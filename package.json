@@ -1,0 +1,22 @@
+{
+  "name": "pi-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev --prefix packages/ui\" \"wait-on tcp:1420 && electron .\"",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.2.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^35.7.5",
+    "wait-on": "^8.0.3"
+  },
+  "allowScripts": {
+    "electron@35.7.5": true
+  }
+}

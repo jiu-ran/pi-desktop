@@ -9,9 +9,10 @@ defineProps({
   models: { type: Array, required: true },
   levels: { type: Array, required: true },
   panel: { type: String, required: true },
+  theme: { type: String, required: true },
 });
 
-const emit = defineEmits(["panel", "model", "thinking"]);
+const emit = defineEmits(["panel", "model", "thinking", "theme"]);
 const openMenu = ref("");
 
 function choose(kind, value) {
@@ -37,7 +38,7 @@ function toggle(kind) {
       </span>
 
       <div class="menu">
-        <button :class="{ active: openMenu === 'model' }" @click="toggle('model')">
+        <button class="model" :title="model" :class="{ active: openMenu === 'model' }" @click="toggle('model')">
           {{ model }}
         </button>
         <div v-if="openMenu === 'model'" class="menu-list">
@@ -68,6 +69,9 @@ function toggle(kind) {
         </div>
       </div>
 
+      <button :class="{ active: theme === 'dark' }" @click="$emit('theme', theme === 'dark' ? 'light' : 'dark')">
+        {{ theme === "dark" ? "浅色" : "深色" }}
+      </button>
       <button :class="{ active: panel === 'changes' }" @click="$emit('panel', 'changes')">
         变更
       </button>

@@ -5,7 +5,7 @@ defineProps({
   version: { type: String, required: true },
 });
 
-defineEmits(["open"]);
+defineEmits(["open", "choose"]);
 
 const labels = { idle: "空闲", working: "运行", done: "完成", failed: "失败" };
 </script>
@@ -34,6 +34,6 @@ const labels = { idle: "空闲", working: "运行", done: "完成", failed: "失
         </li>
       </ul>
     </section>
-    <button class="add">打开目录</button>
+    <button class="add" @click="$emit('choose')">打开目录</button>
   </aside>
 </template>
