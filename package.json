@@ -1,12 +1,52 @@
 {
   "name": "pi-desktop",
+  "productName": "Pi Desktop",
   "private": true,
   "version": "0.1.0",
+  "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3）",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jiu-ran/pi-desktop.git"
+  },
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"npm run dev --prefix packages/ui\" \"wait-on tcp:1420 && electron .\"",
-    "start": "electron ."
+    "start": "electron .",
+    "build": "npm run build --prefix packages/ui",
+    "dist": "npm run build && npx --yes electron-builder",
+    "check": "node scripts/checks/transcript.check.mjs && node scripts/checks/diff.check.mjs && node scripts/checks/host.check.mjs && node scripts/checks/delete.check.mjs && node scripts/checks/attachments.check.mjs && node scripts/checks/files.check.mjs",
+    "check:smoke": "electron --disable-gpu scripts/checks/smoke.electron.mjs"
+  },
+  "build": {
+    "appId": "dev.pi.desktop",
+    "productName": "Pi Desktop",
+    "files": [
+      "electron/**/*",
+      "packages/ui/dist/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "win": {
+      "target": [
+        "zip",
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "zip",
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "tar.gz",
+        "AppImage"
+      ],
+      "category": "Development"
+    }
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.2.0"

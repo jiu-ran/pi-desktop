@@ -1,204 +1,157 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RpcClient } from "@earendil-works/pi-coding-agent";
+import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.js";
 
-const sessions = new Map();
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DIST_HTML = path.join(HERE, "../packages/ui/dist/index.html");
 const DEV_URL = process.env.PI_DESKTOP_URL ?? "http://127.0.0.1:1420";
+let mainWindow = null;
 
-function cliPath() {
-  const entry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-  return path.join(path.dirname(entry), "cli.js");
+const host = new PiHost({
+  emit(payload) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pi:event", plain(payload));
+  },
+  // 会话文件移入系统回收站，误删可恢复
+  trash: (file) => shell.trashItem(file),
+});
+
+const recentFile = () => path.join(app.getPath("userData"), "recent-workspaces.json");
+
+function locatePi() {
+  return new Promise((resolve) => {
+    const probe = spawn("pi", ["--version"], { shell: true });
+    let output = "";
+    probe.stdout.on("data", (chunk) => { output += chunk; });
+    probe.stderr.on("data", (chunk) => { output += chunk; });
+    probe.once("error", () => resolve({ found: false, version: "" }));
+    probe.once("close", (code) => resolve({ found: code === 0, version: output.trim() }));
+  });
 }
 
-function sessionRoot(cwd) {
-  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
-  const resolved = path.resolve(cwd);
-  const encoded = `--${[...resolved].map((char) => "\\/:".includes(char) ? "-" : char).join("").replace(/^-/, "")}--`;
-  return path.join(agentDir, "sessions", encoded);
-}
-
-async function sessionTitle(file, fallback) {
-  const text = await readFile(file, "utf8");
-  for (const line of text.split(/\r?\n/).slice(0, 40)) {
-    if (!line) continue;
-    try {
-      const entry = JSON.parse(line);
-      const message = entry.message ?? entry;
-      if (message.role !== "user") continue;
-      const content = message.content;
-      const value = typeof content === "string"
-        ? content
-        : content?.find((part) => part.type === "text")?.text;
-      if (value) return value.replace(/\s+/g, " ").trim().slice(0, 28);
-    } catch {
-      // Skip a malformed line and keep looking for the first user message.
-    }
-  }
-  return fallback.slice(0, 8);
-}
-
-function recentPath() {
-  return path.join(app.getPath("userData"), "recent-workspaces.json");
-}
-
-async function recentWorkspaces() {
-  try {
-    const saved = JSON.parse(await readFile(recentPath(), "utf8"));
-    return saved.filter((cwd) => typeof cwd === "string");
-  } catch {
-    return [];
-  }
-}
-
-async function rememberWorkspace(cwd) {
-  const recent = [cwd, ...(await recentWorkspaces()).filter((item) => item !== cwd)].slice(0, 20);
-  await mkdir(path.dirname(recentPath()), { recursive: true });
-  await writeFile(recentPath(), JSON.stringify(recent, null, 2));
-  return recent;
-}
-
-function send(window, channel, payload) {
-  if (!window.isDestroyed()) window.webContents.send(channel, payload);
-}
-
-async function openWorkspace(window, cwd) {
-  const existing = sessions.get(cwd);
-  if (existing) {
-    return {
-      state: existing.state,
-      models: existing.models,
-      levels: existing.levels,
-      messages: await existing.client.getMessages(),
-      sessions: await listSessions(cwd),
-    };
-  }
-
-  const client = new RpcClient({ cliPath: cliPath(), cwd });
-  await client.start();
-  const state = await client.getState();
-  const models = await client.getAvailableModels();
-  const levels = await client.getAvailableThinkingLevels();
-  const messages = await client.getMessages();
-  client.onEvent((event) => send(window, "pi:event", { cwd, event }));
-  sessions.set(cwd, { client, state, models, levels });
-  return { state, models, levels, messages, sessions: await listSessions(cwd) };
-}
-
-async function listSessions(cwd) {
-  const dir = sessionRoot(cwd);
-  try {
-    const names = await readdir(dir);
-    const files = names.filter((name) => name.endsWith(".jsonl"));
-    return Promise.all(files.map(async (name) => {
-      const file = path.join(dir, name);
-      const text = await readFile(file, "utf8");
-      const header = JSON.parse(text.split(/\r?\n/, 1)[0] || "{}");
-      return {
-        id: file,
-        title: await sessionTitle(file, name),
-        path: file,
-        updated: header.timestamp ? new Date(header.timestamp).toLocaleString() : "",
-        status: "idle",
-      };
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function requireClient(cwd) {
-  const session = sessions.get(cwd);
-  if (!session) throw new Error("这个工作区还没有启动 Pi");
-  return session.client;
-}
+const TITLEBAR_HEIGHT = 40;
 
 function createWindow() {
-  const window = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 900,
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 980,
     minHeight: 640,
     autoHideMenuBar: true,
-    backgroundColor: "#141414",
+    backgroundColor: "#111214",
+    title: "Pi Desktop",
+    // 与 Air 一致：标题栏融入界面。Windows/Linux 保留系统窗口按钮覆盖层，macOS 保留红绿灯。
+    titleBarStyle: "hidden",
+    titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#111214", symbolColor: "#a8adb5", height: TITLEBAR_HEIGHT },
+    trafficLightPosition: { x: 14, y: 13 },
     webPreferences: {
-      preload: path.join(app.getAppPath(), "electron/preload.cjs"),
+      preload: path.join(HERE, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
-  window.loadURL(DEV_URL).catch(() => {
-    setTimeout(() => {
-      if (!window.isDestroyed()) window.loadURL(DEV_URL);
-    }, 500);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
   });
-  return window;
+  if (app.isPackaged && existsSync(DIST_HTML)) {
+    mainWindow.loadFile(DIST_HTML);
+    return;
+  }
+  mainWindow.loadURL(DEV_URL).catch(() => {
+    if (existsSync(DIST_HTML) && !process.env.PI_DESKTOP_URL) {
+      mainWindow.loadFile(DIST_HTML);
+      return;
+    }
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(DEV_URL);
+    }, 600);
+  });
+}
+
+/** IPC 只传纯 JSON：去掉 Error、函数、循环引用等无法结构化克隆的值。 */
+function plain(value) {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function handle(channel, fn) {
+  ipcMain.handle(channel, async (_event, ...args) => plain(await fn(...args)));
 }
 
 app.whenReady().then(() => {
-  const window = createWindow();
-
-  ipcMain.handle("pi:locate", async () => {
-    const probe = spawn("pi", ["--version"], { shell: true });
-    let output = "";
-    probe.stdout.on("data", (chunk) => { output += chunk; });
-    probe.stderr.on("data", (chunk) => { output += chunk; });
-    const code = await new Promise((resolve) => probe.once("close", resolve));
-    return { found: code === 0, version: output.trim() };
-  });
-
-  ipcMain.handle("pi:recent", () => recentWorkspaces());
-  ipcMain.handle("pi:open", async (_event, cwd) => {
-    await rememberWorkspace(cwd);
-    return openWorkspace(window, cwd);
-  });
-  ipcMain.handle("pi:choose-directory", async () => {
-    const result = await dialog.showOpenDialog(window, { properties: ["openDirectory"] });
+  // 先注册 IPC 再创建窗口，避免渲染进程启动时调用到尚未注册的处理器。
+  handle("pi:locate", () => locatePi());
+  handle("pi:recent", () => readRecent(recentFile()));
+  handle("pi:forget", (cwd) => forgetRecent(recentFile(), cwd));
+  handle("pi:choose-directory", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] });
     return result.canceled ? null : result.filePaths[0];
   });
-  ipcMain.handle("pi:sessions", (_event, cwd) => listSessions(cwd));
-  ipcMain.handle("pi:prompt", async (_event, cwd, message, streaming) => {
-    const disposition = await requireClient(cwd).prompt(message, undefined, streaming);
-    return disposition;
+  handle("pi:choose-files", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"],
+      title: "添加文件",
+    });
+    return result.canceled ? [] : result.filePaths;
   });
-  ipcMain.handle("pi:stop", async (_event, cwd) => {
-    const client = requireClient(cwd);
-    const queued = await client.clearQueue();
-    await client.abort();
-    return queued;
+  handle("pi:choose-folder", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory"],
+      title: "添加文件夹",
+    });
+    return result.canceled ? null : result.filePaths[0];
   });
-  ipcMain.handle("pi:new-session", async (_event, cwd) => {
-    await requireClient(cwd).newSession();
-    return requireClient(cwd).getState();
+  handle("pi:open", async (cwd) => {
+    await writeRecent(recentFile(), cwd);
+    return host.open(cwd);
   });
-  ipcMain.handle("pi:switch-session", async (_event, cwd, sessionPath) => {
-    await requireClient(cwd).switchSession(sessionPath);
-    return {
-      state: await requireClient(cwd).getState(),
-      messages: await requireClient(cwd).getMessages(),
-    };
+  handle("pi:snapshot", (cwd) => host.snapshot(cwd));
+  handle("pi:prepare-attachments", (cwd, paths) => host.prepareAttachments(cwd, paths));
+  handle("pi:list-directory", (cwd, relative) => host.listDirectory(cwd, relative));
+  handle("pi:read-workspace-file", (cwd, relative) => host.readWorkspaceFile(cwd, relative));
+  handle("pi:write-workspace-file", (cwd, relative, content) => host.writeWorkspaceFile(cwd, relative, content));
+  handle("pi:open-workspace-path", async (cwd, relative) => shell.openPath(await host.openWorkspacePath(cwd, relative)));
+  handle("pi:complete-paths", (cwd, query) => host.completePaths(cwd, query));
+  handle("pi:restart", (cwd) => host.restart(cwd));
+  handle("pi:sessions", (cwd) => host.sessions(cwd));
+  handle("pi:delete-session", (cwd, file) => host.deleteSession(cwd, file));
+  // 移除项目：停止进程、从最近列表移除；可选地把它的会话全部移入回收站。不会删除项目目录本身。
+  handle("pi:remove-project", async (cwd, { deleteSessions = false } = {}) => {
+    await host.close(cwd);
+    const result = deleteSessions ? await host.deleteAllSessions(cwd) : { deleted: 0, failed: 0 };
+    return { ...result, recent: await forgetRecent(recentFile(), cwd) };
   });
-  ipcMain.handle("pi:model", async (_event, cwd, provider, modelId) => {
-    await requireClient(cwd).setModel(provider, modelId);
-    return requireClient(cwd).getAvailableThinkingLevels();
+  handle("pi:call", (cwd, method, args) => host.call(cwd, method, args));
+  handle("pi:extension-ui", (cwd, response) => host.respondExtensionUi(cwd, response));
+  handle("pi:reveal", (target) => shell.showItemInFolder(target));
+  handle("pi:titlebar", ({ color, symbolColor } = {}) => {
+    if (!mainWindow || process.platform === "darwin") return false;
+    try {
+      mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
+      mainWindow.setBackgroundColor(color);
+      return true;
+    } catch {
+      return false;
+    }
   });
-  ipcMain.handle("pi:thinking", (_event, cwd, level) => requireClient(cwd).setThinkingLevel(level));
+
+  createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+let quitting = false;
 app.on("before-quit", async (event) => {
-  if (sessions.size === 0) return;
+  if (quitting) return;
+  quitting = true;
   event.preventDefault();
-  const clients = [...sessions.values()];
-  sessions.clear();
-  await Promise.allSettled(clients.map((session) => session.client.stop()));
+  await host.stopAll();
   app.exit();
 });
 
