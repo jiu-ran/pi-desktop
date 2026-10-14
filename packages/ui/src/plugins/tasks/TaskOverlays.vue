@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { closeMenu, settleConfirm, ui } from "./ui.js";
+import { closeMenu, settleConfirm, ui } from "./ui.ts";
 
 /** 右键菜单 + 确认弹窗 */
 const menuEl = ref(null);

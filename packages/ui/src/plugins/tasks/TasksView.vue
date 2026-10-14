@@ -1,8 +1,8 @@
-<script setup>
+<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { baseName, icons, relativeTime } from "../../shared/util.js";
-import { askConfirm, openMenu } from "./ui.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { baseName, icons, relativeTime } from "../../shared/util.ts";
+import { askConfirm, openMenu } from "./ui.ts";
 
 /**
  * 任务导航（参考 Air 的多项目视图）：按项目分组，组内是 Pi 的会话。

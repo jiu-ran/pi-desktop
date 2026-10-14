@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
 
 /** 插件管理面板：运行时启用/停用，状态持久化。核心插件不可停用。 */
 const { plugins, contributions } = useKernel();

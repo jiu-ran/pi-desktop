@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
 
 /**
  * 块分发器：按 messageRenderers / toolRenderers 贡献点解析渲染组件。

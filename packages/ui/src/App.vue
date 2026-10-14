@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import Shell from "./shell/Shell.vue";
 </script>
 

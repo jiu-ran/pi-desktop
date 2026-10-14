@@ -1,4 +1,6 @@
-node_modules/
-dist/
-*.log
-.DS_Store
+node_modules
+packages/ui/node_modules
+packages/ui/dist
+dist-electron
+dist
+*.tsbuildinfo

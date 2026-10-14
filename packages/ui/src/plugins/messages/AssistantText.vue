@@ -1,9 +1,9 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import MarkdownRender from "markstream-vue";
 import "markstream-vue/index.css";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
 
 const props = defineProps({ block: { type: Object, required: true } });
 const { workbench, contributions } = useKernel();

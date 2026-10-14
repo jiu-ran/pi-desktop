@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 defineProps({ lines: { type: Array, required: true } });
 </script>
 

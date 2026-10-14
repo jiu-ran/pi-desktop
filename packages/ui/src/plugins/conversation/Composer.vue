@@ -1,10 +1,10 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons, thinkingLabel } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons, thinkingLabel } from "../../shared/util.ts";
 import Picker from "./Picker.vue";
 import SlashMenu from "./SlashMenu.vue";
-import { filterCommands, mergeCommands, parseSlash } from "./slash.js";
+import { filterCommands, mergeCommands, parseSlash } from "./slash.ts";
 
 /**
  * 输入框（参考 Air）：上方是文本区，底栏左侧 + / 模型 / 思考，右侧发送方式与发送。

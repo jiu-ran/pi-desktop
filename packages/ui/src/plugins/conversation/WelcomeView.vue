@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { baseName, icons, shortPath } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { baseName, icons, shortPath } from "../../shared/util.ts";
 
 const { workbench } = useKernel();
 const state = workbench.state;

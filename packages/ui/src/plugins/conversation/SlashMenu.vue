@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { GROUPS } from "./slash.js";
+import { GROUPS } from "./slash.ts";
 
 /**
  * 斜杠命令菜单：按分组列出全部命令，或列出某个命令的可选参数。

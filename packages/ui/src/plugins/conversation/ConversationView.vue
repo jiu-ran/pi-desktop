@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
 import BlockView from "./BlockView.vue";
 import Composer from "./Composer.vue";
 

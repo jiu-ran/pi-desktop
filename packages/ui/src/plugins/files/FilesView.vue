@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { baseName, icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { baseName, icons } from "../../shared/util.ts";
 import FileTreeNode from "./FileTreeNode.vue";
 
 const { workbench, bus } = useKernel();

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 defineProps({ block: { type: Object, required: true } });
 const icons = { info: "i", warning: "!", error: "×" };
 </script>

@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
 
 const props = defineProps({
   item: { type: Object, required: true },

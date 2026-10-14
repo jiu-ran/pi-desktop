@@ -1,5 +1,5 @@
-<script setup>
-import { extState } from "./state.js";
+<script setup lang="ts">
+import { extState } from "./state.ts";
 </script>
 
 <template>

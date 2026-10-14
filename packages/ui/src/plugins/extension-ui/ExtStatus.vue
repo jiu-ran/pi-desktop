@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { extState } from "./state.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { extState } from "./state.ts";
 
 const { workbench } = useKernel();
 const entries = computed(() => Object.entries(extState.statuses[workbench.state.activeCwd] ?? {}));

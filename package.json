@@ -3,27 +3,29 @@
   "productName": "Pi Desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3）",
+  "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/jiu-ran/pi-desktop.git"
   },
   "type": "module",
-  "main": "electron/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"npm run dev --prefix packages/ui\" \"wait-on tcp:1420 && electron .\"",
-    "start": "electron .",
-    "build": "npm run build --prefix packages/ui",
+    "dev": "npm run build:electron && concurrently -k \"npm run dev --prefix packages/ui\" \"wait-on tcp:1420 && electron .\"",
+    "start": "npm run build:electron && electron .",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:ui": "npm run build --prefix packages/ui",
+    "build": "npm run build:electron && npm run build:ui",
     "dist": "npm run build && npx --yes electron-builder",
-    "check": "node scripts/checks/transcript.check.mjs && node scripts/checks/diff.check.mjs && node scripts/checks/host.check.mjs && node scripts/checks/delete.check.mjs && node scripts/checks/attachments.check.mjs && node scripts/checks/files.check.mjs",
-    "check:smoke": "electron --disable-gpu scripts/checks/smoke.electron.mjs"
+    "check": "tsc --noEmit && node scripts/checks/transcript.check.ts && node scripts/checks/diff.check.ts && node scripts/checks/host.check.ts && node scripts/checks/delete.check.ts && node scripts/checks/attachments.check.ts && node scripts/checks/files.check.ts",
+    "check:smoke": "npm run build:electron && electron --disable-gpu scripts/checks/smoke.electron.ts"
   },
   "build": {
     "appId": "dev.pi.desktop",
     "productName": "Pi Desktop",
     "files": [
-      "electron/**/*",
+      "dist-electron/**/*",
       "packages/ui/dist/**/*",
       "package.json",
       "LICENSE"
@@ -52,8 +54,10 @@
     "@earendil-works/pi-coding-agent": "1.2.0"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "concurrently": "^9.1.2",
     "electron": "^35.7.5",
+    "typescript": "^7.0.2",
     "wait-on": "^8.0.3"
   },
   "allowScripts": {

@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { extState } from "./state.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { extState } from "./state.ts";
 
 /** 扩展通过 setWidget 在输入框上方显示的文本块。 */
 const { workbench } = useKernel();

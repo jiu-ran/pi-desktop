@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { eventLog } from "./log.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { eventLog } from "./log.ts";
 
 const { workbench } = useKernel();
 const filter = ref("");

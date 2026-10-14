@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
 
 /** 标题栏面包屑：项目  ⤴ 分支  /  ✓ 任务标题（与 Air 一致） */
 const { workbench } = useKernel();

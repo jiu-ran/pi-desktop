@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
 
 const { workbench, bus } = useKernel();
 const files = computed(() => workbench.state.openFiles ?? []);

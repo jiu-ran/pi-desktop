@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { paletteState } from "./state.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { paletteState } from "./state.ts";
 
 /** 命令面板：列出所有插件贡献的 commands，外加斜杠命令（内置 + Pi 的扩展 / 模板 / 技能）。 */
 const { contributions, workbench, runCommand, bus } = useKernel();

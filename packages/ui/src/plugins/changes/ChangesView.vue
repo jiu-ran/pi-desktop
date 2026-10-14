@@ -1,9 +1,9 @@
-<script setup>
+<script setup lang="ts">
 import { computed, reactive } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
 import DiffView from "../tools/DiffView.vue";
-import { collectChanges, totals } from "./collect.js";
+import { collectChanges, totals } from "./collect.ts";
 
 /** 任务变更（参考 Air 的 Task Changes）：按文件列出，展开看 Pi 给出的行级 diff。 */
 const kernel = useKernel();

@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { closeDialog, extState } from "./state.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { closeDialog, extState } from "./state.ts";
 
 /**
  * 扩展对话框：一次显示队首的请求，用同一个 id 回写 extension_ui_response。

@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { baseName } from "../../shared/util.js";
+import { baseName } from "../../shared/util.ts";
 import ToolCard from "./ToolCard.vue";
 
 const props = defineProps({ block: { type: Object, required: true } });

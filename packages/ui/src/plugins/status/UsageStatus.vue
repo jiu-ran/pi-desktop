@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { formatTokens } from "../../shared/util.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { formatTokens } from "../../shared/util.ts";
 
 /**
  * 上下文与费用。数据来自 Pi 的 get_session_stats，在每次 agent_settled 与切换会话后刷新。

@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { baseName } from "../../shared/util.js";
-import { blockDiff, diffStat } from "../../shared/diff.js";
+import { baseName } from "../../shared/util.ts";
+import { blockDiff, diffStat } from "../../shared/diff.ts";
 import DiffView from "./DiffView.vue";
 import ToolCard from "./ToolCard.vue";
 

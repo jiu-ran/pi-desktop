@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
 
 const { workbench } = useKernel();
 const ws = computed(() => workbench.active.value);

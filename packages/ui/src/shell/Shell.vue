@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useKernel } from "../kernel/use-kernel.js";
-import { icons } from "../shared/util.js";
+import { useKernel } from "../kernel/use-kernel.ts";
+import { icons } from "../shared/util.ts";
 
 /**
  * 工作台骨架（布局参考 JetBrains Air）：

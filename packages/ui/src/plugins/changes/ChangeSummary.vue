@@ -1,8 +1,8 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
-import { useKernel } from "../../kernel/use-kernel.js";
-import { icons } from "../../shared/util.js";
-import { collectChanges, totals } from "./collect.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
+import { icons } from "../../shared/util.ts";
+import { collectChanges, totals } from "./collect.ts";
 
 /** 对话末尾的变更摘要（Air：任务完成后显示 +512 −4，点击打开 Task Changes） */
 const { workbench } = useKernel();

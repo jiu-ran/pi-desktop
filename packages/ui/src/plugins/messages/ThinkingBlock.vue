@@ -1,7 +1,7 @@
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from "vue";
 import MarkdownRender from "markstream-vue";
-import { useKernel } from "../../kernel/use-kernel.js";
+import { useKernel } from "../../kernel/use-kernel.ts";
 
 /** 思考块：折叠时显示一行纯文本预览，展开后按 Markdown 渲染（模型的思考常带 **标题** 与列表） */
 const props = defineProps({ block: { type: Object, required: true } });
