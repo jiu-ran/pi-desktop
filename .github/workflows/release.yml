@@ -53,7 +53,17 @@ jobs:
           name: Pi Desktop v0.1.0
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            Pi Desktop v0.1.0：基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）。
+
+            - JetBrains Air 风格四区域布局：任务侧栏 / 对话 / 内容舞台 / 右侧面板
+            - Mermaid 图表渲染（对齐 Cursor：缩放、全屏、SVG/PNG/MMD 导出、源码切换）
+            - 中央文件编辑器：多标签、行号、Ctrl+S 保存、未保存标记
+            - 项目文件树、任务变更审查、Git 面板、RPC 事件流、插件管理
+            - 斜杠命令、命令面板（Ctrl+K）、深色/浅色主题
+
+            前置条件：本机已安装并可在命令行运行 `pi`。
           files: |
             dist/*.exe
             dist/*.zip
