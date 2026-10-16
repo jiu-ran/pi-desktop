@@ -12,9 +12,17 @@ export interface MermaidRenderErrorHandler {
 }
 
 export interface MermaidRenderOptions {
-  fitPreviewHeight: true;
-  showZoomControls: false;
-  enableWheelZoom: true;
+  fitPreviewHeight: boolean;
+  showHeader: boolean;
+  showModeToggle: boolean;
+  showCopyButton: boolean;
+  showExportButton: boolean;
+  showFullscreenButton: boolean;
+  showCollapseButton: boolean;
+  showZoomControls: boolean;
+  enableWheelZoom: boolean;
+  enableMermaidInteractions: boolean;
+  showTooltips: boolean;
   workerTimeoutMs: number;
   parseTimeoutMs: number;
   renderTimeoutMs: number;
@@ -93,9 +101,20 @@ export function setMermaidRendering(enabled: boolean): void {
 
 export function mermaidOptions(onRenderError: MermaidRenderErrorHandler): MermaidRenderOptions {
   return {
+    // 对齐 Cursor（streamdown）区块工具栏：标题行 + 图表/源码切换 + 复制 +
+    // 导出 SVG + 全屏 + 折叠 + 缩放控件；滚轮缩放与节点交互一并打开。
+    // PNG / MMD 导出由 mermaid-export.ts 补进同一工具栏（库内置只有 SVG）。
     fitPreviewHeight: true,
-    showZoomControls: false,
+    showHeader: true,
+    showModeToggle: true,
+    showCopyButton: true,
+    showExportButton: true,
+    showFullscreenButton: true,
+    showCollapseButton: true,
+    showZoomControls: true,
     enableWheelZoom: true,
+    enableMermaidInteractions: true,
+    showTooltips: true,
     workerTimeoutMs: 8_000,
     parseTimeoutMs: 4_000,
     renderTimeoutMs: 8_000,

@@ -4,6 +4,7 @@ import MarkdownRender from "markstream-vue";
 import "markstream-vue/index.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
+import { extractMermaidCodes, watchMermaidExport } from "./mermaid-export.ts";
 import { watchMermaidFit } from "./mermaid-fit.ts";
 
 const props = withDefaults(
@@ -40,6 +41,12 @@ function mermaidBlockOf(container: HTMLElement): HTMLElement | null {
 function onMermaidError(error: unknown, code: string, container: HTMLElement): boolean {
   const block = mermaidBlockOf(container);
   if (!block || typeof document === "undefined") return false;
+
+  // 流式中已有可用版本：保留最后一张好图，只标记不销毁（对齐 Cursor 的 keep-last-good）。
+  if (container.querySelector("svg")) {
+    block.dataset.mermaidState = props.streaming ? "streaming" : "ready";
+    return true;
+  }
 
   const detail = String(error instanceof Error ? error.message : error || "未知错误").trim();
   const message = detail ? `图表渲染失败：${detail}` : "图表渲染失败，请检查 Mermaid 语法。";
@@ -126,15 +133,24 @@ watch([mermaidEnabled, isDark], () => {
 });
 
 let stopFit: (() => void) | null = null;
+let stopExport: (() => void) | null = null;
 onMounted(() => {
   if (root.value) {
     stopFit = watchMermaidFit(root.value, (area, changed) => {
       clearMermaidError(area, changed);
       syncMermaidStates();
     });
+    stopExport = watchMermaidExport(
+      root.value,
+      () => extractMermaidCodes(props.content),
+      (message) => bus.emit("notify", { level: "error", text: message }),
+    );
   }
 });
-onBeforeUnmount(() => stopFit?.());
+onBeforeUnmount(() => {
+  stopFit?.();
+  stopExport?.();
+});
 </script>
 
 <template>
