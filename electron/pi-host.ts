@@ -497,7 +497,8 @@ export class PiHost {
     client.onEvent((event: any) => {
       if (event?.type === "agent_start") slot.streaming = true;
       else if (event?.type === "agent_settled") {
-        slot.streaming = false;        this.pruneIdleWorkers(pool);
+        slot.streaming = false;
+        this.pruneIdleWorkers(pool);
       } else if (event?.type === "compaction_start") slot.compacting = true;
       else if (event?.type === "compaction_end") {
         slot.compacting = false;
@@ -996,7 +997,8 @@ export class PiHost {
     return {
       items: items.map(({ path: file, name, kind, image }) => ({ path: file, name, kind, image })),
       text: items.map((item) => item.text ?? "").join(""),
-      images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),    };
+      images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),
+    };
   }
 
   async snapshot(cwd: string, sessionFile?: string) {
@@ -1495,7 +1497,8 @@ export class PiHost {
 
     return {
       agentDir,
-      globalConfigPath,      projectConfigPath,
+      globalConfigPath,
+      projectConfigPath,
       autoEnableCodemode,
       servers,
       errors,
