@@ -41,37 +41,37 @@ function saveBlob(blob: Blob, filename: string): void {
   }
 }
 
+import { getMermaidSvgSize, serializeSvgForDownload } from "./mermaid-normalize.ts";
+
+// 导出清晰度倍数。Cursor 用 5；这里取 4 并限制画布边长，避免超大图爆内存。
+const PNG_SCALE = 4;
+const PNG_MAX_SIDE = 8000;
+
 /**
- * 把 SVG 光栅化为 PNG（思路同 Cursor 的 Zal：SVG → Image → canvas → toBlob）。
- * 无 viewBox 或尺寸缺失时回退到渲染尺寸，保证导出的图不是空白。
+ * 把 SVG 光栅化为 PNG（对齐 Cursor：序列化修复 → base64 data URL → Image →
+ * canvas → toBlob，透明背景原样保留）。
  */
-export function rasterizeSvgToPng(svg: SVGSVGElement, scale = 2): Promise<Blob> {
-  const viewBox = (svg.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+export function rasterizeSvgToPng(svg: SVGSVGElement, scale = PNG_SCALE): Promise<Blob> {
+  const size = getMermaidSvgSize(svg);
   const rect = svg.getBoundingClientRect();
-  const width = Math.round(viewBox.length === 4 && viewBox[2] > 0 ? viewBox[2] : rect.width || 800);
-  const height = Math.round(viewBox.length === 4 && viewBox[3] > 0 ? viewBox[3] : rect.height || 600);
+  const width = Math.round(size?.width ?? rect.width ?? 0) || 800;
+  const height = Math.round(size?.height ?? rect.height ?? 0) || 600;
+  const clampedScale = Math.max(1, Math.min(scale, PNG_MAX_SIDE / Math.max(width, height)));
 
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("width", String(width));
-  clone.setAttribute("height", String(height));
-  // 内联样式在 <img> 里会丢失：把当前字体与背景固化进去。
-  const style = document.createElement("style");
-  style.textContent = "text{font-family:var(--mono,monospace)}";
-  clone.insertBefore(style, clone.firstChild);
-
-  const serialized = new XMLSerializer().serializeToString(clone);
-  const svgBlob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(svgBlob);
+  // base64 data URL 对非 ASCII 内容是 unicode 安全的；blob URL 在部分实现里会丢编码。
+  const serialized = serializeSvgForDownload(svg);
+  const url = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(serialized)))}`;
   return new Promise<Blob>((resolve, reject) => {
     const image = new Image();
+    image.crossOrigin = "anonymous";
     image.onload = () => {
-      URL.revokeObjectURL(url);
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, width * scale);
-        canvas.height = Math.max(1, height * scale);
+        canvas.width = Math.max(1, Math.round(width * clampedScale));
+        canvas.height = Math.max(1, Math.round(height * clampedScale));
         const context = canvas.getContext("2d");
         if (!context) throw new Error("当前浏览器不支持 canvas 导出");
+        // 不填充背景：透明保持透明，与 Cursor 一致。
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(
           (blob) => (blob ? resolve(blob) : reject(new Error("PNG 编码失败"))),
@@ -81,10 +81,7 @@ export function rasterizeSvgToPng(svg: SVGSVGElement, scale = 2): Promise<Blob> 
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("SVG 光栅化失败，请改用 SVG 导出"));
-    };
+    image.onerror = () => reject(new Error("SVG 光栅化失败，请改用 SVG 导出"));
     image.src = url;
   });
 }

@@ -5,8 +5,11 @@
  * 算法与库里的 `Xn` 一致：高度 = 宽度 × 视图框比例，夹在 120px 与最大高度之间。
  */
 
+import { fittedMermaidSize, getMermaidSvgSize, normalizeMermaidSvg } from "./mermaid-normalize.ts";
+
 const MIN_HEIGHT = 120;
-const MAX_HEIGHT = 500;
+// 对齐 Cursor（streamdown `max-h-[min(70vh,40rem)]`）：高图收到 640px 视口再滚/平移，而非压扁。
+const MAX_HEIGHT = 640;
 
 export interface DiagramSize {
   viewWidth: number;
@@ -38,23 +41,52 @@ function maxHeightOf(area: HTMLElement): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : MAX_HEIGHT;
 }
 
-/** 把一个预览区的高度收到其中 SVG 的实际比例。返回是否改动了高度。 */
-export function fitPreviewArea(area: HTMLElement): boolean {
+/**
+ * 把预览区里的 SVG 按自然尺寸归一化后做 fit 缩放（只缩小不放大），
+ * 再把预览框高度收到缩放后的实际比例。返回是否改动了 DOM。
+ *
+ * 对齐 Cursor（streamdown PanZoom 的 auto-fit）：Mermaid 输出的 svg 自带
+ * `width="100%"`，在窄栏里会把宽图压扁；先还原 viewBox 自然像素尺寸，
+ * 再按 `min(容器宽 / 自然宽, 1)` 缩放，SVG 本身保持矢量清晰度。
+ */
+export function fitPreviewSvg(area: HTMLElement): boolean {
   const svg = area.querySelector("svg");
-  const box = parseViewBox(svg?.getAttribute("viewBox") ?? null);
-  if (!svg || !box) return false;
-  const renderedWidth = svg.getBoundingClientRect().width || area.clientWidth;
+  if (!svg) return false;
+  const natural = normalizeMermaidSvg(svg) ?? getMermaidSvgSize(svg);
+  if (!natural) return false;
+  const containerWidth = area.clientWidth || svg.getBoundingClientRect().width;
+  const fitted = fittedMermaidSize(natural, containerWidth);
+  let changed = false;
+
+  const widthText = `${Math.round(fitted.width)}px`;
+  const heightText = `${Math.round(fitted.height)}px`;
+  if (svg.style.width !== widthText) {
+    svg.style.width = widthText;
+    changed = true;
+  }
+  if (svg.style.height !== heightText) {
+    svg.style.height = heightText;
+    changed = true;
+  }
+
   const height = diagramBoxHeight({
-    viewWidth: box.width,
-    viewHeight: box.height,
-    renderedWidth,
+    viewWidth: natural.width,
+    viewHeight: natural.height,
+    renderedWidth: fitted.width,
     maxHeight: maxHeightOf(area),
   });
-  if (height === null) return false;
+  if (height === null) return changed;
   const next = `${height}px`;
-  if (area.style.height === next) return false;
-  area.style.height = next;
-  return true;
+  if (area.style.height !== next) {
+    area.style.height = next;
+    changed = true;
+  }
+  return changed;
+}
+
+/** 把一个预览区的高度收到其中 SVG 的实际比例。返回是否改动了高度。 */
+export function fitPreviewArea(area: HTMLElement): boolean {
+  return fitPreviewSvg(area);
 }
 
 const AREA = ".mermaid-preview-area";

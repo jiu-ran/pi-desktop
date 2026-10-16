@@ -4,6 +4,7 @@ import MarkdownRender from "markstream-vue";
 import "markstream-vue/index.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
+import { injectMermaidTheme } from "./mermaid-theme.ts";
 import { extractMermaidCodes, watchMermaidExport } from "./mermaid-export.ts";
 import { watchMermaidFit } from "./mermaid-fit.ts";
 
@@ -120,6 +121,17 @@ const mermaidProps = computed(() =>
   mermaidEnabled.value ? mermaidOptions(onMermaidError) : undefined,
 );
 
+/**
+ * 主题指令注入：库写死 `theme: dark/default` 两套 stock 主题；
+ * 这里给每个 mermaid 围栏首行加 `%%{init: base + 全套变量}%%`，
+ * 库检测到 `%%{` 开头会跳过自己的指令，于是我们的主题完全接管
+ * （字体按 Inter 度量布局，配色跟随桌面端深浅主题）。
+ * 导出 MMD 仍用原始 content，保证下载的是干净源码。
+ */
+const themedContent = computed(() =>
+  mermaidEnabled.value ? injectMermaidTheme(props.content, isDark.value) : props.content,
+);
+
 watch(() => props.streaming, syncMermaidStates);
 const renderKey = computed(() => `${props.mode}:${mermaidEnabled.value ? "mermaid" : "plain"}:${isDark.value ? "dark" : "light"}`);
 
@@ -159,7 +171,7 @@ onBeforeUnmount(() => {
       :key="renderKey"
       class="md"
       :mode="mode"
-      :content="content"
+      :content="themedContent"
       :final="!streaming"
       :is-dark="isDark"
       :viewport-priority="false"
