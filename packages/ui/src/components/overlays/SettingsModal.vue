@@ -498,6 +498,8 @@ watch(
       loadSkillsOverview();
     }
   },
+
+[1105 more lines in file. Use offset=501 to continue.]
   { immediate: true },
 );
 
@@ -998,6 +1000,8 @@ onBeforeUnmount(() => {
                       <button
                         type="button"
                         :class="{ active: mcpForm.type === 'stdio' }"
+
+[605 more lines in file. Use offset=1001 to continue.]
                         @click="mcpForm.type = 'stdio'"
                       >
                         STDIO 本地进程
@@ -1283,5 +1287,325 @@ onBeforeUnmount(() => {
                   <button type="button" class="settings-chip-btn" @click="fillInstallPrefix('git:github.com/')">git:github.com/user/repo</button>
                   <button type="button" class="settings-chip-btn" @click="fillInstallPrefix('./')">./local/path</button>
                   <span v-if="pkgBusyText" class="settings-pkg-progress">
+                    <span class="mini-spinner" /> {{ pkgBusyText }}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-[Showing lines 1-1285 of 1605 (50.0KB limit). Use offset=1286 to continue.]
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <span class="settings-group-title">
+                  已安装的 Pi 软件包（{{ pkgData?.packages.length ?? 0 }}）
+                </span>
+                <div class="settings-toolbar-actions">
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="pkgBusy || pkgLoading"
+                    @click="loadPackagesOverview"
+                  >
+                    <span class="settings-inline-icon" v-html="icons.refresh" />
+                    刷新
+                  </button>
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="pkgBusy || !(pkgData?.packages.length)"
+                    @click="updatePackage()"
+                  >
+                    全部检查更新
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="pkgLoading && !pkgData" class="settings-empty-card">
+                <span class="mini-spinner" /> 正在读取已安装的 Pi 软件包…
+              </div>
+              <div v-else-if="!pkgData?.packages.length" class="settings-empty-card">
+                <span>尚未安装任何 Pi 软件包。可在上方输入 `npm:` 或 `git:` 地址安装社区扩展、技能与主题。</span>
+              </div>
+              <div v-else class="settings-card-list">
+                <div
+                  v-for="pkg in pkgData.packages"
+                  :key="`${pkg.scope}:${pkg.source}`"
+                  class="settings-item-card"
+                >
+                  <div class="settings-item-top">
+                    <div class="settings-item-main">
+                      <span class="settings-plugin-icon" v-html="icons.package" />
+                      <div class="settings-row-info">
+                        <strong>
+                          {{ pkg.displayName }}
+                          <span v-if="pkg.version" class="settings-plugin-ver">v{{ pkg.version }}</span>
+                          <span class="settings-plugin-tag mono">{{ pkg.kind.toUpperCase() }}</span>
+                          <span class="settings-plugin-tag">{{ pkg.scope === "project" ? "当前项目" : "全局用户" }}</span>
+                          <span class="settings-status-pill" :class="pkg.installed ? 'ok' : 'warn'">
+                            {{ pkg.installed ? "已安装" : "待安装" }}
+                          </span>
+                        </strong>
+                        <span v-if="pkg.description">{{ pkg.description }}</span>
+                        <span class="settings-mono-line" :title="pkg.installedPath || pkg.source">
+                          来源：{{ pkg.source }}
+                          <template v-if="pkg.installedPath"> · 路径：{{ shortPath(pkg.installedPath, 3) }}</template>
+                        </span>
+                        <div class="plugin-caps">
+                          <span v-if="pkg.counts.extensions" class="plugin-cap">扩展 {{ pkg.counts.extensions }}</span>
+                          <span v-if="pkg.counts.skills" class="plugin-cap">技能 {{ pkg.counts.skills }}</span>
+                          <span v-if="pkg.counts.prompts" class="plugin-cap">提示词 {{ pkg.counts.prompts }}</span>
+                          <span v-if="pkg.counts.themes" class="plugin-cap">主题 {{ pkg.counts.themes }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="settings-item-controls">
+                      <button
+                        v-if="pkg.installedPath"
+                        type="button"
+                        class="btn ghost small"
+                        title="在文件夹中显示安装目录"
+                        @click="workbench.reveal(pkg.installedPath)"
+                      >
+                        定位目录
+                      </button>
+                      <button
+                        v-if="pkg.kind !== 'local'"
+                        type="button"
+                        class="btn ghost small"
+                        :disabled="pkgBusy"
+                        title="更新此软件包"
+                        @click="updatePackage(pkg.source)"
+                      >
+                        更新
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-btn small"
+                        :disabled="pkgBusy"
+                        title="卸载并从 settings.json 移除"
+                        @click="removePackage(pkg)"
+                        v-html="icons.trash"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="pkgData?.resources?.length" class="settings-group">
+              <div class="settings-group-title">
+                已发现的扩展与技能资源（{{ pkgData.resources.length }}）
+              </div>
+              <div class="settings-card-list">
+                <div v-for="res in pkgData.resources" :key="`${res.type}:${res.path}`" class="settings-row">
+                  <div class="settings-row-info">
+                    <strong>
+                      {{ res.name }}
+                      <span class="settings-plugin-tag">{{ resourceTypeLabels[res.type] || res.type }}</span>
+                      <span class="settings-plugin-tag">{{ res.origin === "package" ? "软件包" : "本地目录" }}</span>
+                      <span class="settings-plugin-tag">{{ res.scope === "project" ? "当前项目" : "全局" }}</span>
+                    </strong>
+                    <span class="settings-mono-line" :title="res.path">{{ res.path }}</span>
+                  </div>
+                  <span class="settings-status-pill" :class="res.enabled ? 'ok' : 'muted'">
+                    {{ res.enabled ? "已启用" : "已禁用" }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="pkgData?.globalSettingsPath" class="settings-group">
+              <div class="settings-group-title">Pi 配置文件位置</div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>全局 settings.json</strong>
+                  <span class="settings-mono-line">{{ pkgData.globalSettingsPath }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn ghost small"
+                  @click="workbench.reveal(pkgData.globalSettingsPath)"
+                >
+                  在文件夹中显示
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- 5. Skills 设置 -->
+          <template v-else-if="settingsModalState.tab === 'skills'">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <span class="settings-group-title">已加载的技能（{{ visibleSkills.length }}）</span>
+                <div class="settings-toolbar-actions">
+                  <div class="settings-segmented">
+                    <button
+                      v-for="opt in [
+                        { value: 'all', label: '全部' },
+                        { value: 'user', label: '全局' },
+                        { value: 'project', label: '当前项目' },
+                      ]"
+                      :key="opt.value"
+                      type="button"
+                      :class="{ active: skillsFilter === opt.value }"
+                      @click="skillsFilter = opt.value as typeof skillsFilter"
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+                  <button type="button" class="btn ghost small" :disabled="skillsLoading" @click="loadSkillsOverview">
+                    <span class="settings-inline-icon" v-html="icons.refresh" />
+                    刷新
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="skillsData?.diagnostics?.length" class="settings-alert err">
+                <div v-for="(err, idx) in skillsData.diagnostics" :key="idx">{{ err }}</div>
+              </div>
+
+              <div v-if="skillsLoading && !skillsData" class="settings-empty-card">
+                <span class="mini-spinner" /> 正在扫描技能目录…
+              </div>
+              <div v-else-if="!visibleSkills.length" class="settings-empty-card">
+                <span>未发现技能。将 SKILL.md 放入全局或项目的 skills 目录即可被 Pi 加载，并可通过 /skill:名称 调用。</span>
+              </div>
+              <div v-else class="settings-card-list">
+                <div v-for="skill in visibleSkills" :key="skill.filePath" class="settings-item-card">
+                  <div class="settings-item-top">
+                    <div class="settings-item-main">
+                      <span class="settings-plugin-icon" v-html="icons.brain" />
+                      <div class="settings-row-info">
+                        <strong>
+                          {{ skill.name }}
+                          <span class="settings-plugin-tag">{{ skillScopeLabels[skill.scope] || skill.scope }}</span>
+                          <span class="settings-plugin-tag">{{ skillOriginLabels[skill.origin] || skill.origin }}</span>
+                          <span class="settings-status-pill" :class="skill.disableModelInvocation ? 'muted' : 'ok'">
+                            {{ skill.disableModelInvocation ? "仅手动调用" : "可自动调用" }}
+                          </span>
+                        </strong>
+                        <span v-if="skill.description">{{ skill.description }}</span>
+                        <span class="settings-mono-line" :title="skill.filePath">{{ skill.filePath }}</span>
+                      </div>
+                    </div>
+                    <div class="settings-item-controls">
+                      <button
+                        type="button"
+                        class="btn ghost small"
+                        title="在文件夹中显示技能文件"
+                        @click="workbench.reveal(skill.filePath)"
+                      >
+                        定位文件
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+[105 more lines in file. Use offset=1501 to continue.]
+
+            <div v-if="skillsData" class="settings-group">
+              <div class="settings-group-title">技能目录</div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>全局技能目录</strong>
+                  <span class="settings-mono-line">{{ skillsData.globalSkillsDir }}</span>
+                </div>
+                <button type="button" class="btn ghost small" @click="workbench.reveal(skillsData.globalSkillsDir)">
+                  在文件夹中显示
+                </button>
+              </div>
+              <div v-if="skillsData.projectSkillsDir" class="settings-row">
+                <div class="settings-row-info">
+                  <strong>当前项目技能目录</strong>
+                  <span class="settings-mono-line">{{ skillsData.projectSkillsDir }}</span>
+                </div>
+                <button type="button" class="btn ghost small" @click="workbench.reveal(skillsData.projectSkillsDir)">
+                  在文件夹中显示
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- 6. 插件（按界面区域分组） -->
+          <template v-else-if="settingsModalState.tab === 'plugins'">
+            <div v-for="group in pluginGroups" :key="group.id" class="settings-group">
+              <div class="settings-group-title">{{ group.label }} · {{ group.plugins.length }}</div>
+
+              <div v-for="item in group.plugins" :key="item.id" class="settings-row">
+                <div class="settings-plugin-meta">
+                  <span class="settings-plugin-icon" v-html="item.icon" />
+                  <div class="settings-row-info">
+                    <strong>
+                      {{ item.name }}
+                      <span class="settings-plugin-ver">v{{ item.version }}</span>
+                      <span v-if="item.core" class="settings-plugin-tag">核心</span>
+                      <span class="settings-plugin-tag">{{ pluginAreaLabels[item.area] }}</span>
+                    </strong>
+                    <span>{{ item.description }}</span>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  class="settings-switch"
+                  :checked="item.enabled"
+                  :disabled="item.core"
+                  @change="togglePlugin(item.id)"
+                />
+              </div>
+            </div>
+          </template>
+
+          <!-- 6. 环境与快捷键 -->
+          <template v-else-if="settingsModalState.tab === 'environment'">
+            <div class="settings-group">
+              <div class="settings-group-title">本机 Pi CLI 与当前工作区状态</div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>本机 Pi Coding Agent CLI</strong>
+                  <span>{{ state.pi.found ? `已连接 · 版本 ${state.pi.version}` : "未检测到本机 pi 命令，请检查 PATH" }}</span>
+                </div>
+                <span class="settings-status-pill" :class="state.pi.found ? 'ok' : 'err'">
+                  {{ state.pi.found ? "就绪" : "未安装" }}
+                </span>
+              </div>
+
+              <div v-if="ws" class="settings-row">
+                <div class="settings-row-info">
+                  <strong>当前活动项目目录</strong>
+                  <span>{{ ws.cwd }}（当前活跃会话线程 {{ Object.keys(ws.threads).length }} 个，运行中 {{ ws.runningSessionCount }} 个）</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn ghost small"
+                  :disabled="ws.streaming"
+                  @click="restartActiveProcess"
+                >
+                  重启当前会话进程
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-title">全局快捷键速查</div>
+              <div class="settings-shortcuts-grid">
+                <div class="settings-shortcut-item"><span>打开偏好设置</span><kbd>Ctrl+,</kbd></div>
+                <div class="settings-shortcut-item"><span>打开命令面板</span><kbd>Ctrl+K</kbd></div>
+                <div class="settings-shortcut-item"><span>打开项目目录</span><kbd>Ctrl+O</kbd></div>
+                <div class="settings-shortcut-item"><span>新建并行任务</span><kbd>Ctrl+N</kbd></div>
+                <div class="settings-shortcut-item"><span>切换项目与会话栏</span><kbd>Ctrl+B</kbd></div>
+                <div class="settings-shortcut-item"><span>手动保存当前编辑文件</span><kbd>Ctrl+S</kbd></div>
+                <div class="settings-shortcut-item"><span>停止当前正在执行的任务</span><kbd>Esc</kbd></div>
+                <div class="settings-shortcut-item"><span>引用项目文件或目录</span><kbd>@</kbd></div>
+                <div class="settings-shortcut-item"><span>打开斜杠命令菜单</span><kbd>/</kbd></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+
