@@ -1,24 +1,29 @@
+import { definePlugin } from "../../kernel/plugin-manager.ts";
+import { collectChanges } from "../../shared/diff.ts";
 import { icons } from "../../shared/util.ts";
-import ChangeSummary from "./ChangeSummary.vue";
-import ChangesView from "./ChangesView.vue";
-import { collectChanges } from "./collect.ts";
+import ChangesPanel from "./ChangesPanel.vue";
+import ChangesStage from "./ChangesStage.vue";
 
-export default {
-  id: "pi.builtin.changes",
-  name: "任务变更",
-  description: "汇总当前任务中 edit / write 改过的文件，对话末尾显示 +/− 摘要，面板里逐文件审查 diff。",
-  version: "2.0.0",
-  activate(ctx: any) {
-    ctx.contribute("views.panel", {
-      id: "changes",
-      title: "任务变更",
-      icon: icons.diff,
-      order: 10,
-      component: ChangesView,
-      badge: () => collectChanges(ctx.workbench.active?.blocks).length || "",
+export default definePlugin({
+  id: "changes",
+  name: "文件变更",
+  description: "汇总当前会话中 Agent 修改的文件，并在编辑器与详情视图中展示行级 Diff。",
+  version: "0.2.0",
+  icon: icons.diff,
+  order: 20,
+  panel: ChangesPanel,
+  stage: ChangesStage,
+  activate(ctx) {
+    this.badge = () => {
+      const files = collectChanges(ctx.workspace.value?.blocks);
+      return files.length || null;
+    };
+
+    ctx.registerCommand({
+      id: "changes.toggle",
+      title: "切换文件变更面板",
+      category: "插件",
+      run: () => ctx.workbench.togglePanel("changes"),
     });
-    ctx.contribute("timeline.footer", { id: "change-summary", order: 10, component: ChangeSummary });
-    ctx.contribute("commands", { id: "changes.show", title: "查看任务变更", run: () => ctx.workbench.showPanel("changes") });
-    ctx.on("changes:reveal", (target: string) => ctx.reveal(target));
   },
-};
+});

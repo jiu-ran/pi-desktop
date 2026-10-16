@@ -1,26 +1,31 @@
+import { definePlugin } from "../../kernel/plugin-manager.ts";
 import { icons } from "../../shared/util.ts";
-import FileEditorView from "./FileEditorView.vue";
-import FilesView from "./FilesView.vue";
+import FilesPanel from "./FilesPanel.vue";
+import FileStage from "./FileStage.vue";
+import { openFileInStage } from "./state.ts";
 
-export default {
-  id: "pi.builtin.files",
-  name: "文件树",
-  description: "查看当前项目目录中的文件和文件夹，并在系统默认程序中打开文件。",
-  version: "1.0.0",
-  activate(ctx: any) {
-    ctx.contribute("views.editor", {
-      id: "file-editor",
-      order: 5,
-      when: () => ctx.workbench.state.openFiles.length > 0,
-      component: FileEditorView,
-    });
-    ctx.contribute("views.panel", {
-      id: "files",
-      title: "文件",
-      icon: icons.folder,
-      order: 5,
-      component: FilesView,
-    });
-    ctx.contribute("commands", { id: "files.show", title: "查看项目文件", run: () => ctx.workbench.showPanel("files") });
+export default definePlugin({
+  id: "files",
+  name: "项目文件",
+  description: "在扩展工具面板浏览项目目录树，点击文件在编辑器与详情视图中打开多标签代码编辑器。",
+  version: "0.2.0",
+  icon: icons.folder,
+  order: 10,
+  panel: FilesPanel,
+  stage: FileStage,
+  badge() {
+    return null;
   },
-};
+  activate(ctx) {
+    ctx.on("file:open", (targetPath: string) => {
+      openFileInStage(ctx.workbench, ctx.stage, { emit: ctx.emit } as any, targetPath);
+    });
+
+    ctx.registerCommand({
+      id: "files.toggle",
+      title: "切换项目文件面板",
+      category: "插件",
+      run: () => ctx.workbench.togglePanel("files"),
+    });
+  },
+});

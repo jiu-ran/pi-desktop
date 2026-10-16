@@ -7,6 +7,7 @@ export interface EventLogEntry {
   group: string;
   hint: string;
   time: string;
+  sessionFile: string;
   json: string;
 }
 
@@ -33,13 +34,17 @@ function hintOf(event: Record<string, any>): string {
 
 export const eventLog = reactive({
   items: [] as EventLogEntry[],
-  push(cwd: string, event: Record<string, any>) {
+  push(cwd: string, sessionFile: string | undefined, event: Record<string, any>) {
+    const type = event.type ?? "unknown";
+    const session = sessionFile ?? "";
+    if (type === "message_update") return;
     seq += 1;
     this.items.unshift({
       id: seq,
       cwd,
-      type: event.type ?? "unknown",
-      group: groupOf(event.type ?? ""),
+      sessionFile: sessionFile ?? "",
+      type,
+      group: groupOf(type),
       hint: hintOf(event),
       time: new Date().toLocaleTimeString(),
       json: JSON.stringify(event, null, 2).slice(0, 6000),
