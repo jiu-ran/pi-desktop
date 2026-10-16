@@ -497,7 +497,8 @@ watch(
     } else if (tab === "skills") {
       loadSkillsOverview();
     }
-  },  { immediate: true },
+  },
+  { immediate: true },
 );
 
 function onKeydown(event: KeyboardEvent): void {
@@ -996,7 +997,8 @@ onBeforeUnmount(() => {
                     <div class="settings-segmented">
                       <button
                         type="button"
-                        :class="{ active: mcpForm.type === 'stdio' }"                        @click="mcpForm.type = 'stdio'"
+                        :class="{ active: mcpForm.type === 'stdio' }"
+                        @click="mcpForm.type = 'stdio'"
                       >
                         STDIO 本地进程
                       </button>
@@ -1496,6 +1498,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
+
             <div v-if="skillsData" class="settings-group">
               <div class="settings-group-title">技能目录</div>
               <div class="settings-row">
