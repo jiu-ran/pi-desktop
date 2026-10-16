@@ -1,14 +1,22 @@
+import { definePlugin } from "../../kernel/plugin-manager.ts";
 import { icons } from "../../shared/util.ts";
-import PluginsView from "./PluginsView.vue";
+import PluginManagerPanel from "./PluginManagerPanel.vue";
 
-export default {
-  id: "pi.core.plugins",
+export default definePlugin({
+  id: "plugin-manager",
   name: "插件管理",
-  description: "查看已注册插件及其贡献点，运行时启用或停用。",
-  version: "1.1.0",
+  description: "管理扩展工具插件（扩展工具面板与编辑器详情视图）的启用与停用。",
+  version: "0.2.0",
+  icon: icons.puzzle,
+  order: 100,
   core: true,
-  activate(ctx: any) {
-    ctx.contribute("views.panel", { id: "plugins", title: "插件", icon: icons.puzzle, order: 90, component: PluginsView });
-    ctx.contribute("commands", { id: "plugins.show", title: "管理插件", run: () => ctx.workbench.showPanel("plugins") });
+  panel: PluginManagerPanel,
+  activate(ctx) {
+    ctx.registerCommand({
+      id: "plugins.toggle",
+      title: "打开插件管理面板",
+      category: "插件",
+      run: () => ctx.workbench.togglePanel("plugin-manager"),
+    });
   },
-};
+});
