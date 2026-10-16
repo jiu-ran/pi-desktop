@@ -934,3 +934,30 @@
 .recent-icon { display: grid; color: var(--fg-2); }
 .recent-row strong { font-weight: 500; }
 .recent-path { flex: 1; min-width: 0; overflow: hidden; color: var(--fg-3); font: 11.5px var(--mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+
+.cursor-diagram { overflow: hidden; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-1); }
+.cursor-diagram header { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: 12px; }
+.cursor-diagram header div, .cursor-diagram header button { display: flex; align-items: center; }
+.cursor-diagram header div { gap: 4px; }
+.cursor-diagram button { height: 24px; padding: 0 7px; border: 0; border-radius: 5px; background: transparent; color: var(--fg-2); }
+.cursor-diagram button.active, .cursor-diagram button:hover { background: var(--hover); color: var(--fg); }
+.cursor-diagram pre { margin: 0; padding: 14px; overflow: auto; white-space: pre-wrap; }
+.cursor-diagram-view { max-height: 680px; overflow: auto; padding: 18px; }
+.cursor-diagram svg { display: block; max-width: none; }
+.cursor-diagram rect { fill: #2a2d31; stroke: #8d9096; stroke-width: 1; }
+.cursor-cluster-rect { fill: #1d1f22; stroke: #8d9096; }
+.cursor-cluster-bar { fill: #24262a; stroke: #8d9096; }
+.cursor-diagram text { fill: #f2f3f5; font: 13px Inter, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: middle; }
+.cursor-cluster-label { fill: #f2f3f5; font-size: 14px; font-weight: 650; text-anchor: middle; dominant-baseline: middle; }
+.cursor-edge path { fill: none; stroke: #7eb6ff; stroke-width: 1.6; }
+.cursor-edge text { fill: #dcecff; }
+.cursor-edge-label { fill: #17304d; stroke: #7eb6ff; stroke-width: 1.4; }
+.cursor-diagram marker path { fill: #7eb6ff; }
+.cursor-diagram-fullscreen { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 28px; background: rgba(0, 0, 0, 0.62); }
+.cursor-diagram-fullscreen .cursor-diagram { width: min(1400px, 100%); height: min(900px, 100%); }
+.cursor-diagram-fullscreen .cursor-diagram-view { max-height: none; height: calc(100% - 36px); overflow: hidden; cursor: grab; }
+.cursor-diagram-fullscreen svg { transform-origin: center center; }
+.cursor-diagram-fullscreen .cursor-diagram-view.dragging { cursor: grabbing; user-select: none; }
+.cursor-diagram-error { display: flex; flex-direction: column; gap: 8px; padding: 14px; color: var(--err); }
+.cursor-diagram-error pre { color: var(--fg-2); white-space: pre-wrap; }
+
