@@ -498,6 +498,8 @@ export class PiHost {
       if (event?.type === "agent_start") slot.streaming = true;
       else if (event?.type === "agent_settled") {
         slot.streaming = false;
+
+[1467 more lines in file. Use offset=501 to continue.]
         this.pruneIdleWorkers(pool);
       } else if (event?.type === "compaction_start") slot.compacting = true;
       else if (event?.type === "compaction_end") {
@@ -998,6 +1000,8 @@ export class PiHost {
       items: items.map(({ path: file, name, kind, image }) => ({ path: file, name, kind, image })),
       text: items.map((item) => item.text ?? "").join(""),
       images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),
+
+[967 more lines in file. Use offset=1001 to continue.]
     };
   }
 
@@ -1358,5 +1362,612 @@ export class PiHost {
     const standbyDisposals: Promise<void>[] = [];
     for (const pool of this.clients.values()) {
       standbyDisposals.push(this.disposeStandby(pool));
+      for (const slot of pool.workers.values()) {
+        allClients.push(slot.client);
+      }
+    }
+    this.clients.clear();
+    this.starting.clear();
+    await Promise.allSettled([...starting, ...standbyDisposals, ...allClients.map((client) => client.stop())]);
+    // A start may finish after the initial snapshot of clients; stop any late pool as well.
+    const lateClients = [...this.clients.values()].flatMap((pool) => [...pool.workers.values()].map((slot) => slot.client));
+    await Promise.allSettled(lateClients.map((client) => client.stop()));
+    this.clients.clear();
+  }
 
-[Showing lines 1-1360 of 1967 (50.0KB limit). Use offset=1361 to continue.]
+  // ---------- MCP 服务配置管理 ----------
+
+  private mcpProbeCache = new Map<string, { state?: string; tools?: string[]; error?: string; resources?: boolean }>();
+
+  private agentDirPath(): string {
+    return process.env.PI_CODING_AGENT_DIR || getAgentDir() || path.join(homedir(), ".pi", "agent");
+  }
+
+  private mcpConfigFile(scope: "global" | "project", cwd?: string): string {
+    if (scope === "project") {
+      if (!cwd) throw new Error("当前未打开项目目录，无法操作项目级 .pi/mcp.json");
+      const root = path.resolve(cwd);
+      return path.join(root, ".pi", "mcp.json");
+    }
+    return path.join(this.agentDirPath(), "mcp.json");
+  }
+
+  private async readMcpFile(filePath: string): Promise<{ data: Record<string, any>; error?: string }> {
+    if (!existsSync(filePath)) return { data: {} };
+    try {
+      const text = await readFile(filePath, "utf8");
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { data: {}, error: `${filePath}: 根节点必须是 JSON 对象` };
+      }
+      return { data: parsed };
+    } catch (error: any) {
+      return { data: {}, error: `${filePath}: ${error?.message ?? String(error)}` };
+    }
+  }
+
+  private async writeMcpFile(filePath: string, data: Record<string, any>): Promise<void> {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    const temp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temp, filePath).catch(async (error) => {
+      await unlink(temp).catch(() => {});
+      throw error;
+    });
+  }
+
+  private toMcpServerItem(name: string, raw: Record<string, any>, scope: "global" | "project", sourcePath: string): McpServerItem {
+    const isHttp = Boolean(raw.url || raw.type === "http");
+    const safeUrl = typeof raw.url === "string" && /^https?:\/\//i.test(raw.url) ? raw.url : undefined;
+    const probe = this.mcpProbeCache.get(`${scope}:${name}`) ?? this.mcpProbeCache.get(name);
+    const exposureRaw = String(raw.exposure ?? "codemode");
+    const exposure: McpExposureMode =
+      exposureRaw === "direct" || exposureRaw === "deferred" || exposureRaw === "hidden" ? exposureRaw : "codemode";
+    const enabled = raw.enabled !== false;
+    return {
+      name,
+      scope,
+      sourcePath,
+      type: isHttp ? "http" : "stdio",
+      command: typeof raw.command === "string" ? raw.command : undefined,
+      args: Array.isArray(raw.args) ? raw.args.map(String) : undefined,
+      env: raw.env && typeof raw.env === "object" && !Array.isArray(raw.env) ? Object.fromEntries(Object.keys(raw.env).map((key) => [key, "••••••"])) : undefined,
+      cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
+      url: safeUrl,
+      headers: raw.headers && typeof raw.headers === "object" && !Array.isArray(raw.headers) ? Object.fromEntries(Object.keys(raw.headers).map((key) => [key, "••••••"])) : undefined,
+      auth: raw.auth && typeof raw.auth === "object" ? { provider: typeof raw.auth.provider === "string" ? raw.auth.provider : "configured" } : undefined,
+      oauth: raw.oauth && typeof raw.oauth === "object" ? { configured: true } : undefined,
+      enabled,
+      exposure,
+      description: typeof raw.description === "string" ? raw.description : undefined,
+      timeout: typeof raw.timeout === "number" ? raw.timeout : undefined,
+      state: !enabled ? "disabled" : probe?.state,
+      tools: probe?.tools,
+      error: probe?.error,
+      resources: probe?.resources,
+    };
+  }
+
+  async mcpOverview(cwd?: string): Promise<McpOverview> {
+    if (cwd) await assertRealWorkspacePath(cwd, path.resolve(cwd));
+    const agentDir = this.agentDirPath();
+    const globalConfigPath = path.join(agentDir, "mcp.json");
+    const projectConfigPath = cwd ? path.join(path.resolve(cwd), ".pi", "mcp.json") : "";
+    const errors: string[] = [];
+
+    const globalRes = await this.readMcpFile(globalConfigPath);
+    if (globalRes.error) errors.push(globalRes.error);
+
+    const projectRes = projectConfigPath ? await this.readMcpFile(projectConfigPath) : { data: {} as Record<string, any> };
+    if (projectRes.error) errors.push(projectRes.error);
+
+    const servers: McpServerItem[] = [];
+    const globalServers =
+      globalRes.data.mcpServers && typeof globalRes.data.mcpServers === "object" && !Array.isArray(globalRes.data.mcpServers)
+        ? globalRes.data.mcpServers
+        : {};
+    for (const [name, raw] of Object.entries(globalServers)) {
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        servers.push(this.toMcpServerItem(name, raw as Record<string, any>, "global", globalConfigPath));
+      }
+    }
+
+    const projectServers =
+      projectRes.data.mcpServers && typeof projectRes.data.mcpServers === "object" && !Array.isArray(projectRes.data.mcpServers)
+        ? projectRes.data.mcpServers
+        : {};
+    for (const [name, raw] of Object.entries(projectServers)) {
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        const rec = raw as Record<string, any>;
+        const isOverrideOnly = rec.command === undefined && rec.url === undefined && rec.type === undefined;
+        if (isOverrideOnly) {
+          const baseIdx = servers.findIndex((s) => s.scope === "global" && s.name === name);
+          if (baseIdx !== -1) {
+            const baseGlobal = globalServers[name] as Record<string, any>;
+            servers[baseIdx] = this.toMcpServerItem(name, { ...baseGlobal, ...rec }, "global", globalConfigPath);
+            continue;
+          }
+        }
+        servers.push(this.toMcpServerItem(name, rec, "project", projectConfigPath));
+      }
+    }
+
+    const autoEnableCodemode =
+      typeof projectRes.data.autoEnableCodemode === "boolean"
+        ? projectRes.data.autoEnableCodemode
+        : typeof globalRes.data.autoEnableCodemode === "boolean"
+          ? globalRes.data.autoEnableCodemode
+          : true;
+
+    return {
+      agentDir,
+      globalConfigPath,
+
+[467 more lines in file. Use offset=1501 to continue.]
+      projectConfigPath,
+      autoEnableCodemode,
+      servers,
+      errors,
+    };
+  }
+
+  async mcpProbe(cwd?: string): Promise<McpOverview> {
+    const targetCwd = cwd ? path.resolve(cwd) : homedir();
+    const out = await new Promise<{ stdout: string; stderr: string }>((resolve) => {
+      const child = execFile(
+        process.execPath,
+        [cliPath(), "mcp", "list", "--json"],
+        {
+          cwd: targetCwd,
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0" },
+          maxBuffer: 8 * 1024 * 1024,
+          timeout: 45_000,
+        },
+        (_err, stdout = "", stderr = "") => {
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        },
+      );
+      child.stdin?.end();
+    });
+
+    const extraErrors: string[] = [];
+    try {
+      const jsonText = out.stdout.trim();
+      if (jsonText) {
+        const parsed = JSON.parse(jsonText);
+        if (Array.isArray(parsed?.servers)) {
+          for (const srv of parsed.servers) {
+            if (!srv?.name) continue;
+            const info = {
+              state: srv.state ?? (srv.enabled === false ? "disabled" : "unknown"),
+              tools: Array.isArray(srv.tools) ? srv.tools.map(String) : [],
+              error: srv.error ? "MCP 服务返回错误（详细诊断已隐藏）" : undefined,
+              resources: Boolean(srv.resources),
+            };
+            const scopeKey = srv.scope === "project" ? "project" : "global";
+            this.mcpProbeCache.set(`${scopeKey}:${srv.name}`, info);
+            this.mcpProbeCache.set(srv.name, info);
+          }
+        }
+        if (Array.isArray(parsed?.errors) && parsed.errors.length) {
+          extraErrors.push("MCP 列表包含错误（详细诊断已隐藏）");
+        }
+      }
+    } catch {
+      if (out.stderr.trim()) extraErrors.push("MCP 探测失败（详细诊断已隐藏）");
+    }
+
+    const overview = await this.mcpOverview(cwd);
+    if (extraErrors.length) {
+      overview.errors = [...new Set([...overview.errors, ...extraErrors])];
+    }
+    return overview;
+  }
+
+  async mcpSaveServer(
+    cwd: string,
+    payload: { scope: "global" | "project"; name: string; previousName?: string; config: Record<string, any> },
+  ): Promise<McpOverview> {
+    const name = String(payload.name ?? "").trim();
+    if (!name) throw new Error("请输入 MCP 服务名称");
+    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+      throw new Error("MCP 服务名称只能包含字母、数字、点、下划线或连字符");
+    }
+    const cfg = payload.config ?? {};
+    if (!cfg.command && !cfg.url) {
+      throw new Error("MCP 服务必须提供本地命令（command）或远程地址（url）");
+    }
+
+    const filePath = this.mcpConfigFile(payload.scope, cwd);
+    const { data, error } = await this.readMcpFile(filePath);
+    if (error) throw new Error(error);
+
+    const servers =
+      data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
+        ? { ...data.mcpServers }
+        : {};
+    const previousConfig = servers[payload.previousName || name];
+    if (payload.previousName && payload.previousName !== name) {
+      delete servers[payload.previousName];
+      this.mcpProbeCache.delete(`${payload.scope}:${payload.previousName}`);
+    }
+    const cleanConfig: Record<string, any> = {};
+    if (cfg.url) {
+      cleanConfig.url = String(cfg.url).trim();
+      if (cfg.headers && typeof cfg.headers === "object" && Object.keys(cfg.headers).length > 0) {
+        cleanConfig.headers = cfg.headers;
+      } else if (previousConfig?.headers) {
+        cleanConfig.headers = previousConfig.headers;
+      }
+      if (cfg.auth && typeof cfg.auth === "object") cleanConfig.auth = cfg.auth;
+      else if (previousConfig?.auth) cleanConfig.auth = previousConfig.auth;
+      if (cfg.oauth && typeof cfg.oauth === "object") cleanConfig.oauth = cfg.oauth;
+      else if (previousConfig?.oauth) cleanConfig.oauth = previousConfig.oauth;
+    } else {
+      cleanConfig.command = String(cfg.command).trim();
+      if (Array.isArray(cfg.args) && cfg.args.length > 0) {
+        cleanConfig.args = cfg.args.map(String).filter(Boolean);
+      }
+      if (cfg.env && typeof cfg.env === "object" && Object.keys(cfg.env).length > 0) {
+        const masked = Object.values(cfg.env).some((value) => value === "••••••");
+        cleanConfig.env = masked && previousConfig?.env ? previousConfig.env : cfg.env;
+      } else if (previousConfig?.env) {
+        cleanConfig.env = previousConfig.env;
+      }
+      if (cfg.cwd && String(cfg.cwd).trim()) {
+        cleanConfig.cwd = String(cfg.cwd).trim();
+      }
+    }
+    if (cfg.description && String(cfg.description).trim()) {
+      cleanConfig.description = String(cfg.description).trim();
+    }
+    if (cfg.exposure && cfg.exposure !== "codemode") {
+      cleanConfig.exposure = cfg.exposure;
+    }
+    if (cfg.enabled === false) {
+      cleanConfig.enabled = false;
+    }
+    if (typeof cfg.timeout === "number" && cfg.timeout > 0 && cfg.timeout !== 60) {
+      cleanConfig.timeout = cfg.timeout;
+    }
+
+    servers[name] = cleanConfig;
+    data.mcpServers = servers;
+    await this.writeMcpFile(filePath, data);
+    return this.mcpOverview(cwd);
+  }
+
+  async mcpUpdateServer(
+    cwd: string,
+    payload: { scope: "global" | "project"; name: string; patch: { enabled?: boolean; exposure?: McpExposureMode } },
+  ): Promise<McpOverview> {
+    const filePath = this.mcpConfigFile(payload.scope, cwd);
+    const { data, error } = await this.readMcpFile(filePath);
+    if (error) throw new Error(error);
+    const servers =
+      data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
+        ? { ...data.mcpServers }
+        : {};
+    const existing = servers[payload.name];
+    if (!existing || typeof existing !== "object") {
+      throw new Error(`找不到 MCP 服务：${payload.name}`);
+    }
+    const next = { ...existing };
+    if (payload.patch.enabled !== undefined) {
+      if (payload.patch.enabled) delete next.enabled;
+      else next.enabled = false;
+    }
+    if (payload.patch.exposure !== undefined) {
+      if (payload.patch.exposure === "codemode") delete next.exposure;
+      else next.exposure = payload.patch.exposure;
+    }
+    servers[payload.name] = next;
+    data.mcpServers = servers;
+    await this.writeMcpFile(filePath, data);
+    return this.mcpOverview(cwd);
+  }
+
+  async mcpRemoveServer(cwd: string, payload: { scope: "global" | "project"; name: string }): Promise<McpOverview> {
+    const filePath = this.mcpConfigFile(payload.scope, cwd);
+    const { data, error } = await this.readMcpFile(filePath);
+    if (error) throw new Error(error);
+    const servers =
+      data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
+        ? { ...data.mcpServers }
+        : {};
+    delete servers[payload.name];
+    this.mcpProbeCache.delete(`${payload.scope}:${payload.name}`);
+    this.mcpProbeCache.delete(payload.name);
+    data.mcpServers = servers;
+    await this.writeMcpFile(filePath, data);
+    return this.mcpOverview(cwd);
+  }
+
+  async mcpSetAutoCodemode(cwd: string, payload: { scope?: "global" | "project"; enabled: boolean }): Promise<McpOverview> {
+    const filePath = this.mcpConfigFile(payload.scope ?? "global", cwd);
+    const { data, error } = await this.readMcpFile(filePath);
+    if (error) throw new Error(error);
+    if (payload.enabled) {
+      delete data.autoEnableCodemode;
+    } else {
+      data.autoEnableCodemode = false;
+    }
+    await this.writeMcpFile(filePath, data);
+    return this.mcpOverview(cwd);
+  }
+
+  async mcpImportJson(cwd: string, payload: { scope: "global" | "project"; jsonText: string }): Promise<McpOverview> {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(payload.jsonText);
+    } catch (error: any) {
+      throw new Error(`JSON 格式无法解析：${error?.message ?? String(error)}`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("请粘贴包含 mcpServers 的 JSON 对象");
+    }
+
+    let entries: Record<string, any> = {};
+    if (parsed.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers)) {
+      entries = parsed.mcpServers;
+    } else if (typeof parsed.name === "string" && (parsed.command || parsed.url)) {
+      const { name, ...rest } = parsed;
+      entries = { [name]: rest };
+    } else {
+      entries = parsed;
+    }
+
+    const validEntries = Object.entries(entries).filter(
+      ([key, val]) => /^[a-zA-Z0-9._-]+$/.test(key) && val && typeof val === "object" && ((val as any).command || (val as any).url),
+    );
+    if (!validEntries.length) {
+      throw new Error("未在 JSON 中识别出有效的 MCP 服务定义（需要包含 command 或 url 字段）");
+    }
+
+    const filePath = this.mcpConfigFile(payload.scope, cwd);
+    const { data, error } = await this.readMcpFile(filePath);
+    if (error) throw new Error(error);
+    const servers =
+      data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
+        ? { ...data.mcpServers }
+        : {};
+    for (const [name, cfg] of validEntries) {
+      servers[name] = cfg;
+    }
+    data.mcpServers = servers;
+    await this.writeMcpFile(filePath, data);
+    return this.mcpOverview(cwd);
+  }
+
+  // ---------- Pi 软件包管理 ----------
+
+  private createPackageManager(cwd?: string) {
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
+    const settingsManager = SettingsManager.create(effectiveCwd, agentDir, { projectTrusted: true });
+    const packageManager = new DefaultPackageManager({
+      cwd: effectiveCwd,
+      agentDir,
+      settingsManager,
+    });
+    return { agentDir, effectiveCwd, settingsManager, packageManager };
+  }
+
+  private normalizeInstallSource(rawSource: string, cwd?: string): string {
+    const trimmed = rawSource.trim();
+    if (!trimmed) throw new Error("请输入要安装的软件包来源（如 npm:@scope/pkg 或 git:github.com/user/repo）");
+    if (
+      trimmed.startsWith("npm:") ||
+      trimmed.startsWith("git:") ||
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("ssh://") ||
+      trimmed.startsWith("./") ||
+      trimmed.startsWith("../") ||
+      trimmed.startsWith(".\\") ||
+      trimmed.startsWith("..\\") ||
+      trimmed.startsWith("/") ||
+      trimmed.startsWith("~") ||
+      /^[a-zA-Z]:[\\/]/.test(trimmed)
+    ) {
+      return trimmed;
+    }
+    if (cwd && existsSync(path.resolve(cwd, trimmed))) {
+      return trimmed;
+    }
+    if (/^github\.com\/[^/]+\/[^/]+/.test(trimmed)) {
+      return `git:${trimmed}`;
+    }
+    return `npm:${trimmed}`;
+  }
+
+  private classifySourceKind(source: string): "npm" | "git" | "local" {
+    if (source.startsWith("npm:")) return "npm";
+    if (
+      source.startsWith("git:") ||
+      source.startsWith("http://") ||
+      source.startsWith("https://") ||
+      source.startsWith("ssh://") ||
+      source.includes("github.com/") ||
+      source.includes("gitlab.com/")
+    ) {
+      return "git";
+    }
+    return "local";
+  }
+
+  async packagesOverview(cwd?: string): Promise<PiPackagesOverview> {
+    if (cwd) await assertRealWorkspacePath(cwd, path.resolve(cwd));
+    const { agentDir, effectiveCwd, packageManager } = this.createPackageManager(cwd);
+    const globalSettingsPath = path.join(agentDir, "settings.json");
+    const projectSettingsPath = cwd ? path.join(effectiveCwd, ".pi", "settings.json") : "";
+
+    const configured = packageManager.listConfiguredPackages();
+    let resolved = { extensions: [], skills: [], prompts: [], themes: [] } as any;
+    try {
+      resolved = await packageManager.resolve(async () => "skip");
+    } catch {
+      // ignore resolution errors on missing packages
+    }
+
+    const resources: PiResourceItem[] = [];
+    const resourceTypes = ["extensions", "skills", "prompts", "themes"] as const;
+    for (const type of resourceTypes) {
+      for (const item of resolved[type] ?? []) {
+        if (item?.metadata?.source === "builtin") continue;
+        resources.push({
+          path: item.path,
+          name: path.basename(item.path),
+          type,
+          enabled: Boolean(item.enabled),
+          scope: item.metadata?.scope ?? "user",
+          origin: item.metadata?.origin ?? "top-level",
+          source: item.metadata?.source ?? "local",
+        });
+      }
+    }
+
+    const packages: PiPackageItem[] = [];
+    for (const item of configured) {
+      const kind = this.classifySourceKind(item.source);
+      let displayName = item.source.replace(/^npm:/, "").replace(/^git:/, "");
+      let version: string | undefined;
+      let description: string | undefined;
+
+      if (item.installedPath) {
+        const pkgJsonPath = path.join(item.installedPath, "package.json");
+        if (existsSync(pkgJsonPath)) {
+          try {
+            const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
+            if (pkgJson.name) displayName = pkgJson.name;
+            if (pkgJson.version) version = String(pkgJson.version);
+            if (pkgJson.description) description = String(pkgJson.description);
+          } catch {
+            // ignore malformed package.json
+          }
+        }
+      }
+
+      const counts = { extensions: 0, skills: 0, prompts: 0, themes: 0 };
+      if (item.installedPath) {
+        const normRoot = path.resolve(item.installedPath).toLowerCase();
+        for (const res of resources) {
+          const normRes = path.resolve(res.path).toLowerCase();
+          if (normRes.startsWith(normRoot)) {
+            counts[res.type] += 1;
+          }
+        }
+      }
+
+      packages.push({
+        source: item.source,
+        scope: item.scope,
+        kind,
+        displayName,
+        version,
+        description,
+        installed: Boolean(item.installedPath),
+        installedPath: item.installedPath,
+        filtered: Boolean(item.filtered),
+        counts,
+      });
+    }
+
+    return {
+      agentDir,
+      globalSettingsPath,
+      projectSettingsPath,
+      packages,
+      resources,
+    };
+  }
+
+  async packagesInstall(cwd: string, payload: { source: string; local?: boolean }): Promise<PiPackagesOverview> {
+    const local = Boolean(payload?.local);
+    if (local && !cwd) {
+      throw new Error("当前未打开项目目录，无法安装到项目级配置");
+    }
+    const normalized = this.normalizeInstallSource(payload?.source ?? "", cwd);
+    const { packageManager, settingsManager } = this.createPackageManager(cwd);
+    await packageManager.installAndPersist(normalized, { local });
+    await settingsManager.flush();
+    return this.packagesOverview(cwd);
+  }
+
+  async packagesRemove(cwd: string, payload: { source: string; local?: boolean }): Promise<PiPackagesOverview> {
+    const local = Boolean(payload?.local);
+    const { packageManager, settingsManager } = this.createPackageManager(cwd);
+    await packageManager.removeAndPersist(payload.source, { local });
+    await settingsManager.flush();
+    return this.packagesOverview(cwd);
+  }
+
+  async packagesUpdate(cwd: string, payload?: { source?: string }): Promise<PiPackagesOverview> {
+    const { packageManager, settingsManager } = this.createPackageManager(cwd);
+    await packageManager.update(payload?.source || undefined);
+    await settingsManager.flush();
+    return this.packagesOverview(cwd);
+  }
+
+  async skillsOverview(cwd?: string): Promise<PiSkillsOverview> {
+    if (cwd) await assertRealWorkspacePath(cwd, path.resolve(cwd));
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd || homedir();
+    const result = loadSkills({
+      cwd: effectiveCwd,
+      agentDir,
+      skillPaths: [],
+      includeDefaults: true,
+    });
+    return {
+      agentDir,
+      globalSkillsDir: path.join(agentDir, "skills"),
+      projectSkillsDir: cwd ? path.join(effectiveCwd, ".pi", "skills") : "",
+      skills: result.skills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        filePath: skill.filePath,
+        baseDir: skill.baseDir,
+        scope: skill.sourceInfo.scope,
+        origin: skill.sourceInfo.origin,
+        source: skill.sourceInfo.source,
+        disableModelInvocation: skill.disableModelInvocation,
+      })),
+      diagnostics: result.diagnostics.map((item) => item.message ?? String(item)),
+    };
+  }
+}
+
+export async function readRecent(file: string): Promise<string[]> {
+  try {
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    const entries = Array.isArray(saved) ? saved.filter((cwd): cwd is string => typeof cwd === "string") : [];
+    const valid: string[] = [];
+    for (const cwd of entries) {
+      try {
+        const info = await stat(cwd);
+        if (info.isDirectory()) valid.push(path.resolve(cwd));
+      } catch {
+        // Drop stale or inaccessible recent workspaces.
+      }
+    }
+    return [...new Set(valid)];
+  } catch {
+    return [];
+  }
+}
+
+export async function writeRecent(file: string, cwd: string): Promise<string[]> {
+  const next = [cwd, ...(await readRecent(file)).filter((item) => item !== cwd)].slice(0, 20);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(next, null, 2));
+  return next;
+}
+
+export async function forgetRecent(file: string, cwd: string): Promise<string[]> {
+  const next = (await readRecent(file)).filter((item) => item !== cwd);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(next, null, 2));
+  return next;
+}
+
