@@ -62,6 +62,25 @@ function runCommand(command: string, args: string[], timeoutMs = 30000): Promise
  * Windows 的 `where` 会先命中进程 cwd（如项目根的 node_modules/.bin/pi 本地
  * shim），导致识别到错误位置；手动走 PATH 即与 cmd 的解析一致，又天然排除 cwd。
  */
+/**
+ * npm scripts 会把项目 node_modules/.bin 插到 PATH 最前面，Electron 从
+ * `npm run dev` 拉起时也会继承它。这些是本地 shim，不是用户安装的 Pi，必须跳过。
+ */
+function isAppLocalBin(candidate: string): boolean {
+  const isWin = process.platform === "win32";
+  const norm = (value: string) => {
+    const resolved = path.resolve(value);
+    return isWin ? resolved.toLowerCase() : resolved;
+  };
+  const file = norm(candidate);
+  // app.getAppPath() 在开发态可能是 dist-electron 或 scripts，真正的项目根
+  // 以 package.json 为准（main.ts 编译后位于 dist-electron/，上一级即根）。
+  const roots = [path.resolve(HERE, ".."), app.getAppPath(), process.cwd()]
+    .filter(Boolean)
+    .map(norm);
+  return roots.some((root) => file === root || file.startsWith(root + path.sep));
+}
+
 function findPiOnPath(): string {
   try {
     const isWin = process.platform === "win32";
@@ -77,7 +96,8 @@ function findPiOnPath(): string {
         const key = isWin ? full.toLowerCase() : full;
         if (seen.has(key)) continue;
         seen.add(key);
-        if (existsSync(full)) return full;
+        if (!existsSync(full) || isAppLocalBin(full)) continue;
+        return full;
       }
     }
   } catch {
@@ -148,17 +168,19 @@ export interface PiUpdateResult {
 }
 
 /**
- * 全局更新 Pi CLI 到 latest，成功后重新定位并返回版本变化。
- * 更新动作本身永远是 `npm install -g`（全局安装）；customPath 只决定
- * 更新前后“当前版本”从哪个二进制读取，更新后同样回到该路径复检。
+ * 用识别到的 pi 自己更新（`pi update --self`）。
+ * Pi 可能由 npm、pnpm、bun 或官方安装器管理，不能写死 `npm install -g`；
+ * `pi update` 会按实际安装方式选择更新命令。
  */
-async function updatePi(customPath = ""): Promise<PiUpdateResult> {
+async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promise<PiUpdateResult> {
   const before = await locatePi(customPath);
   const from = before.version;
-  if (!before.found) return { ok: false, from: "", to: "", log: before.error ?? "未检测到本机 pi 命令" };
-  const installed = await runCommand("npm", ["install", "-g", `${PI_NPM_PACKAGE}@latest`], 180000);
-  const tail = installed.output.split(/\r?\n/).slice(-20).join("\n");
-  if (installed.code !== 0) return { ok: false, from, to: from, log: tail || "安装进程异常退出" };
+  if (!before.found || !before.path) return { ok: false, from: "", to: "", log: before.error ?? "未检测到本机 pi 命令" };
+  const bin = before.path.includes(" ") ? `"${before.path}"` : before.path;
+  const args = scope === "all" ? ["update", "--all", "--no-approve"] : ["update", "--no-approve"];
+  const installed = await runCommand(bin, args, 180000);
+  const tail = installed.output.split(/\r?\n/).slice(-30).join("\n");
+  if (installed.code !== 0) return { ok: false, from, to: from, log: tail || "pi update 异常退出" };
   const after = await locatePi(customPath);
   return { ok: after.found, from, to: after.version || from, log: tail };
 }
@@ -219,6 +241,18 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedRendererUrl(url)) event.preventDefault();
   });
+  // Chromium 自带 Ctrl/Cmd + - / + / 0 页面缩放。缩放只允许设置页，
+  // 这里把这些组合（含 Shift、小键盘）全部吃掉，避免和输入法抢键。
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    if ((!input.control && !input.meta) || input.alt) return;
+    const zoom =
+      input.code === "Minus" || input.code === "NumpadSubtract" ||
+      input.code === "Equal" || input.code === "NumpadAdd" ||
+      input.key === "+" || input.key === "-" || input.key === "=" ||
+      input.code === "Digit0" || input.code === "Numpad0";
+    if (zoom) event.preventDefault();
+  });
   if (app.isPackaged && existsSync(DIST_HTML)) {
     mainWindow.loadFile(DIST_HTML);
     return;
@@ -263,7 +297,7 @@ function handle(channel: string, fn: (...args: any[]) => any) {
 app.whenReady().then(() => {
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
-  handle("pi:update", (customPath = "") => updatePi(customPath));
+  handle("pi:update", (customPath = "", scope: "self" | "all" = "self") => updatePi(customPath, scope === "all" ? "all" : "self"));
   // 界面缩放完全由设置页控制（不再设全局快捷键，避免与输入法/阅读器冲突）。
   handle("pi:set-zoom", (factor: number) => {
     const next = Math.min(3, Math.max(0.5, Number(factor) || 1));

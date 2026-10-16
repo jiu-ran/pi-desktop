@@ -143,6 +143,7 @@ const piUpdateStatus = computed(() => {
 });
 
 const piPathDraft = ref(appSettings.piCustomPath);
+const piPathEditing = ref(false);
 
 async function checkPiUpdateNow(): Promise<void> {
   const result = await workbench.checkPiUpdate(appSettings.piCustomPath || undefined);
@@ -156,7 +157,7 @@ async function checkPiUpdateNow(): Promise<void> {
 }
 
 async function updatePiNow(): Promise<void> {
-  await workbench.updatePi(appSettings.piCustomPath || undefined);
+  await workbench.updatePi(appSettings.piCustomPath || undefined, appSettings.piUpdateScope);
 }
 
 /** 应用手动输入的 Pi 路径：探活成功才保存，失败直接报错不保存。 */
@@ -172,12 +173,24 @@ async function applyPiCustomPath(): Promise<void> {
     return;
   }
   appSettings.piCustomPath = input;
+  piPathEditing.value = false;
   bus.emit("notify", { level: "info", text: `已使用手动指定的 Pi：${result.version}（${result.path}）` });
+}
+
+function editPiPath(): void {
+  piPathDraft.value = appSettings.piCustomPath || state.pi.path || "";
+  piPathEditing.value = true;
+}
+
+function cancelPiPathEdit(): void {
+  piPathDraft.value = appSettings.piCustomPath;
+  piPathEditing.value = false;
 }
 
 async function clearPiCustomPath(): Promise<void> {
   appSettings.piCustomPath = "";
   piPathDraft.value = "";
+  piPathEditing.value = false;
   await workbench.refreshPi();
   bus.emit("notify", { level: "info", text: "已恢复 PATH 自动识别" });
 }
@@ -569,24 +582,47 @@ watch(
   { immediate: true },
 );
 
-function onKeydown(event: KeyboardEvent): void {
-  if (!settingsModalState.open) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
+const settingsVisible = ref(false);
+const settingsLeaving = ref(false);
+let settingsLeaveTimer = 0;
+
+function requestCloseSettings(): void {
+  if (!settingsModalState.open || settingsLeaving.value) return;
+  settingsLeaving.value = true;
+  window.clearTimeout(settingsLeaveTimer);
+  settingsLeaveTimer = window.setTimeout(() => {
+    settingsLeaving.value = false;
     closeSettingsModal();
-  }
+  }, 180);
 }
 
-onMounted(() => {
-  window.addEventListener("keydown", onKeydown);
-});
+watch(
+  () => settingsModalState.open,
+  (open) => {
+    if (!open) {
+      settingsVisible.value = false;
+      return;
+    }
+    settingsLeaving.value = false;
+    settingsVisible.value = false;
+    requestAnimationFrame(() => {
+      settingsVisible.value = true;
+    });
+  },
+  { immediate: true },
+);
+
 onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onKeydown);
+  window.clearTimeout(settingsLeaveTimer);
 });
 </script>
 
 <template>
-  <div v-if="settingsModalState.open" class="overlay settings-overlay" @mousedown.self="closeSettingsModal">
+  <div
+    v-if="settingsModalState.open"
+    class="overlay settings-overlay"
+    :class="{ open: settingsVisible && !settingsLeaving, leaving: settingsLeaving }"
+  >
     <div class="settings-modal" role="dialog" aria-modal="true" aria-label="偏好设置">
       <!-- 左侧导航栏 -->
       <aside class="settings-nav">
@@ -624,7 +660,7 @@ onBeforeUnmount(() => {
             <h2 class="settings-title">{{ currentTabMeta.label }}</h2>
             <p class="settings-desc">{{ currentTabMeta.desc }}</p>
           </div>
-          <button type="button" class="icon-btn" title="关闭设置 (Esc)" @click="closeSettingsModal" v-html="icons.close" />
+          <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
         </header>
 
         <div class="settings-body">
@@ -1655,45 +1691,39 @@ onBeforeUnmount(() => {
 
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>识别到的 Pi 安装路径</strong>
-                  <span>{{ state.pi.path || (state.pi.found ? "已找到 pi 命令，但未能解析安装路径" : "未在系统 PATH 中检测到 pi 命令") }}</span>
+                  <strong>Pi 路径</strong>
+                  <span v-if="!piPathEditing">{{ state.pi.path || "未在 PATH 中识别到 pi，可手动指定" }}</span>
+                  <span v-else>{{ appSettings.piCustomPath ? "正在使用手动路径，探活成功后替换" : "默认使用 PATH 自动识别，探活成功后才会保存" }}</span>
                 </div>
-                <button
-                  type="button"
-                  class="btn ghost small"
-                  :disabled="!state.pi.path"
-                  @click="copyPiPath"
-                >
-                  复制路径
-                </button>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>手动指定 Pi 路径</strong>
-                  <span>只从 PATH 自动识别；PATH 里没有 pi 时在此粘贴可执行文件完整路径（如 D:\app\pi.cmd），探活成功后才会保存</span>
-                </div>
-              </div>
-              <div class="settings-row">
-                <input
-                  v-model="piPathDraft"
-                  class="search"
-                  placeholder="D:\path\to\pi.cmd"
-                  spellcheck="false"
-                  style="flex: 1; min-width: 0;"
-                />
+                <span v-if="!piPathEditing" class="settings-status-pill" :class="appSettings.piCustomPath ? 'warn' : 'ok'">
+                  {{ appSettings.piCustomPath ? "手动指定" : "自动识别" }}
+                </span>
                 <div style="display: flex; gap: 6px; flex: none;">
-                  <button type="button" class="btn ghost small" @click="applyPiCustomPath">
-                    使用此路径
-                  </button>
+                  <button type="button" class="btn ghost small" :disabled="!state.pi.path" @click="copyPiPath">复制</button>
+                  <button v-if="!piPathEditing" type="button" class="btn ghost small" @click="editPiPath">修改</button>
                   <button
-                    v-if="appSettings.piCustomPath"
+                    v-if="!piPathEditing && appSettings.piCustomPath"
                     type="button"
                     class="btn ghost small"
                     @click="clearPiCustomPath"
                   >
-                    恢复自动识别
+                    恢复自动
                   </button>
+                </div>
+              </div>
+              <div v-if="piPathEditing" class="settings-row">
+                <input
+                  v-model="piPathDraft"
+                  class="search"
+                  placeholder="粘贴 pi 或 pi.cmd 的完整路径"
+                  spellcheck="false"
+                  style="flex: 1; min-width: 0;"
+                  @keydown.enter.prevent="applyPiCustomPath"
+                  @keydown.esc.prevent="cancelPiPathEdit"
+                />
+                <div style="display: flex; gap: 6px; flex: none;">
+                  <button type="button" class="btn ghost small" @click="applyPiCustomPath">使用此路径</button>
+                  <button type="button" class="btn ghost small" @click="cancelPiPathEdit">取消</button>
                 </div>
               </div>
 
@@ -1729,9 +1759,27 @@ onBeforeUnmount(() => {
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>检查并更新 Pi</strong>
-                  <span>从 npm 全局安装最新版 Pi CLI；更新后会在此展示版本变化与安装日志</span>
+                  <span>使用识别到的 Pi 执行更新，由它按实际安装方式（npm、pnpm 或官方安装器）处理；完成后展示版本变化与输出</span>
                 </div>
-                <div style="display: flex; gap: 6px; flex: none;">
+                <div style="display: flex; gap: 6px; flex: none; align-items: center;">
+                  <div class="settings-segmented" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
+                    <button
+                      type="button"
+                      :class="{ active: appSettings.piUpdateScope !== 'all' }"
+                      :disabled="state.pi.updating"
+                      @click="appSettings.piUpdateScope = 'self'"
+                    >
+                      pi update
+                    </button>
+                    <button
+                      type="button"
+                      :class="{ active: appSettings.piUpdateScope === 'all' }"
+                      :disabled="state.pi.updating"
+                      @click="appSettings.piUpdateScope = 'all'"
+                    >
+                      update --all
+                    </button>
+                  </div>
                   <button
                     type="button"
                     class="btn ghost small"
@@ -1754,7 +1802,7 @@ onBeforeUnmount(() => {
               <label class="settings-row clickable">
                 <div class="settings-row-info">
                   <strong>Pi 自动更新</strong>
-                  <span>启动并定位到本机 Pi 后，若发现新版本则自动全局更新到最新版</span>
+                  <span>启动并定位到本机 Pi 后，若发现新版本则按下方所选范围自动更新</span>
                 </div>
                 <input v-model="appSettings.piAutoUpdate" type="checkbox" class="settings-switch" />
               </label>

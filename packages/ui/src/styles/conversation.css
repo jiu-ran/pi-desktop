@@ -65,7 +65,7 @@
   max-width: var(--column);
   width: 100%;
   margin: 0 auto;
-  padding: 0 24px 6px;
+  padding: 0 clamp(10px, 3vw, 24px) 6px;
 }
 .changes-bar-main {
   display: flex;
@@ -110,7 +110,7 @@
   min-width: 0;
   max-width: var(--column);
   margin: 0 auto;
-  padding: 18px 24px 28px;
+  padding: 18px clamp(10px, 3vw, 24px) 28px;
 }
 .timeline-empty { margin: 16vh auto 0; text-align: center; color: var(--fg-2); }
 .timeline-empty h2 { margin: 0 0 8px; color: var(--fg); font-size: 20px; font-weight: 600; }
@@ -142,7 +142,7 @@
   border-radius: var(--radius);
   background: var(--user-bg);
 }
-.msg-user-text { white-space: pre-wrap; word-break: break-word; }
+.msg-user-text { white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; }
 .msg-attach { display: block; margin-top: 4px; color: var(--fg-2); font-size: 12px; }
 
 /* 助手回合：顶部灰色状态行 + 正文 + 工具步骤 */
@@ -157,7 +157,7 @@
 .turn-state svg { color: var(--fg-3); }
 .turn-state.running { color: var(--fg); }
 
-.msg.assistant { min-width: 0; overflow-wrap: anywhere; }
+.msg.assistant { min-width: 0; overflow-wrap: break-word; word-break: normal; }
 .msg-tools {
   display: flex;
   gap: 2px;
@@ -413,7 +413,7 @@
 .change-chip-go { margin-left: 4px; color: var(--accent); }
 
 /* 输入框 */
-.composer-wrap { flex: none; padding: 0 24px 12px; }
+.composer-wrap { flex: none; padding: 0 clamp(10px, 3vw, 24px) 12px; }
 .composer-inner { display: flex; flex-direction: column; gap: 8px; max-width: var(--column); margin: 0 auto; }
 .composer {
   position: relative;
@@ -450,7 +450,7 @@
 .composer textarea {
   display: block;
   width: 100%;
-  min-height: 58px;
+  min-height: 44px;
   max-height: 260px;
   overflow-x: hidden;
   padding: 9px 10px 6px;
@@ -465,16 +465,17 @@
 .composer textarea::placeholder { color: var(--fg-3); }
 .composer-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  height: 34px;
-  padding: 0 6px;
+  gap: 4px 8px;
+  min-height: 34px;
+  padding: 4px 6px;
   border-radius: 0 0 var(--radius) var(--radius);
 }
 .composer-left, .composer-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.composer-left { flex: 1 1 0; overflow: visible; }
-.composer-right { flex: none; gap: 4px; }
+.composer-left { flex: 1 1 140px; overflow: visible; }
+.composer-right { flex: 1 1 auto; justify-content: flex-end; gap: 4px; }
 .composer-context {
   display: inline-flex;
   align-items: center;
@@ -562,7 +563,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: min(220px, 100%);
+  max-width: min(180px, 42vw);
   height: 24px;
   padding: 0 7px;
   border: 0;

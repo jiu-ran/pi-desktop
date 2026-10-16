@@ -27,8 +27,10 @@ export interface AppSettings {
   autoRetry: boolean;
   /** 后台并行任务完成时弹出通知提醒 */
   notifyOnBackgroundDone: boolean;
-  /** 本机 Pi CLI 自动更新：启动定位到新版本后自动全局更新 */
+  /** 本机 Pi CLI 自动更新：启动定位到新版本后自动更新 */
   piAutoUpdate: boolean;
+  /** 更新范围：self = pi update；all = pi update --all（含已安装扩展） */
+  piUpdateScope: "self" | "all";
   /** 手动指定的 Pi 可执行文件路径（为空时只从 PATH 自动识别） */
   piCustomPath: string;
   /** 界面基础字号（px） */
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoRetry: true,
   notifyOnBackgroundDone: true,
   piAutoUpdate: false,
+  piUpdateScope: "self",
   piCustomPath: "",
   uiFontSize: 13,
   codeFontSize: 12.5,
@@ -83,6 +86,7 @@ function loadSavedSettings(): AppSettings {
           ? parsed.notifyOnBackgroundDone
           : DEFAULT_SETTINGS.notifyOnBackgroundDone,
       piAutoUpdate: typeof parsed.piAutoUpdate === "boolean" ? parsed.piAutoUpdate : DEFAULT_SETTINGS.piAutoUpdate,
+      piUpdateScope: parsed.piUpdateScope === "all" ? "all" : "self",
       piCustomPath: typeof parsed.piCustomPath === "string" ? parsed.piCustomPath.slice(0, 500) : DEFAULT_SETTINGS.piCustomPath,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
@@ -165,9 +169,11 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
           return;
         }
       }
-      if (!appSettings.piAutoUpdate || !located?.found) return;
+      if (!located?.found) return;
       const checked = await workbench.checkPiUpdate(custom || undefined);
-      if (checked.updateAvailable) await workbench.updatePi(custom || undefined);
+      if (checked.updateAvailable && appSettings.piAutoUpdate) {
+        await workbench.updatePi(custom || undefined, appSettings.piUpdateScope);
+      }
     })();
   }));
 

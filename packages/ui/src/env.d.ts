@@ -226,7 +226,8 @@ export interface PiDesktopBridge {
   locate: (customPath?: string) => Promise<PiLocation>;
   setZoomFactor: (factor: number) => Promise<number>;
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
-  updatePi: (customPath?: string) => Promise<PiUpdateResult>;
+  /** scope: self = pi update（默认）；all = pi update --all */
+  updatePi: (customPath?: string, scope?: "self" | "all") => Promise<PiUpdateResult>;
   recent: () => Promise<string[]>;
   forget: (cwd: string) => Promise<string[]>;
   chooseDirectory: () => Promise<string | null>;

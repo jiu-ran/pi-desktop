@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   locate: (customPath = "") => ipcRenderer.invoke("pi:locate", customPath),
   setZoomFactor: (factor: number) => ipcRenderer.invoke("pi:set-zoom", factor),
   checkPiUpdate: (customPath = "") => ipcRenderer.invoke("pi:check-update", customPath),
-  updatePi: (customPath = "") => ipcRenderer.invoke("pi:update", customPath),
+  updatePi: (customPath = "", scope: "self" | "all" = "self") => ipcRenderer.invoke("pi:update", customPath, scope),
   recent: () => ipcRenderer.invoke("pi:recent"),
   forget: (cwd: string) => ipcRenderer.invoke("pi:forget", cwd),
   chooseDirectory: () => ipcRenderer.invoke("pi:choose-directory"),

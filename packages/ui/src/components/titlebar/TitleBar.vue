@@ -57,6 +57,11 @@ const connTone = computed(() => {
   if (ws.value?.hasAnyRunning || ws.value?.streaming || ws.value?.compacting || ws.value?.status === "starting") return "running";
   return "ready";
 });
+
+const piTitle = computed(() => {
+  const current = pi.value.version ? `本机 Pi CLI ${pi.value.version}` : "本机 Pi CLI";
+  return pi.value.updateAvailable ? `${current}，可更新到 ${pi.value.latest}` : current;
+});
 </script>
 
 <template>
@@ -78,8 +83,8 @@ const connTone = computed(() => {
         v-html="icons.plus"
       />
       <nav v-if="ws" class="crumbs">
-        <button class="crumb" :title="ws.cwd" @click="showSidebar">{{ ws.name }}</button>
-        <span v-if="ws.branch" class="crumb" :title="`分支 ${ws.branch}`"><span v-html="icons.branch" />{{ ws.branch }}</span>
+        <button class="crumb" :title="ws.cwd" @click="showSidebar"><span class="crumb-text">{{ ws.name }}</span></button>
+        <span v-if="ws.branch" class="crumb crumb-branch" :title="`分支 ${ws.branch}`"><span v-html="icons.branch" /><span class="crumb-text">{{ ws.branch }}</span></span>
         <span class="crumb-slash">/</span>
         <span class="crumb-title" :title="title">
           <span
@@ -99,10 +104,19 @@ const connTone = computed(() => {
     <div class="tb-right">
       <span v-for="[key, text] in extEntries" :key="key" class="status-item" :title="key">◆ {{ text }}</span>
 
-      <span class="status-item" :data-tone="connTone" :title="`本机 Pi CLI ${pi.version}`">
+      <span class="status-item" :data-tone="connTone" :title="piTitle">
         <span class="status-dot" :data-state="connTone" />
         {{ connLabel }}
       </span>
+      <button
+        v-if="pi.updateAvailable"
+        class="status-item clickable pi-update-hint"
+        :title="`Pi ${pi.latest} 可用，当前 ${pi.version}。点击打开设置更新`"
+        @click="openSettingsModal('environment')"
+      >
+        <span class="pi-update-dot" />
+        有新版本 {{ pi.latest }}
+      </button>
 
       <button
         class="tb-btn"

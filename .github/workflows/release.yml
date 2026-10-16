@@ -46,22 +46,23 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx --yes electron-builder --${{ matrix.platform }} --publish never
 
-      - name: Publish GitHub Release v0.1.0
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0
-          name: Pi Desktop v0.1.0
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.1' }}
+          name: Pi Desktop ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.1' }}
           draft: false
           prerelease: false
           generate_release_notes: false
           body: |
-            Pi Desktop v0.1.0：基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）。
+            Pi Desktop v0.1.1：基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）。
 
-            - JetBrains Air 风格四区域布局：任务侧栏 / 对话 / 内容舞台 / 右侧面板
-            - Mermaid 图表渲染（对齐 Cursor：缩放、全屏、SVG/PNG/MMD 导出、源码切换）
-            - 中央文件编辑器：多标签、行号、Ctrl+S 保存、未保存标记
-            - 项目文件树、任务变更审查、Git 面板、RPC 事件流、插件管理
-            - 斜杠命令、命令面板（Ctrl+K）、深色/浅色主题
+            - Pi 只从系统 PATH 识别，跳过项目内 shim；识别失败可手动指定路径
+            - 更新改由识别到的 Pi 执行 `pi update` 或 `pi update --all`，适配 npm、pnpm 与官方安装器
+            - 有新版本时在标题栏提示；自动更新沿用所选范围
+            - 设置弹窗增加打开与关闭动画，仅点击关闭按钮关闭
+            - Mermaid 主题改为渲染时初始化，不再往图表源码注入配置
+            - 窄窗口下对话、输入框、设置页、侧栏与标题栏的布局收紧
 
             前置条件：本机已安装并可在命令行运行 `pi`。
           files: |

@@ -65,17 +65,27 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
+  max-width: 28%;
   padding: 2px 6px;
   border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.crumb:first-child { flex: 0 1 auto; }
+.crumb-slash { flex: none; }
+.crumb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crumb-branch { flex: 0 1 120px; }
+@media (max-width: 1080px) {
+  .crumb-branch { display: none; }
 }
 .crumb:hover { background: var(--hover); color: var(--fg); }
 .crumb svg { flex: none; }
 .crumb-slash { color: var(--fg-3); }
-.crumb-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg); font-weight: 500; }
+.crumb-title { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg); font-weight: 500; }
 .crumb-title > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumb-title .state-icon { display: inline-grid; color: var(--ok); }
 .crumb-title .state-icon.running { color: var(--accent); }
@@ -98,7 +108,10 @@
   border-radius: var(--radius);
   background: var(--bg);
 }
-.sidebar { flex: 0 1 auto; width: 272px; min-width: 180px; }
+.sidebar { flex: 0 1 auto; width: 272px; min-width: 180px; container-type: inline-size; }
+@container (max-width: 230px) {
+  .project-branch { display: none; }
+}
 .sidebar-resizer, .panel-resizer, .editor-resizer {
   position: relative;
   z-index: 10;
@@ -414,6 +427,15 @@
 .status-item.clickable { cursor: pointer; }
 .status-item.clickable:hover { background: var(--hover); color: var(--fg); }
 .status-item[data-tone="error"] { color: var(--err); }
+.pi-update-hint { color: var(--warn); font-weight: 600; }
+.pi-update-hint:hover { color: var(--warn); }
+.pi-update-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
 
 .meter {
   display: inline-block;

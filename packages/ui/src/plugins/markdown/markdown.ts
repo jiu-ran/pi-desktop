@@ -47,8 +47,13 @@ let worker: Worker | null = null;
 let lifecycle = 0;
 let mermaidLoader: Promise<unknown> | null = null;
 
-function loadMermaid(): Promise<unknown> {
-  return import("mermaid");
+async function loadMermaid(): Promise<unknown> {
+  const mod = await import("mermaid") as Record<string, any>;
+  const mermaid = mod.default ?? mod;
+  const { buildMermaidInitConfig } = await import("./mermaid-theme.ts");
+  const isDark = document.documentElement.dataset.theme !== "light";
+  if (typeof mermaid.initialize === "function") mermaid.initialize(buildMermaidInitConfig(isDark));
+  return mod;
 }
 
 function loadMermaidForGeneration(generation: number): Promise<unknown> {

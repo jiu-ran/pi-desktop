@@ -1,6 +1,6 @@
 import { diagramBoxHeight, parseViewBox } from "../../packages/ui/src/plugins/markdown/mermaid-fit.ts";
 import { fittedMermaidSize, getMermaidSvgSize } from "../../packages/ui/src/plugins/markdown/mermaid-normalize.ts";
-import { buildMermaidInitDirective, injectMermaidTheme } from "../../packages/ui/src/plugins/markdown/mermaid-theme.ts";
+import { buildMermaidInitConfig } from "../../packages/ui/src/plugins/markdown/mermaid-theme.ts";
 
 const assert = (ok: boolean, message: string) => {
   if (!ok) throw new Error(message);
@@ -40,13 +40,11 @@ assert(narrow.fit === 1 && narrow.width === 400, "窄图不应放大");
 const zero = fittedMermaidSize({ width: 800, height: 1600 }, 0);
 assert(zero.fit === 1, "容器宽度无效时保持原尺寸");
 
-// 主题指令：围栏首行注入，有 %%{ 开头的围栏不动
-const themed = injectMermaidTheme("前言\n```mermaid\ngraph TD\nA-->B\n```\n```mermaid\n%%{title:x}%%\ngraph LR\n```\n", true);
-assert(themed.includes('"theme":"base"'), "应注入 base 主题指令");
-assert(themed.includes('"fontFamily"'), "应注入字体栈");
-assert((themed.match(/%%\{init:/g) ?? []).length === 1, "已有指令的围栏不应重复注入");
-const directive = buildMermaidInitDirective(false);
-assert(directive.includes('"darkMode":false'), "浅色主题 darkMode 应为 false");
-JSON.parse(directive.replace(/^%%\{init: /, "").replace(/\}%%$/, ""));
+// 主题只通过 mermaid.initialize 应用，不往图表源码里写 init 指令。
+const config = buildMermaidInitConfig(false);
+assert(config.theme === "base", "应使用 base 主题");
+assert(typeof config.themeVariables.fontFamily === "string", "应配置字体栈");
+assert(config.themeVariables.darkMode === false, "浅色主题 darkMode 应为 false");
+assert(!("defaultRenderer" in (config.flowchart ?? {})), "主题配置不应改流程图布局引擎");
 
 console.log("mermaid-fit OK");

@@ -968,11 +968,11 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
    * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
    * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
    */
-  async function updatePi(customPath = ""): Promise<boolean> {
+  async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promise<boolean> {
     if (!host?.updatePi || state.pi.updating) return false;
     state.pi.updating = true;
     try {
-      const result = await host.updatePi(customPath || undefined);
+      const result = await host.updatePi(customPath || undefined, scope === "all" ? "all" : "self");
       if (!result.ok) {
         bus.emit("notify", { level: "error", text: `Pi 更新失败：${result.log.slice(-200) || "未知错误"}` });
         return false;
