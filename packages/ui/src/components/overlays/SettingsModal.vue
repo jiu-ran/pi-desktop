@@ -497,6 +497,7 @@ async function updatePackage(source?: string): Promise<void> {
     pkgBusyText.value = "";
   }
 }
+
 const resourceTypeLabels: Record<string, string> = {
   extensions: "扩展",
   skills: "技能",
@@ -1713,3 +1714,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
