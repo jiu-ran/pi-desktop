@@ -497,10 +497,7 @@ watch(
     } else if (tab === "skills") {
       loadSkillsOverview();
     }
-  },
-
-[1105 more lines in file. Use offset=501 to continue.]
-  { immediate: true },
+  },  { immediate: true },
 );
 
 function onKeydown(event: KeyboardEvent): void {
@@ -999,10 +996,7 @@ onBeforeUnmount(() => {
                     <div class="settings-segmented">
                       <button
                         type="button"
-                        :class="{ active: mcpForm.type === 'stdio' }"
-
-[605 more lines in file. Use offset=1001 to continue.]
-                        @click="mcpForm.type = 'stdio'"
+                        :class="{ active: mcpForm.type === 'stdio' }"                        @click="mcpForm.type = 'stdio'"
                       >
                         STDIO 本地进程
                       </button>
@@ -1502,9 +1496,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-
-[105 more lines in file. Use offset=1501 to continue.]
-
             <div v-if="skillsData" class="settings-group">
               <div class="settings-group-title">技能目录</div>
               <div class="settings-row">
@@ -1608,4 +1599,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
