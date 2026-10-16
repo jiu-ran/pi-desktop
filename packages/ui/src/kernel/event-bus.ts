@@ -1,8 +1,9 @@
-export type EventHandler<T = any> = (payload: T) => void;
+export type EventHandler<T = any> = (payload: T) => void | Promise<void>;
 
 export interface EventBus {
   on: (type: string, handler: EventHandler) => () => void;
   emit: (type: string, payload?: any) => void;
+  dispose: () => void;
 }
 
 /**
@@ -10,31 +11,53 @@ export interface EventBus {
  */
 export function createEventBus(): EventBus {
   const handlers = new Map<string, Set<EventHandler>>();
+  let disposed = false;
 
   function on(type: string, handler: EventHandler): () => void {
-    if (!handlers.has(type)) handlers.set(type, new Set());
-    handlers.get(type)!.add(handler);
-    return () => { handlers.get(type)?.delete(handler); };
+    if (disposed) return () => {};
+    let bucket = handlers.get(type);
+    if (!bucket) {
+      bucket = new Set();
+      handlers.set(type, bucket);
+    }
+    bucket.add(handler);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      bucket!.delete(handler);
+      if (!bucket!.size) handlers.delete(type);
+    };
+  }
+
+  function invoke(type: string, handler: EventHandler, payload: any): void {
+    try {
+      const result = handler(payload);
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        void (result as Promise<void>).catch((error) => {
+          console.error(`[bus] ${type} handler failed`, error);
+        });
+      }
+    } catch (error) {
+      console.error(`[bus] ${type} handler failed`, error);
+    }
   }
 
   function emit(type: string, payload?: any): void {
-    for (const handler of [...(handlers.get(type) ?? [])]) {
-      try {
-        handler(payload);
-      } catch (error) {
-        console.error(`[bus] ${type} handler failed`, error);
-      }
-    }
+    if (disposed) return;
+    for (const handler of [...(handlers.get(type) ?? [])]) invoke(type, handler, payload);
     if (type !== "*") {
       for (const handler of [...(handlers.get("*") ?? [])]) {
-        try {
-          handler({ type, payload });
-        } catch (error) {
-          console.error("[bus] wildcard handler failed", error);
-        }
+        invoke("*", handler, { type, payload });
       }
     }
   }
 
-  return { on, emit };
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    handlers.clear();
+  }
+
+  return { on, emit, dispose };
 }

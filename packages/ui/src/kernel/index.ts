@@ -1,104 +1,172 @@
 import { createEventBus } from "./event-bus.ts";
-import { createContributions } from "./contributions.ts";
-import { createPluginManager, type PluginDefinition } from "./plugin-manager.ts";
+import { createStage } from "./stage.ts";
+import { createPluginManager, type PluginCommand, type PluginContext, type SidebarPlugin } from "./plugin-manager.ts";
 import { createWorkbench } from "./workbench.ts";
+import { setupTheme } from "../services/theme.ts";
+import { createBuiltinSlashCommands } from "../services/slash-commands.ts";
+import { setupExtensionUi } from "../services/extension-ui.ts";
+import { createCommandRegistry, paletteState } from "../services/command-palette.ts";
+import { openSettingsModal, setupSettings } from "../services/settings.ts";
 
 export const KERNEL_KEY = Symbol("pi-desktop-kernel");
 
 export function createKernel({ host = typeof window !== "undefined" ? window.piDesktop : undefined }: { host?: any } = {}) {
   const bus = createEventBus();
-  const contributions = createContributions();
+  const stage = createStage();
   const workbench = createWorkbench({ host, bus });
+  const theme = setupTheme(workbench, host);
+  const settings = setupSettings(workbench, bus);
+  const commandRegistry = createCommandRegistry();
+  const stopExtensionUi = setupExtensionUi(bus, host);
+  const disposers: Array<() => void> = [
+    () => workbench.dispose(),
+    () => settings.dispose(),
+    () => theme.dispose(),
+    stopExtensionUi,
+  ];
 
-  function createContext(plugin: PluginDefinition, disposers: Array<() => void>) {
+  // 切换项目目录时清空 3 区域打开的内容标签页
+  disposers.push(bus.on("workspace:switched", () => {
+    stage.clear();
+  }));
+
+  // 注册主程序内置全局命令（1 区域 & 全局）
+  const builtinCommands: PluginCommand[] = [
+    {
+      id: "palette.open",
+      title: "打开命令面板",
+      category: "全局",
+      keybinding: "Ctrl+K",
+      run: () => {
+        paletteState.open = true;
+      },
+    },
+    {
+      id: "settings.open",
+      title: "打开偏好设置",
+      category: "全局",
+      keybinding: "Ctrl+,",
+      run: () => {
+        openSettingsModal();
+      },
+    },
+    {
+      id: "settings.mcp",
+      title: "打开 MCP 服务配置",
+      category: "全局",
+      run: () => {
+        openSettingsModal("mcp");
+      },
+    },
+    {
+      id: "settings.packages",
+      title: "打开 Pi 软件包管理",
+      category: "全局",
+      run: () => {
+        openSettingsModal("packages");
+      },
+    },
+    {
+      id: "settings.skills",
+      title: "打开 Skills 设置",
+      category: "全局",
+      run: () => {
+        openSettingsModal("skills");
+      },
+    },
+    {
+      id: "workspace.open",
+      title: "打开项目目录",
+      category: "项目",
+      keybinding: "Ctrl+O",
+      run: () => workbench.chooseAndOpen(),
+    },
+    {
+      id: "session.new",
+      title: "新建任务",
+      category: "任务",
+      keybinding: "Ctrl+N",
+      run: () => workbench.newSession(),
+    },
+    {
+      id: "sidebar.toggle",
+      title: "切换项目与会话栏",
+      category: "视图",
+      keybinding: "Ctrl+B",
+      run: () => {
+        workbench.state.sidebarOpen = !workbench.state.sidebarOpen;
+      },
+    },
+    {
+      id: "theme.toggle",
+      title: "切换深色 / 浅色主题",
+      category: "视图",
+      run: () => theme.toggleTheme(),
+    },
+  ];
+  for (const command of builtinCommands) disposers.push(commandRegistry.register(command));
+  disposers.push(commandRegistry.bindGlobalKeys());
+
+  const slashCommands = createBuiltinSlashCommands({
+    workbench,
+    bus,
+    getKeybindings: () => commandRegistry.commands,
+  });
+
+  function createContext(plugin: SidebarPlugin, disposers: Array<() => void>): PluginContext {
     const track = <T extends () => void>(dispose: T): T => {
       disposers.push(dispose);
       return dispose;
     };
+
     return Object.freeze({
       pluginId: plugin.id,
-      contribute: (point: string, item: Record<string, any>) => track(contributions.add(point, plugin.id, item)),
       on: (type: string, handler: (payload: any) => void) => track(bus.on(type, handler)),
-      onDispose: (dispose: () => void) => track(dispose),
       emit: (type: string, payload?: any) => bus.emit(type, payload),
-      workbench: {
-        get state() { return workbench.state; },
-        get active() { return workbench.active.value; },
-        get workspaces() { return workbench.workspaces; },
-        open: workbench.open,
-        chooseAndOpen: workbench.chooseAndOpen,
-        get currentFile() { return workbench.state.openFiles.find((item) => item.relative === workbench.state.activeFile) ?? null; },
-        get openFiles() { return workbench.state.openFiles; },
-        listDirectory: workbench.listDirectory,
-        openFile: workbench.openFile,
-        closeFile: workbench.closeFile,
-        activateFile: workbench.activateFile,
-        readWorkspaceFile: workbench.readWorkspaceFile,
-        saveWorkspaceFile: workbench.saveWorkspaceFile,
-        openWorkspacePath: workbench.openWorkspacePath,
-        completePaths: workbench.completePaths,
-        addFiles: workbench.addFiles,
-        chooseFiles: workbench.chooseFiles,
-        chooseFolder: workbench.chooseFolder,
-        removeAttachment: workbench.removeAttachment,
-        forget: workbench.forget,
-        removeProject: workbench.removeProject,
-        deleteSession: workbench.deleteSession,
-        send: workbench.send,
-        stop: workbench.stop,
-        newSession: workbench.newSession,
-        switchSession: workbench.switchSession,
-        setModel: workbench.setModel,
-        setThinking: workbench.setThinking,
-        setTheme: workbench.setTheme,
-        reload: workbench.reload,
-        restart: workbench.restart,
-        renameSession: workbench.renameSession,
-        notice: workbench.notice,
-        refreshSessions: () => workbench.refreshSessions(),
-        listSessions: workbench.listSessions,
-        openSession: workbench.openSession,
-        showPanel: (id: string) => {
-          const panels = workbench.state.activePanels;
-          const index = panels.indexOf(id);
-          if (index >= 0) panels.splice(index, 1);
-          else panels.push(id);
-        },
-        showSidebar: (id: string) => {
-          const s = workbench.state;
-          if (s.sidebarOpen && s.activeSidebar === id) s.sidebarOpen = false;
-          else { s.activeSidebar = id; s.sidebarOpen = true; }
-        },
-        setSidebarWidth: workbench.setSidebarWidth,
-        setPanelWidth: workbench.setPanelWidth,
-        setEditorWidth: workbench.setEditorWidth,
+      onDispose: (dispose: () => void) => track(dispose),
+      registerCommand: (command) => track(commandRegistry.register(command)),
+      togglePlugin: (pluginId: string) => plugins.toggle(pluginId),
+      workbench,
+      workspace: workbench.active,
+      stage,
+      host: {
+        listDirectory: (relative = "") => workbench.listDirectory(relative),
+        readFile: (relative: string) => workbench.readWorkspaceFile(relative),
+        writeFile: (relative: string, content: string) => workbench.writeWorkspaceFile(relative, content),
+        openExternal: (relative: string) => workbench.openWorkspacePath(relative),
+        gitOverview: () => workbench.gitOverview(),
+        gitInspect: (kind: "commit" | "working", target: string) => workbench.gitInspect(kind, target),
       },
-      get keybindings() {
-        return contributions.points.commands.filter((c: any) => c.keybinding).map((c: any) => ({ title: c.title, keybinding: c.keybinding }));
-      },
-      chrome: {
-        platform: host?.platform ?? "web",
-        setTitleBar: (colors: { color: string; symbolColor: string }) => host?.setTitleBar?.(colors),
-      },
-      rpc: (method: string, ...args: any[]) => workbench.call(method, ...args),
-      respondExtensionUi: (cwd: string, response: Record<string, any>) => host.respondExtensionUi(cwd, JSON.parse(JSON.stringify(response))),
-      reveal: (target: string) => host?.reveal(target),
     });
   }
 
-  const plugins = createPluginManager({ contributions, createContext });
-
-  async function runCommand(id: string): Promise<void> {
-    const command = contributions.points.commands.find((item: any) => item.id === id);
-    if (command) await command.run();
-  }
-
-  bus.on("keybinding", ({ combo, event }: { combo: string; event: KeyboardEvent }) => {
-    const command = contributions.points.commands.find((item: any) => item.keybinding === combo);
-    if (!command) return;
-    event.preventDefault();
-    command.run();
+  const plugins = createPluginManager({
+    createContext,
+    onPluginDeactivated(pluginId: string) {
+      workbench.closePanel(pluginId);
+      stage.closeByPlugin(pluginId);
+    },
   });
 
-  return { bus, contributions, workbench, plugins, runCommand, available: Boolean(host), platform: host?.platform ?? "web" };
+  return {
+    bus,
+    stage,
+    workbench,
+    plugins,
+    theme,
+    settings,
+    slashCommands,
+    commandRegistry,
+    commands: commandRegistry.commands,
+    runCommand: commandRegistry.run,
+    dispose: () => {
+      for (const dispose of disposers.splice(0).reverse()) dispose();
+      plugins.dispose();
+      bus.dispose();
+    },
+    available: Boolean(host),
+    platform: host?.platform ?? "web",
+  };
 }
+
+export type PiDesktopKernel = ReturnType<typeof createKernel>;

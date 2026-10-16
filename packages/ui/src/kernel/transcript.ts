@@ -23,7 +23,8 @@ function textOf(content: any): string {
 function resultText(result: any): string {
   if (!result) return "";
   if (typeof result === "string") return result;
-  return (result.content ?? []).map((part: any) => part.text ?? "").join("\n");
+  if (!Array.isArray(result.content)) return "";
+  return result.content.map((part: any) => part?.text ?? "").join("\n");
 }
 
 let seq = 0;
@@ -97,6 +98,14 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     return block;
   }
 
+  function finalizeLive(partial = true): void {
+    for (const block of live?.values() ?? []) {
+      block.streaming = false;
+      if (partial) block.details = { ...(block.details ?? {}), partial: true };
+    }
+    live = null;
+  }
+
   function applyEvent(event: any): boolean {
     switch (event.type) {
       case "message_start":
@@ -113,14 +122,21 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         } else if (update.type === "text_end") liveBlock(update.contentIndex, "text").text = update.content ?? "";
         else if (update.type === "thinking_end") liveBlock(update.contentIndex, "thinking").text = update.content ?? "";
         else if (update.type === "toolcall_start") pushTool(update.id, update.toolName, null, "pending");
-        else if (update.type === "toolcall_end" && update.toolCall) {
+        else if (update.type === "toolcall_delta") {
+          const block = pushTool(update.id ?? update.toolCallId, update.toolName, null, "pending");
+          const raw = update.delta ?? update.argumentsDelta ?? "";
+          if (raw) {
+            const current = typeof block.details?.streamedArgs === "string" ? block.details.streamedArgs : "";
+            block.details = { ...(block.details ?? {}), streamedArgs: `${current}${raw}` };
+          }
+        } else if (update.type === "toolcall_end" && update.toolCall) {
           pushTool(update.toolCall.id, update.toolCall.name, update.toolCall.arguments, "pending");
         } else return false;
         return true;
       }
       case "message_end": {
         if (event.message?.role !== "assistant") return false;
-        for (const block of live?.values() ?? []) block.streaming = false;
+        finalizeLive(false);
         for (let i = blocks.length - 1; i >= 0; i -= 1) {
           const block = blocks[i];
           if ((block.kind === "text" || block.kind === "thinking") && !(block.text ?? "").trim()) blocks.splice(i, 1);
@@ -128,9 +144,15 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         if (event.message.stopReason === "error" && event.message.errorMessage) {
           blocks.push({ kind: "notice", id: uid("n"), level: "error", text: event.message.errorMessage });
         }
-        live = null;
         return true;
       }
+      case "agent_settled":
+      case "abort":
+      case "error":
+      case "agent_error":
+        if (!live) return false;
+        finalizeLive(true);
+        return true;
       case "tool_execution_start": {
         const block = pushTool(event.toolCallId, event.toolName, event.args, "running");
         block.status = "running";
