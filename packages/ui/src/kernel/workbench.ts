@@ -910,29 +910,48 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     localStorage.setItem(THEME_KEY, id);
   }
 
+  /**
+   * 应用界面缩放（Chromium zoom factor）。缩放完全由设置页的 uiZoom 控制，
+   * 不再绑定全局快捷键。返回主进程实际生效的值。
+   */
+  async function setAppZoom(factor: number): Promise<number> {
+    const next = Math.min(3, Math.max(0.5, Number(factor) || 1));
+    if (!host?.setZoomFactor) return next;
+    try {
+      return await host.setZoomFactor(next);
+    } catch {
+      return next;
+    }
+  }
+
   // ---------- 本机 Pi CLI 定位 / 查更新 / 更新 ----------
   /** 重新定位本机 pi（版本与安装路径），定位完成会广播 pi:located。 */
-  async function refreshPi(): Promise<void> {
-    if (!host?.locate) return;
-    const pi = await host.locate().catch(() => ({ found: false, version: "", path: "" }));
+  /**
+   * 重新定位本机 pi。customPath 为空时只从 PATH 识别；传入则直接校验该路径。
+   * 返回定位结果，供手动输入路径时做成功/失败判定。定位完成广播 pi:located。
+   */
+  async function refreshPi(customPath = ""): Promise<{ found: boolean; version: string; path: string }> {
+    if (!host?.locate) return { found: state.pi.found, version: state.pi.version, path: state.pi.path };
+    const pi = await host.locate(customPath || undefined).catch(() => ({ found: false, version: "", path: customPath }));
     state.pi = {
       ...state.pi,
       found: Boolean(pi.found),
       version: pi.version ?? "",
-      path: pi.path ?? "",
+      path: pi.path ?? customPath,
       checked: true,
     };
     bus.emit("pi:located", { ...state.pi });
+    return { found: state.pi.found, version: state.pi.version, path: state.pi.path };
   }
 
-  /** 查询 npm registry 上的最新 Pi CLI 版本。 */
-  async function checkPiUpdate(): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
+  /** 查询 npm registry 上的最新 Pi CLI 版本。customPath 透传给定位（手动路径同样可查）。 */
+  async function checkPiUpdate(customPath = ""): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
     if (!host?.checkPiUpdate || state.pi.checking) {
       return { current: state.pi.version, latest: state.pi.latest, updateAvailable: state.pi.updateAvailable };
     }
     state.pi.checking = true;
     try {
-      const result = await host.checkPiUpdate();
+      const result = await host.checkPiUpdate(customPath || undefined);
       state.pi.latest = result.latest ?? "";
       state.pi.updateAvailable = Boolean(result.updateAvailable);
       if (result.error) bus.emit("notify", { level: "warning", text: result.error });
@@ -949,16 +968,16 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
    * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
    * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
    */
-  async function updatePi(): Promise<boolean> {
+  async function updatePi(customPath = ""): Promise<boolean> {
     if (!host?.updatePi || state.pi.updating) return false;
     state.pi.updating = true;
     try {
-      const result = await host.updatePi();
+      const result = await host.updatePi(customPath || undefined);
       if (!result.ok) {
         bus.emit("notify", { level: "error", text: `Pi 更新失败：${result.log.slice(-200) || "未知错误"}` });
         return false;
       }
-      await refreshPi();
+      await refreshPi(customPath);
       state.pi.latest = result.to || state.pi.latest;
       state.pi.updateAvailable = false;
       state.pi.lastUpdate = { from: result.from, to: result.to, at: Date.now(), log: result.log };
@@ -1291,6 +1310,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     closePanel,
     setModel,
     setThinking,
+    setAppZoom,
     setTheme,
     mcpOverview,
     mcpProbe,

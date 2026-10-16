@@ -142,8 +142,10 @@ const piUpdateStatus = computed(() => {
   return { tone: "muted", label: "未知" };
 });
 
+const piPathDraft = ref(appSettings.piCustomPath);
+
 async function checkPiUpdateNow(): Promise<void> {
-  const result = await workbench.checkPiUpdate();
+  const result = await workbench.checkPiUpdate(appSettings.piCustomPath || undefined);
   if (!state.pi.found) return;
   bus.emit("notify", {
     level: "info",
@@ -154,7 +156,30 @@ async function checkPiUpdateNow(): Promise<void> {
 }
 
 async function updatePiNow(): Promise<void> {
-  await workbench.updatePi();
+  await workbench.updatePi(appSettings.piCustomPath || undefined);
+}
+
+/** 应用手动输入的 Pi 路径：探活成功才保存，失败直接报错不保存。 */
+async function applyPiCustomPath(): Promise<void> {
+  const input = piPathDraft.value.trim();
+  if (!input) {
+    await clearPiCustomPath();
+    return;
+  }
+  const result = await workbench.refreshPi(input);
+  if (!result.found) {
+    bus.emit("notify", { level: "error", text: "该路径不可用：文件不存在，或无法运行 pi --version，请检查后重新输入" });
+    return;
+  }
+  appSettings.piCustomPath = input;
+  bus.emit("notify", { level: "info", text: `已使用手动指定的 Pi：${result.version}（${result.path}）` });
+}
+
+async function clearPiCustomPath(): Promise<void> {
+  appSettings.piCustomPath = "";
+  piPathDraft.value = "";
+  await workbench.refreshPi();
+  bus.emit("notify", { level: "info", text: "已恢复 PATH 自动识别" });
 }
 
 async function copyPiPath(): Promise<void> {
@@ -868,6 +893,25 @@ onBeforeUnmount(() => {
                     @click="appSettings.codeFontSize = sz"
                   >
                     {{ sz }}px
+                  </button>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>界面缩放</strong>
+                  <span>整体界面缩放比例，替代快捷键缩放（当前 {{ Math.round(appSettings.uiZoom * 100) }}%）</span>
+                </div>
+                <div class="settings-Segmented-range">
+                  <button
+                    v-for="z in [0.8, 0.9, 1, 1.1, 1.25, 1.5]"
+                    :key="z"
+                    type="button"
+                    class="settings-chip-btn"
+                    :class="{ active: appSettings.uiZoom === z }"
+                    @click="appSettings.uiZoom = z"
+                  >
+                    {{ Math.round(z * 100) }}%
                   </button>
                 </div>
               </div>
@@ -1612,7 +1656,7 @@ onBeforeUnmount(() => {
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>识别到的 Pi 安装路径</strong>
-                  <span>{{ state.pi.path || (state.pi.found ? "已找到 pi 命令，但未能解析安装路径" : "未检测到本机 pi 命令") }}</span>
+                  <span>{{ state.pi.path || (state.pi.found ? "已找到 pi 命令，但未能解析安装路径" : "未在系统 PATH 中检测到 pi 命令") }}</span>
                 </div>
                 <button
                   type="button"
@@ -1622,6 +1666,35 @@ onBeforeUnmount(() => {
                 >
                   复制路径
                 </button>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>手动指定 Pi 路径</strong>
+                  <span>只从 PATH 自动识别；PATH 里没有 pi 时在此粘贴可执行文件完整路径（如 D:\app\pi.cmd），探活成功后才会保存</span>
+                </div>
+              </div>
+              <div class="settings-row">
+                <input
+                  v-model="piPathDraft"
+                  class="search"
+                  placeholder="D:\path\to\pi.cmd"
+                  spellcheck="false"
+                  style="flex: 1; min-width: 0;"
+                />
+                <div style="display: flex; gap: 6px; flex: none;">
+                  <button type="button" class="btn ghost small" @click="applyPiCustomPath">
+                    使用此路径
+                  </button>
+                  <button
+                    v-if="appSettings.piCustomPath"
+                    type="button"
+                    class="btn ghost small"
+                    @click="clearPiCustomPath"
+                  >
+                    恢复自动识别
+                  </button>
+                </div>
               </div>
 
               <div v-if="ws" class="settings-row">
@@ -1646,7 +1719,7 @@ onBeforeUnmount(() => {
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>版本状态</strong>
-                  <span>{{ state.pi.found ? `当前 ${state.pi.version || "未知"}${state.pi.latest ? ` · 最新 ${state.pi.latest}` : ""}` : "未检测到本机 pi 命令" }}</span>
+                  <span>{{ state.pi.found ? `当前 ${state.pi.version || "未知"}${state.pi.latest ? ` · 最新 ${state.pi.latest}` : ""}` : "PATH 中没有 pi，请安装后重试，或在上方手动指定路径" }}</span>
                 </div>
                 <span class="settings-status-pill" :class="piUpdateStatus.tone">
                   {{ piUpdateStatus.label }}
@@ -1662,7 +1735,7 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="btn ghost small"
-                    :disabled="!state.pi.found || state.pi.checking || state.pi.updating"
+                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.checking || state.pi.updating"
                     @click="checkPiUpdateNow"
                   >
                     <span v-if="state.pi.checking" class="mini-spinner" />检查更新
@@ -1670,7 +1743,7 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="btn ghost small"
-                    :disabled="!state.pi.found || state.pi.updating"
+                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.updating"
                     @click="updatePiNow"
                   >
                     <span v-if="state.pi.updating" class="mini-spinner" />立即更新

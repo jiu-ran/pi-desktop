@@ -29,12 +29,16 @@ export interface AppSettings {
   notifyOnBackgroundDone: boolean;
   /** 本机 Pi CLI 自动更新：启动定位到新版本后自动全局更新 */
   piAutoUpdate: boolean;
+  /** 手动指定的 Pi 可执行文件路径（为空时只从 PATH 自动识别） */
+  piCustomPath: string;
   /** 界面基础字号（px） */
   uiFontSize: number;
   /** 代码与终端字号（px） */
   codeFontSize: number;
   /** 对话消息排版密度 */
   messageDensity: "comfortable" | "compact";
+  /** 界面缩放倍率（Chromium zoom factor），由设置页控制，不设快捷键 */
+  uiZoom: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -48,10 +52,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoRetry: true,
   notifyOnBackgroundDone: true,
   piAutoUpdate: false,
+  piCustomPath: "",
   uiFontSize: 13,
   codeFontSize: 12.5,
   messageDensity: "comfortable",
-};
+  uiZoom: 1,
+}
 
 function loadSavedSettings(): AppSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
@@ -77,9 +83,11 @@ function loadSavedSettings(): AppSettings {
           ? parsed.notifyOnBackgroundDone
           : DEFAULT_SETTINGS.notifyOnBackgroundDone,
       piAutoUpdate: typeof parsed.piAutoUpdate === "boolean" ? parsed.piAutoUpdate : DEFAULT_SETTINGS.piAutoUpdate,
+      piCustomPath: typeof parsed.piCustomPath === "string" ? parsed.piCustomPath.slice(0, 500) : DEFAULT_SETTINGS.piCustomPath,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
+      uiZoom: Math.min(3, Math.max(0.5, Number(parsed.uiZoom) || DEFAULT_SETTINGS.uiZoom)),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -139,15 +147,27 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     void syncAgentPreferences();
   }));
 
-  // Pi 自动更新：每次定位到本机 Pi 后（启动 / 重检 / 更新后刷新都会广播），
-  // 若开关打开且发现新版本，自动执行一次全局更新。只触发一次，避免循环。
-  let piAutoUpdateDone = false;
+  // Pi 定位后的一次性启动逻辑（启动 / 重检 / 更新后刷新都会广播，只处理首次）：
+  // 1) 若存有手动路径且与当前定位不一致，以手动路径为准重新定位一次；
+  // 2) 若自动更新开关打开且发现新版本，自动执行一次全局更新。
+  let piBootHandled = false;
   disposers.push(bus.on("pi:located", (info: any) => {
-    if (piAutoUpdateDone || !appSettings.piAutoUpdate || !info?.found) return;
-    piAutoUpdateDone = true;
+    if (piBootHandled) return;
+    piBootHandled = true;
     void (async () => {
-      const checked = await workbench.checkPiUpdate();
-      if (checked.updateAvailable) await workbench.updatePi();
+      const custom = appSettings.piCustomPath.trim();
+      let located = info;
+      if (custom && custom !== info?.path) {
+        const result = await workbench.refreshPi(custom);
+        located = { ...info, ...result };
+        if (!result.found) {
+          bus.emit("notify", { level: "warning", text: "已保存的 Pi 路径已失效，已回退为 PATH 自动识别，请检查设置" });
+          return;
+        }
+      }
+      if (!appSettings.piAutoUpdate || !located?.found) return;
+      const checked = await workbench.checkPiUpdate(custom || undefined);
+      if (checked.updateAvailable) await workbench.updatePi(custom || undefined);
     })();
   }));
 
@@ -157,6 +177,15 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
       void syncAgentPreferences();
     },
   ));
+
+  // 界面缩放：设置变更即时生效；启动时应用一次已保存的值。
+  disposers.push(watch(
+    () => appSettings.uiZoom,
+    (factor) => {
+      void workbench.setAppZoom(factor);
+    },
+  ));
+  void workbench.setAppZoom(appSettings.uiZoom);
 
   // 后台并行会话完成时自动发送通知
   disposers.push(bus.on(

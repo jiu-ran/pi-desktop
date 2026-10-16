@@ -222,9 +222,11 @@ export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
   setTitleBar: (colors: { color: string; symbolColor: string }) => Promise<boolean>;
-  locate: () => Promise<PiLocation>;
-  checkPiUpdate: () => Promise<PiUpdateCheck>;
-  updatePi: () => Promise<PiUpdateResult>;
+  /** customPath 为空时只从 PATH 自动识别；传入则直接校验该路径 */
+  locate: (customPath?: string) => Promise<PiLocation>;
+  setZoomFactor: (factor: number) => Promise<number>;
+  checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
+  updatePi: (customPath?: string) => Promise<PiUpdateResult>;
   recent: () => Promise<string[]>;
   forget: (cwd: string) => Promise<string[]>;
   chooseDirectory: () => Promise<string | null>;

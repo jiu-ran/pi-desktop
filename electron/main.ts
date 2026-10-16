@@ -40,8 +40,10 @@ export const PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent";
 export interface PiLocation {
   found: boolean;
   version: string;
-  /** 本机 pi 可执行文件的解析路径（where/which 首行），找不到为空 */
+  /** 本机 pi 可执行文件的解析路径（仅从 PATH 识别），找不到为空 */
   path: string;
+  /** 识别失败时的原因说明（PATH 缺失 / 路径不可用等） */
+  error?: string;
 }
 
 function runCommand(command: string, args: string[], timeoutMs = 30000): Promise<{ code: number; output: string }> {
@@ -55,30 +57,68 @@ function runCommand(command: string, args: string[], timeoutMs = 30000): Promise
   });
 }
 
-function locatePi(): Promise<PiLocation> {
-  return new Promise((resolve) => {
-    const probe = spawn("pi", ["--version"], { shell: true });
-    let output = "";
-    probe.stdout.on("data", (chunk) => { output += chunk; });
-    probe.stderr.on("data", (chunk) => { output += chunk; });
-    probe.once("error", () => resolve({ found: false, version: "", path: "" }));
-    probe.once("close", async (code) => {
-      if (code !== 0) {
-        resolve({ found: false, version: "", path: "" });
-        return;
+/**
+ * 只在系统 PATH 中识别 pi（自己逐目录走一遍，不调 where/which）。
+ * Windows 的 `where` 会先命中进程 cwd（如项目根的 node_modules/.bin/pi 本地
+ * shim），导致识别到错误位置；手动走 PATH 即与 cmd 的解析一致，又天然排除 cwd。
+ */
+function findPiOnPath(): string {
+  try {
+    const isWin = process.platform === "win32";
+    const dirs = (process.env.PATH ?? "").split(path.delimiter).map((d) => d.trim()).filter(Boolean);
+    const pathext = isWin
+      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.trim()).filter(Boolean)
+      : [];
+    const names = isWin ? [...pathext.map((ext) => `pi${ext.toLowerCase()}`), "pi"] : ["pi"];
+    const seen = new Set<string>();
+    for (const dir of dirs) {
+      for (const name of names) {
+        const full = path.join(dir, name);
+        const key = isWin ? full.toLowerCase() : full;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (existsSync(full)) return full;
       }
-      // 解析 pi 可执行文件位置：Windows 用 where，其他平台用 which
-      let binPath = "";
-      try {
-        const locator = process.platform === "win32" ? "where" : "which";
-        const located = await runCommand(locator, ["pi"], 8000);
-        if (located.code === 0) binPath = located.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? "";
-      } catch {
-        binPath = "";
-      }
-      resolve({ found: true, version: output.trim(), path: binPath });
-    });
-  });
+    }
+  } catch {
+    /* 忽略 PATH 解析异常，按找不到处理 */
+  }
+  return "";
+}
+
+/** 用指定二进制跑 `--version` 探活，返回版本号（失败为空字符串）。路径含空格时加引号。 */
+async function probePiVersion(bin: string): Promise<string> {
+  const quoted = bin.includes(" ") && !(bin.startsWith('"') && bin.endsWith('"')) ? `"${bin}"` : bin;
+  const probed = await runCommand(quoted, ["--version"], 10000);
+  if (probed.code !== 0) return "";
+  return probed.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? "";
+}
+
+/**
+ * 定位 Pi CLI。customPath 为空时只从 PATH 识别；PATH 里没有则直接报
+ * NOT_IN_PATH，由界面引导用户手动指定路径（不再静默回退）。
+ */
+async function locatePi(customPath = ""): Promise<PiLocation> {
+  const manual = customPath.trim().replace(/^"|"$/g, "");
+  if (manual) {
+    if (!existsSync(manual)) {
+      return { found: false, version: "", path: manual, error: "指定的 Pi 路径不存在，请检查后重新输入" };
+    }
+    const version = await probePiVersion(manual);
+    if (!version) {
+      return { found: false, version: "", path: manual, error: "该路径无法运行 pi --version，请确认是 Pi 可执行文件" };
+    }
+    return { found: true, version, path: manual };
+  }
+  const auto = findPiOnPath();
+  if (!auto) {
+    return { found: false, version: "", path: "", error: "未在系统 PATH 中检测到 pi 命令，请先安装 Pi CLI，或在下方手动指定 Pi 可执行文件路径" };
+  }
+  const version = await probePiVersion(auto);
+  if (!version) {
+    return { found: false, version: "", path: auto, error: "PATH 中的 pi 无法运行（pi --version 失败），请检查安装或手动指定路径" };
+  }
+  return { found: true, version, path: auto };
 }
 
 export interface PiUpdateCheck {
@@ -88,11 +128,11 @@ export interface PiUpdateCheck {
   error?: string;
 }
 
-/** 查询 npm  registry 上的最新 Pi CLI 版本，与本机已安装版本对比。 */
-async function checkPiUpdate(): Promise<PiUpdateCheck> {
-  const located = await locatePi();
+/** 查询 npm registry 上的最新 Pi CLI 版本，与本机已安装版本对比。customPath 透传给定位（手动路径同样可查更新）。 */
+async function checkPiUpdate(customPath = ""): Promise<PiUpdateCheck> {
+  const located = await locatePi(customPath);
   const current = located.version;
-  if (!located.found) return { current: "", latest: "", updateAvailable: false, error: "未检测到本机 pi 命令" };
+  if (!located.found) return { current: "", latest: "", updateAvailable: false, error: located.error ?? "未检测到本机 pi 命令" };
   const viewed = await runCommand("npm", ["view", PI_NPM_PACKAGE, "version"], 20000);
   const latest = viewed.code === 0 ? viewed.output.split(/\s+/).filter(Boolean).at(-1) ?? "" : "";
   if (!latest) return { current, latest: "", updateAvailable: false, error: "无法查询最新版本，请检查网络" };
@@ -107,15 +147,19 @@ export interface PiUpdateResult {
   log: string;
 }
 
-/** 全局更新 Pi CLI 到 latest，成功后重新定位并返回版本变化。 */
-async function updatePi(): Promise<PiUpdateResult> {
-  const before = await locatePi();
+/**
+ * 全局更新 Pi CLI 到 latest，成功后重新定位并返回版本变化。
+ * 更新动作本身永远是 `npm install -g`（全局安装）；customPath 只决定
+ * 更新前后“当前版本”从哪个二进制读取，更新后同样回到该路径复检。
+ */
+async function updatePi(customPath = ""): Promise<PiUpdateResult> {
+  const before = await locatePi(customPath);
   const from = before.version;
-  if (!before.found) return { ok: false, from: "", to: "", log: "未检测到本机 pi 命令" };
+  if (!before.found) return { ok: false, from: "", to: "", log: before.error ?? "未检测到本机 pi 命令" };
   const installed = await runCommand("npm", ["install", "-g", `${PI_NPM_PACKAGE}@latest`], 180000);
   const tail = installed.output.split(/\r?\n/).slice(-20).join("\n");
   if (installed.code !== 0) return { ok: false, from, to: from, log: tail || "安装进程异常退出" };
-  const after = await locatePi();
+  const after = await locatePi(customPath);
   return { ok: after.found, from, to: after.version || from, log: tail };
 }
 
@@ -217,9 +261,19 @@ function handle(channel: string, fn: (...args: any[]) => any) {
 }
 
 app.whenReady().then(() => {
-  handle("pi:locate", () => locatePi());
-  handle("pi:check-update", () => checkPiUpdate());
-  handle("pi:update", () => updatePi());
+  handle("pi:locate", (customPath = "") => locatePi(customPath));
+  handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
+  handle("pi:update", (customPath = "") => updatePi(customPath));
+  // 界面缩放完全由设置页控制（不再设全局快捷键，避免与输入法/阅读器冲突）。
+  handle("pi:set-zoom", (factor: number) => {
+    const next = Math.min(3, Math.max(0.5, Number(factor) || 1));
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.setZoomFactor(next);
+    } catch {
+      /* 忽略窗口已关闭等竞态 */
+    }
+    return next;
+  });
   handle("pi:recent", async () => {
     const recent = await readRecent(recentFile());
     const authorized: string[] = [];

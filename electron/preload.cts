@@ -11,9 +11,10 @@ contextBridge.exposeInMainWorld("piDesktop", {
     }
   },
   setTitleBar: (colors: { color: string; symbolColor: string }) => ipcRenderer.invoke("pi:titlebar", colors),
-  locate: () => ipcRenderer.invoke("pi:locate"),
-  checkPiUpdate: () => ipcRenderer.invoke("pi:check-update"),
-  updatePi: () => ipcRenderer.invoke("pi:update"),
+  locate: (customPath = "") => ipcRenderer.invoke("pi:locate", customPath),
+  setZoomFactor: (factor: number) => ipcRenderer.invoke("pi:set-zoom", factor),
+  checkPiUpdate: (customPath = "") => ipcRenderer.invoke("pi:check-update", customPath),
+  updatePi: (customPath = "") => ipcRenderer.invoke("pi:update", customPath),
   recent: () => ipcRenderer.invoke("pi:recent"),
   forget: (cwd: string) => ipcRenderer.invoke("pi:forget", cwd),
   chooseDirectory: () => ipcRenderer.invoke("pi:choose-directory"),
