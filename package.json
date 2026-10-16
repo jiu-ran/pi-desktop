@@ -18,7 +18,7 @@
     "build:ui": "npm run build --prefix packages/ui",
     "build": "npm run build:electron && npm run build:ui",
     "dist": "npm run build && npx --yes electron-builder",
-    "check": "tsc --noEmit && node scripts/checks/transcript.check.ts && node scripts/checks/diff.check.ts && node scripts/checks/host.check.ts && node scripts/checks/delete.check.ts && node scripts/checks/attachments.check.ts && node scripts/checks/files.check.ts",
+    "check": "tsc --noEmit && npm run typecheck --prefix packages/ui && node scripts/checks/transcript.check.ts && node scripts/checks/diff.check.ts && node scripts/checks/event-bus.check.ts && node scripts/checks/stage.check.ts && node scripts/checks/plugin-lifecycle.check.ts && node scripts/checks/host.check.ts && node scripts/checks/delete.check.ts && node scripts/checks/attachments.check.ts && node scripts/checks/files.check.ts && node scripts/checks/mermaid-fit.check.ts",
     "check:smoke": "npm run build:electron && electron --disable-gpu scripts/checks/smoke.electron.ts"
   },
   "build": {

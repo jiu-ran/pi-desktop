@@ -6,12 +6,193 @@ declare module "*.vue" {
 declare module "*.css" {}
 
 declare module "markstream-vue" {
-  const MarkdownRender: any;
+  import type { DefineComponent } from "vue";
+
+  export interface MermaidBlockNodeProps {
+    maxHeight?: string | null;
+    estimatedPreviewHeightPx?: number;
+    workerTimeoutMs?: number;
+    parseTimeoutMs?: number;
+    renderTimeoutMs?: number;
+    fullRenderTimeoutMs?: number;
+    renderDebounceMs?: number;
+    contentStableDelayMs?: number;
+    previewPollDelayMs?: number;
+    previewPollMaxDelayMs?: number;
+    previewPollMaxAttempts?: number;
+    showHeader?: boolean;
+    showModeToggle?: boolean;
+    showCopyButton?: boolean;
+    showExportButton?: boolean;
+    showFullscreenButton?: boolean;
+    showCollapseButton?: boolean;
+    showZoomControls?: boolean;
+    enableWheelZoom?: boolean;
+    isStrict?: boolean;
+    enableMermaidInteractions?: boolean;
+    showTooltips?: boolean;
+    fitPreviewHeight?: boolean;
+    onRenderError?: (error: unknown, code: string, container: HTMLElement) => boolean | void;
+  }
+
+  export interface MarkdownRenderProps {
+    mode?: "docs" | "chat" | "minimal";
+    content?: string;
+    final?: boolean;
+    isDark?: boolean;
+    viewportPriority?: boolean;
+    codeBlockProps?: Record<string, unknown>;
+    mermaidProps?: Partial<MermaidBlockNodeProps>;
+  }
+
+  const MarkdownRender: DefineComponent<MarkdownRenderProps>;
   export default MarkdownRender;
+  export function enableMermaid(loader?: () => Promise<unknown> | unknown): void;
+  export function disableMermaid(): void;
+  export function isMermaidEnabled(): boolean;
+  export function setMermaidWorker(worker: Worker): void;
+  export function clearMermaidWorker(): void;
+  export function terminateWorker(): void;
 }
 
-interface PiDesktopBridge {
+export interface WorkspaceEntry {
+  path: string;
+  relative: string;
+  name: string;
+  kind: "folder" | "file";
+}
+
+export interface WorkspaceFileData {
+  path: string;
+  relative: string;
+  name: string;
+  content: string;
+  size: number;
+}
+
+export interface GitStatusFile {
+  code: string;
+  path: string;
+}
+
+export interface GitCommitNode {
+  hash: string;
+  shortHash: string;
+  graph: string;
+  subject: string;
+  author: string;
+  relativeTime: string;
+  refs: string;
+}
+
+export interface GitOverview {
+  isRepo: boolean;
+  branch: string;
+  status: GitStatusFile[];
+  commits: GitCommitNode[];
+}
+
+export interface GitInspectResult {
+  kind: "commit" | "working";
+  target: string;
+  title: string;
+  subtitle: string;
+  meta: string;
+  diff: string;
+}
+
+export type McpExposureMode = "codemode" | "deferred" | "direct" | "hidden";
+
+export interface McpServerItem {
+  name: string;
+  scope: "global" | "project";
+  sourcePath: string;
+  type: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  auth?: { provider: string };
+  oauth?: Record<string, any>;
+  enabled: boolean;
+  exposure: McpExposureMode;
+  description?: string;
+  timeout?: number;
+  state?: string;
+  tools?: string[];
+  error?: string;
+  resources?: boolean;
+}
+
+export interface McpOverview {
+  agentDir: string;
+  globalConfigPath: string;
+  projectConfigPath: string;
+  autoEnableCodemode: boolean;
+  servers: McpServerItem[];
+  errors: string[];
+}
+
+export interface PiPackageItem {
+  source: string;
+  scope: "user" | "project";
+  kind: "npm" | "git" | "local";
+  displayName: string;
+  version?: string;
+  description?: string;
+  installed: boolean;
+  installedPath?: string;
+  filtered: boolean;
+  counts: {
+    extensions: number;
+    skills: number;
+    prompts: number;
+    themes: number;
+  };
+}
+
+export interface PiResourceItem {
+  path: string;
+  name: string;
+  type: "extensions" | "skills" | "prompts" | "themes";
+  enabled: boolean;
+  scope: "user" | "project" | "temporary";
+  origin: "package" | "top-level";
+  source: string;
+}
+
+export interface PiPackagesOverview {
+  agentDir: string;
+  globalSettingsPath: string;
+  projectSettingsPath: string;
+  packages: PiPackageItem[];
+  resources: PiResourceItem[];
+}
+
+export interface PiSkillItem {
+  name: string;
+  description: string;
+  filePath: string;
+  baseDir: string;
+  scope: "user" | "project" | "temporary";
+  origin: "package" | "top-level";
+  source: string;
+  disableModelInvocation: boolean;
+}
+
+export interface PiSkillsOverview {
+  agentDir: string;
+  globalSkillsDir: string;
+  projectSkillsDir: string;
+  skills: PiSkillItem[];
+  diagnostics: string[];
+}
+
+export interface PiDesktopBridge {
   platform: string;
+  getPathForFile?: (file: File) => string;
   setTitleBar: (colors: { color: string; symbolColor: string }) => Promise<boolean>;
   locate: () => Promise<{ found: boolean; version: string }>;
   recent: () => Promise<string[]>;
@@ -20,24 +201,49 @@ interface PiDesktopBridge {
   chooseFiles: () => Promise<string[]>;
   chooseFolder: () => Promise<string | null>;
   open: (cwd: string) => Promise<any>;
-  snapshot: (cwd: string) => Promise<any>;
+  snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[]) => Promise<any>;
-  listDirectory: (cwd: string, relative: string) => Promise<any[]>;
-  readWorkspaceFile: (cwd: string, relative: string) => Promise<any>;
-  writeWorkspaceFile: (cwd: string, relative: string, content: string) => Promise<any>;
+  listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
+  readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
+  writeWorkspaceFile: (cwd: string, relative: string, content: string) => Promise<WorkspaceFileData>;
   openWorkspacePath: (cwd: string, relative: string) => Promise<string>;
-  completePaths: (cwd: string, query: string) => Promise<any[]>;
-  restart: (cwd: string) => Promise<any>;
+  createWorkspaceEntry: (cwd: string, parent: string, name: string, kind: "file" | "folder") => Promise<WorkspaceEntry>;
+  renameWorkspaceEntry: (cwd: string, relative: string, name: string) => Promise<WorkspaceEntry>;
+  deleteWorkspaceEntry: (cwd: string, relative: string) => Promise<void>;
+  gitOverview: (cwd: string) => Promise<GitOverview>;
+  gitInspect: (cwd: string, kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+  completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
+  restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;
   deleteSession: (cwd: string, file: string) => Promise<any[]>;
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => Promise<any>;
-  call: (cwd: string, method: string, args?: any[]) => Promise<any>;
-  respondExtensionUi: (cwd: string, response: Record<string, any>) => Promise<any>;
+  call: (cwd: string, method: string, args?: any[], sessionFile?: string) => Promise<any>;
+  respondExtensionUi: (cwd: string, response: Record<string, any>, sessionFile?: string) => Promise<any>;
   reveal: (target: string) => Promise<void>;
-  onEvent: (listener: (payload: { cwd: string; event: any }) => void) => () => void;
+  mcpOverview: (cwd?: string) => Promise<McpOverview>;
+  mcpProbe: (cwd?: string) => Promise<McpOverview>;
+  mcpSaveServer: (
+    cwd: string,
+    payload: { scope: "global" | "project"; name: string; previousName?: string; config: Record<string, any> },
+  ) => Promise<McpOverview>;
+  mcpUpdateServer: (
+    cwd: string,
+    payload: { scope: "global" | "project"; name: string; patch: { enabled?: boolean; exposure?: McpExposureMode } },
+  ) => Promise<McpOverview>;
+  mcpRemoveServer: (cwd: string, payload: { scope: "global" | "project"; name: string }) => Promise<McpOverview>;
+  mcpSetAutoCodemode: (cwd: string, payload: { scope?: "global" | "project"; enabled: boolean }) => Promise<McpOverview>;
+  mcpImportJson: (cwd: string, payload: { scope: "global" | "project"; jsonText: string }) => Promise<McpOverview>;
+  packagesOverview: (cwd?: string) => Promise<PiPackagesOverview>;
+  packagesInstall: (cwd: string, payload: { source: string; local?: boolean }) => Promise<PiPackagesOverview>;
+  packagesRemove: (cwd: string, payload: { source: string; local?: boolean }) => Promise<PiPackagesOverview>;
+  packagesUpdate: (cwd: string, payload?: { source?: string }) => Promise<PiPackagesOverview>;
+  skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
+  onEvent: (listener: (payload: { cwd: string; sessionFile?: string; event: any }) => void) => () => void;
 }
 
-interface Window {
-  piDesktop?: PiDesktopBridge;
-  __piDesktop?: any;
+declare global {
+  interface Window {
+    piDesktop?: PiDesktopBridge;
+    __piDesktop?: any;
+  }
 }
