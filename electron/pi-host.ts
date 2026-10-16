@@ -497,10 +497,7 @@ export class PiHost {
     client.onEvent((event: any) => {
       if (event?.type === "agent_start") slot.streaming = true;
       else if (event?.type === "agent_settled") {
-        slot.streaming = false;
-
-[1467 more lines in file. Use offset=501 to continue.]
-        this.pruneIdleWorkers(pool);
+        slot.streaming = false;        this.pruneIdleWorkers(pool);
       } else if (event?.type === "compaction_start") slot.compacting = true;
       else if (event?.type === "compaction_end") {
         slot.compacting = false;
@@ -999,10 +996,7 @@ export class PiHost {
     return {
       items: items.map(({ path: file, name, kind, image }) => ({ path: file, name, kind, image })),
       text: items.map((item) => item.text ?? "").join(""),
-      images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),
-
-[967 more lines in file. Use offset=1001 to continue.]
-    };
+      images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),    };
   }
 
   async snapshot(cwd: string, sessionFile?: string) {
@@ -1501,10 +1495,7 @@ export class PiHost {
 
     return {
       agentDir,
-      globalConfigPath,
-
-[467 more lines in file. Use offset=1501 to continue.]
-      projectConfigPath,
+      globalConfigPath,      projectConfigPath,
       autoEnableCodemode,
       servers,
       errors,
@@ -1970,4 +1961,3 @@ export async function forgetRecent(file: string, cwd: string): Promise<string[]>
   await writeFile(file, JSON.stringify(next, null, 2));
   return next;
 }
-
