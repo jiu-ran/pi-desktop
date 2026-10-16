@@ -25,12 +25,19 @@ try {
   try { await host.writeWorkspaceFile(root, "../outside.txt", "nope"); } catch { rejected = true; }
   assert(rejected, "不应允许写入项目目录外路径");
   rejected = false;
+  try { await host.prepareAttachments(root, [path.join(path.dirname(root), "outside.txt")]); } catch { rejected = true; }
+  assert(rejected, "不应允许添加项目目录外附件");
+  rejected = false;
   try { await host.listDirectory(root, "../"); } catch { rejected = true; }
   assert(rejected, "不应允许查看项目目录外的路径");
   rejected = false;
   try { await host.openWorkspacePath(root, "missing.ts"); } catch { rejected = true; }
   assert(rejected, "不存在的文件不应打开");
-  console.log("files", top.length, nested.length);
+  const git = await host.gitOverview(process.cwd());
+  assert(git.isRepo && git.commits.length > 0, "应读取 Git 仓库分支与提交树");
+  const commitDetail = await host.gitInspect(process.cwd(), "commit", git.commits[0].hash);
+  assert(commitDetail.kind === "commit" && commitDetail.meta.length > 0, "应读取 Git 提交详情");
+  console.log("files", top.length, nested.length, "git", git.branch, git.commits.length);
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });

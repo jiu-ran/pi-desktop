@@ -12,11 +12,11 @@ async function probe(label: string) {
       sidebar: q('.sidebar'),
       projects: q('.project'),
       tasks: q('.task-row'),
-      strip: q('.strip-btn'),
-      turns: q('.turn'),
-      stage: q('.stage > *'),
-      welcome: q('.welcome'),
-      conversation: q('.conversation'),
+      strip: q('.activity-btn'),
+      turns: q('.timeline-inner > *'),
+      stage: q('.editor > *'),
+      welcome: q('.empty-thread'),
+      conversation: q('.area-chat'),
       blocks: q('.timeline-inner > *'),
       tools: q('.tool-card'),
       user: q('.msg.user'),
@@ -48,14 +48,22 @@ app.whenReady().then(async () => {
 
   await new Promise((r) => setTimeout(r, 2500));
   await probe("boot");
-  await win.webContents.executeJavaScript("window.__piDesktop.workbench.open('C:\\\\Users\\\\jiuran\\\\Desktop\\\\chat').then(() => true)");
+  const workspace = process.env.PI_DESKTOP_SMOKE_WORKSPACE ?? process.cwd();
+  const workspaceLiteral = JSON.stringify(workspace);
+  await win.webContents.executeJavaScript(`window.__piDesktop.workbench.open(${workspaceLiteral}).then(() => true)`);
   for (let i = 0; i < 40; i += 1) {
     const done = await win.webContents.executeJavaScript("window.__piDesktop.workbench.active.value?.status === 'ready'");
     if (done) break;
     await new Promise((r) => setTimeout(r, 500));
   }
   const ready = await probe("workspace");
+  const required = ["sidebar", "strip", "conversation"] as const;
+  for (const key of required) {
+    if (!ready[key]) errors.push(`missing required UI region: ${key}`);
+  }
+  if (!ready.ws || ready.ws.status !== "ready") errors.push("workspace did not become ready");
   console.log("[errors]", errors.length ? errors.join("\n") : "none");
-  console.log("[result]", ready.ws?.status === "ready" && !errors.length ? "PASS" : "CHECK");
-  app.exit(0);
+  const passed = ready.ws?.status === "ready" && !errors.length;
+  console.log("[result]", passed ? "PASS" : "FAIL");
+  app.exit(passed ? 0 : 1);
 });

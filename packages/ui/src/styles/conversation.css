@@ -1,11 +1,100 @@
 /* 对话舞台：尺寸与配色对照 JetBrains Air 实际界面 */
-.conversation {
+.conversation, .area-chat {
   --column: 760px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
 }
+
+.empty-thread {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10vh auto 0;
+  width: min(520px, 100%);
+}
+.empty-kicker {
+  margin: 0;
+  color: var(--accent);
+  font: 600 12px var(--mono);
+}
+.empty-thread h2 {
+  margin: 0 0 6px;
+  color: var(--fg);
+  font-size: 18px;
+  font-weight: 600;
+}
+.starter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.starter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg);
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+.starter:hover {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+.starter span { font-size: 13px; font-weight: 500; }
+.starter small { color: var(--fg-3); font-size: 12px; }
+.thinking-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-2);
+  font-size: 12.5px;
+}
+.diff-file.clickable { cursor: pointer; }
+.diff-file.clickable:hover { color: var(--accent); text-decoration: underline; }
+.changes-bar {
+  flex: none;
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px 6px;
+}
+.changes-bar-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: 12px;
+}
+.changes-bar-main:hover { border-color: var(--accent); background: var(--bg-2); }
+.changes-bar-icon { display: grid; color: var(--accent); }
+.changes-bar-files { display: flex; flex: 1; gap: 4px; min-width: 0; overflow: hidden; }
+.changes-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
+.changes-bar-more { margin-left: auto; color: var(--accent); font-size: 11.5px; white-space: nowrap; }
+.diff-stat { display: inline-flex; gap: 6px; font: 11.5px var(--mono); }
+.diff-stat .add { color: var(--add-fg); font-weight: 500; }
+.diff-stat .del { color: var(--del-fg); font-weight: 500; }
 
 .stage-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--fg-2); }
 .stage-state.error h3 { margin: 0; color: var(--err); }
@@ -68,17 +157,16 @@
 .turn-state svg { color: var(--fg-3); }
 .turn-state.running { color: var(--fg); }
 
-.msg.assistant { position: relative; min-width: 0; overflow-wrap: anywhere; }
+.msg.assistant { min-width: 0; overflow-wrap: anywhere; }
 .msg-tools {
-  position: absolute;
-  top: -4px;
-  right: 0;
   display: flex;
   gap: 2px;
+  margin-top: -6px;
   opacity: 0;
   transition: opacity 0.15s;
 }
-.msg.assistant:hover .msg-tools { opacity: 1; }
+.msg.assistant:hover .msg-tools,
+.msg-tools:focus-within { opacity: 1; }
 
 /* markstream 排版：用它自己的变量收紧间距（默认段距 1.5em、表格 2em 太松），并对齐 Air 的紧凑排版 */
 .markstream-vue.md, .md .markstream-vue, .md {
@@ -104,6 +192,63 @@
 /* markstream 用 contain:content，内外边距不会折叠：去掉首尾块的外边距 */
 .md > .node-slot:first-child > .node-content > :first-child { margin-top: 0 !important; }
 .md > .node-slot:last-child > .node-content > :last-child { margin-bottom: 0 !important; }
+
+/* 对话里的 Mermaid：预览高度跟着图走，工具栏保持一行 */
+.msg.assistant .mermaid-block-container {
+  border-color: var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.msg.assistant .mermaid-block-header {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 0;
+  padding: 4px 8px;
+}
+.msg.assistant .mermaid-label-text { white-space: nowrap; }
+.msg.assistant .mermaid-mode-toggle-group { flex: none; }
+.msg.assistant .mermaid-mode-btn {
+  height: 22px;
+  white-space: nowrap;
+}
+.msg.assistant .mermaid-header-actions { flex: none; margin-left: auto; }
+.msg.assistant .mermaid-action-btn { white-space: nowrap; }
+.msg.assistant .mermaid-preview-area,
+.md-thinking .mermaid-preview-area { background: var(--bg); }
+.md-body { min-width: 0; }
+.md-mermaid-error {
+  margin: 0;
+  padding: 6px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--err) 45%, var(--line-2));
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+  color: var(--err);
+  font-size: 12px;
+}
+.md-mermaid-fallback {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 0;
+  border-top: 1px solid var(--line-2);
+  background: var(--bg);
+  color: var(--fg-2);
+  font: 12px/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mermaid-block-container[data-mermaid-state="error"] .mermaid-preview-area {
+  display: none;
+  min-height: 0 !important;
+}
+.mermaid-block-container[data-mermaid-state="rendering"] .mermaid-preview-area,
+.mermaid-block-container[data-mermaid-state="streaming"] .mermaid-preview-area {
+  opacity: 0.72;
+  transition: opacity 0.15s ease;
+}
+.mermaid-block-container[data-mermaid-state="ready"] .mermaid-preview-area {
+  opacity: 1;
+}
 .md table { border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
 .md table tbody tr:nth-child(2n) { background: transparent !important; }
 .md :is(code:not(pre code)) {
@@ -171,8 +316,8 @@
   font-size: 12.5px;
 }
 /* 思考正文：同一套 Markdown 排版，字号更小、颜色更淡 */
-.md.md-thinking { --ms-text-body: 12.5px; color: var(--fg-2); font-size: 12.5px; }
-.md.md-thinking :where(strong) { color: var(--fg); }
+.md-body.md-thinking .md { --ms-text-body: 12.5px; color: var(--fg-2); font-size: 12.5px; }
+.md-body.md-thinking .md :where(strong) { color: var(--fg); }
 
 .notice {
   display: flex;
@@ -279,6 +424,29 @@
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.composer.drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.composer-drop-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-1) 86%, var(--accent) 14%);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+}
+.composer-drop-icon {
+  display: grid;
+  place-items: center;
+}
 .composer textarea {
   display: block;
   width: 100%;
@@ -305,8 +473,55 @@
   border-radius: 0 0 var(--radius) var(--radius);
 }
 .composer-left, .composer-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.composer-left { flex: 1 1 0; overflow: hidden; }
-.composer-right { flex: none; }
+.composer-left { flex: 1 1 0; overflow: visible; }
+.composer-right { flex: none; gap: 4px; }
+.composer-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+  font: 500 11.5px/1 var(--mono);
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+  transition: background 0.12s, color 0.12s;
+}
+.composer-context:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.context-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  transform: rotate(-90deg);
+}
+.context-ring-track,
+.context-ring-fill {
+  fill: none;
+  stroke-width: 2.5;
+}
+.context-ring-track {
+  stroke: var(--bg-3);
+}
+.context-ring-fill {
+  stroke: var(--ok-fg);
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.3s;
+}
+.composer-context[data-level="mid"] .composer-context-pct,
+.composer-context[data-level="mid"] .context-ring-fill {
+  color: var(--warn);
+  stroke: var(--warn);
+}
+.composer-context[data-level="high"] .composer-context-pct,
+.composer-context[data-level="high"] .context-ring-fill {
+  color: var(--err);
+  stroke: var(--err);
+}
 .bar-btn {
   display: grid;
   flex: none;

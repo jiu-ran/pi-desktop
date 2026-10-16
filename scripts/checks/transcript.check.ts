@@ -28,6 +28,14 @@ const events = [
 ];
 for (const e of events) t.applyEvent(e);
 console.log("live", t.blocks.map((b) => `${b.kind}:${b.status ?? (b.streaming ? "stream" : "")}:${(b.text ?? b.output ?? "").slice(0, 10)}`).join(" | "));
+const partial = createTranscript();
+partial.applyEvent({ type: "message_start", message: { role: "assistant" } });
+partial.applyEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "partial" } });
+partial.applyEvent({ type: "agent_settled" });
+const partialBlock = partial.blocks.find((b) => b.kind === "text");
+if (!partialBlock || partialBlock.streaming || partialBlock.details?.partial !== true) {
+  throw new Error("settled streams should finalize partial blocks");
+}
 const tool = t.blocks.find((b) => b.id === "c2");
 if (!tool || tool.status !== "done" || tool.args?.path !== "b.ts" || tool.output !== "ok") throw new Error("tool merge failed");
 if (t.blocks.filter((b) => b.kind === "tool" && b.id === "c2").length !== 1) throw new Error("duplicate tool");
