@@ -132,6 +132,49 @@ async function restartActiveProcess(): Promise<void> {
   bus.emit("notify", { level: "info", text: "已重启当前会话的 Pi 进程" });
 }
 
+// ==================== 本机 Pi CLI 更新逻辑 ====================
+const piUpdateStatus = computed(() => {
+  if (!state.pi.found) return { tone: "err", label: "未安装" };
+  if (state.pi.updating) return { tone: "warn", label: "更新中" };
+  if (state.pi.checking) return { tone: "muted", label: "检查中" };
+  if (state.pi.updateAvailable) return { tone: "warn", label: `有更新 ${state.pi.latest}` };
+  if (state.pi.latest) return { tone: "ok", label: "已是最新" };
+  return { tone: "muted", label: "未知" };
+});
+
+async function checkPiUpdateNow(): Promise<void> {
+  const result = await workbench.checkPiUpdate();
+  if (!state.pi.found) return;
+  bus.emit("notify", {
+    level: "info",
+    text: result.updateAvailable
+      ? `发现 Pi 新版本 ${result.latest}（当前 ${result.current}），可点击“立即更新”`
+      : `Pi 已是最新版本（${result.current || state.pi.version}）`,
+  });
+}
+
+async function updatePiNow(): Promise<void> {
+  await workbench.updatePi();
+}
+
+async function copyPiPath(): Promise<void> {
+  if (!state.pi.path) return;
+  try {
+    await navigator.clipboard.writeText(state.pi.path);
+    bus.emit("notify", { level: "info", text: "已复制 Pi 安装路径" });
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  }
+}
+
+function formatPiUpdateTime(at: number): string {
+  try {
+    return new Date(at).toLocaleString();
+  } catch {
+    return "";
+  }
+}
+
 // ==================== MCP 服务配置逻辑 ====================
 const mcpLoading = ref(false);
 const mcpProbing = ref(false);
@@ -454,7 +497,6 @@ async function updatePackage(source?: string): Promise<void> {
     pkgBusyText.value = "";
   }
 }
-
 const resourceTypeLabels: Record<string, string> = {
   extensions: "扩展",
   skills: "技能",
@@ -1566,6 +1608,21 @@ onBeforeUnmount(() => {
                 </span>
               </div>
 
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>识别到的 Pi 安装路径</strong>
+                  <span>{{ state.pi.path || (state.pi.found ? "已找到 pi 命令，但未能解析安装路径" : "未检测到本机 pi 命令") }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn ghost small"
+                  :disabled="!state.pi.path"
+                  @click="copyPiPath"
+                >
+                  复制路径
+                </button>
+              </div>
+
               <div v-if="ws" class="settings-row">
                 <div class="settings-row-info">
                   <strong>当前活动项目目录</strong>
@@ -1579,6 +1636,60 @@ onBeforeUnmount(() => {
                 >
                   重启当前会话进程
                 </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-title">Pi CLI 更新</div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>版本状态</strong>
+                  <span>{{ state.pi.found ? `当前 ${state.pi.version || "未知"}${state.pi.latest ? ` · 最新 ${state.pi.latest}` : ""}` : "未检测到本机 pi 命令" }}</span>
+                </div>
+                <span class="settings-status-pill" :class="piUpdateStatus.tone">
+                  {{ piUpdateStatus.label }}
+                </span>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>检查并更新 Pi</strong>
+                  <span>从 npm 全局安装最新版 Pi CLI；更新后会在此展示版本变化与安装日志</span>
+                </div>
+                <div style="display: flex; gap: 6px; flex: none;">
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="!state.pi.found || state.pi.checking || state.pi.updating"
+                    @click="checkPiUpdateNow"
+                  >
+                    <span v-if="state.pi.checking" class="mini-spinner" />检查更新
+                  </button>
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="!state.pi.found || state.pi.updating"
+                    @click="updatePiNow"
+                  >
+                    <span v-if="state.pi.updating" class="mini-spinner" />立即更新
+                  </button>
+                </div>
+              </div>
+
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>Pi 自动更新</strong>
+                  <span>启动并定位到本机 Pi 后，若发现新版本则自动全局更新到最新版</span>
+                </div>
+                <input v-model="appSettings.piAutoUpdate" type="checkbox" class="settings-switch" />
+              </label>
+
+              <div v-if="state.pi.lastUpdate" class="settings-row">
+                <div class="settings-row-info">
+                  <strong>上次更新结果</strong>
+                  <span :title="state.pi.lastUpdate.log">{{ state.pi.lastUpdate.from === state.pi.lastUpdate.to ? `已确认最新（${state.pi.lastUpdate.to || state.pi.version}）` : `已从 ${state.pi.lastUpdate.from || "未知版本"} 更新到 ${state.pi.lastUpdate.to}` }} · {{ formatPiUpdateTime(state.pi.lastUpdate.at) }}</span>
+                </div>
               </div>
             </div>
 
