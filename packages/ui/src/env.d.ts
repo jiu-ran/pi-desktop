@@ -190,11 +190,41 @@ export interface PiSkillsOverview {
   diagnostics: string[];
 }
 
+export interface PiLocation {
+  found: boolean;
+  version: string;
+  /** 本机 pi 可执行文件的解析路径，找不到为空 */
+  path: string;
+}
+
+export interface PiUpdateCheck {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+  error?: string;
+}
+
+export interface PiUpdateResult {
+  ok: boolean;
+  from: string;
+  to: string;
+  log: string;
+}
+
+export interface PiUpdateRecord {
+  from: string;
+  to: string;
+  at: number;
+  log: string;
+}
+
 export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
   setTitleBar: (colors: { color: string; symbolColor: string }) => Promise<boolean>;
-  locate: () => Promise<{ found: boolean; version: string }>;
+  locate: () => Promise<PiLocation>;
+  checkPiUpdate: () => Promise<PiUpdateCheck>;
+  updatePi: () => Promise<PiUpdateResult>;
   recent: () => Promise<string[]>;
   forget: (cwd: string) => Promise<string[]>;
   chooseDirectory: () => Promise<string | null>;

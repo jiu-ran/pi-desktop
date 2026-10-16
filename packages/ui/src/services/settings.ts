@@ -27,6 +27,8 @@ export interface AppSettings {
   autoRetry: boolean;
   /** 后台并行任务完成时弹出通知提醒 */
   notifyOnBackgroundDone: boolean;
+  /** 本机 Pi CLI 自动更新：启动定位到新版本后自动全局更新 */
+  piAutoUpdate: boolean;
   /** 界面基础字号（px） */
   uiFontSize: number;
   /** 代码与终端字号（px） */
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoCompaction: true,
   autoRetry: true,
   notifyOnBackgroundDone: true,
+  piAutoUpdate: false,
   uiFontSize: 13,
   codeFontSize: 12.5,
   messageDensity: "comfortable",
@@ -73,6 +76,7 @@ function loadSavedSettings(): AppSettings {
         typeof parsed.notifyOnBackgroundDone === "boolean"
           ? parsed.notifyOnBackgroundDone
           : DEFAULT_SETTINGS.notifyOnBackgroundDone,
+      piAutoUpdate: typeof parsed.piAutoUpdate === "boolean" ? parsed.piAutoUpdate : DEFAULT_SETTINGS.piAutoUpdate,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
@@ -133,6 +137,18 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
 
   disposers.push(bus.on("workspace:opened", () => {
     void syncAgentPreferences();
+  }));
+
+  // Pi 自动更新：每次定位到本机 Pi 后（启动 / 重检 / 更新后刷新都会广播），
+  // 若开关打开且发现新版本，自动执行一次全局更新。只触发一次，避免循环。
+  let piAutoUpdateDone = false;
+  disposers.push(bus.on("pi:located", (info: any) => {
+    if (piAutoUpdateDone || !appSettings.piAutoUpdate || !info?.found) return;
+    piAutoUpdateDone = true;
+    void (async () => {
+      const checked = await workbench.checkPiUpdate();
+      if (checked.updateAvailable) await workbench.updatePi();
+    })();
   }));
 
   disposers.push(watch(

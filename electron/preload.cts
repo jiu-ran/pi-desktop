@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   },
   setTitleBar: (colors: { color: string; symbolColor: string }) => ipcRenderer.invoke("pi:titlebar", colors),
   locate: () => ipcRenderer.invoke("pi:locate"),
+  checkPiUpdate: () => ipcRenderer.invoke("pi:check-update"),
+  updatePi: () => ipcRenderer.invoke("pi:update"),
   recent: () => ipcRenderer.invoke("pi:recent"),
   forget: (cwd: string) => ipcRenderer.invoke("pi:forget", cwd),
   chooseDirectory: () => ipcRenderer.invoke("pi:choose-directory"),

@@ -94,7 +94,17 @@ function plainArgs(args: any[]): any[] {
 
 export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
   const state = reactive({
-    pi: { found: false, version: "", checked: false },
+    pi: {
+      found: false,
+      version: "",
+      checked: false,
+      path: "",
+      latest: "",
+      updateAvailable: false,
+      checking: false,
+      updating: false,
+      lastUpdate: null as null | { from: string; to: string; at: number; log: string },
+    },
     recent: [] as string[],
     activeCwd: "",
     theme: localStorage.getItem(THEME_KEY) || "dark",
@@ -308,7 +318,8 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     if (initPromise) return initPromise;
     initPromise = (async () => {
       if (!host || disposed) {
-        state.pi = { found: false, version: "", checked: true };
+        state.pi = { ...state.pi, found: false, version: "", path: "", checked: true };
+        bus.emit("pi:located", { ...state.pi });
         return;
       }
       stopHostEvents?.();
@@ -322,11 +333,18 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
         bus.emit("pi:event", { cwd, sessionFile: targetFile, event, workspace: ws, thread });
       });
       const [pi, recent] = await Promise.all([
-        host.locate().catch(() => ({ found: false, version: "" })),
+        host.locate().catch(() => ({ found: false, version: "", path: "" })),
         host.recent().catch(() => [] as string[]),
       ]);
       if (disposed) return;
-      state.pi = { ...pi, checked: true };
+      state.pi = {
+        ...state.pi,
+        found: Boolean(pi.found),
+        version: pi.version ?? "",
+        path: pi.path ?? "",
+        checked: true,
+      };
+      bus.emit("pi:located", { ...state.pi });
       state.recent = recent;
       if (pi.found && recent[0]) await open(recent[0]);
     })();
@@ -892,6 +910,74 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     localStorage.setItem(THEME_KEY, id);
   }
 
+  // ---------- 本机 Pi CLI 定位 / 查更新 / 更新 ----------
+  /** 重新定位本机 pi（版本与安装路径），定位完成会广播 pi:located。 */
+  async function refreshPi(): Promise<void> {
+    if (!host?.locate) return;
+    const pi = await host.locate().catch(() => ({ found: false, version: "", path: "" }));
+    state.pi = {
+      ...state.pi,
+      found: Boolean(pi.found),
+      version: pi.version ?? "",
+      path: pi.path ?? "",
+      checked: true,
+    };
+    bus.emit("pi:located", { ...state.pi });
+  }
+
+  /** 查询 npm registry 上的最新 Pi CLI 版本。 */
+  async function checkPiUpdate(): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
+    if (!host?.checkPiUpdate || state.pi.checking) {
+      return { current: state.pi.version, latest: state.pi.latest, updateAvailable: state.pi.updateAvailable };
+    }
+    state.pi.checking = true;
+    try {
+      const result = await host.checkPiUpdate();
+      state.pi.latest = result.latest ?? "";
+      state.pi.updateAvailable = Boolean(result.updateAvailable);
+      if (result.error) bus.emit("notify", { level: "warning", text: result.error });
+      return { current: result.current, latest: result.latest, updateAvailable: Boolean(result.updateAvailable) };
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return { current: state.pi.version, latest: state.pi.latest, updateAvailable: false };
+    } finally {
+      state.pi.checking = false;
+    }
+  }
+
+  /**
+   * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
+   * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
+   */
+  async function updatePi(): Promise<boolean> {
+    if (!host?.updatePi || state.pi.updating) return false;
+    state.pi.updating = true;
+    try {
+      const result = await host.updatePi();
+      if (!result.ok) {
+        bus.emit("notify", { level: "error", text: `Pi 更新失败：${result.log.slice(-200) || "未知错误"}` });
+        return false;
+      }
+      await refreshPi();
+      state.pi.latest = result.to || state.pi.latest;
+      state.pi.updateAvailable = false;
+      state.pi.lastUpdate = { from: result.from, to: result.to, at: Date.now(), log: result.log };
+      bus.emit("notify", {
+        level: "info",
+        text: result.from === result.to
+          ? `Pi 已是最新（${result.to || state.pi.version}），无需更新`
+          : `Pi 已从 ${result.from || "未知版本"} 更新到 ${result.to}`,
+      });
+      bus.emit("pi:updated", { ...state.pi.lastUpdate });
+      return true;
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return false;
+    } finally {
+      state.pi.updating = false;
+    }
+  }
+
   // ---------- MCP 与 Pi 软件包管理（支持 Electron 宿主 IPC 与 Web 预览兜底） ----------
   const mockMcpOverview = reactive<McpOverview>({
     agentDir: "~/.pi/agent",
@@ -1195,6 +1281,9 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     stop,
     newSession,
     switchSession,
+    refreshPi,
+    checkPiUpdate,
+    updatePi,
     setSidebarWidth,
     setPanelWidth,
     setStageWidth,

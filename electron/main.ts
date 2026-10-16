@@ -35,15 +35,88 @@ async function authorizedCwd(cwd: string): Promise<string> {
   return host.requireAuthorizedWorkspace(cwd);
 }
 
-function locatePi(): Promise<{ found: boolean; version: string }> {
+export const PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent";
+
+export interface PiLocation {
+  found: boolean;
+  version: string;
+  /** 本机 pi 可执行文件的解析路径（where/which 首行），找不到为空 */
+  path: string;
+}
+
+function runCommand(command: string, args: string[], timeoutMs = 30000): Promise<{ code: number; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { shell: true, timeout: timeoutMs });
+    let output = "";
+    child.stdout?.on("data", (chunk) => { output += chunk; });
+    child.stderr?.on("data", (chunk) => { output += chunk; });
+    child.once("error", () => resolve({ code: -1, output: output.trim() }));
+    child.once("close", (code) => resolve({ code: code ?? -1, output: output.trim() }));
+  });
+}
+
+function locatePi(): Promise<PiLocation> {
   return new Promise((resolve) => {
     const probe = spawn("pi", ["--version"], { shell: true });
     let output = "";
     probe.stdout.on("data", (chunk) => { output += chunk; });
     probe.stderr.on("data", (chunk) => { output += chunk; });
-    probe.once("error", () => resolve({ found: false, version: "" }));
-    probe.once("close", (code) => resolve({ found: code === 0, version: output.trim() }));
+    probe.once("error", () => resolve({ found: false, version: "", path: "" }));
+    probe.once("close", async (code) => {
+      if (code !== 0) {
+        resolve({ found: false, version: "", path: "" });
+        return;
+      }
+      // 解析 pi 可执行文件位置：Windows 用 where，其他平台用 which
+      let binPath = "";
+      try {
+        const locator = process.platform === "win32" ? "where" : "which";
+        const located = await runCommand(locator, ["pi"], 8000);
+        if (located.code === 0) binPath = located.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? "";
+      } catch {
+        binPath = "";
+      }
+      resolve({ found: true, version: output.trim(), path: binPath });
+    });
   });
+}
+
+export interface PiUpdateCheck {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+  error?: string;
+}
+
+/** 查询 npm  registry 上的最新 Pi CLI 版本，与本机已安装版本对比。 */
+async function checkPiUpdate(): Promise<PiUpdateCheck> {
+  const located = await locatePi();
+  const current = located.version;
+  if (!located.found) return { current: "", latest: "", updateAvailable: false, error: "未检测到本机 pi 命令" };
+  const viewed = await runCommand("npm", ["view", PI_NPM_PACKAGE, "version"], 20000);
+  const latest = viewed.code === 0 ? viewed.output.split(/\s+/).filter(Boolean).at(-1) ?? "" : "";
+  if (!latest) return { current, latest: "", updateAvailable: false, error: "无法查询最新版本，请检查网络" };
+  return { current, latest, updateAvailable: latest !== current };
+}
+
+export interface PiUpdateResult {
+  ok: boolean;
+  from: string;
+  to: string;
+  /** 安装输出尾部（排错用） */
+  log: string;
+}
+
+/** 全局更新 Pi CLI 到 latest，成功后重新定位并返回版本变化。 */
+async function updatePi(): Promise<PiUpdateResult> {
+  const before = await locatePi();
+  const from = before.version;
+  if (!before.found) return { ok: false, from: "", to: "", log: "未检测到本机 pi 命令" };
+  const installed = await runCommand("npm", ["install", "-g", `${PI_NPM_PACKAGE}@latest`], 180000);
+  const tail = installed.output.split(/\r?\n/).slice(-20).join("\n");
+  if (installed.code !== 0) return { ok: false, from, to: from, log: tail || "安装进程异常退出" };
+  const after = await locatePi();
+  return { ok: after.found, from, to: after.version || from, log: tail };
 }
 
 const TITLEBAR_HEIGHT = 40;
@@ -145,6 +218,8 @@ function handle(channel: string, fn: (...args: any[]) => any) {
 
 app.whenReady().then(() => {
   handle("pi:locate", () => locatePi());
+  handle("pi:check-update", () => checkPiUpdate());
+  handle("pi:update", () => updatePi());
   handle("pi:recent", async () => {
     const recent = await readRecent(recentFile());
     const authorized: string[] = [];
