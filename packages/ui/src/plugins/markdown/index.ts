@@ -8,7 +8,7 @@ import { icons } from "../../shared/util.ts";
 export default definePlugin({
   id: "markdown",
   name: "Markdown 渲染",
-  description: "在打开的 .md 文件中提供实时 Markdown 预览，可随时与源码编辑互相切换。",
+  description: "在打开的 .md 文件中提供源码语法高亮和实时预览，可随时与纯文本编辑互相切换。",
   version: "0.1.0",
   icon: icons.text,
   order: 10,

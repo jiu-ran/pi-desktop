@@ -105,6 +105,16 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       updating: false,
       lastUpdate: null as null | { from: string; to: string; at: number; log: string },
     },
+    appUpdate: {
+      current: "",
+      latest: "",
+      updateAvailable: false,
+      url: "",
+      assetName: "",
+      phase: "idle" as "idle" | "checking" | "available" | "downloading" | "ready" | "installing",
+      checking: false,
+      checkedAt: 0,
+    },
     recent: [] as string[],
     activeCwd: "",
     theme: localStorage.getItem(THEME_KEY) || "dark",
@@ -968,6 +978,68 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
    * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
    * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
    */
+  async function checkAppUpdate(): Promise<{ current: string; latest: string; updateAvailable: boolean; url: string }> {
+    const current = state.appUpdate;
+    if (!host?.checkAppUpdate || current.checking) {
+      return { current: current.current, latest: current.latest, updateAvailable: current.updateAvailable, url: current.url };
+    }
+    state.appUpdate.checking = true;
+    try {
+      const result = await host.checkAppUpdate();
+      state.appUpdate.current = result.current ?? "";
+      state.appUpdate.latest = result.latest ?? "";
+      state.appUpdate.updateAvailable = Boolean(result.updateAvailable);
+      state.appUpdate.url = result.url ?? "";
+      state.appUpdate.assetName = result.assetName ?? "";
+      state.appUpdate.phase = result.updateAvailable ? "available" : "idle";
+      state.appUpdate.checkedAt = Date.now();
+      if (result.error) bus.emit("notify", { level: "warning", text: result.error });
+      else if (result.updateAvailable) bus.emit("notify", { level: "info", text: `Pi Desktop ${result.latest} 已发布，当前版本 ${result.current}` });
+      return { current: state.appUpdate.current, latest: state.appUpdate.latest, updateAvailable: state.appUpdate.updateAvailable, url: state.appUpdate.url };
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return { current: current.current, latest: current.latest, updateAvailable: false, url: current.url };
+    } finally {
+      state.appUpdate.checking = false;
+    }
+  }
+
+  async function downloadAppUpdate(): Promise<boolean> {
+    if (!host?.downloadAppUpdate || state.appUpdate.phase === "downloading") return false;
+    state.appUpdate.phase = "downloading";
+    try {
+      const prepared = await host.downloadAppUpdate();
+      state.appUpdate.latest = prepared.version;
+      state.appUpdate.assetName = prepared.assetName;
+      state.appUpdate.url = prepared.url;
+      state.appUpdate.phase = "ready";
+      bus.emit("notify", { level: "info", text: `Pi Desktop ${prepared.version} 已准备完成，确认后才会安装` });
+      return true;
+    } catch (error: any) {
+      state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return false;
+    }
+  }
+
+  async function installAppUpdate(): Promise<boolean> {
+    if (!host?.installAppUpdate || state.appUpdate.phase !== "ready") return false;
+    state.appUpdate.phase = "installing";
+    try {
+      await host.installAppUpdate(state.appUpdate.latest);
+      return true;
+    } catch (error: any) {
+      state.appUpdate.phase = "ready";
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return false;
+    }
+  }
+
+  async function openAppUpdate(): Promise<boolean> {
+    if (!state.appUpdate.url || !host?.openAppUpdate) return false;
+    return Boolean(await host.openAppUpdate(state.appUpdate.url).catch(() => false));
+  }
+
   async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promise<boolean> {
     if (!host?.updatePi || state.pi.updating) return false;
     state.pi.updating = true;
@@ -1307,6 +1379,10 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     switchSession,
     refreshPi,
     checkPiUpdate,
+    checkAppUpdate,
+    downloadAppUpdate,
+    installAppUpdate,
+    openAppUpdate,
     updatePi,
     setSidebarWidth,
     setPanelWidth,

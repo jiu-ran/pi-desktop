@@ -166,6 +166,40 @@ async function updatePiNow(): Promise<void> {
   await workbench.updatePi(appSettings.piCustomPath || undefined, appSettings.piUpdateScope);
 }
 
+const appUpdateStatus = computed(() => {
+  if (state.appUpdate.phase === "downloading") return { tone: "muted", label: "下载中" };
+  if (state.appUpdate.phase === "ready") return { tone: "warn", label: "准备完成" };
+  if (state.appUpdate.phase === "installing") return { tone: "warn", label: "等待安装" };
+  if (state.appUpdate.checking) return { tone: "muted", label: "检查中" };
+  if (state.appUpdate.updateAvailable) return { tone: "warn", label: `有更新 ${state.appUpdate.latest}` };
+  if (state.appUpdate.checkedAt) return { tone: "ok", label: "已是最新" };
+  return { tone: "muted", label: "未检查" };
+});
+
+async function checkAppUpdateNow(): Promise<void> {
+  const result = await workbench.checkAppUpdate();
+  if (!result.current && !result.latest) return;
+  bus.emit("notify", {
+    level: "info",
+    text: result.updateAvailable
+      ? `发现 Pi Desktop ${result.latest}（当前 ${result.current}）`
+      : `Pi Desktop 已是最新版本（${result.current}）`,
+  });
+}
+
+async function downloadAppUpdateNow(): Promise<void> {
+  await workbench.downloadAppUpdate();
+}
+
+async function installAppUpdateNow(): Promise<void> {
+  await workbench.installAppUpdate();
+}
+
+async function openAppRelease(): Promise<void> {
+  const opened = await workbench.openAppUpdate();
+  if (!opened) bus.emit("notify", { level: "warning", text: "无法打开发布页面" });
+}
+
 /** 应用手动输入的 Pi 路径：探活成功才保存，失败直接报错不保存。 */
 async function applyPiCustomPath(): Promise<void> {
   const input = piPathDraft.value.trim();
@@ -1593,6 +1627,40 @@ onBeforeUnmount(() => {
                   重启当前会话进程
                 </button>
               </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-title">Pi Desktop 更新</div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>软件版本</strong>
+                  <span>当前 {{ state.appUpdate.current || "未知" }}{{ state.appUpdate.latest ? ` · 最新 ${state.appUpdate.latest}` : "" }}</span>
+                </div>
+                <span class="settings-status-pill" :class="appUpdateStatus.tone">{{ appUpdateStatus.label }}</span>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>检查软件更新</strong>
+                  <span>检查后可下载并校验安装包；只有点击“安装并重启”才会打开安装程序</span>
+                </div>
+                <div style="display: flex; gap: 6px; flex: none;">
+                  <button type="button" class="btn ghost small" :disabled="state.appUpdate.checking || state.appUpdate.phase === 'downloading'" @click="checkAppUpdateNow">
+                    <span v-if="state.appUpdate.checking" class="mini-spinner" />检查更新
+                  </button>
+                  <button v-if="state.appUpdate.updateAvailable && state.appUpdate.phase !== 'ready'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'downloading'" @click="downloadAppUpdateNow">
+                    <span v-if="state.appUpdate.phase === 'downloading'" class="mini-spinner" />下载更新
+                  </button>
+                  <button v-if="state.appUpdate.phase === 'ready' || state.appUpdate.phase === 'installing'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'installing'" @click="installAppUpdateNow">安装并重启</button>
+                  <button v-if="state.appUpdate.url" type="button" class="btn ghost small" @click="openAppRelease">查看发布</button>
+                </div>
+              </div>
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>启动时检查更新</strong>
+                  <span>只自动检查版本；下载、准备和安装都需要手动确认</span>
+                </div>
+                <input v-model="appSettings.appUpdateCheck" type="checkbox" class="settings-switch" />
+              </label>
             </div>
 
             <div class="settings-group">

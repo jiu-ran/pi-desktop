@@ -49,17 +49,17 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.2' }}
-          name: Pi Desktop ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.2' }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.3' }}
+          name: Pi Desktop ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.3' }}
           draft: false
           prerelease: false
           generate_release_notes: false
           body: |
-            Pi Desktop v0.1.2：基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）。
+            Pi Desktop：基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）。
 
-            - Mermaid 流程图改用 elk 自绘，支持圆角节点、连线标签、拖拽与缩放
-            - 图表默认缩放调整为适合阅读的尺寸，并按该尺寸显示为 100%
-            - 全屏按钮改为图标，全屏层避开窗口的最小化、最大化与关闭按钮
+            - 对话代码块和 Markdown 源码支持语法高亮
+            - 软件更新支持检查、下载、准备，并在确认后安装并重启
+            - 完善设置界面、应用图标和插件信息展示
 
             前置条件：本机已安装并可在命令行运行 `pi`。
           files: |

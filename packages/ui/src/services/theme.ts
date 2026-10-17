@@ -14,7 +14,7 @@ export const THEMES: ThemeSpec[] = [
     id: "dark",
     label: "深色",
     scheme: "dark",
-    codeTheme: { light: "github-light", dark: "github-dark-default" },
+    codeTheme: { light: "github-light", dark: "github-dark" },
     titlebar: { color: "#090909", symbolColor: "#909192" },
     vars: {
       "--frame": "#090909",
@@ -49,7 +49,7 @@ export const THEMES: ThemeSpec[] = [
     id: "light",
     label: "浅色",
     scheme: "light",
-    codeTheme: { light: "github-light", dark: "github-dark-default" },
+    codeTheme: { light: "github-light", dark: "github-dark" },
     titlebar: { color: "#e9eaee", symbolColor: "#5d6068" },
     vars: {
       "--frame": "#e9eaee",

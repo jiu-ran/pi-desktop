@@ -33,6 +33,8 @@ export interface AppSettings {
   piUpdateScope: "self" | "all";
   /** 手动指定的 Pi 可执行文件路径（为空时只从 PATH 自动识别） */
   piCustomPath: string;
+  /** 启动时检查 Pi Desktop 的 GitHub Release */
+  appUpdateCheck: boolean;
   /** 界面基础字号（px） */
   uiFontSize: number;
   /** 代码与终端字号（px） */
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piAutoUpdate: false,
   piUpdateScope: "self",
   piCustomPath: "",
+  appUpdateCheck: true,
   uiFontSize: 13,
   codeFontSize: 12.5,
   messageDensity: "comfortable",
@@ -88,6 +91,7 @@ function loadSavedSettings(): AppSettings {
       piAutoUpdate: typeof parsed.piAutoUpdate === "boolean" ? parsed.piAutoUpdate : DEFAULT_SETTINGS.piAutoUpdate,
       piUpdateScope: parsed.piUpdateScope === "all" ? "all" : "self",
       piCustomPath: typeof parsed.piCustomPath === "string" ? parsed.piCustomPath.slice(0, 500) : DEFAULT_SETTINGS.piCustomPath,
+      appUpdateCheck: typeof parsed.appUpdateCheck === "boolean" ? parsed.appUpdateCheck : DEFAULT_SETTINGS.appUpdateCheck,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
@@ -192,6 +196,8 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     },
   ));
   void workbench.setAppZoom(appSettings.uiZoom);
+
+  if (appSettings.appUpdateCheck) void workbench.checkAppUpdate();
 
   // 后台并行会话完成时自动发送通知
   disposers.push(bus.on(

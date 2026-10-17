@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MarkdownRender, { setCustomComponents } from "markstream-vue";
 import "markstream-vue/index.css";
 import CursorMermaid from "./CursorMermaid.vue";
+import MarkdownCodeBlock from "./MarkdownCodeBlock.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
 
@@ -31,7 +32,7 @@ const codeTheme = computed(() => currentTheme.value.codeTheme);
 const root = ref<HTMLElement | null>(null);
 
 const mermaidCustomId = `cursor-mermaid-${Math.random().toString(36).slice(2)}`;
-setCustomComponents(mermaidCustomId, { mermaid: CursorMermaid });
+setCustomComponents(mermaidCustomId, { mermaid: CursorMermaid, code_block: MarkdownCodeBlock });
 
 const mermaidEnabled = computed(() => {
   void plugins.records.length;
@@ -170,7 +171,7 @@ onBeforeUnmount(() => {
       :final="!streaming"
       :is-dark="isDark"
       :viewport-priority="false"
-      :code-block-props="{ theme: codeTheme }"
+      :code-block-props="{ themes: [codeTheme.dark, codeTheme.light], showLineNumbers: true }"
       :custom-id="mermaidCustomId"
       :mermaid-props="mermaidProps"
     />
