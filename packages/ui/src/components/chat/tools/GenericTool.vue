@@ -2,9 +2,11 @@
 import { computed } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import ToolCard from "./ToolCard.vue";
+import SearchHighlight from "../SearchHighlight.vue";
 
 const props = defineProps<{
   block: TranscriptBlock;
+  query?: string;
 }>();
 
 const mcp = computed(() => {
@@ -49,11 +51,11 @@ const output = computed(() => {
   <ToolCard :block="block" :verb="verb" :subtitle="subtitle" :badge="mcp ? `MCP · ${mcp.server}` : ''">
     <div v-if="argsText" class="tool-section">
       <span class="tool-section-label">参数</span>
-      <pre class="term-out">{{ argsText }}</pre>
+      <pre class="term-out"><SearchHighlight :text="argsText" :query="query" /></pre>
     </div>
     <div v-if="output" class="tool-section">
       <span class="tool-section-label">结果</span>
-      <pre class="term-out" :class="{ err: block.isError }">{{ output }}</pre>
+      <pre class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="output" :query="query" /></pre>
     </div>
   </ToolCard>
 </template>

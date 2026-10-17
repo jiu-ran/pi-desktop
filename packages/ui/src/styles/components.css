@@ -1332,6 +1332,8 @@ html[data-density="compact"] .tool-card {
   color: var(--accent);
   font-weight: 600;
 }
+.agents-editor { width: 100%; min-height: 360px; margin-top: 12px; padding: 12px; resize: vertical; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-1); color: var(--fg); font: 13px/1.6 var(--mono); }
+.agents-editor:focus { border-color: var(--accent); outline: none; }
 .settings-select {
   flex: none;
   min-width: 132px;

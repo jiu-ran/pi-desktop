@@ -1,6 +1,7 @@
 /* 对话舞台：尺寸与配色对照 JetBrains Air 实际界面 */
 .conversation, .area-chat {
   --column: 760px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -101,7 +102,21 @@
 .stage-state pre { max-width: 680px; max-height: 280px; overflow: auto; padding: 12px; border-radius: var(--radius); background: var(--bg-1); color: var(--fg-2); font-size: 12px; white-space: pre-wrap; }
 
 /* 时间线 */
-.timeline { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.chat-search { position: sticky; z-index: 5; top: 8px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: min(360px, calc(100% - 24px)); margin: 8px 0 -42px 12px; padding: 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-1); box-shadow: var(--shadow); }
+.chat-search-count { flex: 1 0 100%; }
+.chat-search button, .chat-search-input { height: 28px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--bg-1); color: var(--fg); }
+.chat-search button { padding: 0 8px; cursor: pointer; }
+.chat-search button:hover, .chat-search-input:focus { border-color: var(--accent); }
+.chat-search-input { flex: 1; width: 180px; min-width: 0; padding: 0 8px; outline: none; }
+.search-hit { outline: 1px solid var(--accent); border-radius: 6px; }
+.search-mark { padding: 0 2px; border-radius: 2px; background: var(--accent); color: var(--accent-fg); }
+.chat-body { display: flex; flex: 1; min-height: 0; }
+.chat-outline { position: absolute; z-index: 6; top: 50%; right: 8px; width: 34px; max-height: 120px; padding: 8px; overflow-y: auto; scrollbar-gutter: stable; border: 1px solid transparent; border-radius: 8px; background: transparent; transform: translateY(-50%); transition: width 160ms ease, background 160ms ease; }
+.chat-outline:hover { width: 240px; max-height: min(292px, 50%); border-color: var(--line-2); background: var(--bg-1); box-shadow: var(--shadow); }
+.chat-outline button { display: block; width: 16px; height: 3px; margin: 9px 0 9px auto; padding: 0; overflow: hidden; border: 0; border-radius: 999px; background: var(--line-2); color: transparent; font-size: 12px; line-height: 24px; text-align: right; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.chat-outline:hover button { width: 100%; height: auto; margin-left: 0; padding: 4px 6px; background: transparent; color: var(--fg-2); }
+.chat-outline button:hover { background: var(--hover); color: var(--accent); }
+.timeline { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .timeline::-webkit-scrollbar:horizontal { display: none; height: 0; }
 .timeline-inner {
   display: flex;
@@ -160,13 +175,11 @@
 .msg.assistant { min-width: 0; overflow-wrap: break-word; word-break: normal; }
 .msg-tools {
   display: flex;
-  gap: 2px;
-  margin-top: -6px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
 }
-.msg.assistant:hover .msg-tools,
-.msg-tools:focus-within { opacity: 1; }
+.msg-usage { color: var(--fg-3); font-size: 12px; }
 
 /* markstream 排版：用它自己的变量收紧间距（默认段距 1.5em、表格 2em 太松），并对齐 Air 的紧凑排版 */
 .markstream-vue.md, .md .markstream-vue, .md {

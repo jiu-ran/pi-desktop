@@ -13,6 +13,7 @@ export interface TranscriptBlock {
   durationMs?: number | null;
   level?: string;
   local?: boolean;
+  usageText?: string;
 }
 
 function textOf(content: any): string {
@@ -106,6 +107,16 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     live = null;
   }
 
+  function settleRunningTools(): boolean {
+    let changed = false;
+    for (const block of blocks) {
+      if (block.kind !== "tool" || (block.status !== "pending" && block.status !== "running")) continue;
+      block.status = "done";
+      changed = true;
+    }
+    return changed;
+  }
+
   function applyEvent(event: any): boolean {
     switch (event.type) {
       case "message_start":
@@ -149,10 +160,11 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       case "agent_settled":
       case "abort":
       case "error":
-      case "agent_error":
-        if (!live) return false;
-        finalizeLive(true);
-        return true;
+      case "agent_error": {
+        const hadLive = Boolean(live);
+        if (hadLive) finalizeLive(true);
+        return settleRunningTools() || hadLive;
+      }
       case "tool_execution_start": {
         const block = pushTool(event.toolCallId, event.toolName, event.args, "running");
         block.status = "running";
@@ -197,5 +209,16 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     blocks.push({ kind: "notice", id: uid("n"), level, text, local: true });
   }
 
-  return { blocks, loadMessages, applyEvent, pushUser, pushNotice };
+  function attachUsage(text: string): void {
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const block = blocks[index];
+      if (block.kind === "user") break;
+      if (block.kind === "text") {
+        block.usageText = text;
+        return;
+      }
+    }
+  }
+
+  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage };
 }

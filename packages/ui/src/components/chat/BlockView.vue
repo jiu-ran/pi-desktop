@@ -14,19 +14,21 @@ import GenericTool from "./tools/GenericTool.vue";
  */
 defineProps<{
   block: TranscriptBlock;
+  query?: string;
+  copyText?: string;
 }>();
 </script>
 
 <template>
-  <UserMessage v-if="block.kind === 'user'" :block="block" />
-  <AssistantText v-else-if="block.kind === 'text'" :block="block" />
-  <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" />
-  <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" />
+  <UserMessage v-if="block.kind === 'user'" :block="block" :query="query" />
+  <AssistantText v-else-if="block.kind === 'text'" :block="block" :query="query" :copy-text="copyText" />
+  <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" :query="query" />
+  <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" :query="query" />
   <template v-else-if="block.kind === 'tool'">
-    <BashTool v-if="block.name === 'bash'" :block="block" />
-    <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" />
-    <ReadTool v-else-if="block.name === 'read'" :block="block" />
-    <GenericTool v-else :block="block" />
+    <BashTool v-if="block.name === 'bash'" :block="block" :query="query" />
+    <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" :query="query" />
+    <ReadTool v-else-if="block.name === 'read'" :block="block" :query="query" />
+    <GenericTool v-else :block="block" :query="query" />
   </template>
   <div v-else class="block-fallback" :data-kind="block.kind">
     <span class="fallback-tag">{{ block.kind }}</span>

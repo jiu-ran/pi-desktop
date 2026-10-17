@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, stat as fsStat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
@@ -36,7 +37,7 @@ async function authorizedCwd(cwd: string): Promise<string> {
   return host.requireAuthorizedWorkspace(cwd);
 }
 
-export const PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent";
+export const PI_NPM_PACKAGE = ["@earendil-works", "pi-coding-agent"].join("/");
 
 export interface PiLocation {
   found: boolean;
@@ -520,6 +521,17 @@ app.whenReady().then(() => {
   handle("pi:packages-remove", (cwd: string, payload: any) => host.packagesRemove(cwd, payload));
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
+  const agentsPath = path.join(homedir(), ".pi", "agent", "AGENTS.md");
+  handle("pi:global-agents", async () => {
+    try { return { path: agentsPath, content: await readFile(agentsPath, "utf8") }; }
+    catch (error: any) { if (error?.code === "ENOENT") return { path: agentsPath, content: "" }; throw error; }
+  });
+  handle("pi:global-agents-save", async (content: string) => {
+    if (typeof content !== "string" || content.length > 1024 * 1024) throw new Error("全局提示词不能超过 1 MB");
+    await mkdir(path.dirname(agentsPath), { recursive: true });
+    await writeFile(agentsPath, content, "utf8");
+    return { path: agentsPath, content };
+  });
   handle("pi:titlebar", ({ color = "#111214", symbolColor = "#a8adb5" }: { color?: string; symbolColor?: string } = {}) => {
     if (!mainWindow || process.platform === "darwin") return false;
     try {

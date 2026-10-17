@@ -12,6 +12,9 @@ let stopHeightChange: (() => void) | null = null;
 const ws = computed(() => workbench.active.value);
 const scroller = ref<HTMLElement | null>(null);
 const stick = ref(true);
+const searchOpen = ref(false);
+const searchQuery = ref("");
+const searchIndex = ref(0);
 let scrollFrame = 0;
 let scrollForce = false;
 
@@ -49,11 +52,20 @@ function scrollToBottom(force = false): void {
   }) as number;
 }
 
+function onSearchKey(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f" || !ws.value) return;
+  event.preventDefault();
+  searchOpen.value = true;
+  void nextTick(() => scroller.value?.parentElement?.querySelector<HTMLInputElement>(".chat-search-input")?.focus());
+}
+
 onMounted(() => {
   stopHeightChange = bus.on("markdown:height-change", () => scrollToBottom());
+  window.addEventListener("keydown", onSearchKey);
 });
 onBeforeUnmount(() => {
   stopHeightChange?.();
+  window.removeEventListener("keydown", onSearchKey);
   if (scrollFrame) {
     if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(scrollFrame);
     else window.clearTimeout(scrollFrame);
@@ -79,6 +91,75 @@ function fillPrompt(text: string): void {
 function openChangesPanel(): void {
   workbench.state.activePanelId = "changes";
 }
+
+function blockText(block: any): string {
+  return [block.text, block.output, block.name, block.args ? JSON.stringify(block.args) : ""].filter(Boolean).join("\n");
+}
+
+const outline = computed(() => (ws.value?.blocks ?? [])
+  .filter((block) => block.kind === "user" && block.text?.trim())
+  .map((block) => ({ id: block.id, text: block.text!.replace(/\s+/g, " ").trim() })));
+
+const copyTextByIndex = computed(() => {
+  const result = new Map<number, string>();
+  const blocks = ws.value?.blocks ?? [];
+  let parts: string[] = [];
+  let last = -1;
+  const finish = () => {
+    if (last >= 0 && !blocks[last]?.streaming) result.set(last, parts.join("\n\n"));
+    parts = [];
+    last = -1;
+  };
+  blocks.forEach((block, index) => {
+    if (block.kind === "user") finish();
+    else if (block.kind === "text" && block.text?.trim()) {
+      parts.push(block.text);
+      last = index;
+    }
+  });
+  finish();
+  return result;
+});
+
+function openOutline(id: string): void {
+  scroller.value?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });
+}
+
+const searchMatches = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return [];
+  return (ws.value?.blocks ?? []).filter((block: any) => blockText(block).toLowerCase().includes(query));
+});
+
+function toggleSearch(): void {
+  searchOpen.value = !searchOpen.value;
+  if (!searchOpen.value) {
+    searchQuery.value = "";
+    searchIndex.value = 0;
+  }
+}
+
+function moveSearch(direction: number): void {
+  const count = searchMatches.value.length;
+  if (!count) return;
+  searchIndex.value = (searchIndex.value + direction + count) % count;
+  focusSearchMatch();
+}
+
+function focusSearchMatch(): void {
+  const block = searchMatches.value[searchIndex.value] as { id?: string } | undefined;
+  if (!block?.id) return;
+  void nextTick(() => {
+    const container = scroller.value?.querySelector(`[data-block-id="${CSS.escape(block.id!)}"]`);
+    const mark = container?.querySelector("mark.search-mark");
+    (mark ?? container)?.scrollIntoView({ block: "center" });
+  });
+}
+
+watch(searchMatches, () => {
+  searchIndex.value = 0;
+  focusSearchMatch();
+});
 </script>
 
 <template>
@@ -86,6 +167,14 @@ function openChangesPanel(): void {
     <WelcomeView v-if="!ws" />
 
     <template v-else>
+      <div v-if="searchOpen" class="chat-search">
+        <span class="chat-search-count">{{ searchMatches.length ? searchIndex + 1 : 0 }}/{{ searchMatches.length }}</span>
+        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
+        <button type="button" title="上一个" @click="moveSearch(-1)">↑</button>
+        <button type="button" title="下一个" @click="moveSearch(1)">↓</button>
+        <button type="button" title="关闭" @click="toggleSearch">×</button>
+      </div>
+      <div class="chat-body">
       <div ref="scroller" class="timeline" @scroll="onScroll">
         <div class="timeline-inner">
           <div v-if="ws.loading && !ws.blocks.length" class="empty-thread">
@@ -105,12 +194,23 @@ function openChangesPanel(): void {
           </div>
 
           <template v-else>
-            <BlockView v-for="block in ws.blocks" :key="block.id" :block="block" />
+            <div
+              v-for="(block, index) in ws.blocks"
+              :key="block.id"
+              :data-block-id="block.id"
+              :class="{ 'search-hit': searchMatches[searchIndex]?.id === block.id }"
+            >
+              <BlockView :block="block" :query="searchQuery" :copy-text="copyTextByIndex.get(index) ?? ''" />
+            </div>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">
               <span class="mini-spinner" />思考中…
             </div>
           </template>
         </div>
+      </div>
+      <aside v-if="outline.length" class="chat-outline">
+          <button v-for="item in outline" :key="item.id" :title="item.text" @click="openOutline(item.id)">{{ item.text }}</button>
+        </aside>
       </div>
 
       <div v-if="changedFiles.length" class="changes-bar">

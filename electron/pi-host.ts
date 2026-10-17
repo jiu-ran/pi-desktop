@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -1063,14 +1064,7 @@ export class PiHost {
   }
 
   async call(cwd: string, method: string, args: any[] = [], sessionFile?: string) {
-    const allowed = new Set([
-      "prompt", "steer", "followUp", "abort", "clearQueue",
-      "newSession", "switchSession", "getState", "getMessages",
-      "setModel", "getAvailableModels", "setThinkingLevel", "getAvailableThinkingLevels",
-      "setAutoCompaction", "setAutoRetry", "setSteeringMode", "setFollowUpMode", "setMaxIdleWorkers",
-      "compact", "getSessionStats", "getCommands", "getTree", "fork", "setSessionName",
-      "clone", "getForkMessages", "getLastAssistantText", "exportHtml",
-    ]);
+    const allowed = new Set<string>(PI_RPC_ALLOWLIST);
     if (!allowed.has(method)) throw new Error(`不允许的 RPC 方法：${method}`);
     if (method === "setMaxIdleWorkers") {
       this.requirePool(cwd);

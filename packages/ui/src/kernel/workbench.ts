@@ -365,7 +365,22 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     }
   }
 
-  function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any): void {
+  function formatUsage(usage: any): string {
+  const input = Number(usage?.input ?? 0);
+  const output = Number(usage?.output ?? 0);
+  const cacheRead = Number(usage?.cacheRead ?? usage?.cache_read ?? 0);
+  const cacheWrite = Number(usage?.cacheWrite ?? usage?.cache_write ?? 0);
+  const total = Number(usage?.totalTokens ?? usage?.total ?? input + output + cacheRead + cacheWrite);
+  return `Token：总计 ${total} · 输入 ${input} · 输出 ${output} · 缓存读取 ${cacheRead} · 缓存写入 ${cacheWrite}`;
+}
+
+function appendUsage(thread: SessionThreadState): void {
+  if (!thread.usage) return;
+  thread.transcript.attachUsage(formatUsage(thread.usage));
+  thread.usage = null;
+}
+
+function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any): void {
     thread.transcript.applyEvent(event);
     thread.loaded = true;
     switch (event.type) {
@@ -376,6 +391,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       case "agent_settled":
         thread.streaming = false;
         thread.queue = { steering: [], followUp: [] };
+        appendUsage(thread);
         scheduleSessionsRefresh(ws);
         break;
       case "queue_update":

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MarkdownRender, { setCustomComponents } from "markstream-vue";
 import "markstream-vue/index.css";
 import CursorMermaid from "./CursorMermaid.vue";
@@ -17,6 +17,7 @@ const props = withDefaults(
     streaming?: boolean;
     mode?: "chat" | "docs";
     className?: string;
+    query?: string;
   }>(),
   {
     streaming: false,
@@ -155,6 +156,41 @@ onMounted(() => {
     );
   }
 });
+function highlightQuery(): void {
+  const container = root.value;
+  if (!container) return;
+  for (const mark of container.querySelectorAll("mark.search-mark")) {
+    const parent = mark.parentNode;
+    parent?.replaceChild(document.createTextNode(mark.textContent ?? ""), mark);
+    parent?.normalize();
+  }
+  const query = props.query?.trim();
+  if (!query) return;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    const value = node.nodeValue ?? "";
+    if (!value.toLowerCase().includes(query.toLowerCase())) continue;
+    const fragment = document.createDocumentFragment();
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const part of value.split(new RegExp(`(${escaped})`, "ig")).filter(Boolean)) {
+      if (part.toLowerCase() === query.toLowerCase()) {
+        const mark = document.createElement("mark");
+        mark.className = "search-mark";
+        mark.textContent = part;
+        fragment.append(mark);
+      } else fragment.append(document.createTextNode(part));
+    }
+    node.parentNode?.replaceChild(fragment, node);
+  }
+}
+
+watch([() => props.content, () => props.query, () => props.streaming], () => {
+  if (!props.query?.trim() && !root.value?.querySelector("mark.search-mark")) return;
+  void nextTick(highlightQuery);
+});
+onMounted(() => void nextTick(highlightQuery));
 onBeforeUnmount(() => {
   stopFit?.();
   stopExport?.();

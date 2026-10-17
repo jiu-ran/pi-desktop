@@ -29,6 +29,8 @@ try {
   assert(prepared.text.includes("src\\main.ts") || prepared.text.includes("src/main.ts"), "文件夹附件应含递归目录树");
   assert(!prepared.text.includes("ignored.js"), "目录树应跳过 node_modules");
   assert(prepared.text.includes("二进制文件"), "二进制文件应有说明而非解码成乱码");
+  assert(!/你是|系统提示|隐藏指令|ignore previous instructions/i.test(prepared.text), "附件文本不得包含桌面端添加的任务指令");
+  assert(prepared.text.startsWith("<file ") || prepared.text.startsWith("<directory "), "附件文本只能以文件或目录边界开始");
   let rejected = false;
   try { await host.prepareAttachments(project, [path.join(project, "missing.txt")]); } catch { rejected = true; }
   assert(rejected, "不存在的附件应返回错误");

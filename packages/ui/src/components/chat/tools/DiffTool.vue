@@ -6,9 +6,11 @@ import { baseName } from "../../../shared/util.ts";
 import { blockDiff, diffStat } from "../../../shared/diff.ts";
 import DiffView from "../../shared/DiffView.vue";
 import ToolCard from "./ToolCard.vue";
+import SearchHighlight from "../SearchHighlight.vue";
 
 const props = defineProps<{
   block: TranscriptBlock;
+  query?: string;
 }>();
 
 const { bus } = useKernel();
@@ -37,6 +39,6 @@ function openInEditor(): void {
   >
     <div class="diff-file clickable" :title="`在代码编辑器中打开 ${path}`" @click="openInEditor">{{ path }}</div>
     <DiffView :lines="lines" />
-    <pre v-if="block.isError" class="term-out err">{{ block.output }}</pre>
+    <pre v-if="block.isError" class="term-out err"><SearchHighlight :text="block.output" :query="query" /></pre>
   </ToolCard>
 </template>

@@ -49,6 +49,12 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
     desc: "安装、更新与卸载 Pi 扩展包（npm / Git / 本地目录）及技能、提示词与主题资源",
   },
   {
+    id: "agents",
+    label: "全局提示词",
+    icon: icons.file,
+    desc: "查看和管理 ~/.pi/agent/AGENTS.md",
+  },
+  {
     id: "skills",
     label: "Skills",
     icon: icons.brain,
@@ -584,6 +590,36 @@ const resourceTypeLabels: Record<string, string> = {
 };
 
 // ==================== Skills 设置逻辑 ====================
+const agentsPath = ref("");
+const agentsContent = ref("");
+const agentsSaved = ref("");
+const agentsLoading = ref(false);
+const agentsSaving = ref(false);
+const agentsDirty = computed(() => agentsContent.value !== agentsSaved.value);
+
+async function loadGlobalAgents(): Promise<void> {
+  agentsLoading.value = true;
+  try {
+    const result = await window.piDesktop!.globalAgents();
+    agentsPath.value = result.path;
+    agentsContent.value = result.content;
+    agentsSaved.value = result.content;
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  } finally { agentsLoading.value = false; }
+}
+
+async function saveGlobalAgents(): Promise<void> {
+  agentsSaving.value = true;
+  try {
+    const result = await window.piDesktop!.saveGlobalAgents(agentsContent.value);
+    agentsSaved.value = result.content;
+    bus.emit("notify", { level: "info", text: "全局提示词已保存" });
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  } finally { agentsSaving.value = false; }
+}
+
 const skillsLoading = ref(false);
 const skillsData = ref<PiSkillsOverview | null>(null);
 const skillsFilter = ref<"all" | "user" | "project" | "temporary">("all");
@@ -617,6 +653,8 @@ watch(
       loadPackagesOverview();
     } else if (tab === "skills") {
       loadSkillsOverview();
+    } else if (tab === "agents") {
+      loadGlobalAgents();
     }
   },
   { immediate: true },
@@ -1457,6 +1495,20 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- 5. Skills 设置 -->
+          <template v-else-if="settingsModalState.tab === 'agents'">
+            <div class="settings-group">
+              <div class="settings-group-head">
+                <span class="settings-group-title">全局提示词</span>
+                <div class="settings-toolbar-actions">
+                  <button type="button" class="btn ghost small" @click="loadGlobalAgents">刷新</button>
+                  <button type="button" class="btn small" :disabled="!agentsDirty || agentsSaving" @click="saveGlobalAgents">保存</button>
+                </div>
+              </div>
+              <p class="settings-note">{{ agentsPath || 'C:\\Users\\<用户>\\.pi\\agent\\AGENTS.md' }}</p>
+              <textarea v-model="agentsContent" class="agents-editor" spellcheck="false" :disabled="agentsLoading" />
+            </div>
+          </template>
+
           <template v-else-if="settingsModalState.tab === 'skills'">
             <div class="settings-group">
               <div class="settings-group-head">

@@ -36,7 +36,28 @@ const partialBlock = partial.blocks.find((b) => b.kind === "text");
 if (!partialBlock || partialBlock.streaming || partialBlock.details?.partial !== true) {
   throw new Error("settled streams should finalize partial blocks");
 }
+const stuckTool = createTranscript();
+stuckTool.applyEvent({ type: "tool_execution_start", toolCallId: "c3", toolName: "bash", args: {} });
+stuckTool.applyEvent({ type: "agent_settled" });
+const settledTool = stuckTool.blocks.find((block) => block.id === "c3");
+if (!settledTool || settledTool.status !== "done") throw new Error("agent_settled should finish running tools");
 const tool = t.blocks.find((b) => b.id === "c2");
 if (!tool || tool.status !== "done" || tool.args?.path !== "b.ts" || tool.output !== "ok") throw new Error("tool merge failed");
 if (t.blocks.filter((b) => b.kind === "tool" && b.id === "c2").length !== 1) throw new Error("duplicate tool");
+
+const replay = createTranscript();
+const snapshotMessages = [
+  { role: "user", content: [{ type: "text", text: "检查状态" }] },
+  { role: "assistant", content: [{ type: "text", text: "Pi 返回的最终结果" }] },
+];
+replay.loadMessages(snapshotMessages);
+replay.attachUsage("Token：总计 18");
+const usageBlock = replay.blocks.find((block) => block.kind === "text");
+if (usageBlock?.usageText !== "Token：总计 18") throw new Error("用量必须附加到当前轮回复");
+const snapshot = createTranscript();
+snapshot.loadMessages(snapshotMessages);
+const visible = (blocks: Array<{ kind: string; text?: string }>) => blocks.filter((block) => block.kind === "text").map((block) => block.text);
+if (JSON.stringify(visible(replay.blocks)) !== JSON.stringify(visible(snapshot.blocks))) {
+  throw new Error("RPC 快照必须能覆盖由事件派生的消息状态");
+}
 console.log("OK");

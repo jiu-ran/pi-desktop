@@ -297,6 +297,8 @@ export interface PiDesktopBridge {
   packagesRemove: (cwd: string, payload: { source: string; local?: boolean }) => Promise<PiPackagesOverview>;
   packagesUpdate: (cwd: string, payload?: { source?: string }) => Promise<PiPackagesOverview>;
   skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
+  globalAgents: () => Promise<{ path: string; content: string }>;
+  saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
   onEvent: (listener: (payload: { cwd: string; sessionFile?: string; event: any }) => void) => () => void;
 }
 

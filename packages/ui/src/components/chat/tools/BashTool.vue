@@ -2,9 +2,11 @@
 import { computed } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import ToolCard from "./ToolCard.vue";
+import SearchHighlight from "../SearchHighlight.vue";
 
 const props = defineProps<{
   block: TranscriptBlock;
+  query?: string;
 }>();
 
 const command = computed(() => String(props.block.args?.command ?? ""));
@@ -15,8 +17,8 @@ const running = computed(() => props.block.status === "running" || props.block.s
 <template>
   <ToolCard :block="block" :verb="running ? '正在运行' : '运行'" :subtitle="oneLine">
     <div class="term">
-      <div class="term-cmd"><span class="term-prompt">$</span>{{ command }}</div>
-      <pre v-if="block.output" class="term-out" :class="{ err: block.isError }">{{ block.output }}</pre>
+      <div class="term-cmd"><span class="term-prompt">$</span><SearchHighlight :text="command" :query="query" /></div>
+      <pre v-if="block.output" class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="block.output" :query="query" /></pre>
       <div v-else-if="running" class="term-wait">等待输出…</div>
     </div>
   </ToolCard>

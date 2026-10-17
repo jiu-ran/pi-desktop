@@ -4,7 +4,7 @@ import type { Workbench } from "../kernel/workbench.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
-export type SettingsTabId = "conversation" | "appearance" | "mcp" | "packages" | "skills" | "plugins" | "environment";
+export type SettingsTabId = "conversation" | "appearance" | "mcp" | "packages" | "agents" | "skills" | "plugins" | "environment";
 
 export type AutoSaveMode = "off" | "afterDelay" | "onFocusChange" | "onWindowChange";
 
