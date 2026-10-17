@@ -31,18 +31,21 @@
       "LICENSE"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "zip",
         "nsis"
       ]
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         "zip",
         "dmg"
       ]
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "tar.gz",
         "AppImage"

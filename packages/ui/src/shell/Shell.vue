@@ -45,7 +45,7 @@ const workspaceWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1
 
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
-const PANEL_MIN_WIDTH = 200;
+const PANEL_MIN_WIDTH = 290;
 const PANEL_MAX_WIDTH = 640;
 const STAGE_VIEW_MIN_WIDTH = 240;
 const STAGE_VIEW_MAX_WIDTH = 1000;

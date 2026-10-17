@@ -17,7 +17,7 @@ const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
 const PANEL_WIDTH_KEY = "pi-desktop.panel-width";
-const PANEL_MIN_WIDTH = 200;
+const PANEL_MIN_WIDTH = 290;
 const PANEL_MAX_WIDTH = 640;
 const EDITOR_WIDTH_KEY = "pi-desktop.editor-width";
 const EDITOR_MIN_WIDTH = 240;
@@ -1219,6 +1219,11 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     agentDir: "~/.pi/agent",
     globalSkillsDir: "~/.pi/agent/skills",
     projectSkillsDir: ".pi/skills",
+    directories: [
+      { label: "全局技能目录", path: "~/.pi/agent/skills" },
+      { label: "用户 Agent Skills", path: "~/.agents/skills" },
+      { label: "当前项目技能目录", path: ".pi/skills" },
+    ],
     skills: [
       {
         name: "commit",

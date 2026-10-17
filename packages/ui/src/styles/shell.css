@@ -31,16 +31,13 @@
 .tb-left { flex: 1; overflow: hidden; }
 .tb-right { flex: none; }
 .tb-logo {
-  display: grid;
-  place-items: center;
+  display: block;
   flex: none;
   width: 22px;
   height: 22px;
   margin-right: 6px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #00cbd7, #2a7deb 55%, #b451ff);
-  color: #fff;
-  font: 700 14px/1 var(--font);
+  object-fit: cover;
 }
 .tb-btn {
   display: grid;

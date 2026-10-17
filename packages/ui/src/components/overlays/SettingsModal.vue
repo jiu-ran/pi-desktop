@@ -69,6 +69,12 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
 ];
 
 const currentTabMeta = computed(() => tabs.find((t) => t.id === settingsModalState.tab) ?? tabs[0]);
+const settingsQuery = ref("");
+const visibleTabs = computed(() => {
+  const query = settingsQuery.value.trim().toLocaleLowerCase();
+  if (!query) return tabs;
+  return tabs.filter((tab) => `${tab.label} ${tab.desc}`.toLocaleLowerCase().includes(query));
+});
 
 const thinkingOptions: Array<{ value: typeof appSettings.defaultThinking; label: string }> = [
   { value: "off", label: `${thinkingLabel("off")} (off)` },
@@ -584,7 +590,39 @@ watch(
 
 const settingsVisible = ref(false);
 const settingsLeaving = ref(false);
+const settingsOffset = ref({ x: 0, y: 0 });
 let settingsLeaveTimer = 0;
+let settingsDrag: { x: number; y: number; originX: number; originY: number } | null = null;
+
+function startSettingsDrag(event: PointerEvent): void {
+  const modal = event.currentTarget as HTMLElement;
+  const bounds = modal.getBoundingClientRect();
+  const edge = 8;
+  const onEdge = event.clientX <= bounds.left + edge
+    || event.clientX >= bounds.right - edge
+    || event.clientY <= bounds.top + edge
+    || event.clientY >= bounds.bottom - edge;
+  if (!onEdge) return;
+  settingsDrag = {
+    x: event.clientX,
+    y: event.clientY,
+    originX: settingsOffset.value.x,
+    originY: settingsOffset.value.y,
+  };
+  modal.setPointerCapture(event.pointerId);
+}
+
+function moveSettingsDrag(event: PointerEvent): void {
+  if (!settingsDrag) return;
+  settingsOffset.value = {
+    x: settingsDrag.originX + event.clientX - settingsDrag.x,
+    y: settingsDrag.originY + event.clientY - settingsDrag.y,
+  };
+}
+
+function stopSettingsDrag(): void {
+  settingsDrag = null;
+}
 
 function requestCloseSettings(): void {
   if (!settingsModalState.open || settingsLeaving.value) return;
@@ -604,6 +642,7 @@ watch(
       return;
     }
     settingsLeaving.value = false;
+    settingsOffset.value = { x: 0, y: 0 };
     settingsVisible.value = false;
     requestAnimationFrame(() => {
       settingsVisible.value = true;
@@ -623,42 +662,43 @@ onBeforeUnmount(() => {
     class="overlay settings-overlay"
     :class="{ open: settingsVisible && !settingsLeaving, leaving: settingsLeaving }"
   >
+    <div
+      class="settings-modal-position"
+      :style="{ '--settings-x': `${settingsOffset.x}px`, '--settings-y': `${settingsOffset.y}px` }"
+      @pointerdown="startSettingsDrag"
+      @pointermove="moveSettingsDrag"
+      @pointerup="stopSettingsDrag"
+      @pointercancel="stopSettingsDrag"
+    >
     <div class="settings-modal" role="dialog" aria-modal="true" aria-label="偏好设置">
       <!-- 左侧导航栏 -->
       <aside class="settings-nav">
-        <div class="settings-brand">
-          <span class="settings-brand-icon" v-html="icons.gear" />
-          <div>
-            <div class="settings-brand-title">偏好设置</div>
-            <div class="settings-brand-sub">Pi Desktop · Ctrl+,</div>
-          </div>
-        </div>
+        <label class="settings-search">
+          <span v-html="icons.search" />
+          <input v-model="settingsQuery" type="search" placeholder="搜索设置" />
+        </label>
 
         <nav class="settings-nav-list">
           <button
-            v-for="item in tabs"
+            v-for="item in visibleTabs"
             :key="item.id"
             type="button"
             class="settings-nav-item"
             :class="{ active: settingsModalState.tab === item.id }"
             @click="settingsModalState.tab = item.id"
           >
-            <span class="settings-nav-icon" v-html="item.icon" />
             <span>{{ item.label }}</span>
           </button>
         </nav>
-
-        <div class="settings-nav-foot">
-          <button type="button" class="btn ghost small" @click="handleResetAll">恢复默认设置</button>
-        </div>
       </aside>
 
       <!-- 右侧内容区 -->
       <section class="settings-main">
         <header class="settings-head">
-          <div>
-            <h2 class="settings-title">{{ currentTabMeta.label }}</h2>
-            <p class="settings-desc">{{ currentTabMeta.desc }}</p>
+          <div class="settings-breadcrumb">
+            <span>设置</span>
+            <span>›</span>
+            <strong>{{ currentTabMeta.label }}</strong>
           </div>
           <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
         </header>
@@ -674,22 +714,10 @@ onBeforeUnmount(() => {
                   <strong>发送消息快捷键</strong>
                   <span>选择输入框按下回车键时的默认发送方式</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.sendShortcut === 'enter' }"
-                    @click="appSettings.sendShortcut = 'enter'"
-                  >
-                    Enter 发送
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.sendShortcut === 'ctrl-enter' }"
-                    @click="appSettings.sendShortcut = 'ctrl-enter'"
-                  >
-                    Ctrl+Enter 发送
-                  </button>
-                </div>
+                <select v-model="appSettings.sendShortcut" class="settings-select">
+                  <option value="enter">Enter 发送</option>
+                  <option value="ctrl-enter">Ctrl+Enter 发送</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -697,22 +725,10 @@ onBeforeUnmount(() => {
                   <strong>运行中默认发送模式</strong>
                   <span>当当前会话正在执行任务时，继续发送新消息的默认处理策略</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.streamingMode === 'followUp' }"
-                    @click="appSettings.streamingMode = 'followUp'"
-                  >
-                    排队（结束后执行）
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.streamingMode === 'steer' }"
-                    @click="appSettings.streamingMode = 'steer'"
-                  >
-                    引导（立即插入）
-                  </button>
-                </div>
+                <select v-model="appSettings.streamingMode" class="settings-select">
+                  <option value="followUp">排队（结束后执行）</option>
+                  <option value="steer">引导（立即插入）</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -736,36 +752,12 @@ onBeforeUnmount(() => {
                   <strong>修改文件自动保存</strong>
                   <span>控制在代码编辑器中修改项目文件后的自动落盘保存策略</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.autoSave === 'off' }"
-                    @click="appSettings.autoSave = 'off'"
-                  >
-                    关闭
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.autoSave === 'afterDelay' }"
-                    @click="appSettings.autoSave = 'afterDelay'"
-                  >
-                    延迟保存
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.autoSave === 'onFocusChange' }"
-                    @click="appSettings.autoSave = 'onFocusChange'"
-                  >
-                    失焦时
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.autoSave === 'onWindowChange' }"
-                    @click="appSettings.autoSave = 'onWindowChange'"
-                  >
-                    切窗口时
-                  </button>
-                </div>
+                <select v-model="appSettings.autoSave" class="settings-select">
+                  <option value="off">关闭</option>
+                  <option value="afterDelay">延迟保存</option>
+                  <option value="onFocusChange">失焦时</option>
+                  <option value="onWindowChange">切窗口时</option>
+                </select>
               </div>
 
               <div class="settings-row" :class="{ 'is-disabled': appSettings.autoSave !== 'afterDelay' }">
@@ -779,19 +771,11 @@ onBeforeUnmount(() => {
                     }}
                   </span>
                 </div>
-                <div class="settings-Segmented-range">
-                  <button
-                    v-for="ms in [500, 1000, 2000, 3000]"
-                    :key="ms"
-                    type="button"
-                    class="settings-chip-btn"
-                    :disabled="appSettings.autoSave !== 'afterDelay'"
-                    :class="{ active: appSettings.autoSave === 'afterDelay' && appSettings.autoSaveDelay === ms }"
-                    @click="appSettings.autoSaveDelay = ms"
-                  >
+                <select v-model.number="appSettings.autoSaveDelay" class="settings-select" :disabled="appSettings.autoSave !== 'afterDelay'">
+                  <option v-for="ms in [500, 1000, 2000, 3000]" :key="ms" :value="ms">
                     {{ ms >= 1000 ? `${ms / 1000}s` : `${ms}ms` }}
-                  </button>
-                </div>
+                  </option>
+                </select>
               </div>
             </div>
 
@@ -803,17 +787,9 @@ onBeforeUnmount(() => {
                   <strong>单目录温备 Worker 进程上限</strong>
                   <span>同一项目目录支持任意数量任务同时并行运行；此项控制任务结束后保留的空闲温备进程数（切换更快）</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    v-for="num in [1, 2, 3, 5]"
-                    :key="num"
-                    type="button"
-                    :class="{ active: appSettings.maxIdleWorkers === num }"
-                    @click="appSettings.maxIdleWorkers = num"
-                  >
-                    {{ num }} 个
-                  </button>
-                </div>
+                <select v-model.number="appSettings.maxIdleWorkers" class="settings-select">
+                  <option v-for="num in [1, 2, 3, 5]" :key="num" :value="num">{{ num }} 个</option>
+                </select>
               </div>
 
               <label class="settings-row clickable">
@@ -852,24 +828,10 @@ onBeforeUnmount(() => {
                   <strong>界面主题</strong>
                   <span>在深色（JetBrains Dark）与浅色模式之间切换</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    type="button"
-                    :class="{ active: state.theme === 'dark' }"
-                    @click="workbench.setTheme('dark')"
-                  >
-                    <span class="settings-inline-icon" v-html="icons.moon" />
-                    深色模式
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: state.theme === 'light' }"
-                    @click="workbench.setTheme('light')"
-                  >
-                    <span class="settings-inline-icon" v-html="icons.sun" />
-                    浅色模式
-                  </button>
-                </div>
+                <select class="settings-select" :value="state.theme" @change="workbench.setTheme(($event.target as HTMLSelectElement).value as 'dark' | 'light')">
+                  <option value="dark">深色模式</option>
+                  <option value="light">浅色模式</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -877,22 +839,10 @@ onBeforeUnmount(() => {
                   <strong>对话排版紧凑度</strong>
                   <span>调整 Agent 对话区消息流与工具卡片的垂直间距</span>
                 </div>
-                <div class="settings-segmented">
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.messageDensity === 'comfortable' }"
-                    @click="appSettings.messageDensity = 'comfortable'"
-                  >
-                    舒适
-                  </button>
-                  <button
-                    type="button"
-                    :class="{ active: appSettings.messageDensity === 'compact' }"
-                    @click="appSettings.messageDensity = 'compact'"
-                  >
-                    紧凑
-                  </button>
-                </div>
+                <select v-model="appSettings.messageDensity" class="settings-select">
+                  <option value="comfortable">舒适</option>
+                  <option value="compact">紧凑</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -900,18 +850,9 @@ onBeforeUnmount(() => {
                   <strong>界面字体大小</strong>
                   <span>全局界面与对话正文字号（当前 {{ appSettings.uiFontSize }}px）</span>
                 </div>
-                <div class="settings-Segmented-range">
-                  <button
-                    v-for="sz in [12, 13, 14, 15]"
-                    :key="sz"
-                    type="button"
-                    class="settings-chip-btn"
-                    :class="{ active: appSettings.uiFontSize === sz }"
-                    @click="appSettings.uiFontSize = sz"
-                  >
-                    {{ sz }}px
-                  </button>
-                </div>
+                <select v-model.number="appSettings.uiFontSize" class="settings-select">
+                  <option v-for="sz in [12, 13, 14, 15]" :key="sz" :value="sz">{{ sz }}px</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -919,18 +860,9 @@ onBeforeUnmount(() => {
                   <strong>代码与终端字体大小</strong>
                   <span>代码块、Diff 视图与 Bash 输出字号（当前 {{ appSettings.codeFontSize }}px）</span>
                 </div>
-                <div class="settings-Segmented-range">
-                  <button
-                    v-for="sz in [11.5, 12.5, 13.5, 14.5]"
-                    :key="sz"
-                    type="button"
-                    class="settings-chip-btn"
-                    :class="{ active: appSettings.codeFontSize === sz }"
-                    @click="appSettings.codeFontSize = sz"
-                  >
-                    {{ sz }}px
-                  </button>
-                </div>
+                <select v-model.number="appSettings.codeFontSize" class="settings-select">
+                  <option v-for="sz in [11.5, 12.5, 13.5, 14.5]" :key="sz" :value="sz">{{ sz }}px</option>
+                </select>
               </div>
 
               <div class="settings-row">
@@ -938,18 +870,9 @@ onBeforeUnmount(() => {
                   <strong>界面缩放</strong>
                   <span>整体界面缩放比例，替代快捷键缩放（当前 {{ Math.round(appSettings.uiZoom * 100) }}%）</span>
                 </div>
-                <div class="settings-Segmented-range">
-                  <button
-                    v-for="z in [0.8, 0.9, 1, 1.1, 1.25, 1.5]"
-                    :key="z"
-                    type="button"
-                    class="settings-chip-btn"
-                    :class="{ active: appSettings.uiZoom === z }"
-                    @click="appSettings.uiZoom = z"
-                  >
-                    {{ Math.round(z * 100) }}%
-                  </button>
-                </div>
+                <select v-model.number="appSettings.uiZoom" class="settings-select">
+                  <option v-for="z in [0.8, 0.9, 1, 1.1, 1.25, 1.5]" :key="z" :value="z">{{ Math.round(z * 100) }}%</option>
+                </select>
               </div>
             </div>
 
@@ -992,7 +915,7 @@ onBeforeUnmount(() => {
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>扩展工具面板（右侧插件面板）</strong>
-                  <span>展示项目文件树、变更汇总、Git 树等插件列表 · 范围 200px – 640px，当前 {{ state.panelWidth }}px</span>
+                  <span>展示项目文件树、变更汇总、Git 树等插件列表 · 范围 290px – 640px，当前 {{ state.panelWidth }}px</span>
                 </div>
                 <input
                   type="range"
@@ -1043,23 +966,10 @@ onBeforeUnmount(() => {
               <div v-if="mcpJsonImportOpen" class="settings-card-form">
                 <div class="settings-form-head">
                   <strong>从 JSON 导入 MCP 服务配置</strong>
-                  <div class="settings-segmented">
-                    <button
-                      type="button"
-                      :class="{ active: mcpJsonScope === 'global' }"
-                      @click="mcpJsonScope = 'global'"
-                    >
-                      全局配置
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="!state.activeCwd"
-                      :class="{ active: mcpJsonScope === 'project' }"
-                      @click="mcpJsonScope = 'project'"
-                    >
-                      当前项目 (.pi/mcp.json)
-                    </button>
-                  </div>
+                  <select v-model="mcpJsonScope" class="settings-select">
+                    <option value="global">全局配置</option>
+                    <option value="project" :disabled="!state.activeCwd">当前项目 (.pi/mcp.json)</option>
+                  </select>
                 </div>
                 <textarea
                   v-model="mcpJsonText"
@@ -1085,23 +995,10 @@ onBeforeUnmount(() => {
               <div v-if="mcpFormOpen" class="settings-card-form">
                 <div class="settings-form-head">
                   <strong>{{ mcpForm.editingName ? `编辑服务「${mcpForm.editingName}」` : "新增 MCP 服务" }}</strong>
-                  <div class="settings-segmented">
-                    <button
-                      type="button"
-                      :class="{ active: mcpForm.scope === 'global' }"
-                      @click="mcpForm.scope = 'global'"
-                    >
-                      全局 (~/.pi/agent/mcp.json)
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="!state.activeCwd"
-                      :class="{ active: mcpForm.scope === 'project' }"
-                      @click="mcpForm.scope = 'project'"
-                    >
-                      当前项目 (.pi/mcp.json)
-                    </button>
-                  </div>
+                  <select v-model="mcpForm.scope" class="settings-select">
+                    <option value="global">全局 (~/.pi/agent/mcp.json)</option>
+                    <option value="project" :disabled="!state.activeCwd">当前项目 (.pi/mcp.json)</option>
+                  </select>
                 </div>
 
                 <div class="settings-form-grid">
@@ -1117,22 +1014,10 @@ onBeforeUnmount(() => {
 
                   <div class="settings-field">
                     <span>传输类型</span>
-                    <div class="settings-segmented">
-                      <button
-                        type="button"
-                        :class="{ active: mcpForm.type === 'stdio' }"
-                        @click="mcpForm.type = 'stdio'"
-                      >
-                        STDIO 本地进程
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ active: mcpForm.type === 'http' }"
-                        @click="mcpForm.type = 'http'"
-                      >
-                        HTTP 远程服务
-                      </button>
-                    </div>
+                    <select v-model="mcpForm.type" class="settings-select">
+                      <option value="stdio">STDIO 本地进程</option>
+                      <option value="http">HTTP 远程服务</option>
+                    </select>
                   </div>
                 </div>
 
@@ -1370,24 +1255,10 @@ onBeforeUnmount(() => {
                     :disabled="pkgBusy"
                     @keydown.enter.prevent="installPackage"
                   />
-                  <div class="settings-segmented">
-                    <button
-                      type="button"
-                      :class="{ active: !pkgInstallLocal }"
-                      @click="pkgInstallLocal = false"
-                    >
-                      全局安装
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="!state.activeCwd"
-                      :class="{ active: pkgInstallLocal }"
-                      title="写入当前项目的 .pi/settings.json (-l)"
-                      @click="pkgInstallLocal = true"
-                    >
-                      当前项目 (-l)
-                    </button>
-                  </div>
+                  <select v-model="pkgInstallLocal" class="settings-select">
+                    <option :value="false">全局安装</option>
+                    <option :value="true" :disabled="!state.activeCwd">当前项目 (-l)</option>
+                  </select>
                   <button
                     type="button"
                     class="btn small"
@@ -1557,21 +1428,11 @@ onBeforeUnmount(() => {
               <div class="settings-group-head">
                 <span class="settings-group-title">已加载的技能（{{ visibleSkills.length }}）</span>
                 <div class="settings-toolbar-actions">
-                  <div class="settings-segmented">
-                    <button
-                      v-for="opt in [
-                        { value: 'all', label: '全部' },
-                        { value: 'user', label: '全局' },
-                        { value: 'project', label: '当前项目' },
-                      ]"
-                      :key="opt.value"
-                      type="button"
-                      :class="{ active: skillsFilter === opt.value }"
-                      @click="skillsFilter = opt.value as typeof skillsFilter"
-                    >
-                      {{ opt.label }}
-                    </button>
-                  </div>
+                  <select v-model="skillsFilter" class="settings-select">
+                    <option value="all">全部</option>
+                    <option value="user">全局</option>
+                    <option value="project">当前项目</option>
+                  </select>
                   <button type="button" class="btn ghost small" :disabled="skillsLoading" @click="loadSkillsOverview">
                     <span class="settings-inline-icon" v-html="icons.refresh" />
                     刷新
@@ -1624,21 +1485,12 @@ onBeforeUnmount(() => {
 
             <div v-if="skillsData" class="settings-group">
               <div class="settings-group-title">技能目录</div>
-              <div class="settings-row">
+              <div v-for="dir in skillsData.directories" :key="dir.path" class="settings-row">
                 <div class="settings-row-info">
-                  <strong>全局技能目录</strong>
-                  <span class="settings-mono-line">{{ skillsData.globalSkillsDir }}</span>
+                  <strong>{{ dir.label }}</strong>
+                  <span class="settings-mono-line">{{ dir.path }}</span>
                 </div>
-                <button type="button" class="btn ghost small" @click="workbench.reveal(skillsData.globalSkillsDir)">
-                  在文件夹中显示
-                </button>
-              </div>
-              <div v-if="skillsData.projectSkillsDir" class="settings-row">
-                <div class="settings-row-info">
-                  <strong>当前项目技能目录</strong>
-                  <span class="settings-mono-line">{{ skillsData.projectSkillsDir }}</span>
-                </div>
-                <button type="button" class="btn ghost small" @click="workbench.reveal(skillsData.projectSkillsDir)">
+                <button type="button" class="btn ghost small" @click="workbench.reveal(dir.path)">
                   在文件夹中显示
                 </button>
               </div>
@@ -1762,24 +1614,10 @@ onBeforeUnmount(() => {
                   <span>使用识别到的 Pi 执行更新，由它按实际安装方式（npm、pnpm 或官方安装器）处理；完成后展示版本变化与输出</span>
                 </div>
                 <div style="display: flex; gap: 6px; flex: none; align-items: center;">
-                  <div class="settings-segmented" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
-                    <button
-                      type="button"
-                      :class="{ active: appSettings.piUpdateScope !== 'all' }"
-                      :disabled="state.pi.updating"
-                      @click="appSettings.piUpdateScope = 'self'"
-                    >
-                      pi update
-                    </button>
-                    <button
-                      type="button"
-                      :class="{ active: appSettings.piUpdateScope === 'all' }"
-                      :disabled="state.pi.updating"
-                      @click="appSettings.piUpdateScope = 'all'"
-                    >
-                      update --all
-                    </button>
-                  </div>
+                  <select v-model="appSettings.piUpdateScope" class="settings-select" :disabled="state.pi.updating" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
+                    <option value="self">pi update</option>
+                    <option value="all">update --all</option>
+                  </select>
                   <button
                     type="button"
                     class="btn ghost small"
@@ -1831,7 +1669,13 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </div>
+        <footer class="settings-footer">
+          <button type="button" class="btn ghost" @click="handleResetAll">恢复默认</button>
+          <button type="button" class="btn primary" @click="requestCloseSettings">确定</button>
+          <button type="button" class="btn" @click="requestCloseSettings">关闭</button>
+        </footer>
       </section>
+    </div>
     </div>
   </div>
 </template>

@@ -390,7 +390,8 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
       </section>
 
       <div v-if="!projects.length" class="tasks-empty">
-        <p>还没有打开过项目。</p>
+        <p>还没有打开项目</p>
+        <span>打开本地目录后即可创建任务。</span>
         <button class="btn" @click="workbench.chooseAndOpen()">打开项目目录</button>
       </div>
     </div>
