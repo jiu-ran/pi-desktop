@@ -109,13 +109,13 @@ const piTitle = computed(() => {
         {{ connLabel }}
       </span>
       <button
-        v-if="pi.updateAvailable"
+        v-if="state.appUpdate.updateAvailable || pi.updateAvailable"
         class="status-item clickable pi-update-hint"
-        :title="`Pi ${pi.latest} 可用，当前 ${pi.version}。点击打开设置更新`"
+        :title="state.appUpdate.updateAvailable ? `Pi Desktop ${state.appUpdate.latest} 已发布，当前 ${state.appUpdate.current}` : `Pi ${pi.latest} 可用，当前 ${pi.version}`"
         @click="openSettingsModal('environment')"
       >
         <span class="pi-update-dot" />
-        有新版本 {{ pi.latest }}
+        有新版本 {{ state.appUpdate.updateAvailable ? state.appUpdate.latest : pi.latest }}
       </button>
 
       <button

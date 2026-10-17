@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdir, stat as fsStat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
@@ -159,6 +160,130 @@ async function checkPiUpdate(customPath = ""): Promise<PiUpdateCheck> {
   return { current, latest, updateAvailable: latest !== current };
 }
 
+export interface AppUpdateCheck {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+  url: string;
+  assetName: string;
+  error?: string;
+}
+
+interface AppReleaseAsset {
+  name?: string;
+  browser_download_url?: string;
+  size?: number;
+}
+
+interface AppRelease {
+  tag_name?: string;
+  html_url?: string;
+  draft?: boolean;
+  prerelease?: boolean;
+  assets?: AppReleaseAsset[];
+}
+
+interface PreparedAppUpdate {
+  version: string;
+  url: string;
+  assetName: string;
+  filePath: string;
+}
+
+const APP_RELEASES_URL = "https://api.github.com/repos/jiu-ran/pi-desktop/releases?per_page=20";
+const preparedUpdates = new Map<string, PreparedAppUpdate>();
+
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) => value.replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const delta = (a[index] ?? 0) - (b[index] ?? 0);
+    if (delta) return delta;
+  }
+  return 0;
+}
+
+function preferredUpdateAsset(assets: AppReleaseAsset[] = []): AppReleaseAsset | undefined {
+  const patterns = process.platform === "win32"
+    ? [/\.exe$/i, /win.*\.zip$/i]
+    : process.platform === "darwin"
+      ? [/\.dmg$/i, /mac.*\.zip$/i]
+      : [/\.AppImage$/i, /linux.*\.tar\.gz$/i];
+  return patterns.map((pattern) => assets.find((asset) => pattern.test(asset.name ?? ""))).find(Boolean);
+}
+
+async function fetchStableRelease(): Promise<{ current: string; release?: AppRelease; error?: string }> {
+  const current = app.getVersion();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(APP_RELEASES_URL, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Pi-Desktop" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return { current, error: "无法查询 Pi Desktop 更新" };
+    const releases = await response.json() as AppRelease[];
+    const stable = releases
+      .filter((release) => !release.draft && !release.prerelease && /^v?\d+(?:\.\d+){1,3}$/i.test(release.tag_name ?? ""))
+      .sort((left, right) => compareVersions(right.tag_name ?? "", left.tag_name ?? ""));
+    return { current, release: stable[0] };
+  } catch {
+    return { current, error: "无法连接 GitHub，请检查网络" };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function checkAppUpdate(): Promise<AppUpdateCheck> {
+  const { current, release, error } = await fetchStableRelease();
+  if (error || !release) return { current, latest: "", updateAvailable: false, url: "", assetName: "", error: error ?? "尚未发现可用的正式版本" };
+  const latest = (release.tag_name ?? "").replace(/^v/i, "");
+  const asset = preferredUpdateAsset(release.assets);
+  return {
+    current,
+    latest,
+    updateAvailable: compareVersions(latest, current) > 0,
+    url: release.html_url ?? "",
+    assetName: asset?.name ?? "",
+  };
+}
+
+async function downloadAppUpdate(): Promise<PreparedAppUpdate> {
+  const { current, release, error } = await fetchStableRelease();
+  if (error || !release) throw new Error(error ?? "尚未发现可用的正式版本");
+  const latest = (release.tag_name ?? "").replace(/^v/i, "");
+  if (compareVersions(latest, current) <= 0) throw new Error("当前已是最新版本");
+  const asset = preferredUpdateAsset(release.assets);
+  if (!asset?.browser_download_url || !asset.name) throw new Error("该版本没有适用于当前系统的安装包");
+  const directory = path.join(app.getPath("userData"), "updates");
+  await mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, path.basename(asset.name));
+  const response = await fetch(asset.browser_download_url, { headers: { "User-Agent": "Pi-Desktop" } });
+  if (!response.ok || !response.body) throw new Error("安装包下载失败");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    chunks.push(chunk.value);
+  }
+  await writeFile(filePath, Buffer.concat(chunks));
+  const stat = await fsStat(filePath);
+  if (asset.size && stat.size !== asset.size) throw new Error("安装包大小校验失败");
+  const prepared = { version: latest, url: release.html_url ?? "", assetName: asset.name, filePath };
+  preparedUpdates.set(latest, prepared);
+  return prepared;
+}
+
+async function installPreparedUpdate(version: string): Promise<void> {
+  const prepared = preparedUpdates.get(version);
+  if (!prepared) throw new Error("请先下载并准备更新");
+  const error = await shell.openPath(prepared.filePath);
+  if (error) throw new Error(error);
+  setTimeout(() => app.quit(), 300);
+}
+
 export interface PiUpdateResult {
   ok: boolean;
   from: string;
@@ -298,6 +423,13 @@ function handle(channel: string, fn: (...args: any[]) => any) {
 app.whenReady().then(() => {
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
+  handle("app:check-update", () => checkAppUpdate());
+  handle("app:download-update", () => downloadAppUpdate());
+  handle("app:install-update", (version = "") => installPreparedUpdate(version));
+  handle("app:open-update", (url = "") => {
+    if (!isAllowedExternalUrl(url)) return false;
+    return shell.openExternal(url).then(() => true, () => false);
+  });
   handle("pi:update", (customPath = "", scope: "self" | "all" = "self") => updatePi(customPath, scope === "all" ? "all" : "self"));
   // 界面缩放完全由设置页控制（不再设全局快捷键，避免与输入法/阅读器冲突）。
   handle("pi:set-zoom", (factor: number) => {

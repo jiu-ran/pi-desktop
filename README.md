@@ -4,9 +4,9 @@
 
 桌面端不内置 Pi 的推理与工具执行，而是通过 RPC 驱动用户已安装的 `pi`。同时，桌面端会读取会话 JSONL，并通过宿主层管理已暴露的 Pi 配置与资源（全局 / 项目 MCP、软件包、Skills 和设置）；默认使用 `~/.pi/agent`，也支持 `PI_CODING_AGENT_DIR` 覆盖。项目文件操作仍限制在当前工作区目录内。
 
-## 下载与安装（v0.1.0）
+## 下载与安装
 
-- **预构建安装包 / 便携包**：前往 [GitHub Releases (v0.1.0)](https://github.com/jiu-ran/pi-desktop/releases/tag/v0.1.0) 下载对应系统版本（Windows `.exe` / `.zip`、macOS `.dmg` / `.zip`、Linux `.AppImage` / `.tar.gz`）。
+- **预构建安装包 / 便携包**：前往 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载对应系统的最新版本（Windows `.exe` / `.zip`、macOS `.dmg` / `.zip`、Linux `.AppImage` / `.tar.gz`）。
 - **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）。
 
 ## 从源码运行与打包
@@ -33,7 +33,8 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 - 每个工作区可以保留多个 Worker 以支持并行任务；空闲 Worker 数量可在设置中调整（1–8），后台任务完成时可发送通知。
 - 对话中的 Markdown 使用 `markstream-vue` 渲染，助手消息支持一键复制 Markdown 源文。
 - ` ```mermaid ` 代码块可渲染为流程图、时序图等图表；图表按 SVG 实际宽高比自动收缩预览区域，避免扁图被固定的大容器撑开。
-- 可通过插件管理停用 Mermaid 或 Markdown 能力；停用 Mermaid 后代码块回退为普通代码显示。
+- 对话和 Markdown 文件中的代码块使用 Shiki 按语言进行语法高亮，并跟随深色 / 浅色主题。
+- 打开 `.md` 文件时，源码编辑区也会显示 Markdown 语法高亮；可在插件管理中停用 Markdown 插件并恢复纯文本编辑。
 
 ### 项目文件
 
@@ -49,6 +50,7 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 - **RPC 事件**：实时查看 Pi 子进程发出的 JSON-RPC 事件及完整载荷，并可复制 JSON。
 - **插件管理**：按“对话区域 / 文件区域 / 扩展工具”分组启用或停用插件；核心插件不可停用，选择会保存在本地。
 - **主题与设置**：切换深色 / 浅色主题，配置发送快捷键、消息密度、自动保存、Worker 上限、自动压缩 / 重试、Pi 软件包、Skills、MCP 和插件。
+- **软件更新**：启动时可检查 Pi Desktop 的 GitHub Release；发现新版本后在标题栏和设置页提示，并由用户手动打开下载页面。
 
 ## 架构
 
@@ -73,7 +75,7 @@ main.ts                 组合根：创建内核、注册内置插件
 | `git` | 扩展工具 | Git 提交树、状态和详情 |
 | `events` | 扩展工具 | Pi JSON-RPC 事件流 |
 | `plugin-manager` | 扩展工具 | 管理插件启停；自身为核心插件 |
-| `markdown` | 文件区域 | `.md` / `.markdown` / `.mdx` 文件源代码与实时预览 |
+| `markdown` | 文件区域 / 对话区域 | `.md` 源码高亮、实时预览，以及对话代码块语法高亮 |
 | `mermaid` | 对话区域 | 对话和 Markdown 文件中的 Mermaid 图表；与 Markdown 渲染共用 |
 
 内置插件清单位于 [`packages/ui/src/plugins/index.ts`](packages/ui/src/plugins/index.ts)，插件生命周期和注册接口位于 [`packages/ui/src/kernel/plugin-manager.ts`](packages/ui/src/kernel/plugin-manager.ts)。插件停用时会执行其清理回调、取消订阅并关闭对应面板 / 详情标签。

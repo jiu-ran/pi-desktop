@@ -203,6 +203,22 @@ export interface PiLocation {
   path: string;
 }
 
+export interface AppUpdateCheck {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+  url: string;
+  assetName: string;
+  error?: string;
+}
+
+export interface PreparedAppUpdate {
+  version: string;
+  url: string;
+  assetName: string;
+  filePath: string;
+}
+
 export interface PiUpdateCheck {
   current: string;
   latest: string;
@@ -232,6 +248,10 @@ export interface PiDesktopBridge {
   locate: (customPath?: string) => Promise<PiLocation>;
   setZoomFactor: (factor: number) => Promise<number>;
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
+  checkAppUpdate: () => Promise<AppUpdateCheck>;
+  downloadAppUpdate: () => Promise<PreparedAppUpdate>;
+  installAppUpdate: (version: string) => Promise<void>;
+  openAppUpdate: (url: string) => Promise<boolean>;
   /** scope: self = pi update（默认）；all = pi update --all */
   updatePi: (customPath?: string, scope?: "self" | "all") => Promise<PiUpdateResult>;
   recent: () => Promise<string[]>;
