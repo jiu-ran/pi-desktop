@@ -45,6 +45,6 @@ const config = buildMermaidInitConfig(false);
 assert(config.theme === "base", "应使用 base 主题");
 assert(typeof config.themeVariables.fontFamily === "string", "应配置字体栈");
 assert(config.themeVariables.darkMode === false, "浅色主题 darkMode 应为 false");
-assert(!("defaultRenderer" in (config.flowchart ?? {})), "主题配置不应改流程图布局引擎");
+assert(config.flowchart.defaultRenderer === "elk" && config.layout === "elk", "流程图应使用 elk 布局");
 
 console.log("mermaid-fit OK");

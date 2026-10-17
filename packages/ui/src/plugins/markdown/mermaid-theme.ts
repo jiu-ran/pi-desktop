@@ -218,21 +218,24 @@ export interface MermaidInitConfig {
   theme: "base";
   themeVariables: Record<string, string | boolean>;
   themeCSS: string;
-  flowchart: { htmlLabels?: boolean };
+  /** elk 对齐 Cursor 的纵向分层布局；htmlLabels 交给调用方的 strict 配置。 */
+  flowchart: { defaultRenderer: "elk"; htmlLabels?: boolean };
+  layout: "elk";
   securityLevel: "strict";
 }
 
 /**
  * 组装 init 配置。边线加粗半像素解决截图里“线太细发虚”的观感；
- * htmlLabels 保持库的 strict 行为（不碰安全边界）。
+ * 流程图固定 elk，避免 markstream 只传 htmlLabels 时退回 dagre。
  */
 export function buildMermaidInitConfig(isDark: boolean): MermaidInitConfig {
   const palette = isDark ? DARK : LIGHT;
   return {
     theme: "base",
     themeVariables: themeVariables(palette),
-    themeCSS: ".edgePath path{stroke-width:1.5px}.flowchart-link{stroke-width:1.5px}",
-    flowchart: {},
+    themeCSS: ".edgePath path{stroke-width:1.5px}.flowchart-link{stroke-width:1.5px}.node rect,.node polygon,.node circle{rx:8;ry:8}",
+    flowchart: { defaultRenderer: "elk" },
+    layout: "elk",
     securityLevel: "strict",
   };
 }

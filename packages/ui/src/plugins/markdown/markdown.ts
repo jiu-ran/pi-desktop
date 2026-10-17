@@ -50,9 +50,33 @@ let mermaidLoader: Promise<unknown> | null = null;
 async function loadMermaid(): Promise<unknown> {
   const mod = await import("mermaid") as Record<string, any>;
   const mermaid = mod.default ?? mod;
-  const { buildMermaidInitConfig } = await import("./mermaid-theme.ts");
-  const isDark = document.documentElement.dataset.theme !== "light";
-  if (typeof mermaid.initialize === "function") mermaid.initialize(buildMermaidInitConfig(isDark));
+  const [{ buildMermaidInitConfig }, elkMod] = await Promise.all([
+    import("./mermaid-theme.ts"),
+    import("@mermaid-js/layout-elk"),
+  ]);
+  const elk = (elkMod as Record<string, any>).default ?? elkMod;
+  if (typeof mermaid.registerLayoutLoaders === "function" && !mermaid.__piElkRegistered) {
+    mermaid.registerLayoutLoaders(elk);
+    mermaid.__piElkRegistered = true;
+  }
+  // markstream 每次渲染都会 initialize，并只带 htmlLabels。包一层把 elk 加回去，
+  // 否则流程图会退回 dagre，和 Cursor 的纵向分层不一样。
+  if (typeof mermaid.initialize === "function" && !mermaid.__piInitializeWrapped) {
+    const original = mermaid.initialize.bind(mermaid);
+    mermaid.initialize = (config: Record<string, any> = {}) => {
+      const isDark = document.documentElement.dataset.theme !== "light";
+      const ours = buildMermaidInitConfig(isDark);
+      original({
+        ...ours,
+        ...config,
+        theme: ours.theme,
+        themeVariables: { ...ours.themeVariables, ...config.themeVariables },
+        flowchart: { ...config.flowchart, defaultRenderer: "elk" },
+        layout: "elk",
+      });
+    };
+    mermaid.__piInitializeWrapped = true;
+  }
   return mod;
 }
 

@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@mermaid-js/layout-elk": "^0.2.3",
     "markstream-vue": "^2.0.19",
     "mermaid": "^11.17.2",
     "vue": "^3.5.13"
