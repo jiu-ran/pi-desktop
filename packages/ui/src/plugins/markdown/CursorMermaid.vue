@@ -7,7 +7,9 @@ const props = defineProps<{ node: { code?: string }; isDark?: boolean }>();
 const diagram = ref<CursorDiagram | null>(null);
 const error = ref("");
 const mode = ref<"preview" | "source">("preview");
-const zoom = ref(1);
+const baseZoom = 0.8;
+const zoom = ref(baseZoom);
+const zoomPercent = computed(() => Math.round((zoom.value / baseZoom) * 100));
 const fullscreen = ref(false);
 const dragging = ref(false);
 const panX = ref(0);
@@ -46,24 +48,6 @@ function path(points: Array<{ x: number; y: number }>): string {
   if (!points.length) return "";
   const [first, ...rest] = points;
   return `M ${first.x} ${first.y} ${rest.map((point) => `L ${point.x} ${point.y}`).join(" ")}`;
-}
-
-function verticalParts(label: string): string[] {
-  const parts: string[] = [];
-  let latin = "";
-  for (const char of label.trim()) {
-    if (/[A-Za-z0-9.+#/-]/.test(char)) {
-      latin += char;
-      continue;
-    }
-    if (latin) {
-      parts.push(latin);
-      latin = "";
-    }
-    if (!/\s/.test(char)) parts.push(char);
-  }
-  if (latin) parts.push(latin);
-  return parts;
 }
 
 function lines(label: string): string[] {
@@ -107,7 +91,7 @@ function onFullscreenWheel(event: WheelEvent): void {
   if (!event.ctrlKey && !event.metaKey) return;
   event.preventDefault();
   const next = zoom.value + (event.deltaY < 0 ? 0.1 : -0.1);
-  zoom.value = Math.min(2, Math.max(0.5, Number(next.toFixed(2))));
+  zoom.value = Math.min(baseZoom * 2, Math.max(baseZoom * 0.5, Number(next.toFixed(2))));
 }
 
 watch(fullscreen, (open) => {
@@ -126,10 +110,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <button type="button" :class="{ active: mode === 'preview' }" @click="mode = 'preview'">图表</button>
         <button type="button" :class="{ active: mode === 'source' }" @click="mode = 'source'">源码</button>
         <button type="button" @click="copySource">复制</button>
-        <button type="button" @click="zoom = Math.max(0.5, zoom - 0.1)">-</button>
-        <button type="button" @click="zoom = 1">{{ Math.round(zoom * 100) }}%</button>
-        <button type="button" @click="zoom = Math.min(2, zoom + 0.1)">+</button>
-        <button type="button" @click="fullscreen = true">全屏</button>
+        <button type="button" @click="zoom = Math.max(baseZoom * 0.5, zoom - 0.1)">-</button>
+        <button type="button" @click="zoom = baseZoom">{{ zoomPercent }}%</button>
+        <button type="button" @click="zoom = Math.min(baseZoom * 2, zoom + 0.1)">+</button>
+        <button type="button" title="全屏" aria-label="全屏" @click="fullscreen = true">⛶</button>
       </div>
     </header>
     <pre v-if="mode === 'source'">{{ code }}</pre>
@@ -147,9 +131,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         </defs>
         <g v-for="cluster in diagram.clusters" :key="cluster.id">
           <rect class="cursor-cluster-rect" :x="cluster.x" :y="cluster.y" :width="cluster.width" :height="cluster.height" rx="12" />
-          <text class="cursor-cluster-label" :x="cluster.labelX" :y="cluster.labelY" text-anchor="middle">
-            <tspan v-for="(part, index) in verticalParts(cluster.label)" :key="index" :x="cluster.labelVertical ? cluster.labelX : undefined" :dy="index === 0 ? 0 : cluster.labelVertical ? 16 : 0">{{ cluster.labelVertical ? part : index === 0 ? cluster.label : "" }}</tspan>
-          </text>
+          <text class="cursor-cluster-label" :x="cluster.labelX" :y="cluster.labelY">{{ cluster.label }}</text>
         </g>
         <g v-for="edge in diagram.edges" :key="edge.id" class="cursor-edge">
           <path :d="path(edge.points)" :marker-end="`url(#${markerId})`" />
@@ -178,9 +160,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <header>
           <span>Mermaid 全屏</span>
           <div>
-            <button type="button" @click="zoom = Math.max(0.5, zoom - 0.1)">-</button>
-            <button type="button" @click="zoom = 1">{{ Math.round(zoom * 100) }}%</button>
-            <button type="button" @click="zoom = Math.min(2, zoom + 0.1)">+</button>
+            <button type="button" @click="zoom = Math.max(baseZoom * 0.5, zoom - 0.1)">-</button>
+            <button type="button" @click="zoom = baseZoom">{{ zoomPercent }}%</button>
+            <button type="button" @click="zoom = Math.min(baseZoom * 2, zoom + 0.1)">+</button>
             <button type="button" @click="fullscreen = false">关闭</button>
           </div>
         </header>
@@ -200,9 +182,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </defs>
             <g v-for="cluster in diagram.clusters" :key="cluster.id">
               <rect class="cursor-cluster-rect" :x="cluster.x" :y="cluster.y" :width="cluster.width" :height="cluster.height" rx="12" />
-              <text class="cursor-cluster-label" :x="cluster.labelX" :y="cluster.labelY" text-anchor="middle">
-                <tspan v-for="(part, index) in verticalParts(cluster.label)" :key="index" :x="cluster.labelVertical ? cluster.labelX : undefined" :dy="index === 0 ? 0 : cluster.labelVertical ? 16 : 0">{{ cluster.labelVertical ? part : index === 0 ? cluster.label : "" }}</tspan>
-              </text>
+              <text class="cursor-cluster-label" :x="cluster.labelX" :y="cluster.labelY">{{ cluster.label }}</text>
             </g>
             <g v-for="edge in diagram.edges" :key="edge.id" class="cursor-edge">
               <path :d="path(edge.points)" :marker-end="`url(#${markerId}-full)`" />

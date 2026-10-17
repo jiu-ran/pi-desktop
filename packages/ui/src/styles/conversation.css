@@ -946,14 +946,13 @@
 .cursor-diagram svg { display: block; max-width: none; }
 .cursor-diagram rect { fill: #2a2d31; stroke: #8d9096; stroke-width: 1; }
 .cursor-cluster-rect { fill: #1d1f22; stroke: #8d9096; }
-.cursor-cluster-bar { fill: #24262a; stroke: #8d9096; }
 .cursor-diagram text { fill: #f2f3f5; font: 13px Inter, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: middle; }
 .cursor-cluster-label { fill: #f2f3f5; font-size: 14px; font-weight: 650; text-anchor: middle; dominant-baseline: middle; }
 .cursor-edge path { fill: none; stroke: #7eb6ff; stroke-width: 1.6; }
 .cursor-edge text { fill: #dcecff; }
 .cursor-edge-label { fill: #17304d; stroke: #7eb6ff; stroke-width: 1.4; }
 .cursor-diagram marker path { fill: #7eb6ff; }
-.cursor-diagram-fullscreen { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 28px; background: rgba(0, 0, 0, 0.62); }
+.cursor-diagram-fullscreen { position: fixed; z-index: 80; display: grid; place-items: center; padding: 28px; inset: 40px 0 0; background: rgba(0, 0, 0, 0.62); }
 .cursor-diagram-fullscreen .cursor-diagram { width: min(1400px, 100%); height: min(900px, 100%); }
 .cursor-diagram-fullscreen .cursor-diagram-view { max-height: none; height: calc(100% - 36px); overflow: hidden; cursor: grab; }
 .cursor-diagram-fullscreen svg { transform-origin: center center; }

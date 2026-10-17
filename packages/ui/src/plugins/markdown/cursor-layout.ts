@@ -19,8 +19,6 @@ export interface CursorCluster {
   height: number;
   labelX: number;
   labelY: number;
-  labelAnchor: "start" | "middle" | "end";
-  labelVertical: boolean;
 }
 
 export interface CursorEdge {
@@ -163,8 +161,6 @@ function collect(node: any, nodes: CursorNode[], clusters: CursorCluster[], pare
       height: node.height,
       labelX: x + node.width / 2,
       labelY: y + 18,
-      labelAnchor: "middle",
-      labelVertical: false,
     });
   } else if (node.id !== "root") {
     nodes.push({
@@ -267,22 +263,6 @@ export async function layoutCursorFlow(code: string): Promise<CursorDiagram> {
       labelHeight: 24,
     }];
   });
-  const hits = (edge: CursorEdge, left: number, top: number, right: number, bottom: number): boolean => edge.points.some((point, index) => {
-    const next = edge.points[index + 1];
-    if (!next) return false;
-    const vertical = point.x === next.x;
-    return vertical
-      ? point.x >= left && point.x <= right && Math.max(point.y, next.y) >= top && Math.min(point.y, next.y) <= bottom
-      : point.y >= top && point.y <= bottom && Math.max(point.x, next.x) >= left && Math.min(point.x, next.x) <= right;
-  });
-  const crosses = (cluster: CursorCluster, side: "left" | "right" | "top"): boolean => {
-    const box = side === "top"
-      ? [cluster.x + cluster.width / 2 - 55, cluster.y + 4, cluster.x + cluster.width / 2 + 55, cluster.y + 30]
-      : side === "left"
-        ? [cluster.x + 8, cluster.y + 4, cluster.x + 78, cluster.y + 30]
-        : [cluster.x + cluster.width - 78, cluster.y + 4, cluster.x + cluster.width - 8, cluster.y + 30];
-    return edges.some((edge) => hits(edge, box[0], box[1], box[2], box[3]));
-  };
   const inset = 28;
   for (const node of nodes) node.x += inset;
   for (const cluster of clusters) {
@@ -307,9 +287,6 @@ export async function layoutCursorFlow(code: string): Promise<CursorDiagram> {
     edge.labelX = x;
   }
   for (const cluster of clusters) {
-    const side = (["left", "right", "top"] as const).find((item) => !crosses(cluster, item)) ?? "top";
-    cluster.labelVertical = false;
-    cluster.labelAnchor = "middle";
     cluster.labelX = cluster.x + cluster.width / 2;
     cluster.labelY = cluster.y + 18;
   }
