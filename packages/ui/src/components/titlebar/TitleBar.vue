@@ -67,7 +67,7 @@ const piTitle = computed(() => {
 <template>
   <header class="titlebar">
     <div class="tb-left">
-      <span class="tb-logo" title="Pi Desktop">π</span>
+      <img class="tb-logo" src="../../assets/pi-icon.png" alt="Pi Desktop" title="Pi Desktop" />
       <button
         class="tb-btn"
         :class="{ active: state.sidebarOpen }"

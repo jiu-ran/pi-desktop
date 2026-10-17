@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { DefaultPackageManager, getAgentDir, loadSkills, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 const execFileAsync = promisify(execFile);
 
@@ -160,10 +160,16 @@ export interface PiSkillItem {
   disableModelInvocation: boolean;
 }
 
+export interface PiSkillDirectory {
+  label: string;
+  path: string;
+}
+
 export interface PiSkillsOverview {
   agentDir: string;
   globalSkillsDir: string;
   projectSkillsDir: string;
+  directories: PiSkillDirectory[];
   skills: PiSkillItem[];
   diagnostics: string[];
 }
@@ -1907,16 +1913,30 @@ export class PiHost {
     if (cwd) await assertRealWorkspacePath(cwd, path.resolve(cwd));
     const agentDir = this.agentDirPath();
     const effectiveCwd = cwd || homedir();
-    const result = loadSkills({
-      cwd: effectiveCwd,
-      agentDir,
-      skillPaths: [],
-      includeDefaults: true,
-    });
+    const globalSkillsDir = path.join(agentDir, "skills");
+    const projectSkillsDir = cwd ? path.join(effectiveCwd, ".pi", "skills") : "";
+    const userAgentsSkillsDir = path.join(homedir(), ".agents", "skills");
+    const directories = new Map<string, string>([
+      [path.resolve(globalSkillsDir), "全局技能目录"],
+      [path.resolve(userAgentsSkillsDir), "用户 Agent Skills"],
+    ]);
+    if (projectSkillsDir) directories.set(path.resolve(projectSkillsDir), "当前项目技能目录");
+    let dir = path.resolve(effectiveCwd);
+    while (cwd) {
+      directories.set(path.join(dir, ".agents", "skills"), "项目 Agent Skills");
+      if (existsSync(path.join(dir, ".git"))) break;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    const loader = new DefaultResourceLoader({ cwd: effectiveCwd, agentDir });
+    await loader.reload();
+    const result = loader.getSkills();
     return {
       agentDir,
-      globalSkillsDir: path.join(agentDir, "skills"),
-      projectSkillsDir: cwd ? path.join(effectiveCwd, ".pi", "skills") : "",
+      globalSkillsDir,
+      projectSkillsDir,
+      directories: [...directories].map(([skillPath, label]) => ({ label, path: skillPath })),
       skills: result.skills.map((skill) => ({
         name: skill.name,
         description: skill.description,

@@ -182,10 +182,16 @@ export interface PiSkillItem {
   disableModelInvocation: boolean;
 }
 
+export interface PiSkillDirectory {
+  label: string;
+  path: string;
+}
+
 export interface PiSkillsOverview {
   agentDir: string;
   globalSkillsDir: string;
   projectSkillsDir: string;
+  directories: PiSkillDirectory[];
   skills: PiSkillItem[];
   diagnostics: string[];
 }

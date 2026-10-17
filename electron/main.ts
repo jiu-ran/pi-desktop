@@ -224,6 +224,7 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: "#111214",
     title: "Pi Desktop",
+    icon: path.join(HERE, "../build/icon.png"),
     titleBarStyle: "hidden",
     titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#111214", symbolColor: "#a8adb5", height: TITLEBAR_HEIGHT },
     trafficLightPosition: { x: 14, y: 13 },

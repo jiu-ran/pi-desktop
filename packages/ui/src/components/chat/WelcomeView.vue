@@ -11,7 +11,7 @@ const recent = computed(() => state.recent.slice(0, 6));
 <template>
   <section class="welcome">
     <div class="welcome-card">
-      <div class="welcome-logo">π</div>
+      <img class="welcome-logo" src="../../assets/pi-icon.png" alt="Pi Desktop" />
 
       <template v-if="!state.pi.checked">
         <h1>正在查找本机 Pi…</h1>
@@ -24,10 +24,10 @@ const recent = computed(() => state.recent.slice(0, 6));
       </template>
 
       <template v-else>
-        <h1>开始一个任务</h1>
-        <p>选择项目目录。每个项目独立运行一个 <code>pi --mode rpc</code>，模型、密钥、Skills、MCP 与会话都沿用本机 Pi 的配置。</p>
+        <h1>Pi Desktop</h1>
+        <p>打开一个本地项目，开始编码、查看文件修改，并使用本机 Pi 的模型、Skills 与 MCP。</p>
         <div class="welcome-actions">
-          <button class="btn primary large" @click="workbench.chooseAndOpen()">打开项目目录</button>
+          <button class="btn primary large" @click="workbench.chooseAndOpen()">打开项目</button>
           <span class="version-tag">Pi {{ state.pi.version }}</span>
         </div>
 
