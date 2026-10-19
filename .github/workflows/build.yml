@@ -1,4 +1,4 @@
-name: Build Release Artifacts
+name: Build and Release
 
 on:
   push:
@@ -10,84 +10,111 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 构建
+          - os: windows-latest
+            platform: win
+            artifact_path: 'dist/Pi Desktop Setup*.exe'
+
+          # macOS Apple Silicon 构建
+          - os: macos-latest
+            platform: mac-arm64
+            artifact_path: 'dist/Pi.Desktop*.dmg'
+
+          # Linux 构建
+          - os: ubuntu-latest
+            platform: linux
+            artifact_path: 'dist/Pi.Desktop*.AppImage'
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm install
-      - run: npm install --prefix packages/ui
-      - run: npm run build
-      - run: npm run dist
-      - uses: actions/upload-artifact@v4
+
+      - name: Setup Python (macOS/Linux)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v4
         with:
-          name: windows
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install --prefix packages/ui
+
+      - name: Build UI
+        run: npm run build
+
+      - name: Build Electron
+        run: npm run build:electron
+
+      - name: Build and package (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win --publish never
+
+      - name: Build and package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: -
+        run: npx electron-builder --mac --publish never
+
+      - name: Build and package (Linux)
+        if: runner.os == 'Linux'
+        run: npx electron-builder --linux --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifacts
           path: |
             dist/Pi*.exe
+            dist/Pi*.msi
             dist/Pi*.zip
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm install
-      - run: npm install --prefix packages/ui
-      - run: npm run build
-      - run: npm run dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos
-          path: |
             dist/Pi*.dmg
-            dist/Pi*.zip
-
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: sudo apt-get update && sudo apt-get install -y libfuse2
-      - run: npm install
-      - run: npm install --prefix packages/ui
-      - run: npm run build
-      - run: npm run dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: |
             dist/Pi*.AppImage
             dist/pi-desktop*.tar.gz
 
   release:
-    needs: [build-windows, build-macos, build-linux]
+    needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Prepare files
+      - name: Flatten artifacts
         shell: bash
         run: |
-          mkdir -p release_files
-          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" \) -exec cp {} release_files/ \;
-          ls -lh release_files/
+          mkdir -p final_artifacts
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.msi" \) -exec cp {} final_artifacts/ \;
+          ls -lh final_artifacts/
 
-      - uses: softprops/action-gh-release@v1
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          files: release_files/*
+          files: final_artifacts/*
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
