@@ -1,0 +1,199 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 构建
+          - os: windows-latest
+            platform: win
+            target: 'win-unpacked'
+            artifact_path: 'dist/Pi Desktop Setup*.exe'
+
+          # macOS Intel 构建
+          - os: macos-13
+            platform: mac-intel
+            target: 'mac'
+            artifact_path: 'dist/Pi.Desktop*.dmg'
+
+          # macOS Apple Silicon 构建
+          - os: macos-latest
+            platform: mac-arm64
+            target: 'mac-arm64'
+            artifact_path: 'dist/Pi.Desktop*.dmg'
+
+          # Linux 构建
+          - os: ubuntu-latest
+            platform: linux
+            target: 'linux'
+            artifact_path: 'dist/Pi.Desktop*.AppImage'
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python (macOS/Linux)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install --prefix packages/ui
+
+      - name: Build UI
+        run: npm run build
+
+      - name: Build Electron
+        run: npm run build:electron
+
+      - name: Build and package (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win --publish never
+
+      - name: Build and package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: -
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --publish never
+
+      - name: Build and package (Linux)
+        if: runner.os == 'Linux'
+        run: npx electron-builder --linux --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifacts
+          path: |
+            dist/Pi*.exe
+            dist/Pi*.msi
+            dist/Pi*.zip
+            dist/Pi*.dmg
+            dist/Pi*.AppImage
+            dist/pi-desktop*.tar.gz
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p final_artifacts
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.msi" \) -exec cp {} final_artifacts/ \;
+          ls -lh final_artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: final_artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Release Notes
+        uses: actions/github-script@v7
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          script: |
+            const version = context.ref.replace('refs/tags/', '');
+            const body = `# Pi Desktop ${version}
+
+## 📦 Available Downloads
+
+### Windows
+- **Pi Desktop Setup ${version}.exe** - NSIS Installer (Recommended)
+- **Pi Desktop-${version}-win.zip** - Portable ZIP
+
+### macOS
+- **Pi.Desktop-${version}-arm64.dmg** - Apple Silicon (M1/M2/M3)
+- **Pi.Desktop-${version}-arm64-mac.zip** - Portable ZIP
+- **Pi.Desktop-${version}-x64.dmg** - Intel Mac
+- **Pi.Desktop-${version}-x64-mac.zip** - Portable ZIP
+
+### Linux
+- **Pi.Desktop-${version}.AppImage** - AppImage (Universal)
+- **pi-desktop-${version}.tar.gz** - Source Archive
+
+## 🚀 Quick Start
+
+### Windows
+1. Download and run the .exe installer, or
+2. Extract the .zip and run Pi Desktop.exe
+
+### macOS
+1. Download and open the .dmg file, or
+2. Extract the .zip and run the application
+
+### Linux
+1. Download the .AppImage and make it executable:
+   \`\`\`bash
+   chmod +x Pi.Desktop-${version}.AppImage
+   ./Pi.Desktop-${version}.AppImage
+   \`\`\`
+
+## ✨ Features
+- Electron + Vue 3 + TypeScript
+- Complete session management
+- Paginated message loading
+- Full proxy support
+- Auto-retry mechanism
+- Production-ready
+
+## 📋 System Requirements
+- Windows 7+ (x64)
+- macOS 10.13+ (Intel/Apple Silicon)
+- Linux with glibc 2.29+
+
+---
+
+**Release Date**: ${new Date().toISOString().split('T')[0]}
+**Built with**: Electron Builder | Node.js 22
+`;
+
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: body
+            });
