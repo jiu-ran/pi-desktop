@@ -25,11 +25,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/Pi*.exe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: dist/Pi*.zip
+          path: |
+            dist/Pi*.exe
+            dist/Pi*.zip
 
   build-macos:
     runs-on: macos-latest
@@ -78,11 +76,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
       - name: Prepare files
+        shell: bash
         run: |
           mkdir -p release_files
-          find artifacts -type f -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" | xargs -I {} cp {} release_files/
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" \) -exec cp {} release_files/ \;
           ls -lh release_files/
+
       - uses: softprops/action-gh-release@v1
         with:
           files: release_files/*
