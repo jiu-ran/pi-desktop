@@ -1,0 +1,6 @@
+node_modules
+packages/ui/node_modules
+packages/ui/dist
+dist-electron
+dist
+*.tsbuildinfo
