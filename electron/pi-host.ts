@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
+import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
+import { sessionTitleFromText } from "./session-title.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -345,7 +347,9 @@ function firstUserText(lines: string[]): string {
       if (message.role !== "user") continue;
       const content = message.content;
       const text = typeof content === "string" ? content : content?.find((part: any) => part.type === "text")?.text;
-      if (text) return String(text).replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      const title = sessionTitleFromText(text);
+      if (title) return title;
     } catch {
       // 跳过损坏行
     }
@@ -1039,100 +1043,21 @@ export class PiHost {
     return { state, models, levels, messages, sessions, commands, branch, workerStates };
   }
 
-  async loadMoreMessages(cwd: string, sessionFile: string, offset: number, limit: number = 8): Promise<{ messages: any[]; total: number }> {
+  /**
+   * 从会话文件读取一页历史消息。
+   * endIndex 为「不含」的结束下标；<= 0 表示取最新一页（末尾）。
+   */
+  async messagePage(
+    cwd: string,
+    sessionFile: string,
+    endIndex = 0,
+    limit = 8,
+  ): Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }> {
     try {
       assertSessionFile(cwd, sessionFile);
-      const messages = await this.readMessagesFromSessionFile(sessionFile, offset, limit);
-      const total = await this.getSessionMessageCount(sessionFile);
-      return { messages, total };
+      return await readSessionHistoryPage(sessionFile, endIndex, limit);
     } catch (error) {
-      throw new Error(`Failed to load more messages: ${error}`);
-    }
-  }
-
-  private async readMessagesFromSessionFile(sessionFile: string, offset: number = 0, limit: number = 8): Promise<any[]> {
-    const messages: any[] = [];
-    try {
-      const stats = await stat(sessionFile);
-      if (!stats.isFile()) return [];
-      
-      const content = await readFile(sessionFile, "utf8");
-      if (!content.trim()) return [];
-      
-      const lines = content.split(/\r?\n/);
-      let messageCount = 0;
-      let skippedHeader = false;
-      let collectedCount = 0;
-      
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        
-        try {
-          const obj = JSON.parse(line);
-          
-          // 跳过头部的元数据行（第一行通常没有 role 字段）
-          if (!skippedHeader && !obj.role) {
-            skippedHeader = true;
-            continue;
-          }
-          skippedHeader = true;
-          
-          // 仅处理有 role 字段的消息
-          if (!obj.role) continue;
-          
-          // 按照 offset/limit 分页
-          if (messageCount >= offset && collectedCount < limit) {
-            messages.push(obj);
-            collectedCount++;
-          }
-          messageCount++;
-          
-          // 已收集足够消息，提前退出
-          if (collectedCount >= limit) break;
-        } catch {
-          // 忽略无法解析的行
-        }
-      }
-    } catch {
-      return [];
-    }
-    return messages;
-  }
-
-  private async getSessionMessageCount(sessionFile: string): Promise<number> {
-    try {
-      const stats = await stat(sessionFile);
-      if (!stats.isFile()) return 0;
-      
-      const content = await readFile(sessionFile, "utf8");
-      if (!content.trim()) return 0;
-      
-      const lines = content.split(/\r?\n/);
-      let count = 0;
-      let skippedHeader = false;
-      
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        
-        try {
-          const obj = JSON.parse(line);
-          
-          // 跳过头部元数据行
-          if (!skippedHeader && !obj.role) {
-            skippedHeader = true;
-            continue;
-          }
-          skippedHeader = true;
-          
-          // 仅计数有 role 字段的消息
-          if (obj.role) count++;
-        } catch {
-          // 忽略无法解析的行
-        }
-      }
-      return count;
-    } catch {
-      return 0;
+      throw new Error(`读取会话历史失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1430,6 +1355,7 @@ export class PiHost {
       }
     }
     await this.trash(target);
+    clearSessionHistoryCache(target);
     return this.sessions(cwd);
   }
 

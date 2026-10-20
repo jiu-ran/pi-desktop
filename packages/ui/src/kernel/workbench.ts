@@ -13,6 +13,8 @@ import type {
 } from "../env.d.ts";
 
 const THEME_KEY = "pi-desktop.theme";
+/** 每页加载的历史消息条数 */
+const PAGE_SIZE = 8;
 const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
@@ -38,8 +40,10 @@ export interface SessionThreadState {
   draft: string;
   attachments: any[];
   loaded: boolean;
-  messageOffset: number;
-  messageTotalCount: number;
+  /** 当前已渲染的最早一条消息在会话历史中的下标；-1 表示未知（流式中或未就绪） */
+  historyStart: number;
+  /** 会话历史总条数（不含 system） */
+  messageTotal: number;
   loadingMore: boolean;
 }
 
@@ -153,8 +157,8 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       draft: "",
       attachments: [],
       loaded: false,
-      messageOffset: 0,
-      messageTotalCount: 0,
+      historyStart: -1,
+      messageTotal: 0,
       loadingMore: false,
     });
   }
@@ -322,12 +326,57 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     thread.streaming = Boolean(snap.state?.isStreaming);
     thread.compacting = Boolean(snap.state?.isCompacting);
 
-    if (!thread.loaded || (!thread.streaming && !snap.state?.isStreaming)) {
+    const initial = !thread.loaded;
+    if (initial) {
       thread.transcript.loadMessages(snap.messages ?? []);
       thread.loaded = true;
     }
+    // 仅在空闲时从会话文件补齐；流式中的内容由事件增量维护
+    if (!thread.streaming && !snap.state?.isStreaming) void hydrateHistory(ws, thread, initial);
 
     ws.sessionFile = file;
+  }
+
+  /**
+   * 用会话文件补齐历史：默认只渲染最新一页（8 条），
+   * 已向上翻过页的会话则重新加载「已渲染窗口」，保持滚动与分页进度不变。
+   */
+  async function hydrateHistory(ws: WorkspaceState, thread: SessionThreadState, initial = false): Promise<void> {
+    const file = thread.sessionFile;
+    if (!file) {
+      thread.historyStart = 0;
+      thread.messageTotal = thread.blocks.length;
+      return;
+    }
+    if (thread.streaming) return;
+    const loaded = thread.historyStart >= 0 && thread.messageTotal > thread.historyStart
+      ? thread.messageTotal - thread.historyStart
+      : 0;
+    // 多取一页：会话文件可能已追加新消息，保证原先已加载的更早消息不丢
+    const limit = Math.max(PAGE_SIZE, loaded + PAGE_SIZE);
+    try {
+      const page = await host.messagePage(ws.cwd, file, 0, limit);
+      if (disposed || workspaces.get(ws.cwd) !== ws) return;
+      if (thread.sessionFile !== file || thread.streaming) return;
+      if (page.total === 0) {
+        // 文件里还没有落盘消息（刚新建的会话），保留内存里的消息
+        thread.historyStart = 0;
+        thread.messageTotal = thread.blocks.length;
+        return;
+      }
+      // 非首次加载且内容没变：不重绘，避免用户上翻阅读时被拉回底部
+      if (!initial && thread.historyStart >= 0 && page.total === thread.messageTotal) return;
+      thread.transcript.loadMessages(page.messages);
+      thread.historyStart = page.startIndex;
+      thread.messageTotal = page.total;
+      thread.loaded = true;
+    } catch {
+      // 会话文件读不到时保留 getMessages() 的结果，不阻断会话打开
+      if (thread.historyStart < 0) {
+        thread.historyStart = 0;
+        thread.messageTotal = thread.blocks.length;
+      }
+    }
   }
 
   async function init(): Promise<void> {
@@ -532,6 +581,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     ws.attachments.push(...prepared.items.filter((item: any) => !known.has(item.path)));
   }
 
+  /** 粘贴剪贴板图片：主进程落盘到临时目录后作为普通附件加入 */
+  async function addPastedImage(payload: { name?: string; mimeType?: string; data: string }): Promise<void> {
+    const ws = active.value;
+    if (!ws) throw new Error("没有打开的工作区");
+    if (!host?.savePastedImage) throw new Error("当前环境不支持粘贴图片");
+    const file = await host.savePastedImage(payload);
+    if (!file) throw new Error("剪贴板图片保存失败");
+    await addFiles([file]);
+  }
+
   function extractDroppedPaths(dataTransfer: DataTransfer | null): string[] {
     if (!dataTransfer) return [];
     const collected: string[] = [];
@@ -734,8 +793,29 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (file && ws?.status === "ready") await switchSession(file);
   }
 
-  async function loadMoreMessages(cwd: string, sessionFile: string, offset: number, limit: number = 8): Promise<{ messages: any[]; total: number }> {
-    return host.loadMoreMessages(cwd, sessionFile, offset, limit);
+  /** 向上加载一页更早的历史消息（同时写入 transcript） */
+  async function loadMoreMessages(
+    cwd: string,
+    sessionFile: string,
+    limit: number = PAGE_SIZE,
+  ): Promise<{ loaded: number; startIndex: number; total: number }> {
+    const ws = workspaces.get(cwd);
+    const thread = ws ? ensureThread(ws, sessionFile) : null;
+    if (!thread || thread.loadingMore || thread.historyStart <= 0) {
+      return { loaded: 0, startIndex: thread?.historyStart ?? 0, total: thread?.messageTotal ?? 0 };
+    }
+    thread.loadingMore = true;
+    try {
+      const page = await host.messagePage(cwd, sessionFile, thread.historyStart, limit);
+      if (page.messages.length > 0) {
+        thread.transcript.prependMessages(page.messages);
+        thread.historyStart = page.startIndex;
+      }
+      thread.messageTotal = page.total;
+      return { loaded: page.messages.length, startIndex: page.startIndex, total: page.total };
+    } finally {
+      thread.loadingMore = false;
+    }
   }
 
   function call(method: string, ...args: any[]): Promise<any> {
@@ -1383,6 +1463,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     gitInspect,
     completePaths,
     addFiles,
+    addPastedImage,
     extractDroppedPaths,
     chooseFiles,
     chooseFolder,

@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   forget: (cwd: string) => ipcRenderer.invoke("pi:forget", cwd),
   chooseDirectory: () => ipcRenderer.invoke("pi:choose-directory"),
   chooseFiles: () => ipcRenderer.invoke("pi:choose-files"),
+  savePastedImage: (payload: { name?: string; mimeType?: string; data: string }) =>
+    ipcRenderer.invoke("pi:save-pasted-image", payload),
   chooseFolder: () => ipcRenderer.invoke("pi:choose-folder"),
   open: (cwd: string) => ipcRenderer.invoke("pi:open", cwd),
   snapshot: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:snapshot", cwd, sessionFile),
@@ -39,6 +41,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   completePaths: (cwd: string, query: string) => ipcRenderer.invoke("pi:complete-paths", cwd, query),
   restart: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:restart", cwd, sessionFile),
   sessions: (cwd: string) => ipcRenderer.invoke("pi:sessions", cwd),
+  messagePage: (cwd: string, file: string, endIndex = 0, limit = 8) =>
+    ipcRenderer.invoke("pi:message-page", cwd, file, endIndex, limit),
   deleteSession: (cwd: string, file: string) => ipcRenderer.invoke("pi:delete-session", cwd, file),
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => ipcRenderer.invoke("pi:remove-project", cwd, options),
   call: (cwd: string, method: string, args?: any[], sessionFile?: string) => ipcRenderer.invoke("pi:call", cwd, method, args, sessionFile),

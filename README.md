@@ -38,7 +38,7 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 
 ### 项目文件
 
-- 浏览、搜索和刷新项目文件树；文件可以拖拽到输入框作为附件。
+- 浏览、搜索和刷新项目文件树；文件可以拖拽到输入框作为附件，截图/图片可用 Ctrl+V 直接粘贴。
 - 在编辑器中打开文本文件，支持多标签、未保存状态、自动保存和 Markdown 预览。
 - 文件树和搜索结果提供常用右键操作：用系统程序打开、重命名、复制绝对路径、复制相对路径、在文件管理器中显示，以及将文件或文件夹移入回收站。
 - 项目根目录支持新建文件、新建文件夹、复制项目路径和在文件管理器中显示。
@@ -100,7 +100,7 @@ main.ts                 组合根：创建内核、注册内置插件
 | 插件 | `packages/ui/src/plugins/mermaid/` | Mermaid 插件启停生命周期 |
 | 渲染修复 | `packages/ui/src/plugins/markdown/mermaid-fit.ts` | 按 SVG 视图框比例修正 Mermaid 预览高度 |
 | 宿主 | `electron/pi-host.ts` | Pi Worker 池、白名单 RPC、文件系统操作 |
-| 自检 | `scripts/checks/` | transcript、Diff、宿主、删除、附件、文件树和 Mermaid 高度检查 |
+| 自检 | `scripts/checks/` | transcript、会话历史分页、会话标题、Diff、宿主、删除、附件、文件树和 Mermaid 高度检查 |
 
 ## 架构图
 

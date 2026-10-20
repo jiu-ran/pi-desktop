@@ -32,11 +32,11 @@ const prompts = [
 const changedFiles = computed(() => collectChanges(ws.value?.blocks));
 const changedTotals = computed(() => totals(changedFiles.value));
 
-// 检查是否还有更多消息可加载
+// 是否还有更早的消息可加载：historyStart > 0 表示还没读到文件开头
 const canLoadMore = computed(() => {
-  if (!ws.value?.activeThread) return false;
-  const { messageOffset, messageTotalCount } = ws.value.activeThread;
-  return messageOffset < messageTotalCount;
+  const thread = ws.value?.activeThread;
+  if (!thread) return false;
+  return thread.historyStart > 0 && !thread.loadingMore;
 });
 
 function onScroll(): void {
@@ -47,8 +47,8 @@ function onScroll(): void {
   
   // 检测是否滚到顶部，触发加载更多
   const isNearTop = el.scrollTop < 100;
-  if (isNearTop && canLoadMore.value && !isLoadingMore.value && !ws.value?.activeThread?.loadingMore) {
-    loadMoreMessages();
+  if (isNearTop && canLoadMore.value && !isLoadingMore.value) {
+    void loadMoreMessages();
   }
 }
 
@@ -80,97 +80,47 @@ function onSearchKey(event: KeyboardEvent): void {
 
 // 加载更多消息
 async function loadMoreMessages(): Promise<void> {
-  if (!ws.value?.activeThread) return;
-  
-  const { sessionFile, messageOffset, loadingMore, messageTotalCount } = ws.value.activeThread;
-  if (!sessionFile || loadingMore || messageOffset >= messageTotalCount) return;
-  
+  const thread = ws.value?.activeThread;
+  const cwd = ws.value?.cwd;
+  if (!thread || !cwd || !thread.sessionFile) return;
+  if (thread.loadingMore || thread.historyStart <= 0) return;
+
   // 防止连续触发
   const now = Date.now();
   if (now - messageLoadingThrottle.value < 500) return;
   messageLoadingThrottle.value = now;
-  
+
+  const scrollerEl = scroller.value;
+  const prevScrollHeight = scrollerEl?.scrollHeight ?? 0;
+  const prevScrollTop = scrollerEl?.scrollTop ?? 0;
+
   try {
     isLoadingMore.value = true;
-    ws.value.activeThread.loadingMore = true;
     loadMoreError.value = "";
-    
-    // 记录当前滚动位置
-    const scrollerEl = scroller.value;
-    const prevScrollHeight = scrollerEl?.scrollHeight ?? 0;
-    
-    // 调用后端加载消息
-    const result = await (workbench as any).loadMoreMessages?.(
-      ws.value.cwd,
-      sessionFile,
-      messageOffset,
-      8
-    );
-    
-    if (result?.messages && result.messages.length > 0) {
-      // 将消息插入到列表开头
-      ws.value.activeThread.transcript.prependMessages(result.messages);
-      
-      // 更新分页状态
-      ws.value.activeThread.messageOffset += result.messages.length;
-      ws.value.activeThread.messageTotalCount = result.total;
-      
-      // 保持滚动位置（防止突然跳跃）
-      void nextTick(() => {
-        if (scrollerEl) {
-          const newScrollHeight = scrollerEl.scrollHeight;
-          const heightDiff = newScrollHeight - prevScrollHeight;
-          scrollerEl.scrollTop += heightDiff;
-        }
-      });
-    } else if (!result?.messages || result.messages.length === 0) {
-      // 没有更多消息了
-      if (messageOffset > 0) {
-        // 不显示错误，只是表示已到顶部
-        loadMoreError.value = "";
-      }
+    const result = await workbench.loadMoreMessages(cwd, thread.sessionFile);
+    if (result.loaded === 0) {
+      // 已到文件开头
+      thread.historyStart = 0;
+      return;
     }
+    // 保持滚动位置（防止顶部插入后画面跳动）
+    void nextTick(() => {
+      if (!scrollerEl) return;
+      const heightDiff = scrollerEl.scrollHeight - prevScrollHeight;
+      scrollerEl.scrollTop = prevScrollTop + heightDiff;
+    });
   } catch (error: any) {
     console.error("Failed to load more messages:", error);
-    loadMoreError.value = `加载消息失败: ${error?.message ?? String(error)}`;
-    bus.emit("notify", { 
-      level: "error", 
-      text: loadMoreError.value
-    });
+    loadMoreError.value = `加载历史消息失败：${error?.message ?? String(error)}`;
+    bus.emit("notify", { level: "error", text: loadMoreError.value });
   } finally {
     isLoadingMore.value = false;
-    if (ws.value?.activeThread) {
-      ws.value.activeThread.loadingMore = false;
-    }
-  }
-}
-
-// 初始化时获取消息总数
-async function initializePaginationState(): Promise<void> {
-  if (!ws.value?.activeThread?.sessionFile) return;
-  
-  try {
-    const result = await (workbench as any).loadMoreMessages?.(
-      ws.value.cwd,
-      ws.value.activeThread.sessionFile,
-      0,
-      0  // limit=0 只获取总数
-    );
-    
-    if (result) {
-      ws.value.activeThread.messageTotalCount = result.total ?? 0;
-    }
-  } catch (error) {
-    console.error("Failed to get message count:", error);
   }
 }
 
 onMounted(() => {
   stopHeightChange = bus.on("markdown:height-change", () => scrollToBottom());
   window.addEventListener("keydown", onSearchKey);
-  
-  // 初始化分页状态
-  initializePaginationState();
 });
 
 onBeforeUnmount(() => {
@@ -193,10 +143,6 @@ watch(
   ],
   () => {
     scrollToBottom();
-    // 切换会话时重新初始化
-    if (ws.value?.activeThread?.sessionFile) {
-      initializePaginationState();
-    }
   },
 );
 
@@ -306,8 +252,8 @@ watch(searchMatches, () => {
           </div>
           
           <!-- 已加载全部消息提示 -->
-          <div v-if="!canLoadMore && ws.activeThread?.messageOffset > 0" class="all-loaded">
-            <span>✓ 已加载全部消息</span>
+          <div v-if="ws.activeThread && ws.activeThread.historyStart === 0 && ws.activeThread.messageTotal > 8" class="all-loaded">
+            <span>✓ 已加载全部 {{ ws.activeThread.messageTotal }} 条消息</span>
           </div>
           
           <div v-if="ws.loading && !ws.blocks.length" class="empty-thread">

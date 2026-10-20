@@ -395,6 +395,55 @@ function closeAttachMenu(event: Event): void {
   if (!target?.closest?.(".attach-popover") && !target?.closest?.(".bar-btn.attach")) attachMenu.value = false;
 }
 
+// ---------- Ctrl+V 粘贴图片 ----------
+const PASTE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp"];
+const PASTE_IMAGE_MAX = 6;
+
+function clipboardImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file") continue;
+    if (!PASTE_IMAGE_TYPES.includes((item.type || "").toLowerCase())) continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  if (!files.length) {
+    for (const file of Array.from(data.files ?? [])) {
+      if (PASTE_IMAGE_TYPES.includes((file.type || "").toLowerCase())) files.push(file);
+    }
+  }
+  return files;
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("读取剪贴板图片失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function onPaste(event: ClipboardEvent): Promise<void> {
+  if (!ws.value) return;
+  const files = clipboardImageFiles(event.clipboardData);
+  if (!files.length) return; // 普通文本粘贴交给默认行为
+  event.preventDefault();
+  const picked = files.slice(0, PASTE_IMAGE_MAX);
+  if (files.length > PASTE_IMAGE_MAX) notifyError(new Error(`一次最多粘贴 ${PASTE_IMAGE_MAX} 张图片`));
+  for (const file of picked) {
+    try {
+      const data = await readAsDataUrl(file);
+      await workbench.addPastedImage({ name: file.name || "pasted", mimeType: file.type, data });
+    } catch (error) {
+      notifyError(error);
+    }
+  }
+  await nextTick();
+  focus();
+}
+
 function autosize(): void {
   const el = input.value;
   if (!el) return;
@@ -550,6 +599,7 @@ const argHint = computed(() => {
         @dragover="onDragOver"
         @dragleave="onDragLeave"
         @drop.stop="onDrop"
+        @paste="onPaste"
       >
         <div v-if="dragOver" class="composer-drop-mask">
           <span class="composer-drop-icon" v-html="icons.folder" />

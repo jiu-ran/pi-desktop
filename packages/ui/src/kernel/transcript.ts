@@ -234,9 +234,18 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           } else if (part.type === "text" && part.text?.trim()) {
             newBlocks.push({ kind: "text", id: uid("tx"), text: part.text, streaming: false });
           } else if (part.type === "toolCall") {
-            const block: TranscriptBlock = { kind: "tool", id: part.id, name: part.name, args: part.arguments ?? {}, status: "done", output: "", details: null, isError: false, durationMs: null };
-            newBlocks.push(block);
-            tools.set(part.id, block);
+            const existing = tools.get(part.id);
+            if (existing && blocks.includes(existing)) {
+              // 之前只看到 toolResult 而建过占位块，复用并把它移到正确位置
+              blocks.splice(blocks.indexOf(existing), 1);
+              existing.name = part.name ?? existing.name;
+              existing.args = part.arguments ?? existing.args ?? {};
+              newBlocks.push(existing);
+            } else {
+              const block: TranscriptBlock = { kind: "tool", id: part.id, name: part.name, args: part.arguments ?? {}, status: "done", output: "", details: null, isError: false, durationMs: null };
+              newBlocks.push(block);
+              tools.set(part.id, block);
+            }
           }
         }
       } else if (message.role === "toolResult") {

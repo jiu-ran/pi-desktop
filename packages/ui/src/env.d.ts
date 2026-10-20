@@ -258,6 +258,7 @@ export interface PiDesktopBridge {
   forget: (cwd: string) => Promise<string[]>;
   chooseDirectory: () => Promise<string | null>;
   chooseFiles: () => Promise<string[]>;
+  savePastedImage: (payload: { name?: string; mimeType?: string; data: string }) => Promise<string>;
   chooseFolder: () => Promise<string | null>;
   open: (cwd: string) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
@@ -274,6 +275,12 @@ export interface PiDesktopBridge {
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;
+  messagePage: (
+    cwd: string,
+    file: string,
+    endIndex?: number,
+    limit?: number,
+  ) => Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }>;
   deleteSession: (cwd: string, file: string) => Promise<any[]>;
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => Promise<any>;
   call: (cwd: string, method: string, args?: any[], sessionFile?: string) => Promise<any>;

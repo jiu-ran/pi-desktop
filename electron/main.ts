@@ -10,6 +10,17 @@ import { createAppUpdateManager } from "./network/update.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+/** 剪贴板粘贴图片：允许的 MIME → 扩展名 */
+const PASTE_IMAGE_TYPES: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/bmp": "bmp",
+};
+/** base64 长度上限约 20MB 原图 */
+const PASTE_IMAGE_MAX_BASE64 = 20 * 1024 * 1024 * 1.4;
 const DIST_HTML = path.join(HERE, "../packages/ui/dist/index.html");
 const requestedDevUrl = process.env.PI_DESKTOP_URL ?? "http://127.0.0.1:1420";
 const DEV_URL = (() => {
@@ -289,7 +300,7 @@ const workspaceChannels = new Set([
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
   "pi:git-overview", "pi:git-inspect", "pi:complete-paths", "pi:restart", "pi:sessions",
-  "pi:delete-session", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview",
+  "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
   "pi:packages-remove", "pi:packages-update", "pi:skills-overview",
@@ -344,6 +355,33 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return null;
     return host.authorizeWorkspace(result.filePaths[0]);
   });
+  // 剪贴板图片（Ctrl+V）：写入临时目录后作为普通附件加入，不入仓、不污染工作区
+  handle("pi:save-pasted-image", async (payload: { name?: string; mimeType?: string; data?: string } = {}) => {
+    const mime = String(payload.mimeType ?? "image/png").toLowerCase();
+    const ext = PASTE_IMAGE_TYPES[mime];
+    if (!ext) throw new Error(`不支持的图片格式：${mime}`);
+    const base64 = String(payload.data ?? "").replace(/^data:[^;]+;base64,/, "");
+    if (!base64) throw new Error("剪贴板图片内容为空");
+    if (base64.length > PASTE_IMAGE_MAX_BASE64) throw new Error("图片过大（最大 20MB）");
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(base64, "base64");
+    } catch {
+      throw new Error("剪贴板图片解码失败");
+    }
+    if (!buffer.length) throw new Error("剪贴板图片内容为空");
+    const dir = path.join(app.getPath("temp"), "pi-desktop-paste");
+    await mkdir(dir, { recursive: true });
+    const stem = String(payload.name ?? "pasted")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^\w.-]+/g, "-")
+      .slice(0, 40) || "pasted";
+    const file = path.join(dir, `${stem}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`);
+    await writeFile(file, buffer);
+    host.authorizeAttachmentPaths([file]);
+    return file;
+  });
+
   handle("pi:choose-files", async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openFile", "multiSelections"],
@@ -383,6 +421,9 @@ app.whenReady().then(() => {
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));
   handle("pi:sessions", (cwd: string) => host.sessions(cwd));
+  handle("pi:message-page", (cwd: string, file: string, endIndex?: number, limit?: number) =>
+    host.messagePage(cwd, file, endIndex, limit),
+  );
   handle("pi:delete-session", (cwd: string, file: string) => host.deleteSession(cwd, file));
   handle("pi:remove-project", async (cwd: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}) => {
     await host.close(cwd);
