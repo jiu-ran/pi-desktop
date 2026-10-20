@@ -61,3 +61,32 @@ if (JSON.stringify(visible(replay.blocks)) !== JSON.stringify(visible(snapshot.b
   throw new Error("RPC 快照必须能覆盖由事件派生的消息状态");
 }
 console.log("OK");
+
+// 用户消息：附件标记应从正文剥除，图片以数据形式保留供缩略图展示
+const withFiles = createTranscript();
+withFiles.loadMessages([{
+  role: "user",
+  content: [
+    { type: "text", text: '<file name="C:\\tmp\\shot.png"></file>\n\n看这个 bug' },
+    { type: "image", mimeType: "image/png", data: "AAAA" },
+    { type: "text", text: '<file name="C:\\a\\b.ts">\nconst a = 1;\n</file>' },
+    { type: "text", text: '<directory name="C:\\a\\dir">\n./x\n</directory>' },
+  ],
+}]);
+const ub = withFiles.blocks[0];
+if (ub?.text !== "看这个 bug") throw new Error(`附件标记未被剥除：${JSON.stringify(ub?.text)}`);
+if (ub.attachments?.length !== 2) throw new Error("附件数量不正确（图片应由缩略图展示）");
+if (JSON.stringify(ub.attachments?.map((a) => a.name)) !== JSON.stringify(["b.ts", "dir"])) {
+  throw new Error(`附件名称不正确：${JSON.stringify(ub.attachments?.map((a) => a.name))}`);
+}
+if (ub.attachments[1].kind !== "folder") throw new Error("目录附件类型不正确");
+if (ub.images !== 1 || ub.imageItems?.[0]?.data !== "AAAA") throw new Error("图片数据未保留");
+if (ub.text?.includes("const a = 1")) throw new Error("文件内容不应出现在气泡里");
+
+// 仅有非图片附件时也要生成气泡
+const onlyFile = createTranscript();
+onlyFile.loadMessages([{ role: "user", content: [{ type: "text", text: '<file name="C:\\a\\notes.md">\n# hi\n</file>' }] }]);
+if (onlyFile.blocks.length !== 1 || onlyFile.blocks[0].attachments?.length !== 1) throw new Error("纯附件消息未渲染");
+if (onlyFile.blocks[0].text !== "") throw new Error("文件内容不应出现在气泡里");
+
+console.log("attachments ok");

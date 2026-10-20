@@ -1006,7 +1006,15 @@ export class PiHost {
       items.push(await prepareAttachment(cwd, target));
     }
     return {
-      items: items.map(({ path: file, name, kind, image }) => ({ path: file, name, kind, image })),
+      // 图片附带给前端缩略图数据（过大的图片只回传文件名，避免快照膨胀）
+      items: items.map(({ path: file, name, kind, image, mimeType, data }) => ({
+        path: file,
+        name,
+        kind,
+        image,
+        mimeType: image ? mimeType : undefined,
+        data: image && (data?.length ?? 0) <= 8 * 1024 * 1024 ? data : undefined,
+      })),
       text: items.map((item) => item.text ?? "").join(""),
       images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),
     };

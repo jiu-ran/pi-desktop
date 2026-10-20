@@ -837,11 +837,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const attachmentSnapshot = [...thread.attachments];
     const behavior = thread.streaming ? (mode ?? "followUp") : undefined;
     if (!behavior) {
-      const attachmentNames = attachmentSnapshot.map((item: any) => item.name).join("、");
-      const displayMessage = [message, attachmentNames ? `附件：${attachmentNames}` : ""].filter(Boolean).join("\n");
+      const imageItems = attachmentSnapshot
+        .filter((item: any) => item.image && item.data)
+        .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: item.data as string }));
+      const files = attachmentSnapshot
+        .filter((item: any) => !item.image || !item.data)
+        .map((item: any) => ({ path: String(item.path), name: String(item.name), kind: item.kind === "folder" ? "folder" as const : "file" as const }));
       thread.transcript.pushUser(
-        displayMessage || `请查看附件（${attachmentSnapshot.length} 项）`,
-        attachmentSnapshot.filter((item: any) => item.image).length,
+        message,
+        imageItems.length,
+        { imageItems, attachments: files },
       );
       thread.streaming = true;
       thread.loaded = true;

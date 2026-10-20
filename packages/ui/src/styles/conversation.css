@@ -158,7 +158,83 @@
   background: var(--user-bg);
 }
 .msg-user-text { white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; }
+.msg-user-empty { color: var(--fg-3); font-style: italic; }
 .msg-attach { display: block; margin-top: 4px; color: var(--fg-2); font-size: 12px; }
+
+/* 用户消息里的图片缩略图：单图限宽，多图九宫格 */
+.msg-user-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg-user-text + .msg-user-images { margin-top: 8px; }
+.msg-user-thumb {
+  display: block;
+  padding: 0;
+  width: 96px;
+  height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-2);
+  cursor: zoom-in;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.msg-user-thumb:hover { border-color: var(--accent); transform: translateY(-1px); }
+.msg-user-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.msg-user-images.single .msg-user-thumb { width: auto; height: auto; max-width: min(320px, 60vw); max-height: 240px; }
+.msg-user-images.single .msg-user-thumb img { width: auto; height: auto; max-width: min(320px, 60vw); max-height: 240px; object-fit: contain; }
+
+/* 附件：图标 + 文件名 */
+.msg-user-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg-user-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+.msg-user-file-icon { display: inline-flex; color: var(--fg-3); }
+.msg-user-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 图片放大预览 */
+.msg-image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.78);
+}
+.msg-image-preview img {
+  max-width: min(92vw, 1600px);
+  max-height: 82vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.msg-image-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+.msg-image-preview-actions button {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.msg-image-preview-actions button:hover { background: rgba(255, 255, 255, 0.12); }
 
 /* 助手回合：顶部灰色状态行 + 正文 + 工具步骤 */
 .turn { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

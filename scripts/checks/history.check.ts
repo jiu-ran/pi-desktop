@@ -78,5 +78,21 @@ assert.ok(title.endsWith("…"));
 assert.equal(sessionTitleFromText("  多条\n空行   的标题 "), "多条 空行 的标题", "应压缩空白");
 assert.equal(sessionTitleFromText(""), "");
 assert.equal(sessionTitleFromText(undefined), "");
+// 首条消息只有附件标记时，标题不能出现 <file …> 标记
+assert.equal(
+  sessionTitleFromText('<file name="C:\\tmp\\shot.png"></file>'),
+  "shot.png",
+  "纯图片消息应退化为文件名",
+);
+assert.equal(
+  sessionTitleFromText('<file name="C:\\tmp\\a.ts">\nconst a = 1;\n</file>'),
+  "a.ts",
+  "纯文件消息应退化为文件名",
+);
+assert.equal(
+  sessionTitleFromText('<file name="C:\\tmp\\shot.png"></file>\n\n看看这个布局'),
+  "看看这个布局",
+  "附件标记不能进入标题",
+);
 
 console.log(`history.check ok（共 ${history.length} 条，${pages} 页，覆盖 ${covered} 条）`);

@@ -1,8 +1,14 @@
+import { splitAttachmentMarkers, type MessageAttachment } from "../shared/attachments.ts";
+
 export interface TranscriptBlock {
   kind: "user" | "text" | "thinking" | "tool" | "notice";
   id: string;
   text?: string;
   images?: number;
+  /** 用户消息里的图片（用于缩略图展示） */
+  imageItems?: Array<{ mimeType: string; data: string }>;
+  /** 用户消息里被抽离出来的附件标记 */
+  attachments?: MessageAttachment[];
   streaming?: boolean;
   name?: string;
   args?: Record<string, any>;
@@ -19,6 +25,29 @@ export interface TranscriptBlock {
 function textOf(content: any): string {
   if (typeof content === "string") return content;
   return (content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("");
+}
+
+/** 用户消息：剥离附件标记，并收集图片数据用于缩略图 */
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+/** 单张图片缩略图的数据上限，超出的只显示张数，避免长会话占用过多内存 */
+const IMAGE_PREVIEW_MAX = 8 * 1024 * 1024;
+function userBlock(content: any): Omit<TranscriptBlock, "id"> {
+  const { text, attachments } = splitAttachmentMarkers(textOf(content));
+  const imageParts = (Array.isArray(content) ? content : []).filter((part: any) => part?.type === "image");
+  const imageItems = imageParts
+    .filter((part: any) => typeof part.data === "string" && part.data.length <= IMAGE_PREVIEW_MAX)
+    .map((part: any) => ({ mimeType: String(part.mimeType ?? "image/png"), data: part.data as string }));
+  // 有图片时不再重复展示同名的图片文件徽标
+  const files = imageParts.length
+    ? attachments.filter((item) => item.kind === "folder" || !IMAGE_EXT.test(item.path))
+    : attachments;
+  return {
+    kind: "user",
+    text,
+    images: imageParts.length,
+    imageItems,
+    attachments: files,
+  };
 }
 
 function resultText(result: any): string {
@@ -58,9 +87,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
 
   function appendMessage(message: any): void {
     if (message.role === "user") {
-      const text = textOf(message.content);
-      const images = Array.isArray(message.content) ? message.content.filter((p: any) => p.type === "image").length : 0;
-      if (text || images) blocks.push({ kind: "user", id: uid("u"), text, images });
+      const block = userBlock(message.content);
+      if (block.text || block.images || block.attachments?.length) blocks.push({ ...block, id: uid("u") });
       return;
     }
     if (message.role === "assistant") {
@@ -201,8 +229,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     }
   }
 
-  function pushUser(text: string, images = 0): void {
-    blocks.push({ kind: "user", id: uid("u"), text, images });
+  function pushUser(text: string, images = 0, extra: Pick<TranscriptBlock, "imageItems" | "attachments"> = {}): void {
+    blocks.push({ kind: "user", id: uid("u"), text, images, ...extra });
   }
 
   function pushNotice(level: string, text: string): void {
@@ -224,9 +252,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     const newBlocks: TranscriptBlock[] = [];
     for (const message of messages ?? []) {
       if (message.role === "user") {
-        const text = textOf(message.content);
-        const images = Array.isArray(message.content) ? message.content.filter((p: any) => p.type === "image").length : 0;
-        if (text || images) newBlocks.push({ kind: "user", id: uid("u"), text, images });
+        const block = userBlock(message.content);
+        if (block.text || block.images || block.attachments?.length) newBlocks.push({ ...block, id: uid("u") });
       } else if (message.role === "assistant") {
         for (const part of message.content ?? []) {
           if (part.type === "thinking" && part.thinking?.trim()) {
