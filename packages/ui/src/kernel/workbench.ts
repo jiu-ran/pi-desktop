@@ -460,9 +460,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       case "agent_settled":
         thread.streaming = false;
         thread.queue = { steering: [], followUp: [] };
-        // 流式中打开 / 只靠事件建起来的会话，在本轮结束后用文件消息补齐历史；
-        // 补齐会重建块，所以用量条要在补齐完成后再挂回去。
-        void hydrateHistory(ws, thread, thread.historyStart < 0).finally(() => appendUsage(thread));
+        if (thread.historyStart < 0) {
+          // 兜底：打开时没能从文件补齐（比如正好在流式开始的一瞬），本轮结束后补
+          // 补齐会重建块，所以用量条要在补齐完成后再挂回去。
+          void hydrateHistory(ws, thread, true).finally(() => appendUsage(thread));
+        } else {
+          appendUsage(thread);
+        }
         scheduleSessionsRefresh(ws);
         break;
       case "queue_update":
@@ -1012,7 +1016,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         return;
       }
 
-      if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming) {
+      if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming && targetThread.historyStart >= 0) {
         // 复用了正在流式输出的温备 Worker，无需重新拉取完整历史覆盖实时流
         return;
       }
