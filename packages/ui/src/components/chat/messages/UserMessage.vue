@@ -49,11 +49,11 @@ function openPreview(index: number): void {
           v-for="item in files"
           :key="item.path"
           class="msg-user-file"
-          :title="item.inlined === false ? `${item.path}（内容未内联，模型会按需读取）` : item.path"
+          :title="item.path"
         >
           <span class="msg-user-file-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
           <span class="msg-user-file-name">{{ item.name }}</span>
-          <span v-if="item.size" class="msg-user-file-meta">{{ formatBytes(item.size) }}{{ item.inlined === false ? " · 未内联" : "" }}</span>
+          <span v-if="item.size" class="msg-user-file-meta">{{ formatBytes(item.size) }}</span>
         </span>
       </div>
 

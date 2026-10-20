@@ -690,10 +690,10 @@ const argHint = computed(() => {
               </button>
               <button type="button" class="attachment-thumb-remove" title="移除图片" @click="removeAttachment(item.path)">×</button>
             </div>
-            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.inlined === false ? `${item.path}（内容未内联，模型会按需读取）` : item.path">
+            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.path">
               <span class="attachment-chip-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
               <span>{{ item.name }}</span>
-              <span v-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}{{ item.inlined === false ? " · 未内联" : "" }}</span>
+              <span v-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}</span>
               <button type="button" title="移除附件" @click="removeAttachment(item.path)">×</button>
             </span>
           </div>

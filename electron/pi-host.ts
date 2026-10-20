@@ -251,10 +251,6 @@ const TEXT_EXTENSIONS = new Set<string>([
   ".json", ".jsonl", ".md", ".txt", ".log", ".yml", ".yaml", ".toml", ".ini", ".env", ".csv",
   ".py", ".java", ".kt", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".rb", ".sh", ".ps1",
 ]);
-/** 单文件超过该大小不再内联（32 KB ≈ 1 万 token），只把路径交给模型按需读取 */
-const ATTACHMENT_INLINE_MAX = 32 * 1024;
-/** 一条消息里所有附件内联内容的总预算，防止多个中等文件叠加爆上下文 */
-const ATTACHMENT_INLINE_TOTAL = 96 * 1024;
 /** 图片仍然走 base64，超过该大小直接拒绝 */
 const ATTACHMENT_IMAGE_MAX = 20 * 1024 * 1024;
 
@@ -322,7 +318,7 @@ async function walkDirectory(root: string, current = root, output: string[] = []
   return output;
 }
 
-async function prepareAttachment(_cwd: string, target: string, budget: { inline: number }): Promise<AttachmentItem> {
+async function prepareAttachment(_cwd: string, target: string): Promise<AttachmentItem> {
   const file = path.resolve(target);
   const info: AttachmentItem = { path: file, name: path.basename(file), kind: "file", image: false };
   let entry;
@@ -346,25 +342,14 @@ async function prepareAttachment(_cwd: string, target: string, budget: { inline:
     info.text = `<file name="${escapeXml(file)}"></file>\n`;
     return info;
   }
-  if (isProbablyText(file)) {
-    // 大文件不内联：内容会随每条消息反复进入上下文，几 MB 的文件足够把对话撑爆。
-    // 只把路径和大小告诉模型，需要时由它调用 read 工具按需读取。
-    const tooLarge = size > ATTACHMENT_INLINE_MAX;
-    const overBudget = !tooLarge && size > budget.inline;
-    if (tooLarge || overBudget) {
-      const reason = tooLarge ? `文件较大（${formatBytes(size)}）` : "本条消息内联内容已达上限";
-      info.inlined = false;
-      info.text = `<file name="${escapeXml(file)}" size="${size}" inline="false">\n[${reason}，未内联到对话中。需要时请使用 read 工具读取该文件，大文件可分段读取。]\n</file>\n`;
-      return info;
-    }
-    const content = await readFile(file, "utf8");
-    budget.inline -= Buffer.byteLength(content, "utf8");
-    info.inlined = true;
-    info.text = `<file name="${escapeXml(file)}" size="${size}">\n${content}\n</file>\n`;
-  } else {
-    info.inlined = false;
-    info.text = `<file name="${escapeXml(file)}" size="${size}" inline="false">\n[二进制文件，未内联到对话中。请使用工具读取或处理。]\n</file>\n`;
-  }
+  // 所有文件都只传路径，不再读取/内联内容：
+  // 即使是不大的文本文件，内联内容也会随每条消息反复进入上下文，长会话里很快就会撑爆。
+  // 模型需要时用 read 工具按需读取，大文件还能分段读。
+  info.inlined = false;
+  const hint = isProbablyText(file)
+    ? `[已通过路径引用（${formatBytes(size)}），未内联文件内容。需要时请使用 read 工具读取该文件。]`
+    : `[二进制文件（${formatBytes(size)}），未内联。请使用相应工具读取或处理。]`;
+  info.text = `<file name="${escapeXml(file)}" size="${size}" inline="false">\n${hint}\n</file>\n`;
   return info;
 }
 
@@ -1023,7 +1008,6 @@ export class PiHost {
     const workspaceRoot = path.resolve(cwd);
     const workspacePrefix = workspaceRoot.endsWith(path.sep) ? workspaceRoot : `${workspaceRoot}${path.sep}`;
     const items: AttachmentItem[] = [];
-    const budget = { inline: ATTACHMENT_INLINE_TOTAL };
     for (const target of paths) {
       if (typeof target !== "string" || !target.trim()) continue;
       const resolved = path.resolve(target);
@@ -1034,7 +1018,7 @@ export class PiHost {
       } else {
         await assertRealWorkspacePath(cwd, resolved);
       }
-      items.push(await prepareAttachment(cwd, target, budget));
+      items.push(await prepareAttachment(cwd, target));
     }
     return {
       // 图片附带给前端缩略图数据（过大的图片只回传文件名，避免快照膨胀）
