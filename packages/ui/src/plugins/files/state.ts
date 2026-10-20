@@ -23,6 +23,9 @@ export function normalizeRelativePath(cwd: string, targetPath: string): string {
   if (normTarget.toLowerCase().startsWith(`${normCwd.toLowerCase()}/`)) {
     return normTarget.slice(normCwd.length + 1);
   }
+  // 项目外文件保留绝对路径，交给主进程按“单文件绝对路径”处理。
+  // 特别是 macOS / Linux 的 `/tmp/file` 不能被下面的相对路径清理逻辑去掉 `/`。
+  if (normTarget.startsWith("/") || /^[A-Za-z]:\//.test(normTarget)) return normTarget;
   return normTarget.replace(/^\.?\//, "");
 }
 

@@ -289,6 +289,39 @@ function workspacePath(cwd: string, relative = ""): { root: string; target: stri
   return { root, target };
 }
 
+/**
+ * 文件编辑器允许打开工具返回的绝对文件路径。
+ *
+ * 相对路径仍然严格限制在当前项目内；只有调用方明确传入绝对路径时，
+ * 才允许查看/保存项目外的单个文件。目录浏览、创建、删除和 Git 操作
+ * 继续使用 workspacePath，避免把项目边界整体放开。
+ */
+function workspaceFilePath(cwd: string, requested: string): { root: string; target: string; external: boolean } {
+  if (typeof cwd !== "string" || !cwd.trim()) throw new Error("项目目录无效");
+  if (typeof requested !== "string" || !requested.trim()) throw new Error("文件路径无效");
+  const root = path.resolve(cwd);
+  const raw = requested.trim();
+  if (path.isAbsolute(raw)) return { root, target: path.resolve(raw), external: true };
+  const resolved = workspacePath(cwd, raw);
+  return { ...resolved, external: false };
+}
+
+async function assertReadableFilePath(
+  cwd: string,
+  target: string,
+  external: boolean,
+): Promise<void> {
+  if (external) {
+    try {
+      await realpath(target);
+    } catch {
+      throw new Error("文件不存在或无法访问");
+    }
+    return;
+  }
+  await assertRealWorkspacePath(cwd, target);
+}
+
 async function assertRealWorkspacePath(cwd: string, target: string, allowMissing = false): Promise<void> {
   const { root } = workspacePath(cwd, ".");
   const realRoot = await realpath(root);
@@ -747,8 +780,9 @@ export class PiHost {
   }
 
   async readWorkspaceFile(cwd: string, relative: string): Promise<WorkspaceFileData> {
-    const { root, target } = workspacePath(cwd, relative);
-    await assertRealWorkspacePath(cwd, target);
+    const resolved = workspaceFilePath(cwd, relative);
+    await assertReadableFilePath(cwd, resolved.target, resolved.external);
+    const { root, target } = resolved;
     const info = await lstat(target).catch(() => null);
     if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法打开");
     const maxSize = 2 * 1024 * 1024;
@@ -756,7 +790,7 @@ export class PiHost {
     const content = await readFile(target, "utf8");
     return {
       path: target,
-      relative: path.relative(root, target).replace(/\\/g, "/"),
+      relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
       name: path.basename(target),
       content,
       size: info.size,
@@ -764,8 +798,9 @@ export class PiHost {
   }
 
   async writeWorkspaceFile(cwd: string, relative: string, content: string): Promise<WorkspaceFileData> {
-    const { root, target } = workspacePath(cwd, relative);
-    await assertRealWorkspacePath(cwd, target);
+    const resolved = workspaceFilePath(cwd, relative);
+    await assertReadableFilePath(cwd, resolved.target, resolved.external);
+    const { root, target } = resolved;
     if (typeof content !== "string") throw new Error("文件内容必须是文本");
     if (Buffer.byteLength(content, "utf8") > 20 * 1024 * 1024) throw new Error("文件超过 20 MB，暂不支持保存");
     const info = await lstat(target).catch(() => null);
@@ -773,7 +808,7 @@ export class PiHost {
     await writeFile(target, content, "utf8");
     return {
       path: target,
-      relative: path.relative(root, target).replace(/\\/g, "/"),
+      relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
       name: path.basename(target),
       content,
       size: Buffer.byteLength(content, "utf8"),
@@ -781,8 +816,9 @@ export class PiHost {
   }
 
   async openWorkspacePath(cwd: string, relative: string): Promise<string> {
-    const { target } = workspacePath(cwd, relative);
-    await assertRealWorkspacePath(cwd, target);
+    const resolved = workspaceFilePath(cwd, relative);
+    await assertReadableFilePath(cwd, resolved.target, resolved.external);
+    const { target } = resolved;
     const info = await lstat(target).catch(() => null);
     if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法打开");
     return target;

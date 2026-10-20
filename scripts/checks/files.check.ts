@@ -4,6 +4,7 @@ import path from "node:path";
 import { PiHost } from "../../electron/pi-host.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-files-"));
+const external = `${root}-outside.txt`;
 try {
   await mkdir(path.join(root, "src", "nested"), { recursive: true });
   await writeFile(path.join(root, "README.md"), "hello");
@@ -21,6 +22,14 @@ try {
   assert(saved.content.includes("changed"), "保存应返回更新后的内容");
   const reopened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(reopened.content.includes("changed"), "保存后磁盘文件应更新");
+
+  await writeFile(external, "outside");
+  const externalOpened = await host.readWorkspaceFile(root, external);
+  assert(externalOpened.content === "outside" && externalOpened.path === external, "绝对路径文件应允许读取");
+  const externalSaved = await host.writeWorkspaceFile(root, external, "outside changed");
+  assert(externalSaved.content === "outside changed", "绝对路径文件应允许保存");
+  assert(await host.openWorkspacePath(root, external) === external, "绝对路径文件应允许打开");
+
   let rejected = false;
   try { await host.writeWorkspaceFile(root, "../outside.txt", "nope"); } catch { rejected = true; }
   assert(rejected, "不应允许写入项目目录外路径");
@@ -41,4 +50,5 @@ try {
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
+  await rm(external, { force: true });
 }
