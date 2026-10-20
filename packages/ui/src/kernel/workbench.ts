@@ -841,25 +841,34 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const thread = ensureThread(ws, targetSessionFile);
     const attachmentSnapshot = [...thread.attachments];
     const behavior = thread.streaming ? (mode ?? "followUp") : undefined;
-    if (!behavior) {
-      const imageItems = attachmentSnapshot
-        .filter((item: any) => item.image && item.data)
-        .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: item.data as string }));
-      const files = attachmentSnapshot
-        .filter((item: any) => !item.image || !item.data)
-        .map((item: any) => ({ path: String(item.path), name: String(item.name), kind: item.kind === "folder" ? "folder" as const : "file" as const }));
-      thread.transcript.pushUser(
-        message,
-        imageItems.length,
-        { imageItems, attachments: files },
-      );
-      thread.streaming = true;
-      thread.loaded = true;
-    }
     try {
       const prepared = attachmentSnapshot.length
         ? await host.prepareAttachments(ws.cwd, attachmentSnapshot.map((item: any) => item.path))
-        : { text: "", images: [] };
+        : { text: "", images: [] as any[], items: [] as any[] };
+      if (!behavior) {
+        // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致
+        const items = prepared.items?.length ? prepared.items : attachmentSnapshot;
+        const imageFiles = items.filter((item: any) => item.image);
+        const imageItems = imageFiles
+          .filter((item: any) => item.data)
+          .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: item.data as string }));
+        const files = items
+          .filter((item: any) => !item.image)
+          .map((item: any) => ({
+            path: String(item.path),
+            name: String(item.name),
+            kind: item.kind === "folder" ? "folder" as const : "file" as const,
+            size: typeof item.size === "number" ? item.size : undefined,
+            inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
+          }));
+        thread.transcript.pushUser(
+          message,
+          imageFiles.length,
+          { imageItems, attachments: files },
+        );
+        thread.streaming = true;
+        thread.loaded = true;
+      }
       const prompt = [prepared.text, message].filter(Boolean).join("\n");
       thread.attachments = [];
       const disposition = await rpc(ws.cwd, "prompt", [prompt, prepared.images, behavior], targetSessionFile);

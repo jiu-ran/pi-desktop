@@ -6,7 +6,7 @@
 
 export const SESSION_TITLE_MAX = 48;
 
-const ATTACHMENT_MARKER = /<(file|directory) name="([^"]*)">[\s\S]*?<\/\1>/g;
+const ATTACHMENT_MARKER = /<(file|directory) name="([^"]*)"[^>]*>[\s\S]*?<\/\1>/g;
 
 function unescapeXml(value: string): string {
   return value

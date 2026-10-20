@@ -89,4 +89,16 @@ onlyFile.loadMessages([{ role: "user", content: [{ type: "text", text: '<file na
 if (onlyFile.blocks.length !== 1 || onlyFile.blocks[0].attachments?.length !== 1) throw new Error("纯附件消息未渲染");
 if (onlyFile.blocks[0].text !== "") throw new Error("文件内容不应出现在气泡里");
 
+// 超大文件的标记：内容未内联，前端要能展示大小与「未内联」提示
+const bigFile = createTranscript();
+bigFile.loadMessages([{
+  role: "user",
+  content: [{ type: "text", text: '看看这个日志\n<file name="C:\\tmp\\huge.log" size="5242880" inline="false">\n[文件较大（5.0 MB），未内联到对话中。]\n</file>' }],
+}]);
+const bigBlock = bigFile.blocks[0];
+if (bigBlock?.text !== "看看这个日志") throw new Error(`大文件标记未被剥除：${JSON.stringify(bigBlock?.text)}`);
+if (bigBlock.attachments?.[0]?.inlined !== false) throw new Error("大文件应标记为未内联");
+if (bigBlock.attachments?.[0]?.size !== 5242880) throw new Error("大文件大小未解析");
+if (!bigBlock.attachments?.[0]?.name) throw new Error("大文件名丢失");
+
 console.log("attachments ok");

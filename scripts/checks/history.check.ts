@@ -113,6 +113,11 @@ assert.equal(
   "纯文件消息应退化为文件名",
 );
 assert.equal(
+  sessionTitleFromText('<file name="C:\\tmp\\huge.log" size="5242880" inline="false">\n[文件较大，未内联]\n</file>'),
+  "huge.log",
+  "未内联的大文件标记也应能生成标题",
+);
+assert.equal(
   sessionTitleFromText('<file name="C:\\tmp\\shot.png"></file>\n\n看看这个布局'),
   "看看这个布局",
   "附件标记不能进入标题",

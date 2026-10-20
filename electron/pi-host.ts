@@ -25,6 +25,10 @@ export interface AttachmentItem {
   mimeType?: string;
   data?: string;
   text?: string;
+  /** 文件字节数（图片/文档都会带上，便于前端展示） */
+  size?: number;
+  /** false 表示内容没有内联到消息里，模型需要自己用工具读取 */
+  inlined?: boolean;
 }
 
 export interface SessionSummary {
@@ -244,9 +248,21 @@ const IMAGE_MIME = new Map<string, string>([
 ]);
 const TEXT_EXTENSIONS = new Set<string>([
   ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css", ".scss", ".less", ".html", ".xml",
-  ".json", ".jsonl", ".md", ".txt", ".yml", ".yaml", ".toml", ".ini", ".env", ".csv",
+  ".json", ".jsonl", ".md", ".txt", ".log", ".yml", ".yaml", ".toml", ".ini", ".env", ".csv",
   ".py", ".java", ".kt", ".go", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".rb", ".sh", ".ps1",
 ]);
+/** 单文件超过该大小不再内联（32 KB ≈ 1 万 token），只把路径交给模型按需读取 */
+const ATTACHMENT_INLINE_MAX = 32 * 1024;
+/** 一条消息里所有附件内联内容的总预算，防止多个中等文件叠加爆上下文 */
+const ATTACHMENT_INLINE_TOTAL = 96 * 1024;
+/** 图片仍然走 base64，超过该大小直接拒绝 */
+const ATTACHMENT_IMAGE_MAX = 20 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
@@ -306,7 +322,7 @@ async function walkDirectory(root: string, current = root, output: string[] = []
   return output;
 }
 
-async function prepareAttachment(_cwd: string, target: string): Promise<AttachmentItem> {
+async function prepareAttachment(_cwd: string, target: string, budget: { inline: number }): Promise<AttachmentItem> {
   const file = path.resolve(target);
   const info: AttachmentItem = { path: file, name: path.basename(file), kind: "file", image: false };
   let entry;
@@ -319,9 +335,10 @@ async function prepareAttachment(_cwd: string, target: string): Promise<Attachme
   }
   if (!entry.isFile()) throw new Error(`不支持添加此类型的路径：${file}`);
   const size = (await stat(file)).size;
-  if (size > 20 * 1024 * 1024) throw new Error(`附件超过 20 MB：${path.basename(file)}`);
+  info.size = size;
   const mime = IMAGE_MIME.get(path.extname(file).toLowerCase());
   if (mime) {
+    if (size > ATTACHMENT_IMAGE_MAX) throw new Error(`图片超过 20 MB：${path.basename(file)}`);
     const data = (await readFile(file)).toString("base64");
     info.image = true;
     info.mimeType = mime;
@@ -330,10 +347,23 @@ async function prepareAttachment(_cwd: string, target: string): Promise<Attachme
     return info;
   }
   if (isProbablyText(file)) {
+    // 大文件不内联：内容会随每条消息反复进入上下文，几 MB 的文件足够把对话撑爆。
+    // 只把路径和大小告诉模型，需要时由它调用 read 工具按需读取。
+    const tooLarge = size > ATTACHMENT_INLINE_MAX;
+    const overBudget = !tooLarge && size > budget.inline;
+    if (tooLarge || overBudget) {
+      const reason = tooLarge ? `文件较大（${formatBytes(size)}）` : "本条消息内联内容已达上限";
+      info.inlined = false;
+      info.text = `<file name="${escapeXml(file)}" size="${size}" inline="false">\n[${reason}，未内联到对话中。需要时请使用 read 工具读取该文件，大文件可分段读取。]\n</file>\n`;
+      return info;
+    }
     const content = await readFile(file, "utf8");
-    info.text = `<file name="${escapeXml(file)}">\n${content}\n</file>\n`;
+    budget.inline -= Buffer.byteLength(content, "utf8");
+    info.inlined = true;
+    info.text = `<file name="${escapeXml(file)}" size="${size}">\n${content}\n</file>\n`;
   } else {
-    info.text = `<file name="${escapeXml(file)}">\n[二进制文件，无法作为文本读取。请使用工具读取或处理。]\n</file>\n`;
+    info.inlined = false;
+    info.text = `<file name="${escapeXml(file)}" size="${size}" inline="false">\n[二进制文件，未内联到对话中。请使用工具读取或处理。]\n</file>\n`;
   }
   return info;
 }
@@ -993,6 +1023,7 @@ export class PiHost {
     const workspaceRoot = path.resolve(cwd);
     const workspacePrefix = workspaceRoot.endsWith(path.sep) ? workspaceRoot : `${workspaceRoot}${path.sep}`;
     const items: AttachmentItem[] = [];
+    const budget = { inline: ATTACHMENT_INLINE_TOTAL };
     for (const target of paths) {
       if (typeof target !== "string" || !target.trim()) continue;
       const resolved = path.resolve(target);
@@ -1003,17 +1034,19 @@ export class PiHost {
       } else {
         await assertRealWorkspacePath(cwd, resolved);
       }
-      items.push(await prepareAttachment(cwd, target));
+      items.push(await prepareAttachment(cwd, target, budget));
     }
     return {
       // 图片附带给前端缩略图数据（过大的图片只回传文件名，避免快照膨胀）
-      items: items.map(({ path: file, name, kind, image, mimeType, data }) => ({
+      items: items.map(({ path: file, name, kind, image, mimeType, data, size, inlined }) => ({
         path: file,
         name,
         kind,
         image,
         mimeType: image ? mimeType : undefined,
         data: image && (data?.length ?? 0) <= 8 * 1024 * 1024 ? data : undefined,
+        size,
+        inlined,
       })),
       text: items.map((item) => item.text ?? "").join(""),
       images: items.filter((item) => item.image).map(({ mimeType, data }) => ({ type: "image", mimeType, data })),

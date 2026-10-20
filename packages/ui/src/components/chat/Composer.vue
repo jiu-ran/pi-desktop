@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
-import { imageDataUrl } from "../../shared/attachments.ts";
+import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -685,9 +685,10 @@ const argHint = computed(() => {
               </button>
               <button type="button" class="attachment-thumb-remove" title="移除图片" @click="removeAttachment(item.path)">×</button>
             </div>
-            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.path">
+            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.inlined === false ? `${item.path}（内容未内联，模型会按需读取）` : item.path">
               <span class="attachment-chip-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
               <span>{{ item.name }}</span>
+              <span v-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}{{ item.inlined === false ? " · 未内联" : "" }}</span>
               <button type="button" title="移除附件" @click="removeAttachment(item.path)">×</button>
             </span>
           </div>
