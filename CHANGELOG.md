@@ -5,7 +5,7 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.3] - 2026-10-20
 
 ### 修复
 
@@ -84,5 +84,8 @@
 - macOS 仅提供 arm64 产物，Intel Mac 需从源码构建。
 - 自动更新尚未接入签名校验链，更新检查依赖 GitHub Releases。
 
-[未发布]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.0...HEAD
+[未发布]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jiu-ran/pi-desktop/releases/tag/v0.1.0
