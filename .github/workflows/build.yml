@@ -92,10 +92,18 @@ jobs:
       - name: List artifacts
         run: ls -lh artifacts
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
+            artifacts/SHA256SUMS.txt
             artifacts/*.exe
             artifacts/*.zip
             artifacts/*.dmg
