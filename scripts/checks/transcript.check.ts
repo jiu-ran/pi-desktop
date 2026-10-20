@@ -102,3 +102,19 @@ if (bigBlock.attachments?.[0]?.size !== 5242880) throw new Error("大文件大�
 if (!bigBlock.attachments?.[0]?.name) throw new Error("大文件名丢失");
 
 console.log("attachments ok");
+
+// 发送失败回滚：pushUser 必须返回块，removeBlock 只移除指定块
+const removable = createTranscript();
+const firstUser = removable.pushUser("还没发出去", 0);
+const secondUser = removable.pushUser("下一条", 0);
+if (!firstUser?.id || removable.blocks.length !== 2) throw new Error("pushUser 应返回新建块");
+removable.removeBlock(firstUser.id);
+const afterCount: number = removable.blocks.length;
+if (afterCount !== 1 || removable.blocks[0].id !== secondUser.id) {
+  throw new Error("removeBlock 只应移除指定的乐观消息");
+}
+removable.removeBlock("not-exists");
+if (removable.blocks.filter((block) => block.id === secondUser.id).length !== 1) {
+  throw new Error("removeBlock 不存在的 id 不应改变内容");
+}
+console.log("removeBlock ok");

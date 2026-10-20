@@ -1,5 +1,7 @@
 import { net } from "electron";
 import { createHash } from "node:crypto";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 /**
  * 标准化网络错误为用户友好的中文消息
@@ -33,6 +35,8 @@ export interface RequestJsonOptions extends RequestOptions {
 export interface DownloadOptions extends RequestOptions {
   onProgress?: (current: number, total: number) => void;
   verifySha256?: string;
+  /** 外部取消信号（用户取消下载时使用） */
+  signal?: AbortSignal;
 }
 
 /**
@@ -224,17 +228,33 @@ export async function downloadFileStream(
     retryDelay = 2000,
     onProgress,
     verifySha256,
+    signal: externalSignal,
   } = options;
 
   const { createWriteStream } = await import("node:fs");
-  const { unlink, stat: fsStat } = await import("node:fs/promises");
+  const { unlink } = await import("node:fs/promises");
 
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let idleTimer: NodeJS.Timeout | undefined;
+    let abortHandler: (() => void) | undefined;
     try {
       const controller = new AbortController();
-      const timeoutHandle = setTimeout(() => controller.abort(), timeout);
+      if (externalSignal) {
+        if (externalSignal.aborted) controller.abort();
+        else {
+          abortHandler = () => controller.abort();
+          externalSignal.addEventListener("abort", abortHandler, { once: true });
+        }
+      }
+      // 空闲超时：每收到一块数据就重新计时，既不会无限挂起，
+      // 又不会因为安装包较大而在总时长上误杀正常下载。
+      const armIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => controller.abort(), timeout);
+      };
+      armIdle();
 
       try {
         const response = await net.fetch(url, {
@@ -245,66 +265,42 @@ export async function downloadFileStream(
           signal: controller.signal,
         });
 
-        clearTimeout(timeoutHandle);
-
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        if (!response.body) {
+          throw new Error("响应体为空");
         }
 
         const contentLength = parseInt(
           response.headers.get("content-length") || "0",
           10,
         );
-
-        // 创建写入流
-        const writeStream = createWriteStream(filePath);
         let downloadedSize = 0;
-
-        if (!response.body) {
-          throw new Error("响应体为空");
-        }
-
-        const reader = response.body.getReader();
         const hash = verifySha256 ? createHash("sha256") : null;
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) break;
-
-            downloadedSize += value.length;
-
-            // 更新进度
+        const meter = new Transform({
+          transform(chunk: any, _encoding, callback) {
+            armIdle();
+            downloadedSize += chunk.length;
             if (contentLength > 0 && onProgress) {
               onProgress(downloadedSize, contentLength);
             }
-
-            // 计算哈希
-            if (hash) {
-              hash.update(value);
-            }
-
-            // 写入文件
-            writeStream.write(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-
-        // 等待写入完成
-        await new Promise<void>((resolve, reject) => {
-          writeStream.on("finish", resolve);
-          writeStream.on("error", reject);
-          writeStream.end();
+            if (hash) hash.update(chunk);
+            callback(null, chunk);
+          },
         });
 
-        // 验证 SHA-256
+        // pipeline 负责背压、错误时销毁写入流，避免半截文件句柄残留。
+        await pipeline(
+          Readable.fromWeb(response.body as any),
+          meter,
+          createWriteStream(filePath),
+        );
+
         if (verifySha256 && hash) {
           const fileHash = `sha256:${hash.digest("hex")}`;
-
           if (!fileHash.toLowerCase().includes(verifySha256.toLowerCase())) {
-            await unlink(filePath);
+            await unlink(filePath).catch(() => {});
             throw new Error(
               `文件校验失败：期望 ${verifySha256}，但得到 ${fileHash}`,
             );
@@ -313,21 +309,28 @@ export async function downloadFileStream(
 
         return;
       } finally {
-        clearTimeout(timeoutHandle);
+        if (idleTimer) clearTimeout(idleTimer);
+        if (externalSignal && abortHandler) externalSignal.removeEventListener("abort", abortHandler);
       }
     } catch (error) {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (externalSignal && abortHandler) externalSignal.removeEventListener("abort", abortHandler);
       lastError = error instanceof Error ? error : new Error(String(error));
+
+      // 用户主动取消：不再重试，并清掉写了一半的文件
+      if (externalSignal?.aborted) {
+        await unlink(filePath).catch(() => {
+          /* 忽略文件不存在的错误 */
+        });
+        break;
+      }
 
       // 最后一次尝试或不可重试的错误
       if (attempt === maxRetries) {
-        // 尝试清理损坏文件
-        try {
-          await unlink(filePath).catch(() => {
-            /* 忽略文件不存在的错误 */
-          });
-        } catch {
-          /* 忽略清理错误 */
-        }
+        // 尝试清理损坏文件（pipeline 已关闭写入流）
+        await unlink(filePath).catch(() => {
+          /* 忽略文件不存在的错误 */
+        });
         break;
       }
 

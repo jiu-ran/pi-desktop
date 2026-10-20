@@ -21,6 +21,8 @@ const PAGE_MIN_BLOCKS = 8;
 const INITIAL_PAGE_SIZE = 40;
 /** 首屏至少凑够多少轮用户对话 */
 const INITIAL_MIN_TURNS = 3;
+/** 与主进程 prepareAttachments 的上限保持一致 */
+const MAX_ATTACHMENTS = 20;
 const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
@@ -385,11 +387,9 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       thread.messageTotal = page.total;
       thread.loaded = true;
     } catch {
-      // 会话文件读不到时保留 getMessages() 的结果，不阻断会话打开
-      if (thread.historyStart < 0) {
-        thread.historyStart = 0;
-        thread.messageTotal = thread.blocks.length;
-      }
+      // 会话文件读不到时保留 getMessages() 的结果，不阻断会话打开。
+      // 不把 historyStart 伪造成 0：否则界面会误以为“已加载全部”，
+      // 也会让 agent_settled 的历史兜底不再重试。
     }
   }
 
@@ -596,9 +596,28 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function addFiles(paths: string[] = []): Promise<void> {
     const ws = active.value;
     if (!ws || !paths.length) return;
-    const prepared = await host.prepareAttachments(ws.cwd, paths, paths);
     const known = new Set(ws.attachments.map((item: any) => item.path));
-    ws.attachments.push(...prepared.items.filter((item: any) => !known.has(item.path)));
+    const seen = new Set<string>();
+    const fresh = paths.filter((path) => {
+      if (!path || known.has(path) || seen.has(path)) return false;
+      seen.add(path);
+      return true;
+    });
+    const room = Math.max(0, MAX_ATTACHMENTS - ws.attachments.length);
+    const accepted = fresh.slice(0, room);
+    if (accepted.length < fresh.length) {
+      bus.emit("notify", {
+        level: "warning",
+        text: `附件总数最多 ${MAX_ATTACHMENTS} 个，已忽略 ${fresh.length - accepted.length} 个`,
+      });
+    }
+    if (!accepted.length) return;
+    const prepared = await host.prepareAttachments(ws.cwd, accepted, accepted);
+    for (const item of prepared.items ?? []) {
+      if (!item?.path || known.has(item.path)) continue;
+      known.add(item.path);
+      ws.attachments.push(item);
+    }
   }
 
   /** 粘贴剪贴板图片：主进程落盘到临时目录后作为普通附件加入 */
@@ -755,6 +774,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function renameSession(name: string): Promise<void> {
     const ws = active.value;
     if (!ws) return;
+    const pending = pendingNewSessions.get(ws.cwd);
+    if (pending) await pending.catch(() => {});
     await rpc(ws.cwd, "setSessionName", [name], ws.sessionFile);
     ws.sessionName = name;
     await refreshSessions(ws);
@@ -838,24 +859,28 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
-  function call(method: string, ...args: any[]): Promise<any> {
+  async function call(method: string, ...args: any[]): Promise<any> {
     const ws = active.value;
-    if (!ws) return Promise.reject(new Error("没有打开的工作区"));
+    if (!ws) throw new Error("没有打开的工作区");
+    const pending = pendingNewSessions.get(ws.cwd);
+    if (pending) await pending.catch(() => {});
     return rpc(ws.cwd, method, args, ws.sessionFile);
   }
 
   const pendingNewSessions = new Map<string, Promise<void>>();
 
-  async function send(text: string, { mode }: { mode?: string } = {}): Promise<void> {
+  async function send(text: string, { mode }: { mode?: string } = {}): Promise<boolean> {
     const ws = active.value;
     const message = text.trim();
-    if (!ws || (!message && !ws.attachments.length)) return;
+    if (!ws || (!message && !ws.attachments.length)) return false;
     const pending = pendingNewSessions.get(ws.cwd);
     if (pending) await pending.catch(() => {});
     const targetSessionFile = ws.sessionFile;
     const thread = ensureThread(ws, targetSessionFile);
     const attachmentSnapshot = [...thread.attachments];
     const behavior = thread.streaming ? (mode ?? "followUp") : undefined;
+    let accepted = false;
+    let optimisticId = "";
     try {
       const prepared = attachmentSnapshot.length
         ? await host.prepareAttachments(ws.cwd, attachmentSnapshot.map((item: any) => item.path))
@@ -876,31 +901,41 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
             size: typeof item.size === "number" ? item.size : undefined,
             inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
           }));
-        thread.transcript.pushUser(
+        optimisticId = thread.transcript.pushUser(
           message,
           imageFiles.length,
           { imageItems, attachments: files },
-        );
+        ).id;
         thread.streaming = true;
         thread.loaded = true;
       }
       const prompt = [prepared.text, message].filter(Boolean).join("\n");
       thread.attachments = [];
       const disposition = await rpc(ws.cwd, "prompt", [prompt, prepared.images, behavior], targetSessionFile);
+      accepted = true;
       if (disposition === "handled") {
         thread.streaming = false;
         await reload(ws, targetSessionFile);
       }
       await refreshSessions(ws);
+      return true;
     } catch (error: any) {
       thread.streaming = false;
+      if (!accepted) {
+        // 未送达：撤回乐观消息并恢复附件，让用户可以改完再发
+        if (optimisticId) thread.transcript.removeBlock(optimisticId);
+        thread.attachments = attachmentSnapshot;
+      }
       bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      return accepted;
     }
   }
 
   async function stop(): Promise<string> {
     const ws = active.value;
     if (!ws) return "";
+    const pending = pendingNewSessions.get(ws.cwd);
+    if (pending) await pending.catch(() => {});
     const targetSessionFile = ws.sessionFile;
     const thread = ensureThread(ws, targetSessionFile);
     const queued = await rpc(ws.cwd, "clearQueue", [], targetSessionFile);

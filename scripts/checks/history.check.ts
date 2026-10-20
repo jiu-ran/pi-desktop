@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { parseSessionHistory, sliceHistoryPage } from "../../electron/session-history.ts";
-import { SESSION_TITLE_MAX, sessionTitleFromText } from "../../electron/session-title.ts";
+import { SESSION_TITLE_MAX, firstUserTitle, sessionTitleFromText } from "../../electron/session-title.ts";
 
 function line(obj: any): string {
   return JSON.stringify(obj);
@@ -65,6 +65,14 @@ assert.equal(history[aligned.startIndex]?.role, "user", "页首应尽量对齐�
 assert.ok(sliceHistoryPage(history, 21, 0).messages.length >= 1, "limit=0 时至少返回 1 条");
 assert.equal(sliceHistoryPage(history, 21, 9999).messages.length, 21, "limit 超长时返回全部");
 assert.equal(sliceHistoryPage([], 0, 8).total, 0, "空历史安全");
+
+// 单页上限：即使为了对齐 user 向前扩，也不能超过 240 条
+const boundary = Array.from({ length: 300 }, (_, i) => ({
+  role: i === 59 ? "user" : "assistant",
+  content: i === 59 ? "q" : [],
+}));
+const capped = sliceHistoryPage(boundary, 0, 240);
+assert.ok(capped.messages.length <= 240, `单页不能超过 240 条，实际 ${capped.messages.length}`);
 
 // 首屏至少 minTurns 轮对话：长工具链会话的尾部可能只有 1 个 user
 const toolLoop = [];
@@ -137,6 +145,34 @@ assert.equal(
   sessionTitleFromText('<file name="C:\\tmp\\shot.png"></file>\n\n看看这个布局'),
   "看看这个布局",
   "附件标记不能进入标题",
+);
+
+// 会话首条消息的标题识别（决定侧边栏是否把会话当成空会话）
+const userLine = (content: any) => line({ type: "message", message: { role: "user", content } });
+assert.equal(
+  firstUserTitle([userLine([{ type: "image", mimeType: "image/png", data: "abc" }])]),
+  "图片消息",
+  "只有图片的首条消息不能被当成空会话",
+);
+assert.equal(firstUserTitle([userLine([])]), "新会话", "存在用户消息但无文本时也不能是空会话");
+assert.equal(firstUserTitle([userLine([{ type: "text", text: "hello" }])]), "hello");
+assert.equal(firstUserTitle([line({ type: "session", version: 3 })]), "", "没有用户消息才是空会话");
+assert.equal(
+  firstUserTitle([
+    userLine([
+      {
+        type: "text",
+        text: '<file name="C:\\tmp\\a.ts" size="12" inline="false">\n[已通过路径引用]\n</file>',
+      },
+    ]),
+  ]),
+  "a.ts",
+  "只有路径附件时用文件名做标题",
+);
+assert.equal(
+  firstUserTitle([userLine([{ type: "text", text: `<file name="C:\\tmp\\big.log">\n${'x'.repeat(5000)}\n</file>` }])]),
+  "big.log",
+  "超长内联内容不能进入标题",
 );
 
 console.log(`history.check ok（共 ${history.length} 条，${pages} 页，覆盖 ${covered} 条）`);

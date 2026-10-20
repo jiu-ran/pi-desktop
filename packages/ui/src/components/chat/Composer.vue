@@ -491,7 +491,9 @@ async function submit(): Promise<void> {
     return;
   }
   draft.value = "";
-  await workbench.send(text, { mode: mode.value });
+  const sent = await workbench.send(text, { mode: mode.value });
+  // 发送失败（附件失效、Worker 未就绪等）时把正文放回输入框，避免用户白打一段字。
+  if (!sent && !draft.value) draft.value = text;
 }
 
 async function stop(): Promise<void> {

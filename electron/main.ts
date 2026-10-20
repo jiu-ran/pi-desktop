@@ -89,6 +89,20 @@ function runCommand(command: string, args: string[], timeoutMs = 30000): Promise
 }
 
 /**
+ * 把一个可执行文件路径安全地包成 shell 参数。
+ * runCommand 使用 shell:true 才能运行 npm 在 Windows 上生成的 .cmd shim，
+ * 但用户手选的 Pi 路径可能包含空格/& 等字符，必须加引号并拒绝会破坏引号的字符。
+ */
+function quoteShellPath(value: string): string {
+  if (/[\0\r\n]/.test(value)) throw new Error("Pi 路径包含不支持的换行或空字符");
+  if (process.platform === "win32") {
+    if (value.includes('"')) throw new Error("Pi 路径包含不支持的引号");
+    return `"${value}"`;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
  * 只在系统 PATH 中识别 pi（自己逐目录走一遍，不调 where/which）。
  * Windows 的 `where` 会先命中进程 cwd（如项目根的 node_modules/.bin/pi 本地
  * shim），导致识别到错误位置；手动走 PATH 即与 cmd 的解析一致，又天然排除 cwd。
@@ -139,7 +153,7 @@ function findPiOnPath(): string {
 
 /** 用指定二进制跑 `--version` 探活，返回版本号（失败为空字符串）。路径含空格时加引号。 */
 async function probePiVersion(bin: string): Promise<string> {
-  const quoted = bin.includes(" ") && !(bin.startsWith('"') && bin.endsWith('"')) ? `"${bin}"` : bin;
+  const quoted = quoteShellPath(bin);
   const probed = await runCommand(quoted, ["--version"], 10000);
   if (probed.code !== 0) return "";
   return probed.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)[0] ?? "";
@@ -213,7 +227,7 @@ async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promis
   const before = await locatePi(customPath);
   const from = before.version;
   if (!before.found || !before.path) return { ok: false, from: "", to: "", log: before.error ?? "未检测到本机 pi 命令" };
-  const bin = before.path.includes(" ") ? `"${before.path}"` : before.path;
+  const bin = quoteShellPath(before.path);
   const args = scope === "all" ? ["update", "--all", "--no-approve"] : ["update", "--no-approve"];
   const installed = await runCommand(bin, args, 180000);
   const tail = installed.output.split(/\r?\n/).slice(-30).join("\n");

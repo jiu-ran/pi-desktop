@@ -1795,6 +1795,8 @@ html[data-density="compact"] .tool-card {
   margin: 0 0 12px;
   color: var(--fg-2);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .dialog-options {
   display: flex;

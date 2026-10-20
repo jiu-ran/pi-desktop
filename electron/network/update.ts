@@ -1,5 +1,6 @@
 import { app, shell } from "electron";
-import { mkdir, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { downloadFileStream, normalizeNetworkError } from "./http.ts";
 import {
@@ -44,6 +45,7 @@ export class AppUpdateManager {
   private readonly repo: string;
   private readonly preparedUpdates: Map<string, PreparedAppUpdate> = new Map();
   private downloadInProgress: boolean = false;
+  private downloadController: AbortController | null = null;
 
   constructor(owner: string, repo: string) {
     this.owner = owner;
@@ -108,6 +110,8 @@ export class AppUpdateManager {
     }
 
     this.downloadInProgress = true;
+    const controller = new AbortController();
+    this.downloadController = controller;
 
     try {
       const current = app.getVersion();
@@ -140,12 +144,15 @@ export class AppUpdateManager {
 
       // 下载文件
       await downloadFileStream(asset.browser_download_url, filePath, {
-        timeout: 300000, // 5 分钟超时
+        timeout: 300000, // 单块空闲超时 5 分钟（不是总时长）
         maxRetries: 3,
         retryDelay: 2000,
         onProgress,
         verifySha256: sha256,
+        signal: controller.signal,
       });
+
+      if (controller.signal.aborted) throw new Error("下载已取消");
 
       const prepared: PreparedAppUpdate = {
         version: latest,
@@ -160,9 +167,13 @@ export class AppUpdateManager {
 
       return prepared;
     } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("下载更新失败：已取消");
+      }
       const msg = normalizeNetworkError(error);
       throw new Error(`下载更新失败：${msg}`);
     } finally {
+      if (this.downloadController === controller) this.downloadController = null;
       this.downloadInProgress = false;
     }
   }
@@ -177,11 +188,31 @@ export class AppUpdateManager {
       throw new Error("请先下载并准备更新");
     }
 
-    // 打开安装包
-    const error = await shell.openPath(prepared.filePath);
-
-    if (error) {
-      throw new Error(`打开安装包失败：${error}`);
+    if (process.platform === "win32" && /\.exe$/i.test(prepared.filePath)) {
+      // Windows NSIS 安装器需要 --updated 才会启用 keep-shortcuts：
+      // 否则旧卸载器会删掉桌面快捷方式，再由新安装器重新创建。
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const child = spawn(prepared.filePath, ["--updated"], {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.once("spawn", () => {
+          settled = true;
+          child.unref();
+          resolve();
+        });
+        child.once("error", (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        });
+      });
+    } else {
+      const error = await shell.openPath(prepared.filePath);
+      if (error) {
+        throw new Error(`打开安装包失败：${error}`);
+      }
     }
 
     // 300ms 后退出应用，给系统时间启动安装程序
@@ -189,15 +220,14 @@ export class AppUpdateManager {
   }
 
   /**
-   * 取消下载（如果正在进行中）
+   * 取消下载（如果正在进行中）。
+   * 只发取消信号，等 download() 的 finally 统一复位状态，
+   * 避免在真实下载还没结束时允许第二次下载并发写同一个文件。
    */
-  cancelDownload(): void {
-    // 注意：当前实现无法中止已发起的 fetch 请求
-    // 如需支持，应该在 download() 中保存 AbortController 并在此调用 abort()
-    if (this.downloadInProgress) {
-      this.downloadInProgress = false;
-      // 临时文件会在下载失败时自动清理
-    }
+  cancelDownload(): boolean {
+    if (!this.downloadController) return false;
+    this.downloadController.abort();
+    return true;
   }
 
   /**

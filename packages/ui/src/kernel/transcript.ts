@@ -229,8 +229,16 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     }
   }
 
-  function pushUser(text: string, images = 0, extra: Pick<TranscriptBlock, "imageItems" | "attachments"> = {}): void {
-    blocks.push({ kind: "user", id: uid("u"), text, images, ...extra });
+  function pushUser(text: string, images = 0, extra: Pick<TranscriptBlock, "imageItems" | "attachments"> = {}): TranscriptBlock {
+    const block: TranscriptBlock = { kind: "user", id: uid("u"), text, images, ...extra };
+    blocks.push(block);
+    return block;
+  }
+
+  /** 发送失败时撤回乐观渲染的用户消息，避免界面留下一条实际没发出去的消息。 */
+  function removeBlock(id: string): void {
+    const index = blocks.findIndex((block) => block.id === id);
+    if (index >= 0) blocks.splice(index, 1);
   }
 
   function pushNotice(level: string, text: string): void {
@@ -292,5 +300,5 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     blocks.unshift(...newBlocks);
   }
 
-  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages };
+  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages, removeBlock };
 }

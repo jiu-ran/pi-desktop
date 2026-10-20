@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
-import { sessionTitleFromText } from "./session-title.ts";
+import { firstUserTitle, sessionTitleFromText } from "./session-title.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -210,6 +210,18 @@ interface CachedSessionMeta {
 
 const sessionMetaCache = new Map<string, CachedSessionMeta>();
 
+/** `@` 文件补全的目录树缓存：短时间内重复输入时不必反复遍历整个项目。 */
+interface CompletionCacheEntry {
+  at: number;
+  entries: string[];
+}
+const completionCache = new Map<string, CompletionCacheEntry>();
+const COMPLETION_CACHE_TTL = 2000;
+
+function completionKey(root: string): string {
+  return process.platform === "win32" ? root.toLowerCase() : root;
+}
+
 async function readHeadText(file: string, size: number, maxBytes = 128 * 1024): Promise<string> {
   if (size <= maxBytes) {
     return readFile(file, "utf8");
@@ -353,25 +365,6 @@ async function prepareAttachment(_cwd: string, target: string): Promise<Attachme
   return info;
 }
 
-function firstUserText(lines: string[]): string {
-  for (const line of lines.slice(0, 80)) {
-    if (!line) continue;
-    try {
-      const entry = JSON.parse(line);
-      const message = entry.message ?? entry;
-      if (message.role !== "user") continue;
-      const content = message.content;
-      const text = typeof content === "string" ? content : content?.find((part: any) => part.type === "text")?.text;
-      if (!text) continue;
-      const title = sessionTitleFromText(text);
-      if (title) return title;
-    } catch {
-      // 跳过损坏行
-    }
-  }
-  return "";
-}
-
 /** 当前分支：向上查找 .git（兼容 worktree 的 gitdir 文件），只读 HEAD，不调用 git。 */
 export async function gitBranch(cwd: string): Promise<string> {
   let dir = path.resolve(cwd);
@@ -430,12 +423,17 @@ export async function listSessions(cwd: string, keepFile: string | Iterable<stri
       const lines = rawText.split(/\r?\n/);
       let header: Record<string, any> = {};
       try { header = JSON.parse(lines[0] || "{}"); } catch { header = {}; }
-      const title = firstUserText(lines);
+      const title = firstUserTitle(lines);
+      // 自定义名称也走同一套压缩/截断，避免 header.name 绕过 SESSION_TITLE_MAX
+      // 把侧边栏或删除确认弹窗撑爆。
+      const customTitle = sessionTitleFromText(header.name);
       const summary: SessionSummary = {
         id: file,
         path: file,
-        title: header.name || title || "新会话",
-        empty: !title,
+        title: customTitle || title || "新会话",
+        // 有自定义名称的会话即使还没有文字内容也不能算空会话，
+        // 否则切换会话时会被当作空文件清理掉。
+        empty: !customTitle && !title,
         timestamp: header.timestamp ? Date.parse(header.timestamp) : info.mtimeMs,
       };
       sessionMetaCache.set(cacheKey, { mtimeMs: info.mtimeMs, size: info.size, summary });
@@ -448,6 +446,18 @@ export async function listSessions(cwd: string, keepFile: string | Iterable<stri
   return items
     .filter((item): item is SessionSummary => Boolean(item && (!item.empty || keepSet.has(normSessionFile(item.path)))))
     .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/** 只有缓存与文件当前 mtime/size 完全一致时才认为是空会话，避免误删刚写入消息的会话。 */
+async function isKnownEmptySession(file: string): Promise<boolean> {
+  const cached = sessionMetaCache.get(normSessionFile(file));
+  if (!cached?.summary.empty) return false;
+  try {
+    const info = await stat(file);
+    return info.mtimeMs === cached.mtimeMs && info.size === cached.size;
+  } catch {
+    return false;
+  }
 }
 
 export class PiHost {
@@ -803,6 +813,7 @@ export class PiHost {
     if (!parentInfo || !parentInfo.isDirectory()) throw new Error("目标目录不存在");
     if (kind === "folder") await mkdir(target);
     else await writeFile(target, "", { encoding: "utf8", flag: "wx" });
+    completionCache.delete(completionKey(path.resolve(cwd)));
     return {
       path: target,
       relative: path.relative(root, target).replace(/\\/g, "/"),
@@ -821,6 +832,7 @@ export class PiHost {
     const parent = path.relative(current.root, path.dirname(current.target)).replace(/\\/g, "/");
     const next = await this.entryName(cwd, parent === "." ? "" : parent, name);
     await rename(current.target, next.target);
+    completionCache.delete(completionKey(path.resolve(cwd)));
     return {
       path: next.target,
       relative: path.relative(next.root, next.target).replace(/\\/g, "/"),
@@ -836,6 +848,7 @@ export class PiHost {
     const info = await lstat(target).catch(() => null);
     if (!info || info.isSymbolicLink()) throw new Error("项目不存在或无法删除");
     await this.trash(target);
+    completionCache.delete(completionKey(path.resolve(cwd)));
   }
 
   async gitOverview(cwd: string): Promise<GitOverview> {
@@ -948,7 +961,19 @@ export class PiHost {
   async completePaths(cwd: string, query = ""): Promise<WorkspaceEntry[]> {
     const root = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, root);
-    const entries = await walkDirectory(root, root, [], 5000);
+    const key = completionKey(root);
+    const cached = completionCache.get(key);
+    let entries: string[];
+    if (cached && Date.now() - cached.at < COMPLETION_CACHE_TTL) {
+      entries = cached.entries;
+    } else {
+      entries = await walkDirectory(root, root, [], 5000);
+      completionCache.set(key, { at: Date.now(), entries });
+      if (completionCache.size > 8) {
+        const oldest = completionCache.keys().next().value;
+        if (oldest) completionCache.delete(oldest);
+      }
+    }
     const q = String(query).trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 
     function score(relative: string): number | null {
@@ -1148,7 +1173,7 @@ export class PiHost {
         const res = await idleSlot.client.switchSession(targetFile);
         if (!res?.cancelled) {
           if (oldKey) pool.workers.delete(oldKey);
-          if (oldFile && sessionMetaCache.get(oldKey)?.summary.empty) {
+          if (oldFile && await isKnownEmptySession(oldFile)) {
             unlink(oldFile).catch(() => {});
           }
           const st = await idleSlot.client.getState();
@@ -1208,7 +1233,7 @@ export class PiHost {
         const res = await idleSlot.client.newSession(restored[0]);
         if (!res?.cancelled) {
           if (oldKey) pool.workers.delete(oldKey);
-          if (oldFile && sessionMetaCache.get(oldKey)?.summary.empty) {
+          if (oldFile && await isKnownEmptySession(oldFile)) {
             unlink(oldFile).catch(() => {});
           }
           const st = await idleSlot.client.getState();

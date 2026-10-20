@@ -89,14 +89,16 @@ export function sliceHistoryPage(
   options: SliceOptions = {},
 ): HistoryPage {
   const total = history.length;
-  const size = Math.max(1, Math.min(Math.trunc(limit) || 8, 200));
+  const size = Math.max(1, Math.min(Math.trunc(limit) || 8, MAX_PAGE_MESSAGES));
   const requested = Number.isFinite(endIndex) && endIndex > 0 ? Math.trunc(endIndex) : total;
   const end = Math.max(0, Math.min(requested, total));
   let start = Math.max(0, end - size);
   if (start > 0) {
-    // 向前对齐到最近的 user 消息，避免把一轮对话从中间切开
+    // 向前对齐到最近的 user 消息，避免把一轮对话从中间切开；
+    // 但不能为了对齐突破单页上限，否则首屏会超过 MAX_PAGE_MESSAGES。
+    const floor = Math.max(0, end - MAX_PAGE_MESSAGES);
     let probe = start;
-    while (probe > 0 && history[probe]?.role !== "user") probe -= 1;
+    while (probe > floor && history[probe]?.role !== "user") probe -= 1;
     if (probe > 0 && history[probe]?.role === "user" && start - probe <= ALIGN_WINDOW) start = probe;
   }
   // 首屏至少凑够 minTurns 轮对话（从页首往前数 user 消息）

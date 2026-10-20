@@ -1,9 +1,18 @@
 import { app, BrowserWindow } from "electron";
 
-const errors: string[] = [];
-let win: BrowserWindow;
+// Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
+// profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
+process.env.PI_DESKTOP_PROFILE ||= "Pi Desktop Smoke";
 
-async function probe(label: string) {
+const errors = [];
+let win;
+
+setTimeout(() => {
+  console.error("[result] FAIL hard timeout");
+  app.exit(1);
+}, 60000);
+
+async function probe(label) {
   const result = JSON.parse(await win.webContents.executeJavaScript(`JSON.stringify((() => {
     const q = (s) => document.querySelectorAll(s).length;
     const k = window.__piDesktop;
@@ -22,8 +31,8 @@ async function probe(label: string) {
       user: q('.msg.user'),
       assistant: q('.msg.assistant'),
       thinking: q('.thinking'),
-      titlebar: document.querySelector('.titlebar')?.innerText.replace(/\\s+/g, ' ').slice(0, 200),
-      composer: document.querySelector('.composer-bar')?.innerText.replace(/\\s+/g, ' ').slice(0, 120),
+      titlebar: document.querySelector('.titlebar')?.innerText.replace(/\s+/g, ' ').slice(0, 200),
+      composer: document.querySelector('.composer-bar')?.innerText.replace(/\s+/g, ' ').slice(0, 120),
       font: getComputedStyle(document.body).fontFamily.slice(0, 40),
       fontLoaded: document.fonts.check('13px Inter'),
       plugins: k?.plugins.records.map((r) => r.id + ':' + (r.enabled ? 'on' : 'off')).join(' '),
@@ -34,20 +43,30 @@ async function probe(label: string) {
   return result;
 }
 
+await import("../../dist-electron/main.js");
+console.log("[smoke] main imported");
+
 app.whenReady().then(async () => {
-  await import("../../electron/main.ts");
-  await new Promise((r) => setTimeout(r, 300));
+  for (let i = 0; i < 50 && BrowserWindow.getAllWindows().length === 0; i += 1) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
   win = BrowserWindow.getAllWindows()[0];
-  win.webContents.on("console-message", (event: any) => {
+  console.log("[smoke] window", Boolean(win));
+  if (!win) {
+    console.error("[result] FAIL no window");
+    app.exit(1);
+    return;
+  }
+  win.webContents.on("console-message", (event) => {
     const level = event.level ?? "";
     const message = event.message ?? "";
     if ((level === "error" || level === "warning") && !message.includes("Security Warning")) errors.push(message);
   });
   win.webContents.on("render-process-gone", (_e, d) => errors.push(`render gone: ${d.reason}`));
-  await win.webContents.reloadIgnoringCache();
-
   await new Promise((r) => setTimeout(r, 2500));
+  console.log("[smoke] probing");
   await probe("boot");
+  console.log("[smoke] probed");
   const workspace = process.env.PI_DESKTOP_SMOKE_WORKSPACE ?? process.cwd();
   const workspaceLiteral = JSON.stringify(workspace);
   await win.webContents.executeJavaScript(`window.__piDesktop.workbench.open(${workspaceLiteral}).then(() => true)`);
@@ -57,7 +76,7 @@ app.whenReady().then(async () => {
     await new Promise((r) => setTimeout(r, 500));
   }
   const ready = await probe("workspace");
-  const required = ["sidebar", "strip", "conversation"] as const;
+  const required = ["sidebar", "strip", "conversation"];
   for (const key of required) {
     if (!ready[key]) errors.push(`missing required UI region: ${key}`);
   }
@@ -66,4 +85,7 @@ app.whenReady().then(async () => {
   const passed = ready.ws?.status === "ready" && !errors.length;
   console.log("[result]", passed ? "PASS" : "FAIL");
   app.exit(passed ? 0 : 1);
+}).catch((error) => {
+  console.error("[result] FAIL", error);
+  app.exit(1);
 });

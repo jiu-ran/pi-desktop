@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from "vue";
+import { lockBodyScroll, unlockBodyScroll } from "../../shared/body-scroll-lock.ts";
 
 interface PreviewItem {
   src: string;
@@ -44,14 +45,34 @@ function onKey(event: KeyboardEvent): void {
   }
 }
 
+// 多个 Lightbox 可能同时存在（用户消息与输入框各一个），
+// body 锁由共享模块做引用计数，实例只记录自己是否持有。
+let locked = false;
+function lockScroll(): void {
+  if (locked) return;
+  locked = true;
+  lockBodyScroll();
+}
+function unlockScroll(): void {
+  if (!locked) return;
+  locked = false;
+  unlockBodyScroll();
+}
+
 watch(open, (value) => {
   if (typeof window === "undefined") return;
-  if (value) window.addEventListener("keydown", onKey, true);
-  else window.removeEventListener("keydown", onKey, true);
-});
+  if (value) {
+    window.addEventListener("keydown", onKey, true);
+    lockScroll();
+  } else {
+    window.removeEventListener("keydown", onKey, true);
+    unlockScroll();
+  }
+}, { immediate: true });
 
 onBeforeUnmount(() => {
   if (typeof window !== "undefined") window.removeEventListener("keydown", onKey, true);
+  unlockScroll();
 });
 </script>
 
