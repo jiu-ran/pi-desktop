@@ -9,32 +9,34 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: Build (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Windows 构建
-          - os: windows-latest
-            platform: win
-            artifact_path: 'dist/Pi Desktop Setup*.exe'
-
-          # macOS Apple Silicon 构建
-          - os: macos-latest
-            platform: mac-arm64
-            artifact_path: 'dist/Pi.Desktop*.dmg'
-
-          # Linux 构建
-          - os: ubuntu-latest
-            platform: linux
-            artifact_path: 'dist/Pi.Desktop*.AppImage'
+          - platform: windows
+            os: windows-latest
+            builder_args: --win
+          - platform: macos
+            os: macos-latest
+            builder_args: --mac
+          - platform: linux
+            os: ubuntu-latest
+            builder_args: --linux
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -43,78 +45,62 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Setup Python (macOS/Linux)
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
 
       - name: Install dependencies
         run: |
           npm install
           npm install --prefix packages/ui
 
-      - name: Build UI
+      - name: Build app
         run: npm run build
 
-      - name: Build Electron
-        run: npm run build:electron
-
-      - name: Build and package (Windows)
-        if: runner.os == 'Windows'
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npx electron-builder --win --publish never
-
-      - name: Build and package (macOS)
-        if: runner.os == 'macOS'
-        env:
-          APPLE_SIGNING_IDENTITY: -
-        run: npx electron-builder --mac --publish never
-
-      - name: Build and package (Linux)
-        if: runner.os == 'Linux'
-        run: npx electron-builder --linux --publish never
+      - name: Package app
+        run: npx --yes electron-builder ${{ matrix.builder_args }} --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-artifacts
+          if-no-files-found: error
+          retention-days: 14
           path: |
-            dist/Pi*.exe
-            dist/Pi*.msi
-            dist/Pi*.zip
-            dist/Pi*.dmg
-            dist/Pi*.AppImage
-            dist/pi-desktop*.tar.gz
+            dist/*.exe
+            dist/*.msi
+            dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.tar.gz
+            dist/*.blockmap
 
   release:
+    name: Publish release
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
-      - name: Flatten artifacts
-        shell: bash
-        run: |
-          mkdir -p final_artifacts
-          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.msi" \) -exec cp {} final_artifacts/ \;
-          ls -lh final_artifacts/
+      - name: List artifacts
+        run: ls -lh artifacts
 
-      - name: Create Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: final_artifacts/*
+          files: |
+            artifacts/*.exe
+            artifacts/*.zip
+            artifacts/*.dmg
+            artifacts/*.AppImage
+            artifacts/*.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
