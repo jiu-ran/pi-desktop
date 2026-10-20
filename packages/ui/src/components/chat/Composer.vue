@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
+import { imageDataUrl } from "../../shared/attachments.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
 import Picker from "./Picker.vue";
 import SlashMenu from "./SlashMenu.vue";
+import ImageLightbox from "./ImageLightbox.vue";
 import Widgets from "../overlays/Widgets.vue";
 
 const { workbench, slashCommands, bus } = useKernel();
@@ -39,6 +41,17 @@ const draft = computed({
 
 const queued = computed(() => [...(ws.value?.queue.steering ?? []), ...(ws.value?.queue.followUp ?? [])]);
 const attachments = computed(() => ws.value?.attachments ?? []);
+const imageAttachments = computed(() =>
+  attachments.value.filter((item: any) => item.image && item.data),
+);
+const fileAttachments = computed(() =>
+  attachments.value.filter((item: any) => !item.image || !item.data),
+);
+const imagePreviewIndex = ref<number | null>(null);
+function previewAttachment(item: any): void {
+  const index = imageAttachments.value.findIndex((entry: any) => entry.path === item.path);
+  if (index >= 0) imagePreviewIndex.value = index;
+}
 const hasHistory = computed(() => (ws.value?.blocks.length ?? 0) > 0);
 
 const modelItems = computed(() =>
@@ -661,8 +674,19 @@ const argHint = computed(() => {
 
         <div class="composer-field">
           <div v-if="attachments.length" class="attachment-strip">
-            <span v-for="item in attachments" :key="item.path" class="attachment-chip" :title="item.path">
-              <span class="attachment-chip-icon" v-html="item.kind === 'folder' ? icons.folder : item.image ? icons.image : icons.attach" />
+            <div
+              v-for="item in imageAttachments"
+              :key="item.path"
+              class="attachment-thumb"
+              :title="`${item.name}（点击预览）`"
+            >
+              <button type="button" class="attachment-thumb-open" @click="previewAttachment(item)">
+                <img :src="imageDataUrl(item.mimeType, item.data)" :alt="item.name" />
+              </button>
+              <button type="button" class="attachment-thumb-remove" title="移除图片" @click="removeAttachment(item.path)">×</button>
+            </div>
+            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.path">
+              <span class="attachment-chip-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
               <span>{{ item.name }}</span>
               <button type="button" title="移除附件" @click="removeAttachment(item.path)">×</button>
             </span>
@@ -753,5 +777,6 @@ const argHint = computed(() => {
         </div>
       </div>
     </div>
+    <ImageLightbox v-model:index="imagePreviewIndex" :items="imageAttachments.map((item: any) => ({ src: imageDataUrl(item.mimeType, item.data), name: item.name }))" />
   </div>
 </template>

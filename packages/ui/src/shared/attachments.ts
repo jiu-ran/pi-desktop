@@ -14,6 +14,10 @@ export interface MessageAttachment {
   kind: "file" | "folder";
 }
 
+export function imageDataUrl(mimeType: string | undefined, data: string): string {
+  return data.startsWith("data:") ? data : `data:${mimeType || "image/png"};base64,${data}`;
+}
+
 const MARKER_PATTERN = /<(file|directory) name="([^"]*)">[\s\S]*?<\/\1>/g;
 
 function unescapeXml(value: string): string {
