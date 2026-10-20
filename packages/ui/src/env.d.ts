@@ -281,6 +281,7 @@ export interface PiDesktopBridge {
     endIndex?: number,
     limit?: number,
     minTurns?: number,
+    minBlocks?: number,
   ) => Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }>;
   deleteSession: (cwd: string, file: string) => Promise<any[]>;
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => Promise<any>;

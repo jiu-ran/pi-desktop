@@ -437,8 +437,8 @@ app.whenReady().then(() => {
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));
   handle("pi:sessions", (cwd: string) => host.sessions(cwd));
-  handle("pi:message-page", (cwd: string, file: string, endIndex?: number, limit?: number, minTurns?: number) =>
-    host.messagePage(cwd, file, endIndex, limit, minTurns),
+  handle("pi:message-page", (cwd: string, file: string, endIndex?: number, limit?: number, minTurns?: number, minBlocks?: number) =>
+    host.messagePage(cwd, file, endIndex, limit, minTurns, minBlocks),
   );
   handle("pi:delete-session", (cwd: string, file: string) => host.deleteSession(cwd, file));
   handle("pi:remove-project", async (cwd: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}) => {

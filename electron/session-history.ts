@@ -34,6 +34,27 @@ const MAX_PAGE_MESSAGES = 240;
 export interface SliceOptions {
   /** 页首至少包含多少条 user 消息（首屏用来凑出完整几轮对话） */
   minTurns?: number;
+  /** 页首至少包含多少个可渲染块，避免 8 条原始消息只渲染成 4 行 */
+  minBlocks?: number;
+}
+
+/**
+ * 估算一条原始消息会渲染出多少个块（与 packages/ui transcript 的规则保持一致）：
+ * user 记 1；assistant 的 thinking / text / toolCall 各记 1；toolResult 合并进 tool 块记 0。
+ */
+function countBlocks(message: any): number {
+  if (message?.role === "user") return 1;
+  if (message?.role === "assistant") {
+    let count = 0;
+    for (const part of message.content ?? []) {
+      if (part?.type === "thinking" && part.thinking?.trim()) count += 1;
+      else if (part?.type === "text" && part.text?.trim()) count += 1;
+      else if (part?.type === "toolCall") count += 1;
+    }
+    if (message.stopReason === "error" && message.errorMessage) count += 1;
+    return count;
+  }
+  return 0;
 }
 
 export function parseSessionHistory(text: string): any[] {
@@ -90,6 +111,18 @@ export function sliceHistoryPage(
     }
     start = probe;
   }
+  // 再保证至少有 minBlocks 个可渲染块：长工具链里 8 条原始消息可能只渲染成 4 行
+  const minBlocks = Math.max(0, Math.trunc(Number(options.minBlocks) || 0));
+  if (minBlocks > 0 && start > 0) {
+    let blocks = 0;
+    for (let i = start; i < end; i += 1) blocks += countBlocks(history[i]);
+    let probe = start;
+    while (blocks < minBlocks && probe > 0 && end - probe < MAX_PAGE_MESSAGES) {
+      probe -= 1;
+      blocks += countBlocks(history[probe]);
+    }
+    start = probe;
+  }
   return { messages: history.slice(start, end), startIndex: start, endIndex: end, total };
 }
 
@@ -127,9 +160,10 @@ export async function readSessionHistoryPage(
   endIndex: number,
   limit = 8,
   minTurns = 0,
+  minBlocks = 0,
 ): Promise<HistoryPage> {
   const history = await readSessionHistory(sessionFile);
-  return sliceHistoryPage(history, endIndex, limit, { minTurns });
+  return sliceHistoryPage(history, endIndex, limit, { minTurns, minBlocks });
 }
 
 export function clearSessionHistoryCache(sessionFile?: string): void {

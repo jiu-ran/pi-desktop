@@ -255,6 +255,9 @@ watch(searchMatches, () => {
           <div v-if="ws.activeThread && ws.activeThread.historyStart === 0 && ws.activeThread.messageTotal > 8" class="all-loaded">
             <span>✓ 已加载全部 {{ ws.activeThread.messageTotal }} 条消息</span>
           </div>
+          <div v-else-if="ws.activeThread && ws.activeThread.historyStart > 0" class="all-loaded">
+            <span>已加载最近 {{ ws.activeThread.messageTotal - ws.activeThread.historyStart }} / {{ ws.activeThread.messageTotal }} 条消息 · 继续上滑加载更早</span>
+          </div>
           
           <div v-if="ws.loading && !ws.blocks.length" class="empty-thread">
             <span class="mini-spinner" />

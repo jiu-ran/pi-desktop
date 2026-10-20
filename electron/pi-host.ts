@@ -1094,10 +1094,11 @@ export class PiHost {
     endIndex = 0,
     limit = 8,
     minTurns = 0,
+    minBlocks = 0,
   ): Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }> {
     try {
       assertSessionFile(cwd, sessionFile);
-      return await readSessionHistoryPage(sessionFile, endIndex, limit, minTurns);
+      return await readSessionHistoryPage(sessionFile, endIndex, limit, minTurns, minBlocks);
     } catch (error) {
       throw new Error(`读取会话历史失败: ${error instanceof Error ? error.message : String(error)}`);
     }

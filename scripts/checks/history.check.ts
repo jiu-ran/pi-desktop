@@ -89,6 +89,22 @@ const firstPage = sliceHistoryPage(normal, 0, 40, { minTurns: 3 });
 assert.ok(firstPage.messages.length >= 40, "首屏至少 40 条");
 assert.equal(firstPage.endIndex, 60);
 
+// minBlocks：长工具链里 8 条原始消息可能只渲染成 4 行，应继续向前扩到至少 8 个块
+const sparse: any[] = [];
+for (let turn = 0; turn < 6; turn += 1) {
+  sparse.push({ role: "user", content: `t${turn}` });
+  for (let i = 0; i < 4; i += 1) {
+    sparse.push({ role: "assistant", content: [{ type: "thinking", thinking: `think ${turn}-${i}` }] });
+    sparse.push({ role: "toolResult", toolCallId: `t${turn}-${i}`, toolName: "bash", content: [] });
+  }
+}
+const plainEight = sliceHistoryPage(sparse, 0, 8);
+assert.ok(plainEight.messages.length >= 8 && plainEight.messages.length <= 9, `默认按 8 条原始消息取页，实际 ${plainEight.messages.length}`);
+const blockEight = sliceHistoryPage(sparse, 0, 8, { minBlocks: 8 });
+assert.ok(blockEight.messages.length > 8, `minBlocks 应扩页，实际 ${blockEight.messages.length} 条`);
+assert.ok(blockEight.startIndex < plainEight.startIndex, "minBlocks 页首应更靠前");
+assert.equal(blockEight.endIndex, plainEight.endIndex, "endIndex 不变");
+
 // 旧格式（顶层 role）仍需兼容
 const legacy = parseSessionHistory([line({ role: "user", content: "hi" }), line({ role: "system" })].join("\n"));
 assert.equal(legacy.length, 1);

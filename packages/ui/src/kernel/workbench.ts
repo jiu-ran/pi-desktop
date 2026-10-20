@@ -15,6 +15,8 @@ import type {
 const THEME_KEY = "pi-desktop.theme";
 /** 每页加载的历史消息条数 */
 const PAGE_SIZE = 8;
+/** 每页至少渲染多少个块（8 条原始消息在长工具链里可能只渲染成 4 行） */
+const PAGE_MIN_BLOCKS = 8;
 /** 首屏消息条数：8 条在长工具链会话中可能只够 1～2 条气泡，首屏多给一些上下文 */
 const INITIAL_PAGE_SIZE = 40;
 /** 首屏至少凑够多少轮用户对话 */
@@ -335,8 +337,9 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       thread.transcript.loadMessages(snap.messages ?? []);
       thread.loaded = true;
     }
-    // 仅在空闲时从会话文件补齐；流式中的内容由事件增量维护
-    if (!thread.streaming && !snap.state?.isStreaming) void hydrateHistory(ws, thread, initial);
+    // 打开会话时即便正在流式输出也要补齐历史：
+    // 否则 snap.messages 只是压缩后的上下文，可能只有几条消息。
+    void hydrateHistory(ws, thread, initial);
 
     ws.sessionFile = file;
   }
@@ -352,17 +355,23 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       thread.messageTotal = thread.blocks.length;
       return;
     }
-    if (thread.streaming) return;
+    const wasStreaming = thread.streaming;
     const loaded = thread.historyStart >= 0 && thread.messageTotal > thread.historyStart
       ? thread.messageTotal - thread.historyStart
       : 0;
+    // historyStart < 0 说明这线程是事件/上下文消息建起来的（比如流式中打开），按首屏处理
+    const firstLoad = initial || thread.historyStart < 0;
+    // 已完整加载过窗口时，流式中不再覆盖，避免抹掉正在输出的半截消息
+    if (!firstLoad && wasStreaming) return;
     // 首屏多加载一些：8 条消息在长工具链会话里可能只够一轮对话；
     // 之后再向上翻页时仍按 8 条一页。
-    const limit = initial ? INITIAL_PAGE_SIZE : Math.max(PAGE_SIZE, loaded + PAGE_SIZE);
+    const limit = firstLoad ? INITIAL_PAGE_SIZE : Math.max(PAGE_SIZE, loaded + PAGE_SIZE);
     try {
-      const page = await host.messagePage(ws.cwd, file, 0, limit, initial ? INITIAL_MIN_TURNS : 0);
+      const page = await host.messagePage(ws.cwd, file, 0, limit, firstLoad ? INITIAL_MIN_TURNS : 0);
       if (disposed || workspaces.get(ws.cwd) !== ws) return;
-      if (thread.sessionFile !== file || thread.streaming) return;
+      if (thread.sessionFile !== file) return;
+      // 请求期间从空闲进入流式：放弃这次覆盖，避免抹掉刚产生的实时内容
+      if (!wasStreaming && thread.streaming) return;
       if (page.total === 0) {
         // 文件里还没有落盘消息（刚新建的会话），保留内存里的消息
         thread.historyStart = 0;
@@ -370,7 +379,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
         return;
       }
       // 非首次加载且内容没变：不重绘，避免用户上翻阅读时被拉回底部
-      if (!initial && thread.historyStart >= 0 && page.total === thread.messageTotal) return;
+      if (!firstLoad && page.total === thread.messageTotal) return;
       thread.transcript.loadMessages(page.messages);
       thread.historyStart = page.startIndex;
       thread.messageTotal = page.total;
@@ -451,7 +460,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       case "agent_settled":
         thread.streaming = false;
         thread.queue = { steering: [], followUp: [] };
-        appendUsage(thread);
+        // 流式中打开 / 只靠事件建起来的会话，在本轮结束后用文件消息补齐历史；
+        // 补齐会重建块，所以用量条要在补齐完成后再挂回去。
+        void hydrateHistory(ws, thread, thread.historyStart < 0).finally(() => appendUsage(thread));
         scheduleSessionsRefresh(ws);
         break;
       case "queue_update":
@@ -811,7 +822,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
     thread.loadingMore = true;
     try {
-      const page = await host.messagePage(cwd, sessionFile, thread.historyStart, limit);
+      const page = await host.messagePage(cwd, sessionFile, thread.historyStart, limit, 0, PAGE_MIN_BLOCKS);
       if (page.messages.length > 0) {
         thread.transcript.prependMessages(page.messages);
         thread.historyStart = page.startIndex;
