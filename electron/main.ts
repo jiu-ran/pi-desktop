@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -10,6 +10,22 @@ import { createAppUpdateManager } from "./network/update.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// 开发实例使用独立 profile：
+// Electron 的 userData 目录取自 package.json 的 productName，而 dev 与已安装版本
+// 用的是同一份 package.json，两个进程会抢同一个 Cache/GPUCache，
+// 启动时报 "Unable to move the cache: 拒绝访问 (0x5)" / "Gpu Cache Creation failed"。
+// dev 独立目录后，已安装版本可以与 npm run dev 同时运行。
+if (!app.isPackaged) {
+  const profile = process.env.PI_DESKTOP_PROFILE || "Pi Desktop Dev";
+  const dir = path.join(app.getPath("appData"), profile);
+  try {
+    mkdirSync(dir, { recursive: true });
+    app.setPath("userData", dir);
+  } catch {
+    // 目录不可写时退回默认 profile，不影响启动
+  }
+}
 /** 剪贴板粘贴图片：允许的 MIME → 扩展名 */
 const PASTE_IMAGE_TYPES: Record<string, string> = {
   "image/png": "png",

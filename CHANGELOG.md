@@ -9,6 +9,7 @@
 
 ### 修复
 
+- 开发实例与已安装版本共用 Chromium profile：两者 `package.json` 的 `productName` 都是 `Pi Desktop`，同时运行时抢同一份 `Cache`/`GPUCache` 锁，启动日志会刷 `Unable to move the cache: 拒绝访问 (0x5)`、`Unable to create cache`、`Gpu Cache Creation failed: -2`。现在 `npm run dev` 使用独立的 `Pi Desktop Dev` 目录（可用 `PI_DESKTOP_PROFILE` 覆盖），已安装版本可同时运行。
 - 打开会话时只显示 1～2 条消息：首屏原先只取文件末尾 8 条 **原始消息**，而长工具链会话的末尾 8 条往往全在同一轮里，渲染出来只有一两个气泡。现在首屏加载 40 条消息，并向前扩到至少 3 轮用户对话（单页上限 240 条），向上滚动仍按 8 条一页；实测 1279 条的会话首屏加载 240 条 / 197 个块。
 
 ### 优化

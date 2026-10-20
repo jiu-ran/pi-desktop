@@ -24,6 +24,8 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 
 开发服务器默认监听 `127.0.0.1:1420`。如果只需要调试前端，可以在 `packages/ui` 下运行 `npm run dev`。
 
+开发实例使用独立的 Chromium profile（`%APPDATA%/Pi Desktop Dev`），与已安装的 Pi Desktop 互不影响，可以同时运行；需要自定义目录时设置 `PI_DESKTOP_PROFILE` 环境变量。
+
 ## 当前功能
 
 ### 工作区与对话
