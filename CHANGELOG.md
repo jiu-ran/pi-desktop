@@ -5,6 +5,14 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.5] - 2026-10-21
+
+### 修复
+
+- 回复下方的 Token 用量一直显示为全 0：Pi 的 RPC 流式事件里 `message_update.usage` 可能只是初始化时的空快照，完整用量在最后的 `message_end.message.usage`。现在按 `message_end` 的最终用量展示，并兼容从 `message_update.message.usage` 读取，总计 / 输入 / 输出 / 缓存读取 / 缓存写入都能正常显示。
+- 从「文件变更」面板打开项目外的文件会报「路径必须位于当前项目目录内」，无法读取、保存或使用系统程序打开。现在明确传入的绝对文件路径可以正常打开，路径需实际存在并通过 `realpath` 校验；相对路径、目录浏览、创建 / 删除、附件和 Git 等操作仍限制在当前项目目录内。前端也不再错误地把 `C:/…`、`/tmp/…` 这类项目外绝对路径清洗成项目内相对路径。
+- Windows 安装 / 更新时桌面快捷方式行为不稳定：更新会以 `--updated` 启动安装器，安装器在安装前备份、安装后恢复用户与全局桌面快捷方式，已有快捷方式原样保留；首次安装或快捷方式缺失时显示默认勾选的「创建桌面快捷方式」，只有主动取消勾选才会删除。
+
 ## [0.1.4] - 2026-10-20
 
 ### 修复
@@ -109,6 +117,7 @@
 - macOS 仅提供 arm64 产物，Intel Mac 需从源码构建。
 - 自动更新尚未接入签名校验链，更新检查依赖 GitHub Releases。
 
+[0.1.5]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/jiu-ran/pi-desktop/compare/v0.1.1...v0.1.2
