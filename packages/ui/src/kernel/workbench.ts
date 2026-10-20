@@ -473,7 +473,17 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         thread.queue = { steering: event.steering ?? [], followUp: event.followUp ?? [] };
         break;
       case "message_update":
-        if (event.usage) thread.usage = event.usage;
+        // 流式增量里的 usage 可能仍是 provider 初始化的全 0 快照；
+        // 先保留它作为兜底，最终用量以 message_end 的完整 assistant message 为准。
+        if (event.usage ?? event.message?.usage) thread.usage = event.usage ?? event.message.usage;
+        break;
+      case "message_end":
+        // pi 的 RPC JSON 事件会把最终用量放在 message.usage，而不是
+        // message_update.usage。必须在 agent_settled 前接住这个权威快照，
+        // 否则界面会把流式开始时的全 0 用量显示出来。
+        if (event.message?.role === "assistant" && event.message.usage) {
+          thread.usage = event.message.usage;
+        }
         break;
       case "compaction_start":
         thread.compacting = true;
