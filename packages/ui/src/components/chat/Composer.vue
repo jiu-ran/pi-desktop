@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
+import { applyMention, parseMentionToken } from "../../shared/mentions.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -182,10 +183,7 @@ const optionItems = computed(() => {
     .map((o) => ({ ...o, current: o.value === current }));
 });
 const menuItems = computed<any[]>(() => (menuMode.value === "options" ? optionItems.value : commandItems.value));
-const pathToken = computed(() => {
-  const match = draft.value.match(/(?:^|\s)@([^\s]*)$/);
-  return match ? { query: match[1], start: draft.value.length - match[1].length - 1 } : null;
-});
+const pathToken = computed(() => parseMentionToken(draft.value));
 
 watch(
   () => [pathPicker.value, draft.value, ws.value?.cwd],
@@ -324,14 +322,21 @@ function closePathPicker(): void {
 
 async function pickPath(item: WorkspaceEntry): Promise<void> {
   if (!item) return;
-  try {
-    await workbench.addFiles([item.path]);
-    const token = pathToken.value;
-    if (token) draft.value = draft.value.slice(0, token.start);
+  const token = pathToken.value;
+  if (!token) return;
+  const mention = applyMention(draft.value, token, item.relative || item.name, item.kind === "folder");
+  draft.value = mention.text;
+  await nextTick();
+  const el = input.value;
+  if (el) {
+    el.focus();
+    el.setSelectionRange(mention.cursor, mention.cursor);
+  }
+  if (mention.keepOpen) {
+    // 目录：保留选择器，继续补全子路径
+    pathPicker.value = true;
+  } else {
     closePathPicker();
-    nextTick(focus);
-  } catch (error) {
-    notifyError(error);
   }
 }
 
@@ -513,7 +518,7 @@ function onKeydown(event: KeyboardEvent): void {
       event.preventDefault();
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && count) {
+    if (((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") && count) {
       pickPath(pathItems.value[pathCursor.value]);
       event.preventDefault();
       return;
@@ -656,7 +661,7 @@ const argHint = computed(() => {
           </div>
           <div class="path-picker-foot">
             <span><kbd>↑</kbd><kbd>↓</kbd> 导航</span>
-            <span><kbd>Enter</kbd> 选择</span>
+            <span><kbd>Enter</kbd> 插入引用</span>
             <span><kbd>Esc</kbd> 关闭</span>
             <span v-if="pathItems.length" class="path-picker-count">{{ pathItems.length }} 项</span>
           </div>
