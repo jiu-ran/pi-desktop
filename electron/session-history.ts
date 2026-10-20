@@ -28,6 +28,14 @@ export interface HistoryPage {
 /** 把同一轮对话的助手消息/工具结果尽量保持在同一页，向前最多扩展这么多条 */
 const ALIGN_WINDOW = 60;
 
+/** 单页最多回溯多少条消息（超长工具链兜底） */
+const MAX_PAGE_MESSAGES = 240;
+
+export interface SliceOptions {
+  /** 页首至少包含多少条 user 消息（首屏用来凑出完整几轮对话） */
+  minTurns?: number;
+}
+
 export function parseSessionHistory(text: string): any[] {
   const messages: any[] = [];
   if (!text) return messages;
@@ -53,7 +61,12 @@ export function parseSessionHistory(text: string): any[] {
  * 取「结束于 endIndex（不含）」的一页历史。
  * endIndex <= 0 或非有限数时表示取最新的一页（末尾）。
  */
-export function sliceHistoryPage(history: any[], endIndex: number, limit: number): HistoryPage {
+export function sliceHistoryPage(
+  history: any[],
+  endIndex: number,
+  limit: number,
+  options: SliceOptions = {},
+): HistoryPage {
   const total = history.length;
   const size = Math.max(1, Math.min(Math.trunc(limit) || 8, 200));
   const requested = Number.isFinite(endIndex) && endIndex > 0 ? Math.trunc(endIndex) : total;
@@ -64,6 +77,18 @@ export function sliceHistoryPage(history: any[], endIndex: number, limit: number
     let probe = start;
     while (probe > 0 && history[probe]?.role !== "user") probe -= 1;
     if (probe > 0 && history[probe]?.role === "user" && start - probe <= ALIGN_WINDOW) start = probe;
+  }
+  // 首屏至少凑够 minTurns 轮对话（从页首往前数 user 消息）
+  const minTurns = Math.max(0, Math.trunc(Number(options.minTurns) || 0));
+  if (minTurns > 0 && start > 0) {
+    let users = 0;
+    for (let i = start; i < end; i += 1) if (history[i]?.role === "user") users += 1;
+    let probe = start;
+    while (users < minTurns && probe > 0 && end - probe < MAX_PAGE_MESSAGES) {
+      probe -= 1;
+      if (history[probe]?.role === "user") users += 1;
+    }
+    start = probe;
   }
   return { messages: history.slice(start, end), startIndex: start, endIndex: end, total };
 }
@@ -101,9 +126,10 @@ export async function readSessionHistoryPage(
   sessionFile: string,
   endIndex: number,
   limit = 8,
+  minTurns = 0,
 ): Promise<HistoryPage> {
   const history = await readSessionHistory(sessionFile);
-  return sliceHistoryPage(history, endIndex, limit);
+  return sliceHistoryPage(history, endIndex, limit, { minTurns });
 }
 
 export function clearSessionHistoryCache(sessionFile?: string): void {

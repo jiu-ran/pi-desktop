@@ -66,6 +66,29 @@ assert.ok(sliceHistoryPage(history, 21, 0).messages.length >= 1, "limit=0 时至
 assert.equal(sliceHistoryPage(history, 21, 9999).messages.length, 21, "limit 超长时返回全部");
 assert.equal(sliceHistoryPage([], 0, 8).total, 0, "空历史安全");
 
+// 首屏至少 minTurns 轮对话：长工具链会话的尾部可能只有 1 个 user
+const toolLoop = [];
+toolLoop.push({ role: "user", content: "起点" });
+for (let i = 0; i < 200; i += 1) {
+  toolLoop.push({ role: i % 2 === 0 ? "assistant" : "toolResult", content: [] });
+}
+toolLoop.push({ role: "user", content: "最后一问" });
+for (let i = 0; i < 30; i += 1) toolLoop.push({ role: i % 2 === 0 ? "assistant" : "toolResult", content: [] });
+const tailOnly = sliceHistoryPage(toolLoop, 0, 8);
+assert.equal(tailOnly.messages.filter((m) => m.role === "user").length, 1, "仅 8 条时尾部只有一轮");
+const withTurns = sliceHistoryPage(toolLoop, 0, 40, { minTurns: 3 });
+assert.equal(withTurns.messages.filter((m) => m.role === "user").length, 2, "历史里只有 2 个 user 时全部纳入");
+assert.equal(withTurns.startIndex, 0, "向前扩到文件开头");
+
+const normal = [];
+for (let i = 0; i < 30; i += 1) {
+  normal.push({ role: "user", content: `q${i}` });
+  normal.push({ role: "assistant", content: [] });
+}
+const firstPage = sliceHistoryPage(normal, 0, 40, { minTurns: 3 });
+assert.ok(firstPage.messages.length >= 40, "首屏至少 40 条");
+assert.equal(firstPage.endIndex, 60);
+
 // 旧格式（顶层 role）仍需兼容
 const legacy = parseSessionHistory([line({ role: "user", content: "hi" }), line({ role: "system" })].join("\n"));
 assert.equal(legacy.length, 1);

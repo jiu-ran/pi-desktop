@@ -15,6 +15,10 @@ import type {
 const THEME_KEY = "pi-desktop.theme";
 /** 每页加载的历史消息条数 */
 const PAGE_SIZE = 8;
+/** 首屏消息条数：8 条在长工具链会话中可能只够 1～2 条气泡，首屏多给一些上下文 */
+const INITIAL_PAGE_SIZE = 40;
+/** 首屏至少凑够多少轮用户对话 */
+const INITIAL_MIN_TURNS = 3;
 const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
@@ -338,7 +342,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
   }
 
   /**
-   * 用会话文件补齐历史：默认只渲染最新一页（8 条），
+   * 用会话文件补齐历史：首屏至少加载 40 条消息且覆盖 3 轮对话，
    * 已向上翻过页的会话则重新加载「已渲染窗口」，保持滚动与分页进度不变。
    */
   async function hydrateHistory(ws: WorkspaceState, thread: SessionThreadState, initial = false): Promise<void> {
@@ -352,10 +356,11 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     const loaded = thread.historyStart >= 0 && thread.messageTotal > thread.historyStart
       ? thread.messageTotal - thread.historyStart
       : 0;
-    // 多取一页：会话文件可能已追加新消息，保证原先已加载的更早消息不丢
-    const limit = Math.max(PAGE_SIZE, loaded + PAGE_SIZE);
+    // 首屏多加载一些：8 条消息在长工具链会话里可能只够一轮对话；
+    // 之后再向上翻页时仍按 8 条一页。
+    const limit = initial ? INITIAL_PAGE_SIZE : Math.max(PAGE_SIZE, loaded + PAGE_SIZE);
     try {
-      const page = await host.messagePage(ws.cwd, file, 0, limit);
+      const page = await host.messagePage(ws.cwd, file, 0, limit, initial ? INITIAL_MIN_TURNS : 0);
       if (disposed || workspaces.get(ws.cwd) !== ws) return;
       if (thread.sessionFile !== file || thread.streaming) return;
       if (page.total === 0) {
