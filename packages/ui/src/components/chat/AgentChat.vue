@@ -2,7 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { baseName, icons } from "../../shared/util.ts";
-import { collectChanges, totals } from "../../shared/diff.ts";
+import { collectChanges } from "../../shared/diff.ts";
+import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
+import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
 import BlockView from "./BlockView.vue";
 import Composer from "./Composer.vue";
@@ -46,8 +48,35 @@ const prompts = [
   { label: "解释最近改动", text: "运行 git status 和 git log -n 5，总结最近在做什么。" },
 ];
 
-const changedFiles = computed(() => collectChanges(ws.value?.blocks));
-const changedTotals = computed(() => totals(changedFiles.value));
+// 变更条只反映「当前还没提交的改动」：Git 状态是事实来源，
+// 会话记录只用来补 Agent 标记与增删行数；提交或还原后不再残留。
+const changedFiles = computed(() => {
+  const session = collectChanges(ws.value?.blocks);
+  const overview = overviewState.value;
+  if (!overview) return [];
+  if (!overview.isRepo) return session;
+  const merged = mergeRepoChanges({
+    cwd: ws.value?.cwd ?? "",
+    root: overview.root,
+    status: overview.status,
+    session,
+  });
+  return merged
+    .filter((change) => !isSessionOnly(change))
+    .map((change) => ({
+      path: change.path,
+      name: change.name,
+      added: change.session?.added ?? 0,
+      removed: change.session?.removed ?? 0,
+    }));
+});
+const changedTotals = computed(() =>
+  changedFiles.value.reduce(
+    (acc, file) => ({ added: acc.added + file.added, removed: acc.removed + file.removed }),
+    { added: 0, removed: 0 },
+  ),
+);
+const changedDiff = computed(() => changedTotals.value.added > 0 || changedTotals.value.removed > 0);
 
 // 是否还有更早的消息可加载：historyStart > 0 表示还没读到文件开头
 const canLoadMore = computed(() => {
@@ -284,18 +313,46 @@ watch(scroller, (el) => bindScroller((el as HTMLElement | null) ?? null), {
   flush: "post",
 });
 
+let overviewTimer: number | null = null;
+function scheduleOverviewRefresh(): void {
+  if (overviewTimer) window.clearTimeout(overviewTimer);
+  overviewTimer = window.setTimeout(() => {
+    overviewTimer = null;
+    void refreshOverviewState(workbench);
+  }, 600);
+}
+let stopGitEvents: (() => void) | null = null;
+let stopGitFiles: (() => void) | null = null;
+
 onMounted(() => {
   stopHeightChange = bus.on("markdown:height-change", () => {
     if (!userScrolled) scrollToBottom(true);
     else scrollToBottom();
   });
+  stopGitEvents = bus.on("pi:event", ({ event }: { event: any }) => {
+    const type = event?.type;
+    if (type === "agent_settled" || type === "tool_execution_end") scheduleOverviewRefresh();
+  });
+  stopGitFiles = bus.on("files:changed", scheduleOverviewRefresh);
+  void refreshOverviewState(workbench);
   window.addEventListener("keydown", onSearchKey);
   window.addEventListener("keydown", onScrollKey);
   window.addEventListener("focus", onWindowFocus);
 });
 
+watch(
+  () => ws.value?.cwd,
+  () => {
+    overviewState.value = null;
+    void refreshOverviewState(workbench);
+  },
+);
+
 onBeforeUnmount(() => {
   stopHeightChange?.();
+  stopGitEvents?.();
+  stopGitFiles?.();
+  if (overviewTimer) window.clearTimeout(overviewTimer);
   window.removeEventListener("keydown", onSearchKey);
   window.removeEventListener("keydown", onScrollKey);
   window.removeEventListener("focus", onWindowFocus);
@@ -485,7 +542,7 @@ watch(searchMatches, () => {
         <button class="changes-bar-main" @click="openChangesPanel">
           <span class="changes-bar-icon" v-html="icons.diff" />
           <strong>{{ changedFiles.length }} 个文件已变更</strong>
-          <span class="diff-stat">
+          <span v-if="changedDiff" class="diff-stat">
             <b class="add">+{{ changedTotals.added }}</b>
             <b class="del">−{{ changedTotals.removed }}</b>
           </span>
