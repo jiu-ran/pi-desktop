@@ -1,6 +1,5 @@
 import type { SidebarPlugin } from "../kernel/plugin-manager.ts";
 import filesPlugin from "./files/index.ts";
-import changesPlugin from "./changes/index.ts";
 import gitPlugin from "./git/index.ts";
 import eventsPlugin from "./events/index.ts";
 import pluginManagerPlugin from "./plugin-manager/index.ts";
@@ -15,7 +14,6 @@ import mermaidPlugin from "./mermaid/index.ts";
  */
 export const builtinPlugins: SidebarPlugin[] = [
   filesPlugin,
-  changesPlugin,
   gitPlugin,
   eventsPlugin,
   pluginManagerPlugin,

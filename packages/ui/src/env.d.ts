@@ -72,7 +72,10 @@ export interface WorkspaceFileData {
 
 export interface GitStatusFile {
   code: string;
+  index: string;
+  worktree: string;
   path: string;
+  untracked: boolean;
 }
 
 export interface GitCommitNode {
@@ -87,9 +90,33 @@ export interface GitCommitNode {
 
 export interface GitOverview {
   isRepo: boolean;
+  root: string;
   branch: string;
+  detached: boolean;
+  upstream: string;
+  ahead: number;
+  behind: number;
+  hasCommits: boolean;
+  canWrite: boolean;
+  hasRemote: boolean;
   status: GitStatusFile[];
   commits: GitCommitNode[];
+  userName: string;
+  userEmail: string;
+}
+
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+
+export interface GitActionPayload {
+  paths?: string[];
+  all?: boolean;
+  message?: string;
+}
+
+export interface GitActionResult {
+  ok: boolean;
+  message: string;
+  overview: GitOverview;
 }
 
 export interface GitInspectResult {
@@ -272,6 +299,7 @@ export interface PiDesktopBridge {
   deleteWorkspaceEntry: (cwd: string, relative: string) => Promise<void>;
   gitOverview: (cwd: string) => Promise<GitOverview>;
   gitInspect: (cwd: string, kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+  gitAction: (cwd: string, action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;

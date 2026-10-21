@@ -136,6 +136,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
         openExternal: (relative: string) => workbench.openWorkspacePath(relative),
         gitOverview: () => workbench.gitOverview(),
         gitInspect: (kind: "commit" | "working", target: string) => workbench.gitInspect(kind, target),
+        gitAction: (action, payload) => workbench.gitAction(action, payload),
       },
     });
   }

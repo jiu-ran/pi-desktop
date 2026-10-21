@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   deleteWorkspaceEntry: (cwd: string, relative: string) => ipcRenderer.invoke("pi:delete-workspace-entry", cwd, relative),
   gitOverview: (cwd: string) => ipcRenderer.invoke("pi:git-overview", cwd),
   gitInspect: (cwd: string, kind: "commit" | "working", target: string) => ipcRenderer.invoke("pi:git-inspect", cwd, kind, target),
+  gitAction: (cwd: string, action: string, payload?: any) => ipcRenderer.invoke("pi:git-action", cwd, action, payload),
   completePaths: (cwd: string, query: string) => ipcRenderer.invoke("pi:complete-paths", cwd, query),
   restart: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:restart", cwd, sessionFile),
   sessions: (cwd: string) => ipcRenderer.invoke("pi:sessions", cwd),

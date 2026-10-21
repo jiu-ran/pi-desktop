@@ -345,7 +345,7 @@ function fillPrompt(text: string): void {
 }
 
 function openChangesPanel(): void {
-  workbench.state.activePanelId = "changes";
+  workbench.state.activePanelId = "git";
 }
 
 function blockText(block: any): string {

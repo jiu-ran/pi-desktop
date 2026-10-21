@@ -2,6 +2,9 @@ import { computed, reactive, shallowReactive, toRaw } from "vue";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
+  GitActionResult,
+  GitActionName,
+  GitActionPayload,
   GitInspectResult,
   GitOverview,
   McpExposureMode,
@@ -105,6 +108,26 @@ function savedSidebarWidth(): number {
 /** 传给 IPC 的参数必须是纯数据，Vue 响应式 Proxy 无法被结构化克隆。 */
 function plainArgs(args: any[]): any[] {
   return JSON.parse(JSON.stringify(args.map((arg) => (arg && typeof arg === "object" ? toRaw(arg) : arg)) ?? []));
+}
+
+/** 没有打开工作区或宿主不支持 Git 时的空概览，保证界面字段始终完整。 */
+export function emptyGitOverview(): GitOverview {
+  return {
+    isRepo: false,
+    root: "",
+    branch: "",
+    detached: false,
+    upstream: "",
+    ahead: 0,
+    behind: 0,
+    hasCommits: false,
+    canWrite: false,
+    hasRemote: false,
+    status: [],
+    commits: [],
+    userName: "",
+    userEmail: "",
+  };
 }
 
 export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
@@ -587,7 +610,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   async function gitOverview(): Promise<GitOverview> {
     const ws = active.value;
-    if (!ws || !host?.gitOverview) return { isRepo: false, branch: "", status: [], commits: [] };
+    if (!ws || !host?.gitOverview) return emptyGitOverview();
     return host.gitOverview(ws.cwd);
   }
 
@@ -595,6 +618,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws || !host?.gitInspect) throw new Error("没有打开的工作区");
     return host.gitInspect(ws.cwd, kind, target);
+  }
+
+  async function gitAction(action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitAction) throw new Error("没有打开的工作区");
+    return host.gitAction(ws.cwd, action, payload);
   }
 
   async function completePaths(query = ""): Promise<WorkspaceEntry[]> {
@@ -1540,6 +1569,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     deleteEntry,
     gitOverview,
     gitInspect,
+    gitAction,
     completePaths,
     addFiles,
     addPastedImage,

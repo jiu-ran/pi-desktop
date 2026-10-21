@@ -55,8 +55,16 @@ export interface WorkspaceFileData {
 }
 
 export interface GitStatusFile {
+  /** 组合状态码，例如 "M" / "MM" / "??" */
   code: string;
+  /** 暂存区状态（porcelain 第一列） */
+  index: string;
+  /** 工作区状态（porcelain 第二列） */
+  worktree: string;
+  /** 仓库内相对路径 */
   path: string;
+  /** 未跟踪文件 */
+  untracked: boolean;
 }
 
 export interface GitCommitNode {
@@ -71,9 +79,42 @@ export interface GitCommitNode {
 
 export interface GitOverview {
   isRepo: boolean;
+  /** 仓库根目录绝对路径，非仓库为空 */
+  root: string;
   branch: string;
+  /** HEAD 处于游离状态 */
+  detached: boolean;
+  /** 上游分支，例如 origin/main */
+  upstream: string;
+  ahead: number;
+  behind: number;
+  /** 仓库是否已有提交（空仓库为 false） */
+  hasCommits: boolean;
+  /** 仓库根目录是否就是当前项目目录（否则禁止写操作） */
+  canWrite: boolean;
+  /** 是否配置了远程仓库 */
+  hasRemote: boolean;
   status: GitStatusFile[];
   commits: GitCommitNode[];
+  userName: string;
+  userEmail: string;
+}
+
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+
+export interface GitActionPayload {
+  /** 仓库内相对路径列表 */
+  paths?: string[];
+  /** 暂存全部改动 */
+  all?: boolean;
+  /** 提交信息 */
+  message?: string;
+}
+
+export interface GitActionResult {
+  ok: boolean;
+  message: string;
+  overview: GitOverview;
 }
 
 export interface GitInspectResult {
@@ -420,6 +461,93 @@ export async function gitBranch(cwd: string): Promise<string> {
     }
   }
   return "";
+}
+
+/** 把 git 命令失败转换成可以直接展示给用户的中文错误。 */
+function gitError(error: unknown): Error {
+  const e = error as { stderr?: string | Buffer; stdout?: string | Buffer; message?: string; code?: string };
+  if (e?.code === "ENOENT") return new Error("未检测到 git 命令，请先安装 Git 并加入 PATH");
+  const raw = `${e?.stderr ?? ""}\n${e?.stdout ?? ""}`.trim();
+  if (raw) {
+    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return new Error(lines.slice(-8).join("\n") || raw);
+  }
+  return new Error(e?.message ?? String(error));
+}
+
+async function gitRun(cwd: string, args: string[], maxBuffer = 4 * 1024 * 1024): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer, windowsHide: true });
+    return stdout;
+  } catch (error) {
+    throw gitError(error);
+  }
+}
+
+/** 失败时返回空字符串：用于探测类命令（上游分支、用户配置等）。 */
+async function gitProbe(cwd: string, args: string[]): Promise<string> {
+  try {
+    return await gitRun(cwd, args, 1024 * 1024);
+  } catch {
+    return "";
+  }
+}
+
+/** 仓库根目录；不是仓库时返回空字符串。 */
+async function gitRepoRoot(cwd: string): Promise<string> {
+  const top = (await gitProbe(path.resolve(cwd), ["rev-parse", "--show-toplevel"])).trim();
+  return top ? path.resolve(top) : "";
+}
+
+function samePath(a: string, b: string): boolean {
+  const norm = (value: string) => {
+    const resolved = path.resolve(value);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return norm(a) === norm(b);
+}
+
+/** 解析 `git status --porcelain=v1` 输出。 */
+function parseGitStatus(stdout: string): GitStatusFile[] {
+  const files: GitStatusFile[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const index = line[0] ?? " ";
+    const worktree = line[1] ?? " ";
+    let target = line.slice(3).trim();
+    // 重命名/复制："R  old -> new"，取新路径
+    const arrow = target.indexOf(" -> ");
+    if (arrow >= 0) target = target.slice(arrow + 4);
+    target = target.replace(/^"(.*)"$/, "$1");
+    if (!target) continue;
+    files.push({
+      code: `${index}${worktree}`.trim() || "M",
+      index,
+      worktree,
+      path: target.replace(/\\/g, "/"),
+      untracked: index === "?" && worktree === "?",
+    });
+  }
+  return files;
+}
+
+/** 校验并归一化 git 操作的文件路径，拒绝绝对路径与越界路径。 */
+function gitOperationPaths(root: string, paths: unknown): string[] {
+  const list = Array.isArray(paths) ? paths : [];
+  const output: string[] = [];
+  for (const raw of list) {
+    const value = String(raw ?? "").trim();
+    if (!value) continue;
+    if (path.isAbsolute(value)) throw new Error("Git 操作只接受仓库内的相对路径");
+    const resolved = path.resolve(root, value);
+    const relative = path.relative(root, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("路径必须位于当前项目目录内");
+    }
+    output.push(relative.split(path.sep).join("/"));
+  }
+  if (!output.length) throw new Error("请先选择要操作的文件");
+  return [...new Set(output)];
 }
 
 /** 只允许操作该项目会话目录里的 .jsonl，防止渲染进程传入任意路径 */
@@ -888,49 +1016,200 @@ export class PiHost {
   }
 
   async gitOverview(cwd: string): Promise<GitOverview> {
-    const root = path.resolve(cwd);
-    await assertRealWorkspacePath(cwd, root);
-    const branch = await gitBranch(root);
-    try {
-      const [statusOut, logOut] = await Promise.all([
-        execFileAsync("git", ["status", "--porcelain=v1", "-uall"], { cwd: root, maxBuffer: 2 * 1024 * 1024 }),
-        execFileAsync(
-          "git",
-          ["log", "--graph", "--no-color", "-n", "60", "--pretty=format:\x1f%H\x1f%h\x1f%s\x1f%an\x1f%cr\x1f%D"],
-          { cwd: root, maxBuffer: 2 * 1024 * 1024 },
-        ).catch(() => ({ stdout: "" })),
-      ]);
-
-      const status: GitStatusFile[] = statusOut.stdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((line) => ({
-          code: line.slice(0, 2).trim() || "M",
-          path: line.slice(3).trim().replace(/^"(.*)"$/, "$1"),
-        }));
-
-      const commits: GitCommitNode[] = [];
-      for (const line of logOut.stdout.split(/\r?\n/)) {
-        if (!line.trim()) continue;
-        const parts = line.split("\x1f");
-        if (parts.length >= 6) {
-          const [graph, hash, shortHash, subject, author, relativeTime, refs = ""] = parts;
-          commits.push({
-            graph: graph ?? "",
-            hash: hash.trim(),
-            shortHash: shortHash.trim(),
-            subject: subject.trim(),
-            author: author.trim(),
-            relativeTime: relativeTime.trim(),
-            refs: refs.trim(),
-          });
-        }
-      }
-
-      return { isRepo: true, branch: branch || "HEAD", status, commits };
-    } catch {
-      return { isRepo: false, branch: "", status: [], commits: [] };
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const empty: GitOverview = {
+      isRepo: false,
+      root: "",
+      branch: "",
+      detached: false,
+      upstream: "",
+      ahead: 0,
+      behind: 0,
+      hasCommits: false,
+      canWrite: false,
+      hasRemote: false,
+      status: [],
+      commits: [],
+      userName: "",
+      userEmail: "",
+    };
+    const root = await gitRepoRoot(workspace);
+    if (!root) {
+      // 兼容 .git 目录存在但 git 不可用的情况：至少把分支名带回去
+      const fallback = await gitBranch(workspace);
+      return fallback ? { ...empty, isRepo: true, branch: fallback } : empty;
     }
+
+    const [statusOut, logOut, headOut, symbolicOut, upstreamOut, remoteOut, userName, userEmail] = await Promise.all([
+      gitProbe(root, ["status", "--porcelain=v1", "-uall"]),
+      gitProbe(root, [
+        "log",
+        "--graph",
+        "--no-color",
+        "-n",
+        "60",
+        "--pretty=format:\x1f%H\x1f%h\x1f%s\x1f%an\x1f%cr\x1f%D",
+      ]),
+      gitProbe(root, ["rev-parse", "--verify", "HEAD"]),
+      gitProbe(root, ["symbolic-ref", "-q", "--short", "HEAD"]),
+      gitProbe(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
+      gitProbe(root, ["remote"]),
+      gitProbe(root, ["config", "--get", "user.name"]),
+      gitProbe(root, ["config", "--get", "user.email"]),
+    ]);
+
+    const hasCommits = Boolean(headOut.trim());
+    const branch = symbolicOut.trim() || (hasCommits ? headOut.trim().slice(0, 7) : "");
+    const detached = !symbolicOut.trim() && hasCommits;
+    const upstream = upstreamOut.trim();
+    const hasRemote = Boolean(remoteOut.trim());
+
+    let ahead = 0;
+    let behind = 0;
+    if (upstream) {
+      const counts = (await gitProbe(root, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]))
+        .trim()
+        .split(/\s+/);
+      const behindCount = Number(counts[0]);
+      const aheadCount = Number(counts[1]);
+      behind = Number.isFinite(behindCount) ? behindCount : 0;
+      ahead = Number.isFinite(aheadCount) ? aheadCount : 0;
+    }
+
+    const commits: GitCommitNode[] = [];
+    for (const line of logOut.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const parts = line.split("\x1f");
+      if (parts.length < 6) continue;
+      const [graph, hash, shortHash, subject, author, relativeTime, refs = ""] = parts;
+      commits.push({
+        graph: graph ?? "",
+        hash: hash.trim(),
+        shortHash: shortHash.trim(),
+        subject: subject.trim(),
+        author: author.trim(),
+        relativeTime: relativeTime.trim(),
+        refs: refs.trim(),
+      });
+    }
+
+    return {
+      isRepo: true,
+      root,
+      branch: branch || "HEAD",
+      detached,
+      upstream,
+      ahead,
+      behind,
+      hasCommits,
+      canWrite: samePath(root, workspace),
+      hasRemote,
+      status: parseGitStatus(statusOut),
+      commits,
+      userName: userName.trim(),
+      userEmail: userEmail.trim(),
+    };
+  }
+
+  /**
+   * 执行 Git 写操作。所有路径参数都会被重新校验为仓库内相对路径，
+   * 且只有仓库根目录就是当前项目目录时才允许写入。
+   */
+  async gitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const name = String(action ?? "") as GitActionName;
+
+    if (name === "init") {
+      if (await gitRepoRoot(workspace)) throw new Error("当前目录已经是 Git 仓库");
+      try {
+        await gitRun(workspace, ["init", "-b", "main"]);
+      } catch {
+        // 旧版本 git 不支持 -b，回退到默认分支名
+        await gitRun(workspace, ["init"]);
+      }
+      return { ok: true, message: "已初始化 Git 仓库", overview: await this.gitOverview(cwd) };
+    }
+
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库，请先初始化");
+    if (!samePath(root, workspace)) {
+      throw new Error("Git 仓库根目录不在当前项目内，暂不支持在此执行写操作");
+    }
+
+    const overview = await this.gitOverview(cwd);
+    let message = "";
+
+    switch (name) {
+      case "stage": {
+        const paths = payload.all ? [] : gitOperationPaths(root, payload.paths);
+        await gitRun(root, payload.all ? ["add", "-A"] : ["add", "--", ...paths]);
+        message = payload.all ? "已暂存全部改动" : `已暂存 ${paths.length} 个文件`;
+        break;
+      }
+      case "unstage": {
+        const paths = payload.all ? [] : gitOperationPaths(root, payload.paths);
+        if (payload.all) {
+          await gitRun(root, ["reset", "--quiet"]).catch(async () => {
+            await gitRun(root, ["rm", "--cached", "-r", "--quiet", "."]);
+          });
+          message = "已取消全部暂存";
+        } else {
+          try {
+            await gitRun(root, ["restore", "--staged", "--", ...paths]);
+          } catch {
+            // 空仓库（还没有 HEAD）没有 restore 的基线
+            await gitRun(root, ["rm", "--cached", "-r", "--quiet", "--", ...paths]);
+          }
+          message = `已取消暂存 ${paths.length} 个文件`;
+        }
+        break;
+      }
+      case "commit": {
+        const text = String(payload.message ?? "").trim();
+        if (!text) throw new Error("提交信息不能为空");
+        if (text.length > 5000) throw new Error("提交信息过长（上限 5000 字）");
+        if (!overview.status.some((file) => file.index !== " " && file.index !== "?")) {
+          throw new Error("没有已暂存的改动，请先暂存要提交的文件");
+        }
+        await gitRun(root, ["commit", "-m", text]);
+        const short = (await gitProbe(root, ["rev-parse", "--short", "HEAD"])).trim();
+        message = short ? `已提交 ${short}` : "已提交";
+        break;
+      }
+      case "fetch": {
+        if (!overview.upstream && !(await gitProbe(root, ["remote"])).trim()) {
+          throw new Error("没有配置远程仓库，无法获取更新");
+        }
+        await gitRun(root, ["fetch", "--all", "--prune"]);
+        message = "已获取远程更新";
+        break;
+      }
+      case "pull": {
+        if (!overview.upstream) throw new Error("当前分支没有上游分支，请先推送一次以建立跟踪关系");
+        await gitRun(root, ["pull", "--no-edit"]);
+        message = "已拉取远程更新";
+        break;
+      }
+      case "push": {
+        if (overview.detached) throw new Error("当前处于游离 HEAD 状态，无法推送");
+        const remotes = (await gitProbe(root, ["remote"])).trim().split(/\s+/).filter(Boolean);
+        if (!remotes.length) throw new Error("没有配置远程仓库，无法推送");
+        if (overview.upstream) {
+          await gitRun(root, ["push"]);
+        } else {
+          const remote = remotes.includes("origin") ? "origin" : remotes[0];
+          await gitRun(root, ["push", "-u", remote, overview.branch]);
+        }
+        message = "已推送到远程";
+        break;
+      }
+      default:
+        throw new Error(`不支持的 Git 操作：${name}`);
+    }
+
+    return { ok: true, message, overview: await this.gitOverview(cwd) };
   }
 
   async gitInspect(cwd: string, kind: "commit" | "working", target: string): Promise<GitInspectResult> {
@@ -967,7 +1246,7 @@ export class PiHost {
     }
 
     const { root: safeRoot, target: safeTarget } = workspacePath(root, target);
-    await assertRealWorkspacePath(root, safeTarget);
+    await assertRealWorkspacePath(root, safeTarget, true);
     const relative = path.relative(safeRoot, safeTarget).replace(/\\/g, "/");
     const { stdout } = await execFileAsync(
       "git",

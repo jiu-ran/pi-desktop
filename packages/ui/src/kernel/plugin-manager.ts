@@ -1,7 +1,7 @@
 import { computed, markRaw, reactive, type ComputedRef } from "vue";
 import type { OpenStageInput, StageController, StageTab } from "./stage.ts";
 import type { Workbench, WorkspaceState } from "./workbench.ts";
-import type { GitInspectResult, GitOverview, WorkspaceEntry, WorkspaceFileData } from "../env.d.ts";
+import type { GitActionResult, GitActionName, GitActionPayload, GitInspectResult, GitOverview, WorkspaceEntry, WorkspaceFileData } from "../env.d.ts";
 
 const STORAGE_KEY = "pi-desktop.plugins.disabled";
 
@@ -40,6 +40,7 @@ export interface PluginContext {
     openExternal: (relative: string) => Promise<void>;
     gitOverview: () => Promise<GitOverview>;
     gitInspect: (kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+    gitAction: (action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   };
 }
 
