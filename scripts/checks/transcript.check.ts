@@ -1,4 +1,5 @@
 import { createTranscript } from "../../packages/ui/src/kernel/transcript.ts";
+import { buildCopyTexts } from "../../packages/ui/src/shared/copy-text.ts";
 
 const t = createTranscript();
 t.loadMessages([
@@ -12,6 +13,38 @@ t.loadMessages([
   { role: "toolResult", toolCallId: "c1", toolName: "read", content: [{ type: "text", text: "line1" }], isError: false, durationMs: 12 },
 ]);
 console.log("history", t.blocks.map((b) => `${b.kind}:${b.status ?? ""}:${(b.text ?? b.output ?? "").slice(0, 10)}`).join(" | "));
+
+// 工具结果里的图片：保留为缩略图，base64 不能变成文本输出
+const imageTranscript = createTranscript();
+imageTranscript.loadMessages([
+  { role: "assistant", content: [{ type: "toolCall", id: "img1", name: "read", arguments: { path: "a.png" } }] },
+  {
+    role: "toolResult",
+    toolCallId: "img1",
+    toolName: "read",
+    content: [
+      { type: "text", text: "Read image file [image/png]" },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    ],
+  },
+]);
+const imageTool = imageTranscript.blocks.find((block) => block.id === "img1");
+if (!imageTool || imageTool.imageItems?.length !== 1 || imageTool.images !== 1) {
+  throw new Error("工具结果里的图片应保留为 imageItems");
+}
+if ((imageTool.output ?? "").includes("iVBORw0KGgo")) throw new Error("图片 base64 不应出现在文本输出里");
+
+const liveImage = createTranscript();
+liveImage.applyEvent({ type: "tool_execution_start", toolCallId: "img2", toolName: "read", args: { path: "b.png" } });
+liveImage.applyEvent({
+  type: "tool_execution_end",
+  toolCallId: "img2",
+  toolName: "read",
+  result: { content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] },
+  isError: false,
+});
+const liveTool = liveImage.blocks.find((block) => block.id === "img2");
+if (!liveTool || liveTool.imageItems?.length !== 1) throw new Error("流式工具结果也应收集图片");
 
 const events = [
   { type: "message_start", message: { role: "user" } },
@@ -44,6 +77,18 @@ if (!settledTool || settledTool.status !== "done") throw new Error("agent_settle
 const tool = t.blocks.find((b) => b.id === "c2");
 if (!tool || tool.status !== "done" || tool.args?.path !== "b.ts" || tool.output !== "ok") throw new Error("tool merge failed");
 if (t.blocks.filter((b) => b.kind === "tool" && b.id === "c2").length !== 1) throw new Error("duplicate tool");
+
+// 复制按钮：只在整轮结束后提供完整文本
+const copyBlocks: any[] = [
+  { kind: "user", id: "u1", text: "问题" },
+  { kind: "text", id: "t1", text: "第一段" },
+  { kind: "text", id: "t2", text: "第二段" },
+];
+const copySettled = buildCopyTexts(copyBlocks, false);
+if (copySettled.get(2) !== "第一段\n\n第二段") throw new Error("整轮结束后应可复制合并后的回复");
+if (buildCopyTexts(copyBlocks, true).size !== 0) throw new Error("会话流式中不应提供复制文本");
+const copyPartialBlock = buildCopyTexts([{ kind: "text", id: "t3", text: "半截", streaming: true }] as any, false);
+if (copyPartialBlock.size !== 0) throw new Error("单个文本块仍在流式时不应提供复制文本");
 
 const replay = createTranscript();
 const snapshotMessages = [

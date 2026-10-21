@@ -57,6 +57,24 @@ function resultText(result: any): string {
   return result.content.map((part: any) => part?.text ?? "").join("\n");
 }
 
+/** 工具结果里的图片（read 读图、MCP 返回图片等），用于缩略图展示 */
+function resultImages(result: any): Array<{ mimeType: string; data: string }> {
+  if (!result || typeof result === "string" || !Array.isArray(result.content)) return [];
+  return result.content
+    .filter((part: any) => part?.type === "image" && typeof part.data === "string")
+    .filter((part: any) => part.data.length <= IMAGE_PREVIEW_MAX)
+    .map((part: any) => ({ mimeType: String(part.mimeType ?? "image/png"), data: part.data as string }));
+}
+
+function applyToolResult(block: TranscriptBlock, result: any): void {
+  block.output = resultText(result);
+  const images = resultImages(result);
+  if (images.length) {
+    block.imageItems = images;
+    block.images = images.length;
+  }
+}
+
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
 
@@ -108,7 +126,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     }
     if (message.role === "toolResult") {
       const block = pushTool(message.toolCallId, message.toolName, null, "done");
-      block.output = resultText(message);
+      applyToolResult(block, message);
       block.details = message.details ?? null;
       block.isError = Boolean(message.isError);
       block.status = message.isError ? "error" : "done";
@@ -200,12 +218,12 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       }
       case "tool_execution_update": {
         const block = pushTool(event.toolCallId, event.toolName, event.args, "running");
-        block.output = resultText(event.partialResult);
+        applyToolResult(block, event.partialResult);
         return true;
       }
       case "tool_execution_end": {
         const block = pushTool(event.toolCallId, event.toolName, null, "done");
-        block.output = resultText(event.result);
+        applyToolResult(block, event.result);
         block.details = event.result?.details ?? null;
         block.isError = Boolean(event.isError);
         block.status = event.isError ? "error" : "done";

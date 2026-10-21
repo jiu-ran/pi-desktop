@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { baseName, icons } from "../../shared/util.ts";
 import { collectChanges, totals } from "../../shared/diff.ts";
+import { buildCopyTexts } from "../../shared/copy-text.ts";
 import BlockView from "./BlockView.vue";
 import Composer from "./Composer.vue";
 import WelcomeView from "./WelcomeView.vue";
@@ -356,26 +357,9 @@ const outline = computed(() => (ws.value?.blocks ?? [])
   .filter((block) => block.kind === "user" && block.text?.trim())
   .map((block) => ({ id: block.id, text: block.text!.replace(/\s+/g, " ").trim() })));
 
-const copyTextByIndex = computed(() => {
-  const result = new Map<number, string>();
-  const blocks = ws.value?.blocks ?? [];
-  let parts: string[] = [];
-  let last = -1;
-  const finish = () => {
-    if (last >= 0 && !blocks[last]?.streaming) result.set(last, parts.join("\n\n"));
-    parts = [];
-    last = -1;
-  };
-  blocks.forEach((block, index) => {
-    if (block.kind === "user") finish();
-    else if (block.kind === "text" && block.text?.trim()) {
-      parts.push(block.text);
-      last = index;
-    }
-  });
-  finish();
-  return result;
-});
+const copyTextByIndex = computed(() =>
+  buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
+);
 
 function openOutline(id: string): void {
   scroller.value?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });

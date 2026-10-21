@@ -83,7 +83,9 @@ async function switchSource(next: GitDiffSource): Promise<void> {
     <header class="git-detail-head">
       <div>
         <strong>{{ detail?.title || tab.title }}</strong>
-        <span>{{ detail?.subtitle || tab.subtitle }}</span>
+        <span v-if="(detail?.subtitle || tab.subtitle) && (detail?.subtitle || tab.subtitle) !== (detail?.title || tab.title)">
+          {{ detail?.subtitle || tab.subtitle }}
+        </span>
       </div>
       <div class="git-detail-actions">
         <div v-if="canToggle" class="git-source-toggle">

@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import ToolCard from "./ToolCard.vue";
+import ToolImages from "./ToolImages.vue";
 import SearchHighlight from "../SearchHighlight.vue";
 
 const props = defineProps<{
@@ -45,6 +46,8 @@ const output = computed(() => {
   const text = props.block.output ?? "";
   return text.length > 8000 ? `${text.slice(0, 8000)}\n… 已截断，共 ${text.length} 字符` : text;
 });
+
+const images = computed(() => props.block.imageItems ?? []);
 </script>
 
 <template>
@@ -52,6 +55,10 @@ const output = computed(() => {
     <div v-if="argsText" class="tool-section">
       <span class="tool-section-label">参数</span>
       <pre class="term-out"><SearchHighlight :text="argsText" :query="query" /></pre>
+    </div>
+    <div v-if="images.length" class="tool-section">
+      <span class="tool-section-label">图片</span>
+      <ToolImages :items="images" />
     </div>
     <div v-if="output" class="tool-section">
       <span class="tool-section-label">结果</span>

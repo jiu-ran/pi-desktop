@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { PiHost } from "../../electron/pi-host.ts";
-import { isSessionOnly, isStaged, isUnstaged, mergeRepoChanges } from "../../packages/ui/src/shared/git-changes.ts";
+import { isSessionOnly, isStaged, isUnstaged, mergeRepoChanges, type RepoChange } from "../../packages/ui/src/shared/git-changes.ts";
+import { buildChangeTree, flattenChangeTree } from "../../packages/ui/src/shared/git-tree.ts";
 
 const execFileAsync = promisify(execFile);
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-git-"));
@@ -89,6 +90,36 @@ try {
   assert(Boolean(touched?.agentTouched) && isStaged(touched!) && !isUnstaged(touched!), "同名文件应合并为一条并带上 Agent 标记");
   const committedSession = merged.find((item) => item.path === "old.txt");
   assert(Boolean(committedSession) && isSessionOnly(committedSession!), "Git 里已没有的会话改动应标记为已提交快照");
+
+  // 变更树：目录分层、单链目录压缩、折叠后不再展开子节点
+  const change = (file: string): RepoChange => ({
+    absPath: `/repo/${file}`,
+    path: file,
+    name: file.split("/").at(-1) ?? file,
+    dir: file.split("/").slice(0, -1).join("/"),
+    index: " ",
+    worktree: "M",
+    untracked: false,
+    agentTouched: false,
+  });
+  const tree = buildChangeTree([
+    change("src/main.ts"),
+    change("src/app/util.ts"),
+    change("README.md"),
+  ]);
+  assert(tree[0].kind === "folder" && tree[0].count === 2, "目录应聚合文件数量");
+  const flat = flattenChangeTree(tree, new Set());
+  assert(
+    flat.map((row) => `${row.depth}:${row.name}`).join(",") === "0:src,1:app,2:util.ts,1:main.ts,0:README.md",
+    "变更树应按目录展开",
+  );
+  const collapsedRows = flattenChangeTree(tree, new Set(["src"]));
+  assert(collapsedRows.length === 2, "折叠目录后应隐藏子节点");
+  const compressed = buildChangeTree([change("java/com/juran/App.java")]);
+  assert(
+    compressed[0].kind === "folder" && compressed[0].name === "java/com/juran" && compressed[0].count === 1,
+    "单链目录应压缩成一行",
+  );
 
   console.log("git", commit.overview.branch, commit.overview.commits.length, "merged", merged.length);
   console.log("OK");

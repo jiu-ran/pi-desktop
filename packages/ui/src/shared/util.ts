@@ -43,6 +43,11 @@ export const icons: Record<string, string> = {
   more: svg('<circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/>', 14),
   trash: svg('<path d="M2.5 4.5h11M6.5 4.5V3a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1.5M4 4.5l.6 8.6a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.6M6.8 7v4.5M9.2 7v4.5"/>', 14),
   copy: svg('<rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M10.5 5V3.5A1 1 0 0 0 9.5 2.5h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1H5"/>', 14),
+  upload: svg('<path d="M8 12.5V3.5M5 6.5 8 3.5l3 3M3 10.5V13h10v-2.5"/>', 14),
+  pull: svg('<path d="M8 2.5v8M5 7.5l3 3 3-3M3 13h10"/>', 14),
+  history: svg('<circle cx="8" cy="8" r="5.5"/><path d="M8 4.8V8l2.2 1.4"/>', 14),
+  minus: svg('<path d="M3.5 8h9"/>', 14),
+  chevronLeft: svg('<path d="m9.5 4.5-3.5 3.5 3.5 3.5"/>', 12),
 };
 
 export function shortPath(value = "", keep = 2): string {
