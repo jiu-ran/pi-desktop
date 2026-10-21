@@ -1,4 +1,5 @@
 import { splitAttachmentMarkers, type MessageAttachment } from "../shared/attachments.ts";
+import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
 
 export interface TranscriptBlock {
   kind: "user" | "text" | "thinking" | "tool" | "notice";
@@ -9,6 +10,8 @@ export interface TranscriptBlock {
   imageItems?: Array<{ mimeType: string; data: string }>;
   /** 用户消息里被抽离出来的附件标记 */
   attachments?: MessageAttachment[];
+  /** `/skill:name` 展开后的技能调用（正文折叠展示） */
+  skill?: SkillInvocation;
   streaming?: boolean;
   name?: string;
   args?: Record<string, any>;
@@ -33,6 +36,8 @@ const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const IMAGE_PREVIEW_MAX = 8 * 1024 * 1024;
 function userBlock(content: any): Omit<TranscriptBlock, "id"> {
   const { text, attachments } = splitAttachmentMarkers(textOf(content));
+  // 技能调用：卡片展示技能名，正文收进折叠区，只保留调用者追加的问题。
+  const skill = parseSkillInvocation(text) ?? undefined;
   const imageParts = (Array.isArray(content) ? content : []).filter((part: any) => part?.type === "image");
   const imageItems = imageParts
     .filter((part: any) => typeof part.data === "string" && part.data.length <= IMAGE_PREVIEW_MAX)
@@ -43,7 +48,8 @@ function userBlock(content: any): Omit<TranscriptBlock, "id"> {
     : attachments;
   return {
     kind: "user",
-    text,
+    text: skill ? (skill.userMessage ?? "") : text,
+    skill,
     images: imageParts.length,
     imageItems,
     attachments: files,
@@ -106,7 +112,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
   function appendMessage(message: any): void {
     if (message.role === "user") {
       const block = userBlock(message.content);
-      if (block.text || block.images || block.attachments?.length) blocks.push({ ...block, id: uid("u") });
+      if (block.text || block.images || block.attachments?.length || block.skill) blocks.push({ ...block, id: uid("u") });
       return;
     }
     if (message.role === "assistant") {

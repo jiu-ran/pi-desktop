@@ -4,6 +4,8 @@ import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import { collectChanges } from "../../shared/diff.ts";
 import {
+  badgeCode,
+  badgeKind,
   isSessionOnly,
   isStaged,
   mergeRepoChanges,
@@ -302,21 +304,6 @@ function onRowOpen(row: PanelRow): void {
 
 function onRowReveal(row: PanelRow): void {
   if (row.change) reveal(row.change);
-}
-
-function badgeCode(change: RepoChange): string {
-  if (change.untracked) return "U";
-  const code = change.worktree !== " " && change.worktree !== "?" ? change.worktree : change.index;
-  const letter = code.trim();
-  return letter === "?" ? "U" : letter || "M";
-}
-
-function badgeKind(change: RepoChange): string {
-  const code = badgeCode(change);
-  if (code === "D") return "删除";
-  if (code === "A" || code === "U") return "新增";
-  if (code === "R" || code === "C") return "重命名";
-  return "修改";
 }
 
 function isActive(change: RepoChange): boolean {

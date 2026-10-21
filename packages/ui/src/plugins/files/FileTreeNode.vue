@@ -4,6 +4,7 @@ import { openMenu } from "../../components/sidebar/ui.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
+import { badgeCode, badgeKind, pathKey, type RepoChange } from "../../shared/git-changes.ts";
 import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
 import { openFileInStage } from "./state.ts";
 
@@ -11,6 +12,10 @@ const props = withDefaults(
   defineProps<{
     item: WorkspaceEntry;
     level?: number;
+    /** 该文件自身的 Git 状态 */
+    git?: RepoChange;
+    /** 全量 Git 状态索引，用于给文件夹汇总子项变更数 */
+    gitMap?: Map<string, RepoChange>;
   }>(),
   {
     level: 0,
@@ -29,6 +34,15 @@ const isActive = computed(
     stage.activeTab.value?.pluginId === "files" &&
     stage.activeTab.value?.tabId === props.item.relative,
 );
+
+// 文件夹只显示子项变更总数，文件显示 M/A/D/R/U 字母。
+const folderChanges = computed(() => {
+  if (props.item.kind !== "folder" || !props.gitMap?.size) return 0;
+  const prefix = pathKey(props.item.path) + "/";
+  let count = 0;
+  for (const key of props.gitMap.keys()) if (key.startsWith(prefix)) count += 1;
+  return count;
+});
 
 const isDirty = computed(
   () =>
@@ -146,9 +160,27 @@ function menu(event: MouseEvent): void {
       <span class="file-tree-icon" :class="fileIconKind(item)" v-html="fileIcon(item)" />
       <span class="file-tree-name">{{ item.name }}</span>
       <span v-if="isDirty" class="file-tree-dirty" title="有未保存修改">●</span>
+      <span
+        v-else-if="item.kind === 'folder' && folderChanges"
+        class="file-tree-git-count"
+        :title="`${folderChanges} 个变更`"
+      >{{ folderChanges }}</span>
+      <span
+        v-else-if="git"
+        class="file-tree-git"
+        :data-kind="badgeKind(git)"
+        :title="`Git 状态：${badgeCode(git)}`"
+      >{{ badgeCode(git) }}</span>
     </button>
     <div v-if="expanded" class="file-tree-children" @contextmenu.stop>
-      <FileTreeNode v-for="child in children" :key="child.path" :item="child" :level="level + 1" />
+      <FileTreeNode
+        v-for="child in children"
+        :key="child.path"
+        :item="child"
+        :level="level + 1"
+        :git="gitMap?.get(pathKey(child.path))"
+        :git-map="gitMap"
+      />
       <div v-if="!loading && !children.length" class="file-tree-empty" :style="{ paddingLeft: `${32 + level * 16}px` }">
         空文件夹
       </div>

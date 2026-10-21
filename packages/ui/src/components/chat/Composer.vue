@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
+import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken } from "../../shared/mentions.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
@@ -75,6 +76,7 @@ const modeItems = [
 
 // ---------- 上下文占用统计 ----------
 const stats = ref<any>(null);
+const statsOpen = ref(false);
 let statsReqId = 0;
 
 async function refreshStats(): Promise<void> {
@@ -147,6 +149,29 @@ const contextLevel = computed<"low" | "mid" | "high">(() => {
   if (pct > 50) return "mid";
   return "low";
 });
+
+// 用量明细弹层：格式化逻辑移植自 ThinkRail 的 SessionStatsBar（Apache-2.0）。
+const statsParts = computed(() => (stats.value ? usageParts(stats.value, false) : []));
+const statsBar = computed(() => contextBar(contextPercent.value));
+const statsCost = computed(() => formatCost(stats.value?.cost));
+const statsCounts = computed(() => {
+  const s = stats.value;
+  if (!s) return "暂无";
+  return `${s.userMessages ?? 0} 轮提问 · ${s.assistantMessages ?? 0} 条回复 · ${s.toolCalls ?? 0} 次工具`;
+});
+
+watch(
+  () => ws.value?.sessionFile,
+  () => {
+    statsOpen.value = false;
+  },
+);
+
+// 打开弹层时刷新一次，避免显示上一次 turn 的快照。
+async function toggleStats(): Promise<void> {
+  statsOpen.value = !statsOpen.value;
+  if (statsOpen.value) await refreshStats();
+}
 
 const contextTooltip = computed(() => {
   const c = contextUsage.value;
@@ -741,11 +766,15 @@ const argHint = computed(() => {
             />
           </div>
           <div class="composer-right">
-            <div
+            <button
               v-if="contextUsage"
+              type="button"
               class="composer-context"
               :data-level="contextLevel"
               :title="contextTooltip"
+              :aria-expanded="statsOpen"
+              aria-label="查看会话用量"
+              @click="toggleStats"
             >
               <svg class="context-ring" viewBox="0 0 20 20" aria-hidden="true">
                 <circle class="context-ring-track" cx="10" cy="10" r="7.5" />
@@ -758,6 +787,35 @@ const argHint = computed(() => {
                 />
               </svg>
               <span class="composer-context-pct">{{ contextPercent ?? "-" }}%</span>
+            </button>
+            <button
+              v-if="statsOpen && stats"
+              type="button"
+              class="composer-stats-backdrop"
+              aria-label="关闭会话统计"
+              @click="statsOpen = false"
+            />
+            <div v-if="statsOpen && stats" class="composer-stats-pop" role="dialog" aria-label="会话统计">
+              <div class="composer-stats-title">会话用量</div>
+              <div class="composer-stats-row">
+                <span>上下文</span>
+                <span class="composer-stats-value">
+                  <span class="composer-stats-bar">{{ statsBar }}</span>
+                  {{ contextPercent ?? "-" }}% · {{ formatTokens(contextUsage?.tokens ?? 0) }}/{{ formatTokens(contextUsage?.contextWindow ?? 0) }}
+                </span>
+              </div>
+              <div class="composer-stats-row">
+                <span>累计</span>
+                <span class="composer-stats-value">{{ statsParts.length ? statsParts.join(" · ") : "暂无" }}</span>
+              </div>
+              <div class="composer-stats-row">
+                <span>费用</span>
+                <span class="composer-stats-value">{{ statsCost }}</span>
+              </div>
+              <div class="composer-stats-row">
+                <span>消息</span>
+                <span class="composer-stats-value">{{ statsCounts }}</span>
+              </div>
             </div>
             <Picker
               v-if="ws?.streaming"

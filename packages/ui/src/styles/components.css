@@ -43,6 +43,24 @@
 .file-tree-icon.file { color: var(--code); }
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-dirty { flex: none; color: var(--accent); font-size: 9px; line-height: 1; }
+/* 文件树里的 Git 状态：与版本控制面板使用同一套字母与配色 */
+.file-tree-git { flex: none; margin-left: auto; padding-left: 6px; color: var(--warn); font: 600 10.5px/1 var(--mono); }
+.file-tree-git[data-kind="新增"] { color: var(--ok-fg); }
+.file-tree-git[data-kind="删除"] { color: var(--del-fg); }
+.file-tree-git[data-kind="重命名"] { color: var(--code); }
+.file-tree-git-count {
+  flex: none;
+  margin-left: auto;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  font: 600 9.5px/1.5 var(--mono);
+  text-align: center;
+}
+.files-actions .icon-btn.active { background: var(--bg-3); color: var(--accent); }
+.files-changes-count { margin-left: 2px; font: 600 9.5px/1 var(--mono); }
 .file-tree-children { min-width: 0; }
 .file-tree-empty { padding-top: 4px; padding-bottom: 4px; color: var(--fg-3); font-size: 12px; }
 .files-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; color: var(--fg-2); font-size: 12.5px; }

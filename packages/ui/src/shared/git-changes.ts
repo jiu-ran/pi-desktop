@@ -127,6 +127,23 @@ export function isSessionOnly(change: RepoChange): boolean {
   return !change.untracked && !isStaged(change) && !isUnstaged(change) && change.agentTouched;
 }
 
+/** 变更列表 / 文件树统一使用的状态字母：U 未跟踪，其余取工作区或暂存区状态。 */
+export function badgeCode(change: RepoChange): string {
+  if (change.untracked) return "U";
+  const code = change.worktree !== " " && change.worktree !== "?" ? change.worktree : change.index;
+  const letter = code.trim();
+  return letter === "?" ? "U" : letter || "M";
+}
+
+/** 状态字母对应的展示分类，决定颜色。 */
+export function badgeKind(change: RepoChange): string {
+  const code = badgeCode(change);
+  if (code === "D") return "删除";
+  if (code === "A" || code === "U") return "新增";
+  if (code === "R" || code === "C") return "重命名";
+  return "修改";
+}
+
 /** 展示用的状态字符：暂存区优先，其次是工作区。 */
 export function changeCode(change: RepoChange, staged: boolean): string {
   if (change.untracked) return "?";

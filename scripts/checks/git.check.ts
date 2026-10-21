@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { PiHost } from "../../electron/pi-host.ts";
-import { isSessionOnly, isStaged, isUnstaged, mergeRepoChanges, type RepoChange } from "../../packages/ui/src/shared/git-changes.ts";
+import { badgeCode, badgeKind, isSessionOnly, isStaged, isUnstaged, mergeRepoChanges, type RepoChange } from "../../packages/ui/src/shared/git-changes.ts";
 import { buildChangeTree, flattenChangeTree } from "../../packages/ui/src/shared/git-tree.ts";
 
 const execFileAsync = promisify(execFile);
@@ -120,6 +120,25 @@ try {
     compressed[0].kind === "folder" && compressed[0].name === "java/com/juran" && compressed[0].count === 1,
     "单链目录应压缩成一行",
   );
+
+  // 文件树与版本控制面板共用同一套状态字母
+  const badgeSample = (over: Partial<RepoChange>): RepoChange => ({
+    absPath: "",
+    path: "",
+    name: "",
+    dir: "",
+    index: " ",
+    worktree: " ",
+    untracked: false,
+    agentTouched: false,
+    ...over,
+  });
+  assert(badgeCode(badgeSample({ untracked: true })) === "U", "未跟踪应显示 U");
+  assert(badgeKind(badgeSample({ untracked: true })) === "新增", "未跟踪应归为新增");
+  assert(badgeCode(badgeSample({ worktree: "D" })) === "D", "工作区删除应显示 D");
+  assert(badgeKind(badgeSample({ worktree: "D" })) === "删除", "删除应归为删除");
+  assert(badgeCode(badgeSample({ index: "M", worktree: " " })) === "M", "暂存修改应显示 M");
+  assert(badgeKind(badgeSample({ index: "M", worktree: " " })) === "修改", "修改应归为修改");
 
   console.log("git", commit.overview.branch, commit.overview.commits.length, "merged", merged.length);
   console.log("OK");

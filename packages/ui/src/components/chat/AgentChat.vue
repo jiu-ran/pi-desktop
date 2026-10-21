@@ -23,7 +23,9 @@ let scrollForce = false;
 let ignoreScroll = false;
 let ignoreScrollTimer = 0;
 let settleTimer = 0;
-let userScrolled = false;
+const userScrolled = ref(false);
+// 用户上翻后记录已看过的块数，用于「N 条新消息」提示。
+const seenBlocks = ref(0);
 let resizeObserver: ResizeObserver | null = null;
 let boundScroller: HTMLElement | null = null;
 
@@ -78,6 +80,45 @@ const changedTotals = computed(() =>
 );
 const changedDiff = computed(() => changedTotals.value.added > 0 || changedTotals.value.removed > 0);
 
+// 「回到最新」与未读数参考 ThinkRail 的 reading band / follow 状态（Apache-2.0）。
+const unreadCount = computed(() => Math.max(0, (ws.value?.blocks.length ?? 0) - seenBlocks.value));
+const showJump = computed(() => !stick.value && Boolean(ws.value?.blocks.length));
+const jumpLabel = computed(() => {
+  if (ws.value?.streaming) return unreadCount.value ? `${unreadCount.value} 条新内容` : "正在回复";
+  if (unreadCount.value) return `${unreadCount.value} 条新消息`;
+  return "回到底部";
+});
+
+function jumpToLatest(): void {
+  userScrolled.value = false;
+  stick.value = true;
+  seenBlocks.value = ws.value?.blocks.length ?? 0;
+  scrollToBottom(true);
+}
+
+watch(
+  () => ws.value?.blocks.length,
+  (count) => {
+    if (count && stick.value) seenBlocks.value = count;
+  },
+);
+
+watch(
+  () => ws.value?.sessionFile,
+  () => {
+    seenBlocks.value = ws.value?.blocks.length ?? 0;
+  },
+  { immediate: true },
+);
+
+// 自己发出新消息时总是回到最新，不把这条消息算成「新内容」。
+watch(
+  () => (ws.value?.blocks.at(-1) as any)?.kind,
+  (kind) => {
+    if (kind === "user") jumpToLatest();
+  },
+);
+
 // 是否还有更早的消息可加载：historyStart > 0 表示还没读到文件开头
 const canLoadMore = computed(() => {
   const thread = ws.value?.activeThread;
@@ -103,7 +144,7 @@ function onScroll(): void {
   if (ignoreScroll) return;
   // 刚打开会话时 hydrate / DOM 替换会触发非用户滚动，不能据此放弃贴底。
   // 用户一旦用滚轮、触摸、滚动条或键盘滚动，userScrolled 才置真。
-  if (!userScrolled) return;
+  if (!userScrolled.value) return;
   
   stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
   
@@ -136,18 +177,18 @@ function scrollToBottom(force = false): void {
 
 /** 会话打开阶段连续贴底，等 hydrate 和异步内容稳定后再交还给用户滚动。 */
 function settleAtBottom(): void {
-  userScrolled = false;
+  userScrolled.value = false;
   stick.value = true;
   scrollToBottom(true);
   if (settleTimer) window.clearTimeout(settleTimer);
   settleTimer = window.setTimeout(() => {
     settleTimer = 0;
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
   }, 320);
 }
 
 function markUserScroll(): void {
-  userScrolled = true;
+  userScrolled.value = true;
 }
 
 /** 只把“点在滚动条上”当成用户滚动，避免点卡片/复制按钮也取消自动贴底。 */
@@ -156,12 +197,12 @@ function onPointerDown(event: PointerEvent): void {
   if (!el) return;
   const rect = el.getBoundingClientRect();
   const onScrollbar = event.clientX - rect.left >= el.clientWidth || event.clientY - rect.top >= el.clientHeight;
-  if (onScrollbar) userScrolled = true;
+  if (onScrollbar) userScrolled.value = true;
 }
 
 function onWindowFocus(): void {
   // 窗口在后台时 rAF 可能被节流，首屏贴底没执行；重新获得焦点时补一次。
-  if (!userScrolled) scrollToBottom(true);
+  if (!userScrolled.value) scrollToBottom(true);
   else if (stick.value) scrollToBottom();
 }
 
@@ -171,7 +212,7 @@ function onScrollKey(event: KeyboardEvent): void {
   const active = document.activeElement;
   if (active !== el && !el.contains(active)) return;
   if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
-    userScrolled = true;
+    userScrolled.value = true;
   }
 }
 
@@ -298,12 +339,12 @@ function bindScroller(el: HTMLElement | null): void {
   if (inner && typeof ResizeObserver !== "undefined") {
     // 图片、代码高亮等异步撑高内容时也能继续贴底；用户上翻后 stick=false 则不打扰。
     resizeObserver = new ResizeObserver(() => {
-      if (!userScrolled) scrollToBottom(true);
+      if (!userScrolled.value) scrollToBottom(true);
       else scrollToBottom();
     });
     resizeObserver.observe(inner);
   }
-  if (!userScrolled) scrollToBottom(true);
+  if (!userScrolled.value) scrollToBottom(true);
 }
 
 // ws 初始为空时 .timeline 还没渲染，onMounted 里拿不到 ref；
@@ -326,7 +367,7 @@ let stopGitFiles: (() => void) | null = null;
 
 onMounted(() => {
   stopHeightChange = bus.on("markdown:height-change", () => {
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
     else scrollToBottom();
   });
   stopGitEvents = bus.on("pi:event", ({ event }: { event: any }) => {
@@ -393,7 +434,7 @@ watch(
     (ws.value?.blocks.at(-1) as any)?.output?.length,
   ],
   () => {
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
     else scrollToBottom();
   },
 );
@@ -525,7 +566,12 @@ watch(searchMatches, () => {
               :data-block-id="block.id"
               :class="{ 'search-hit': searchMatches[searchIndex]?.id === block.id, 'history-enter': historyEnterIds.has(block.id) }"
             >
-              <BlockView :block="block" :query="searchQuery" :copy-text="copyTextByIndex.get(index) ?? ''" />
+              <BlockView
+                :block="block"
+                :query="searchQuery"
+                :copy-text="copyTextByIndex.get(index) ?? ''"
+                :collapse-long="index < ws.blocks.length - 1"
+              />
             </div>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">
               <span class="mini-spinner" />思考中…
@@ -533,6 +579,12 @@ watch(searchMatches, () => {
           </template>
         </div>
       </div>
+      <Transition name="jump-fade">
+        <button v-if="showJump" type="button" class="jump-latest" @click="jumpToLatest">
+          <span class="jump-latest-icon" v-html="icons.chevronDown" />
+          <span>{{ jumpLabel }}</span>
+        </button>
+      </Transition>
       <aside v-if="outline.length" class="chat-outline">
           <button v-for="item in outline" :key="item.id" :title="item.text" @click="openOutline(item.id)">{{ item.text }}</button>
         </aside>
@@ -561,6 +613,39 @@ watch(searchMatches, () => {
 <style scoped>
 .chat-body {
   position: relative;
+}
+
+.jump-latest {
+  position: absolute;
+  z-index: 6;
+  right: 18px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-2) 94%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.jump-latest:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.jump-latest-icon { display: grid; place-items: center; color: var(--accent); }
+.jump-fade-enter-active, .jump-fade-leave-active { transition: opacity 160ms ease, transform 160ms ease; }
+.jump-fade-enter-from, .jump-fade-leave-to { opacity: 0; transform: translateY(6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .jump-fade-enter-active, .jump-fade-leave-active { transition: none; }
 }
 
 .history-enter {

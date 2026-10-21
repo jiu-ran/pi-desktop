@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { openMenu } from "../../components/sidebar/ui.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { baseName, icons } from "../../shared/util.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
+import {
+  badgeCode,
+  badgeKind,
+  collapsePath,
+  mergeRepoChanges,
+  pathKey,
+  type RepoChange,
+} from "../../shared/git-changes.ts";
+import { overviewState, refreshOverviewState } from "../git/state.ts";
 import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
 import FileTreeNode from "./FileTreeNode.vue";
 import { openFileInStage } from "./state.ts";
@@ -15,6 +24,8 @@ const loading = ref(false);
 const error = ref("");
 const filter = ref("");
 const searchResults = ref<WorkspaceEntry[]>([]);
+const showChanges = ref(false);
+let gitTimer: ReturnType<typeof setTimeout> | null = null;
 const searching = ref(false);
 let request = 0;
 let searchRequest = 0;
@@ -40,6 +51,43 @@ async function load(): Promise<void> {
 }
 
 watch(() => ws.value?.cwd, load, { immediate: true });
+
+// 文件树 Git 标记与「只看变更」视图参考 ThinkRail 的 Files 树（Apache-2.0）。
+const changes = computed<Array<RepoChange & { display: string }>>(() => {
+  const overview = overviewState.value;
+  const cwd = ws.value?.cwd;
+  if (!overview?.isRepo || !cwd) return [];
+  const base = collapsePath(cwd);
+  return mergeRepoChanges({ cwd, root: overview.root, status: overview.status }).map((change) => {
+    const abs = collapsePath(change.absPath);
+    const display = abs === base ? "." : abs.startsWith(base + "/") ? abs.slice(base.length + 1) : abs;
+    return { ...change, display };
+  });
+});
+const changesByPath = computed(() => new Map(changes.value.map((change) => [pathKey(change.absPath), change])));
+function gitFor(path: string): RepoChange | undefined {
+  return changesByPath.value.get(pathKey(path));
+}
+
+function scheduleGitRefresh(): void {
+  if (gitTimer) clearTimeout(gitTimer);
+  gitTimer = setTimeout(() => {
+    gitTimer = null;
+    void refreshOverviewState(workbench);
+  }, 400);
+}
+
+onMounted(() => void refreshOverviewState(workbench));
+watch(
+  () => ws.value?.cwd,
+  () => {
+    scheduleGitRefresh();
+  },
+);
+
+function openChanged(change: RepoChange): void {
+  void openFileInStage(workbench, stage, bus, change.absPath);
+}
 
 const ctx = { workbench, stage, bus };
 
@@ -70,7 +118,10 @@ const stopWatching = bus.on("files:changed", ({ directory }: { directory: string
   if (!directory) void load();
   if (filter.value.trim()) scheduleSearch();
 });
-onBeforeUnmount(stopWatching);
+onBeforeUnmount(() => {
+  stopWatching();
+  if (gitTimer) clearTimeout(gitTimer);
+});
 
 
 function rootMenu(event: MouseEvent): void {
@@ -140,6 +191,17 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
         <button
           type="button"
           class="icon-btn small"
+          :class="{ active: showChanges }"
+          :title="showChanges ? '显示全部文件' : `只看变更（${changes.length}）`"
+          :disabled="!ws"
+          @click="showChanges = !showChanges"
+        >
+          <span v-html="icons.diff" />
+          <span v-if="changes.length" class="files-changes-count">{{ changes.length }}</span>
+        </button>
+        <button
+          type="button"
+          class="icon-btn small"
           title="刷新文件树"
           :disabled="loading"
           @click="refresh"
@@ -184,12 +246,39 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
           <span class="file-tree-icon file" v-html="icons.file" />
           <span class="file-tree-name">{{ item.name }}</span>
           <small class="file-search-rel">{{ item.relative }}</small>
+          <span v-if="gitFor(item.path)" class="file-tree-git" :data-kind="badgeKind(gitFor(item.path)!)">{{ badgeCode(gitFor(item.path)!) }}</span>
         </button>
       </div>
     </template>
+    <div v-else-if="showChanges" class="files-tree files-changes-list">
+      <div v-if="!changes.length" class="files-state">工作区没有未提交的改动</div>
+      <button
+        v-for="change in changes"
+        :key="change.path"
+        type="button"
+        class="file-tree-row"
+        :class="{
+          active: stage.activeTab.value?.pluginId === 'files' && stage.activeTab.value?.tabId === change.display,
+        }"
+        :title="change.absPath"
+        @click="openChanged(change)"
+      >
+        <span class="file-tree-caret" />
+        <span class="file-tree-icon file" v-html="icons.file" />
+        <span class="file-tree-name">{{ change.name }}</span>
+        <small v-if="change.display !== change.name" class="file-search-rel">{{ change.display }}</small>
+        <span class="file-tree-git" :data-kind="badgeKind(change)">{{ badgeCode(change) }}</span>
+      </button>
+    </div>
     <div v-else class="files-tree" @contextmenu="rootMenu">
       <div v-if="!entries.length" class="files-state">目录为空，右键可新建</div>
-      <FileTreeNode v-for="item in entries" :key="item.path" :item="item" />
+      <FileTreeNode
+        v-for="item in entries"
+        :key="item.path"
+        :item="item"
+        :git="gitFor(item.path)"
+        :git-map="changesByPath"
+      />
     </div>
   </div>
 </template>

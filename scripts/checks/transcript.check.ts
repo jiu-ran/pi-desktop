@@ -163,3 +163,29 @@ if (removable.blocks.filter((block) => block.id === secondUser.id).length !== 1)
   throw new Error("removeBlock 不存在的 id 不应改变内容");
 }
 console.log("removeBlock ok");
+
+// 技能调用：正文折叠成卡片，只保留技能名与调用者追加的问题
+const skill = createTranscript();
+const skillText = [
+  '<skill name="frontend-design" location="/home/u/.pi/skills/frontend-design/SKILL.md">',
+  "References are relative to /home/u/.pi/skills/frontend-design.",
+  "",
+  "# Frontend",
+  "写点东西",
+  "</skill>",
+  "",
+  "帮我做个页面",
+].join("\n");
+skill.loadMessages([{ role: "user", content: [{ type: "text", text: skillText }] }]);
+const skillBlock = skill.blocks[0];
+if (skill.blocks.length !== 1 || skillBlock.kind !== "user") throw new Error("技能消息应保留为一个用户块");
+if (skillBlock.skill?.name !== "frontend-design") throw new Error("技能名解析失败");
+if (skillBlock.text !== "帮我做个页面") throw new Error("应只保留追加的问题");
+if (!skillBlock.skill.content.includes("写点东西") || skillBlock.skill.content.includes("</skill>")) throw new Error("技能正文解析失败");
+
+// 只有技能、没有追加问题时也必须保留
+const onlySkill = createTranscript();
+onlySkill.loadMessages([{ role: "user", content: [{ type: "text", text: '<skill name="a" location="/x/SKILL.md">\nbody\n</skill>' }] }]);
+if (onlySkill.blocks.length !== 1 || onlySkill.blocks[0].skill?.name !== "a") throw new Error("纯技能消息不应被丢弃");
+
+console.log("skill OK");

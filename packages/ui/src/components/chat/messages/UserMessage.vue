@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import { formatBytes, imageDataUrl } from "../../../shared/attachments.ts";
+import { shouldCollapseUserText } from "../../../shared/chat-text.ts";
 import { icons } from "../../../shared/util.ts";
+import MarkdownBody from "../../../plugins/markdown/MarkdownBody.vue";
 import ImageLightbox from "../ImageLightbox.vue";
 import SearchHighlight from "../SearchHighlight.vue";
 
 const props = defineProps<{
   block: TranscriptBlock;
   query?: string;
+  collapseLong?: boolean;
 }>();
 
+// 长消息折叠与技能卡片参考 ThinkRail（Apache-2.0，见 THIRD-PARTY-NOTICES.md）。
+const expanded = ref(false);
+const skillOpen = ref(false);
 const text = computed(() => (props.block.text ?? "").trim());
+const clampable = computed(() => shouldCollapseUserText(text.value, Boolean(props.collapseLong)));
+const clamped = computed(() => clampable.value && !expanded.value && !props.query);
+watch(
+  () => props.query,
+  (query) => {
+    if (query) expanded.value = true;
+  },
+);
 const files = computed(() => props.block.attachments ?? []);
 const images = computed(() =>
   (props.block.imageItems ?? []).map((item) => ({ src: imageDataUrl(item.mimeType, item.data) })),
@@ -28,8 +42,33 @@ function openPreview(index: number): void {
 
 <template>
   <div class="msg user">
-    <div class="msg-user-bubble" :class="{ 'only-media': !text }">
-      <div v-if="text" class="msg-user-text"><SearchHighlight :text="text" :query="query" /></div>
+    <div class="msg-user-bubble" :class="{ 'only-media': !text && !block.skill }">
+      <div v-if="block.skill" class="msg-skill">
+        <button
+          type="button"
+          class="msg-skill-head"
+          :aria-expanded="skillOpen"
+          :title="block.skill.location"
+          @click="skillOpen = !skillOpen"
+        >
+          <span class="msg-skill-icon" v-html="icons.puzzle" />
+          <span class="msg-skill-name">{{ block.skill.name }}</span>
+          <span class="msg-skill-tag">技能</span>
+          <span class="msg-skill-caret" v-html="skillOpen ? icons.chevronDown : icons.chevronRight" />
+        </button>
+        <div v-if="skillOpen" class="msg-skill-body">
+          <MarkdownBody mode="docs" :content="block.skill.content" />
+          <div class="msg-skill-loc">{{ block.skill.location }}</div>
+        </div>
+      </div>
+      <div
+        v-if="text"
+        class="msg-user-text"
+        :class="{ clamped, 'is-expanded': clampable && expanded }"
+      ><SearchHighlight :text="text" :query="query" /></div>
+      <button v-if="clampable" type="button" class="msg-user-toggle" @click="expanded = !expanded">
+        {{ expanded ? "收起" : `展开全文（${text.length} 字）` }}
+      </button>
 
       <div v-if="images.length" class="msg-user-images" :class="{ single: images.length === 1 }">
         <button
