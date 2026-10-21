@@ -5,6 +5,8 @@ import { appSettings, openSettingsModal } from "../../services/settings.ts";
 import MarkdownPreview from "../markdown/MarkdownPreview.vue";
 import { isMarkdownFile } from "../markdown/markdown.ts";
 import { icons } from "../../shared/util.ts";
+import { formatBytes } from "../../shared/attachments.ts";
+import ImageLightbox from "../../components/chat/ImageLightbox.vue";
 import type { StageTab } from "../../kernel/stage.ts";
 import type { FileStageData } from "./state.ts";
 
@@ -62,7 +64,7 @@ function scheduleAutoSave(): void {
 const draft = computed({
   get: () => file.value?.draft ?? file.value?.content ?? "",
   set: (value: string) => {
-    if (!file.value) return;
+    if (!file.value || file.value.binary) return;
     file.value.draft = value;
     const dirty = value !== (file.value.savedContent ?? file.value.content ?? "");
     props.tab.dirty = dirty;
@@ -89,6 +91,12 @@ const autoSaveLabel = computed(() => {
 });
 
 const lines = computed(() => String(draft.value ?? "").split(/\r?\n/));
+const media = computed(() => file.value?.preview ?? null);
+const isBinary = computed(() => Boolean(file.value?.binary));
+const zoomIndex = ref<number | null>(null);
+const previewItems = computed(() =>
+  media.value ? [{ src: media.value.dataUrl, name: file.value?.name ?? "" }] : [],
+);
 const pathParts = computed(() => String(file.value?.relative ?? "").split(/[\\/]/).filter(Boolean));
 const codeInput = ref<HTMLTextAreaElement | null>(null);
 const lineNumbers = ref<HTMLElement | null>(null);
@@ -126,6 +134,8 @@ async function reload(): Promise<void> {
     file.value.savedContent = detail.content;
     file.value.draft = detail.content;
     file.value.size = detail.size;
+    file.value.preview = detail.preview;
+    file.value.binary = detail.binary;
     props.tab.dirty = false;
     lastAutoSaved.value = false;
   } catch (error: any) {
@@ -138,7 +148,7 @@ async function reload(): Promise<void> {
 async function save(options?: { auto?: boolean; generation?: number }): Promise<void> {
   clearAutoSaveTimer();
   const targetFile = file.value;
-  if (!targetFile || targetFile.loading || targetFile.error || saving.value) return;
+  if (!targetFile || targetFile.binary || targetFile.loading || targetFile.error || saving.value) return;
   if (!props.tab.dirty) return;
   const contentToSave = targetFile.draft ?? targetFile.content ?? "";
   const targetRelative = targetFile.relative;
@@ -263,12 +273,13 @@ onBeforeUnmount(() => {
           <span :class="{ current: idx === pathParts.length - 1 }">{{ part }}</span>
         </template>
       </div>
-      <span v-if="file && !file.loading && !file.error" class="file-editor-meta">{{ lines.length }} 行</span>
+      <span v-if="file && !file.loading && !file.error && !isBinary" class="file-editor-meta">{{ lines.length }} 行</span>
       <span v-if="tab.dirty" class="file-editor-status">
         {{ appSettings.autoSave === "afterDelay" ? "待自动保存" : "未保存" }}
       </span>
       <span v-else-if="lastAutoSaved" class="file-editor-status saved">已自动保存</span>
       <button
+        v-if="!isBinary"
         type="button"
         class="file-autosave-pill"
         :class="{ active: appSettings.autoSave !== 'off' }"
@@ -285,6 +296,7 @@ onBeforeUnmount(() => {
         @ 引用
       </button>
       <button
+        v-if="!isBinary"
         type="button"
         class="btn small file-editor-save"
         :class="{ primary: tab.dirty }"
@@ -301,6 +313,25 @@ onBeforeUnmount(() => {
 
     <div v-if="file?.loading" class="file-editor-state"><span class="mini-spinner" />正在打开文件…</div>
     <div v-else-if="file?.error" class="file-editor-state error">{{ file.error }}</div>
+    <div v-else-if="isBinary" class="file-editor-binary">
+      <template v-if="media">
+        <button
+          type="button"
+          class="file-image-preview"
+          :title="`点击查看 ${file?.name} 大图`"
+          @click="zoomIndex = 0"
+        >
+          <img :src="media.dataUrl" :alt="file?.name" />
+        </button>
+        <p class="file-editor-binary-meta">
+          {{ media.mimeType }} · {{ formatBytes(file?.size ?? 0) }} · 点击图片查看大图
+        </p>
+        <ImageLightbox v-model:index="zoomIndex" :items="previewItems" />
+      </template>
+      <div v-else class="file-editor-state">
+        该文件是二进制文件（{{ formatBytes(file?.size ?? 0) }}），无法以文本方式预览，可使用系统程序打开。
+      </div>
+    </div>
     <MarkdownPreview v-else-if="showPreview && file" :file="file" />
     <div v-else class="file-editor-body">
       <div ref="lineNumbers" class="file-editor-numbers" aria-hidden="true">

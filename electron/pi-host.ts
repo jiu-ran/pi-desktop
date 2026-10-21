@@ -52,6 +52,10 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  /** 图片等二进制文件的预览内容（data URL） */
+  preview?: { mimeType: string; dataUrl: string };
+  /** 非文本文件：只读，不能保存 */
+  binary?: boolean;
 }
 
 export interface GitStatusFile {
@@ -337,6 +341,49 @@ function workspacePath(cwd: string, relative = ""): { root: string; target: stri
  * 才允许查看/保存项目外的单个文件。目录浏览、创建、删除和 Git 操作
  * 继续使用 workspacePath，避免把项目边界整体放开。
  */
+/** 图片扩展名 → MIME；文件头识别作为优先判断，扩展名只做兜底 */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".avif": "image/avif",
+};
+
+const TEXT_PREVIEW_MAX = 2 * 1024 * 1024;
+const IMAGE_PREVIEW_MAX = 20 * 1024 * 1024;
+
+function sniffImageMime(head: Buffer): string | null {
+  if (head.length >= 8 && head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
+  if (head.length >= 4 && head.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (head.length >= 12 && head.subarray(0, 4).toString("latin1") === "RIFF" && head.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  if (head.length >= 2 && head[0] === 0x42 && head[1] === 0x4d) return "image/bmp";
+  if (head.length >= 4 && head[0] === 0 && head[1] === 0 && head[2] === 1 && head[3] === 0) return "image/x-icon";
+  if (head.length >= 12 && head.subarray(4, 12).toString("latin1").includes("ftypavi")) return "image/avif";
+  return null;
+}
+
+async function readFileHead(target: string, length = 16): Promise<Buffer> {
+  const handle = await openFileHandle(target, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** 二进制文件：含 NUL 字节或无法按 UTF-8 解码 */
+function looksBinary(buffer: Buffer): boolean {
+  const head = buffer.subarray(0, 8192);
+  return head.includes(0) || head.toString("utf8").includes("\uFFFD");
+}
+
 function workspaceFilePath(cwd: string, requested: string): { root: string; target: string; external: boolean } {
   if (typeof cwd !== "string" || !cwd.trim()) throw new Error("项目目录无效");
   if (typeof requested !== "string" || !requested.trim()) throw new Error("文件路径无效");
@@ -913,16 +960,31 @@ export class PiHost {
     const { root, target } = resolved;
     const info = await lstat(target).catch(() => null);
     if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法打开");
-    const maxSize = 2 * 1024 * 1024;
-    if (info.size > maxSize) throw new Error("文件超过 2 MB，暂不支持在桌面端预览");
-    const content = await readFile(target, "utf8");
-    return {
+    const pathInfo = {
       path: target,
       relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
       name: path.basename(target),
-      content,
       size: info.size,
     };
+
+    // 图片直接返回 data URL，前端渲染预览，避免把二进制当文本显示
+    const head = await readFileHead(target);
+    const mime = sniffImageMime(head) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()] ?? null;
+    if (mime) {
+      if (info.size > IMAGE_PREVIEW_MAX) throw new Error("图片超过 20 MB，暂不支持在桌面端预览，可使用系统程序打开");
+      const buffer = await readFile(target);
+      return {
+        ...pathInfo,
+        content: "",
+        binary: true,
+        preview: { mimeType: mime, dataUrl: `data:${mime};base64,${buffer.toString("base64")}` },
+      };
+    }
+
+    if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 2 MB，暂不支持在桌面端预览");
+    const buffer = await readFile(target);
+    if (looksBinary(buffer)) return { ...pathInfo, content: "", binary: true };
+    return { ...pathInfo, content: buffer.toString("utf8") };
   }
 
   async writeWorkspaceFile(cwd: string, relative: string, content: string): Promise<WorkspaceFileData> {
@@ -933,6 +995,10 @@ export class PiHost {
     if (Buffer.byteLength(content, "utf8") > 20 * 1024 * 1024) throw new Error("文件超过 20 MB，暂不支持保存");
     const info = await lstat(target).catch(() => null);
     if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法修改");
+    const head = await readFileHead(target);
+    if (sniffImageMime(head) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()]) {
+      throw new Error("图片等二进制文件不支持在文本编辑器中保存");
+    }
     await writeFile(target, content, "utf8");
     return {
       path: target,

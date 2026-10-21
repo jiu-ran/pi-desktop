@@ -13,6 +13,10 @@ export interface FileStageData {
   draft: string;
   loading: boolean;
   error: string;
+  /** 图片预览数据（data URL） */
+  preview?: { mimeType: string; dataUrl: string };
+  /** 非文本文件：只读预览 */
+  binary?: boolean;
 }
 
 export function normalizeRelativePath(cwd: string, targetPath: string): string {
@@ -57,6 +61,8 @@ export async function openFileInStage(
     draft: "",
     loading: true,
     error: "",
+    preview: undefined,
+    binary: false,
   };
   initialData.loading = true;
   initialData.error = "";
@@ -85,6 +91,8 @@ export async function openFileInStage(
       draft: detail.content,
       loading: false,
       error: "",
+      preview: detail.preview,
+      binary: detail.binary,
     };
   } catch (error: any) {
     tab.data.loading = false;

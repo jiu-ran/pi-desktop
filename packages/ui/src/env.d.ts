@@ -68,6 +68,10 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  /** 图片等二进制文件的预览内容（data URL） */
+  preview?: { mimeType: string; dataUrl: string };
+  /** 非文本文件：只读，不能保存 */
+  binary?: boolean;
 }
 
 export interface GitStatusFile {
