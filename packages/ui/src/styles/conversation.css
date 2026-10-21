@@ -529,16 +529,19 @@
   background: var(--input-bg);
   font: 12px/1.6 var(--mono);
 }
-.diff-row { display: grid; grid-template-columns: 44px 16px 1fr; min-width: max-content; min-height: 22px; align-items: center; }
+.diff-body { display: inline-block; min-width: 100%; vertical-align: top; }
+.diff-row { display: flex; align-items: center; width: 100%; min-height: 22px; }
 .diff-row[data-type="ctx"] { background: var(--bg); }
-.diff-num { padding-right: 8px; color: var(--fg-3); text-align: right; user-select: none; }
-.diff-sign { color: var(--fg-3); text-align: center; user-select: none; }
-.diff-text { padding-right: 14px; white-space: pre; }
+.diff-num { flex: none; width: 44px; padding-right: 8px; color: var(--fg-3); text-align: right; user-select: none; }
+.diff-sign { flex: none; width: 16px; color: var(--fg-3); text-align: center; user-select: none; }
+.diff-text { flex: 1 0 auto; padding-right: 14px; white-space: pre; }
 .diff-row[data-type="add"] { background: var(--add-bg); }
 .diff-row[data-type="add"] .diff-text, .diff-row[data-type="add"] .diff-sign { color: var(--add-fg); }
 .diff-row[data-type="del"] { background: var(--del-bg); }
 .diff-row[data-type="del"] .diff-text, .diff-row[data-type="del"] .diff-sign { color: var(--del-fg); }
 .diff-row[data-type="gap"] { background: var(--bg-1); color: var(--fg-3); }
+.diff-row[data-type="meta"] { display: block; width: 100%; background: var(--bg-2); }
+.diff-meta { display: block; padding: 1px 12px; color: var(--fg-3); font-size: 11px; user-select: none; }
 
 .block-fallback { padding: 8px 10px; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); }
 .block-fallback pre { margin: 4px 0 0; color: var(--fg-2); font-size: 12px; white-space: pre-wrap; }

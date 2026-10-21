@@ -348,6 +348,9 @@ function openChange(change: RepoChange): void {
     subtitle: change.path,
     data,
   });
+  // 恢复的旧标签可能还带着「· Git」后缀，打开时统一刷新为文件名
+  tab.title = change.name;
+  tab.subtitle = change.path;
   if (hasLive) void loadLive(tab, change);
 }
 

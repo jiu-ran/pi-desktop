@@ -1,5 +1,6 @@
 export interface DiffLine {
-  type: "add" | "del" | "ctx" | "gap";
+  /** meta 为 hunk 头（@@ … @@），不参与增删统计 */
+  type: "add" | "del" | "ctx" | "gap" | "meta";
   num: string;
   text: string;
 }
@@ -96,9 +97,7 @@ export function parseUnifiedDiff(patch = ""): UnifiedFileDiff[] {
         current = { file: "变更", added: 0, removed: 0, lines: [] };
         files.push(current);
       }
-      if (current.lines.length > 0) {
-        current.lines.push({ type: "gap", num: "", text: "" });
-      }
+      current.lines.push({ type: "meta", num: "", text: raw.trim() });
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[2]);
       continue;
@@ -116,8 +115,26 @@ export function parseUnifiedDiff(patch = ""): UnifiedFileDiff[] {
     }
   }
   return files
-    .map((file) => ({ ...file, lines: file.lines.filter((line) => line.type === "gap" || line.text.length > 0) }))
-    .filter((file) => file.lines.some((line) => line.type !== "gap"));
+    .map((file) => ({
+      ...file,
+      lines: file.lines.filter((line) => line.type === "gap" || line.type === "meta" || line.text.length > 0),
+    }))
+    .filter((file) => file.lines.some((line) => line.type !== "gap" && line.type !== "meta"));
+}
+
+/**
+ * 合并同一文件的多段会话改动，输出一份连续的 diff。
+ * 段与段之间只留一个省略行，不再拆成多张卡片或重复标题。
+ */
+export function mergeHunks(hunks: Array<{ lines: DiffLine[] }> = []): DiffLine[] {
+  const out: DiffLine[] = [];
+  for (const hunk of hunks) {
+    const lines = hunk.lines.filter((line) => line.type === "gap" || line.type === "meta" || line.text.length > 0);
+    if (!lines.length) continue;
+    if (out.length && out.at(-1)?.type !== "gap") out.push({ type: "gap", num: "", text: "" });
+    out.push(...lines);
+  }
+  return out;
 }
 
 export interface ChangeFileItem {
