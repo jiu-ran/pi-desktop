@@ -42,6 +42,19 @@ try {
 
   const opened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(opened.content.includes("export {}"), "应读取文件内容");
+
+  // 8 KB 探测窗口恰好截断一个中文字符时，不能把整个文件误判为二进制。
+  // README / CHANGELOG 这类文件很容易正好命中这个边界。
+  const boundaryText = `${"a".repeat(8191)}你\n`;
+  await writeFile(path.join(root, "boundary.md"), boundaryText);
+  const boundary = await host.readWorkspaceFile(root, "boundary.md");
+  assert(!boundary.binary && boundary.content === boundaryText, "UTF-8 多字节字符不应因探测截断被误判为二进制");
+
+  // 2 MB 以上文本仍可读取，界面会切换为只读大文件预览。
+  const largeText = `${"x".repeat(3 * 1024 * 1024)}\n`;
+  await writeFile(path.join(root, "large.md"), largeText);
+  const large = await host.readWorkspaceFile(root, "large.md");
+  assert(!large.binary && large.content.length === largeText.length, "大文本文件应返回完整内容");
   const saved = await host.writeWorkspaceFile(root, "src/main.ts", "export const changed = true;\n");
   assert(saved.content.includes("changed"), "保存应返回更新后的内容");
   const reopened = await host.readWorkspaceFile(root, "src/main.ts");

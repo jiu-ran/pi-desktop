@@ -97,7 +97,7 @@ main.ts                 组合根：创建内核、注册内置插件
 - [`electron/pi-host.ts`](electron/pi-host.ts) 负责每个工作区的 Pi Worker 池、会话目录、白名单 RPC，以及文件创建、重命名、删除和回收站操作。
 - [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。
 - IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
-- 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。文件预览上限为 2 MB，保存上限为 20 MB。
+- 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。文本读取上限为 20 MB；超过 2 MB 的文本以只读大文件模式打开，保存上限为 20 MB。
 
 ## 关键目录与文件
 
@@ -127,6 +127,10 @@ main.ts                 组合根：创建内核、注册内置插件
 - 项目文件右键菜单复制绝对路径或项目内相对路径。
 
 这些操作依赖 Electron 的安全剪贴板环境；失败时会通过界面通知反馈。
+
+## 通知
+
+界面提示和错误 Toast 统一使用中文文案：Electron IPC 的技术前缀会被移除，常见文件系统 / 网络错误会翻译成可读说明；无法识别的外部错误保留原始细节，并以「操作失败：」或「提示：」开头。
 
 ## 许可
 

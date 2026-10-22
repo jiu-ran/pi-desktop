@@ -1,5 +1,6 @@
 import { baseName } from "../../shared/util.ts";
 import { rememberRecentFile } from "../../shared/recent-files.ts";
+import { localizeNotification } from "../../shared/notify-text.ts";
 import type { StageController } from "../../kernel/stage.ts";
 import type { Workbench } from "../../kernel/workbench.ts";
 import type { EventBus } from "../../kernel/event-bus.ts";
@@ -99,7 +100,7 @@ export async function openFileInStage(
     };
   } catch (error: any) {
     tab.data.loading = false;
-    tab.data.error = error?.message ?? String(error);
+    tab.data.error = localizeNotification(error, "error");
     bus.emit("notify", { level: "error", text: tab.data.error });
   }
 }

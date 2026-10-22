@@ -6,6 +6,7 @@ import MarkdownPreview from "../markdown/MarkdownPreview.vue";
 import { isMarkdownFile } from "../markdown/markdown.ts";
 import { icons } from "../../shared/util.ts";
 import { formatBytes } from "../../shared/attachments.ts";
+import { localizeNotification } from "../../shared/notify-text.ts";
 import ImageLightbox from "../../components/chat/ImageLightbox.vue";
 import type { StageTab } from "../../kernel/stage.ts";
 import type { FileStageData } from "./state.ts";
@@ -93,6 +94,26 @@ const autoSaveLabel = computed(() => {
 const lines = computed(() => String(draft.value ?? "").split(/\r?\n/));
 const media = computed(() => file.value?.preview ?? null);
 const isBinary = computed(() => Boolean(file.value?.binary));
+const LARGE_TEXT_MAX = 2 * 1024 * 1024;
+const LARGE_CHUNK_CHARS = 64 * 1024;
+const isLargeText = computed(() => Boolean(file.value) && !file.value?.binary && (file.value?.size ?? 0) > LARGE_TEXT_MAX);
+const largeChunks = computed(() => {
+  const text = file.value?.content ?? "";
+  const chunks: string[] = [];
+  let start = 0;
+  // 大文件按块渲染，配合 content-visibility 只排版视口附近的块；
+  // 否则一个 2 MB 的 <pre> 会让主线程布局数秒。
+  while (start < text.length && chunks.length < 400) {
+    let end = Math.min(text.length, start + LARGE_CHUNK_CHARS);
+    if (end < text.length) {
+      const newline = text.lastIndexOf("\n", end);
+      if (newline >= start) end = newline + 1;
+    }
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+});
 const zoomIndex = ref<number | null>(null);
 const previewItems = computed(() =>
   media.value ? [{ src: media.value.dataUrl, name: file.value?.name ?? "" }] : [],
@@ -139,7 +160,7 @@ async function reload(): Promise<void> {
     props.tab.dirty = false;
     lastAutoSaved.value = false;
   } catch (error: any) {
-    if (generation === fileGeneration) file.value.error = error?.message ?? String(error);
+    if (generation === fileGeneration) file.value.error = localizeNotification(error, "error");
   } finally {
     if (generation === fileGeneration) file.value.loading = false;
   }
@@ -149,6 +170,7 @@ async function save(options?: { auto?: boolean; generation?: number }): Promise<
   clearAutoSaveTimer();
   const targetFile = file.value;
   if (!targetFile || targetFile.binary || targetFile.loading || targetFile.error || saving.value) return;
+  if (isLargeText.value) return;
   if (!props.tab.dirty) return;
   const contentToSave = targetFile.draft ?? targetFile.content ?? "";
   const targetRelative = targetFile.relative;
@@ -273,13 +295,13 @@ onBeforeUnmount(() => {
           <span :class="{ current: idx === pathParts.length - 1 }">{{ part }}</span>
         </template>
       </div>
-      <span v-if="file && !file.loading && !file.error && !isBinary" class="file-editor-meta">{{ lines.length }} 行</span>
+      <span v-if="file && !file.loading && !file.error && !isBinary && !isLargeText" class="file-editor-meta">{{ lines.length }} 行</span>
       <span v-if="tab.dirty" class="file-editor-status">
         {{ appSettings.autoSave === "afterDelay" ? "待自动保存" : "未保存" }}
       </span>
       <span v-else-if="lastAutoSaved" class="file-editor-status saved">已自动保存</span>
       <button
-        v-if="!isBinary"
+        v-if="!isBinary && !isLargeText"
         type="button"
         class="file-autosave-pill"
         :class="{ active: appSettings.autoSave !== 'off' }"
@@ -288,7 +310,7 @@ onBeforeUnmount(() => {
       >
         {{ autoSaveLabel }}
       </button>
-      <div v-if="isMarkdown && markdownEnabled" class="settings-segmented file-view-toggle">
+      <div v-if="isMarkdown && markdownEnabled && !isLargeText" class="settings-segmented file-view-toggle">
         <button type="button" :class="{ active: !showPreview }" @click="preview = false">源码</button>
         <button type="button" :class="{ active: showPreview }" @click="preview = true">预览</button>
       </div>
@@ -296,7 +318,7 @@ onBeforeUnmount(() => {
         @ 引用
       </button>
       <button
-        v-if="!isBinary"
+        v-if="!isBinary && !isLargeText"
         type="button"
         class="btn small file-editor-save"
         :class="{ primary: tab.dirty }"
@@ -330,6 +352,16 @@ onBeforeUnmount(() => {
       </template>
       <div v-else class="file-editor-state">
         该文件是二进制文件（{{ formatBytes(file?.size ?? 0) }}），无法以文本方式预览，可使用系统程序打开。
+      </div>
+    </div>
+    <div v-else-if="isLargeText" class="file-editor-large">
+      <div class="file-editor-large-note">
+        <strong>只读预览</strong>
+        <span>文件超过 2 MB，已切换为只读预览；可用系统程序打开后编辑。</span>
+        <button type="button" class="btn small" @click="openExternal">用系统程序打开</button>
+      </div>
+      <div class="file-editor-large-scroll">
+        <pre v-for="(chunk, index) in largeChunks" :key="index" class="file-editor-large-chunk">{{ chunk }}</pre>
       </div>
     </div>
     <MarkdownPreview v-else-if="showPreview && file" :file="file" />

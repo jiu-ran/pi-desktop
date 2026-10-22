@@ -385,7 +385,7 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   ".avif": "image/avif",
 };
 
-const TEXT_PREVIEW_MAX = 2 * 1024 * 1024;
+const TEXT_PREVIEW_MAX = 20 * 1024 * 1024;
 const IMAGE_PREVIEW_MAX = 20 * 1024 * 1024;
 
 function sniffImageMime(head: Buffer): string | null {
@@ -413,7 +413,26 @@ async function readFileHead(target: string, length = 16): Promise<Buffer> {
 /** 二进制文件：含 NUL 字节或无法按 UTF-8 解码 */
 function looksBinary(buffer: Buffer): boolean {
   const head = buffer.subarray(0, 8192);
-  return head.includes(0) || head.toString("utf8").includes("\uFFFD");
+  if (head.includes(0)) return true;
+  // 文件比探测窗口长时，窗口末尾可能正好截断一个多字节字符。
+  // Buffer.toString("utf8") 会把截断产生的 U+FFFD 当成非法字节，
+  // 导致中文 Markdown / 代码在 8 KB 边界被误判为二进制。先退回完整字符边界再严格解码。
+  let end = head.length;
+  if (buffer.length > head.length) {
+    let lead = end - 1;
+    while (lead >= 0 && end - lead <= 4 && (head[lead] & 0xc0) === 0x80) lead -= 1;
+    if (lead >= 0) {
+      const byte = head[lead];
+      const expected = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+      if (lead + expected > end) end = lead;
+    }
+  }
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(0, end));
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function workspaceFilePath(cwd: string, requested: string): { root: string; target: string; external: boolean } {
@@ -1073,7 +1092,7 @@ export class PiHost {
       };
     }
 
-    if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 2 MB，暂不支持在桌面端预览");
+    if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持在桌面端预览，可使用系统程序打开");
     const buffer = await readFile(target);
     if (looksBinary(buffer)) return { ...pathInfo, content: "", binary: true };
     return { ...pathInfo, content: buffer.toString("utf8") };
