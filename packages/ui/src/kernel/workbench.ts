@@ -922,15 +922,25 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  const pendingNewSessions = new Map<string, Promise<void>>();
+  /** 会话切换期间阻止统计等 RPC 抢在 worker 切换完成前使用新文件。 */
+  const pendingSessionSwitches = new Map<string, Promise<void>>();
+
   async function call(method: string, ...args: any[]): Promise<any> {
+    let current = active.value;
+    if (!current) throw new Error("没有打开的工作区");
+    // 只在确实有新建 / 切换流程时等待。空闲时不能 await（哪怕已 resolve 的
+    // Promise 也会让出微任务），否则等待期间刚开始的切换会把新文件暴露给宿主。
+    for (let guard = 0; guard < 8; guard += 1) {
+      const pending = pendingNewSessions.get(current.cwd) ?? pendingSessionSwitches.get(current.cwd);
+      if (!pending) break;
+      await pending.catch(() => {});
+      current = active.value ?? current;
+    }
     const ws = active.value;
     if (!ws) throw new Error("没有打开的工作区");
-    const pending = pendingNewSessions.get(ws.cwd);
-    if (pending) await pending.catch(() => {});
     return rpc(ws.cwd, method, args, ws.sessionFile);
   }
-
-  const pendingNewSessions = new Map<string, Promise<void>>();
 
   async function send(text: string, { mode }: { mode?: string } = {}): Promise<boolean> {
     const ws = active.value;
@@ -1019,6 +1029,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const prevThinking = ws.thinking;
     const prevSessions = [...ws.sessions];
 
+    // 在暴露临时文件之前先占住闸门：同步触发的统计请求也必须等真实会话落位。
+    let releaseNewSession!: () => void;
+    const newSessionGate = new Promise<void>((resolve) => {
+      releaseNewSession = resolve;
+    });
+    pendingNewSessions.set(ws.cwd, newSessionGate);
+
     // 1. 乐观即时切换（0ms UI 响应）：立即创建空白线程并切换界面，无需等待后端进程/RPC
     const tempFile = `__optimistic_new_${Date.now()}__`;
     const tempKey = normalizeThreadKey(tempFile);
@@ -1084,49 +1101,65 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         ws.sessions = prevSessions;
         bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       } finally {
-        pendingNewSessions.delete(ws.cwd);
+        if (pendingNewSessions.get(ws.cwd) === newSessionGate) pendingNewSessions.delete(ws.cwd);
+        releaseNewSession();
       }
     })();
 
-    pendingNewSessions.set(ws.cwd, task);
     return task;
   }
 
   async function switchSession(file: string): Promise<void> {
-    const ws = active.value;
+    let ws = active.value;
     if (!ws || !file || normalizeThreadKey(file) === normalizeThreadKey(ws.sessionFile)) return;
-    const pending = pendingNewSessions.get(ws.cwd);
-    if (pending) await pending.catch(() => {});
+    const pendingNew = pendingNewSessions.get(ws.cwd);
+    if (pendingNew) await pendingNew.catch(() => {});
+    const pendingSwitch = pendingSessionSwitches.get(ws.cwd);
+    if (pendingSwitch) await pendingSwitch.catch(() => {});
+    ws = active.value;
+    if (!ws || normalizeThreadKey(file) === normalizeThreadKey(ws.sessionFile)) return;
 
-    const previousFile = ws.sessionFile;
-    const targetThread = ws.threads[normalizeThreadKey(file)];
-    const alreadyLoaded = Boolean(targetThread?.loaded);
-    if (alreadyLoaded) {
-      // 如果目标会话已在内存中加载过（如正在后台运行的并行会话），立即 0ms 切换视图
-      ws.sessionFile = file;
-      bus.emit("session:switched", { cwd: ws.cwd, sessionFile: file });
-    }
-
+    // 乐观切换会立刻改写 ws.sessionFile；先设闸门，统计等 RPC 才不会
+    // 拿着尚未在宿主注册的文件去调用。
+    let releaseSwitch!: () => void;
+    const switchGate = new Promise<void>((resolve) => {
+      releaseSwitch = resolve;
+    });
+    pendingSessionSwitches.set(ws.cwd, switchGate);
     try {
-      const res = await rpc(ws.cwd, "switchSession", [file]);
-      if (res?.cancelled) {
+      const previousFile = ws.sessionFile;
+      const targetThread = ws.threads[normalizeThreadKey(file)];
+      const alreadyLoaded = Boolean(targetThread?.loaded);
+      if (alreadyLoaded) {
+        // 如果目标会话已在内存中加载过（如正在后台运行的并行会话），立即 0ms 切换视图
+        ws.sessionFile = file;
+        bus.emit("session:switched", { cwd: ws.cwd, sessionFile: file });
+      }
+
+      try {
+        const res = await rpc(ws.cwd, "switchSession", [file]);
+        if (res?.cancelled) {
+          if (ws.sessionFile === file) ws.sessionFile = previousFile;
+          return;
+        }
+
+        if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming && targetThread.historyStart >= 0) {
+          // 复用了正在流式输出的温备 Worker，无需重新拉取完整历史覆盖实时流
+          return;
+        }
+
+        await reload(ws, file);
+        if (!alreadyLoaded) {
+          bus.emit("session:switched", { cwd: ws.cwd, sessionFile: ws.sessionFile });
+        }
+      } catch (error) {
         if (ws.sessionFile === file) ws.sessionFile = previousFile;
-        return;
+        if (alreadyLoaded) bus.emit("session:switched", { cwd: ws.cwd, sessionFile: previousFile });
+        throw error;
       }
-
-      if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming && targetThread.historyStart >= 0) {
-        // 复用了正在流式输出的温备 Worker，无需重新拉取完整历史覆盖实时流
-        return;
-      }
-
-      await reload(ws, file);
-      if (!alreadyLoaded) {
-        bus.emit("session:switched", { cwd: ws.cwd, sessionFile: ws.sessionFile });
-      }
-    } catch (error) {
-      if (ws.sessionFile === file) ws.sessionFile = previousFile;
-      if (alreadyLoaded) bus.emit("session:switched", { cwd: ws.cwd, sessionFile: previousFile });
-      throw error;
+    } finally {
+      if (pendingSessionSwitches.get(ws.cwd) === switchGate) pendingSessionSwitches.delete(ws.cwd);
+      releaseSwitch();
     }
   }
 

@@ -85,7 +85,7 @@ async function refreshStats(): Promise<void> {
     stats.value = null;
     return;
   }
-  if (currentWs.sessionFile?.startsWith("__optimistic__")) {
+  if (currentWs.sessionFile?.startsWith("__optimistic_")) {
     stats.value = {
       contextUsage: {
         tokens: 0,

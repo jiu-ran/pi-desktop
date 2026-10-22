@@ -1719,7 +1719,7 @@ export class PiHost {
     if (sessionFile) {
       const byFile = pool.workers.get(normSessionFile(sessionFile));
       if (byFile) return byFile;
-      throw new Error("未知的会话文件");
+      throw new Error(`未知的会话文件：${path.basename(sessionFile)}`);
     }
     const active = pool.workers.get(normSessionFile(pool.activeSessionFile));
     if (active) return active;
