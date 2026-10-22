@@ -13,6 +13,7 @@ import QuickOpen from "../components/overlays/QuickOpen.vue";
 import SettingsModal from "../components/overlays/SettingsModal.vue";
 import ExtensionDialog from "../components/overlays/ExtensionDialog.vue";
 import Toasts from "../components/overlays/Toasts.vue";
+import TooltipLayer from "../components/overlays/TooltipLayer.vue";
 
 /**
  * 工作台四区域 + 右侧边栏骨架：
@@ -414,5 +415,6 @@ onBeforeUnmount(() => {
     <SettingsModal />
     <ExtensionDialog />
     <Toasts />
+    <TooltipLayer />
   </div>
 </template>

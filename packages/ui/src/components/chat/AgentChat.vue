@@ -681,7 +681,7 @@ watch(searchMatches, () => {
           <span>{{ jumpLabel }}</span>
         </button>
       </Transition>
-      <aside v-if="outline.length" class="chat-outline" aria-label="用户消息大纲">
+      <aside v-if="outline.length" class="chat-outline" data-tooltip-group aria-label="用户消息大纲">
           <button
             v-for="item in outline"
             :key="item.id"
