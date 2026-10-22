@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons, relativeTime } from "../../shared/util.ts";
-import { askConfirm, openMenu } from "./ui.ts";
+import { askConfirm, askPrompt, openMenu } from "./ui.ts";
 
 export type SessionWorkState = "running" | "compacting" | "error" | "done" | "active" | "idle";
 
@@ -284,10 +284,31 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
       icon: icons.chat,
       run: () => selectSession(group, item).catch(fail),
     },
+    {
+      label: "重命名任务…",
+      icon: icons.text,
+      disabled: !isActive(group, item),
+      run: () => renameTask(group, item),
+    },
     { label: "在文件管理器中显示会话文件", icon: icons.folder, run: () => workbench.reveal(item.path) },
     { separator: true },
     { label: "删除任务…", icon: icons.trash, danger: true, disabled: running, run: () => removeTask(group, item) },
   ]);
+}
+
+async function renameTask(group: any, item: any): Promise<void> {
+  if (!isActive(group, item)) return;
+  const name = await askPrompt({
+    title: "重命名任务",
+    message: "名称会显示在左侧任务列表与任务信息中。",
+    label: "任务名称",
+    value: item.title ?? "",
+    confirmLabel: "保存",
+  });
+  if (!name) return;
+  if (!isActive(group, item)) return;
+  await workbench.renameSession(name);
+  info("已重命名任务");
 }
 </script>
 

@@ -116,6 +116,8 @@
 .chat-outline button { display: block; width: 16px; height: 3px; margin: 9px 0 9px auto; padding: 0; overflow: hidden; border: 0; border-radius: 999px; background: var(--line-2); color: transparent; font-size: 12px; line-height: 24px; text-align: right; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .chat-outline:hover button { width: 100%; height: auto; margin-left: 0; padding: 4px 6px; background: transparent; color: var(--fg-2); }
 .chat-outline button:hover { background: var(--hover); color: var(--accent); }
+.chat-outline button.active { width: 24px; background: var(--accent); }
+.chat-outline:hover button.active { width: 100%; background: var(--accent-soft); color: var(--accent); }
 .timeline { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .timeline::-webkit-scrollbar:horizontal { display: none; height: 0; }
 .timeline-inner {

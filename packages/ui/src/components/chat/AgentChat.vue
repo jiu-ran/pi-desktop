@@ -154,6 +154,7 @@ function onScroll(): void {
   if (!userScrolled.value) return;
   
   stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+  syncOutline();
   
   // 检测是否滚到顶部，触发加载更多
   const isNearTop = el.scrollTop < 100;
@@ -178,6 +179,7 @@ function scrollToBottom(force = false): void {
     void nextTick(() => {
       const el = scroller.value;
       if (el) setScrollTop(el, el.scrollHeight);
+      syncOutline();
     });
   }) as number;
 }
@@ -446,6 +448,12 @@ watch(
   },
 );
 
+watch(
+  () => [ws.value?.sessionFile, ws.value?.blocks.length],
+  () => void nextTick(syncOutline),
+  { immediate: true },
+);
+
 function fillPrompt(text: string): void {
   if (ws.value) bus.emit("composer:set", { cwd: ws.value.cwd, text });
 }
@@ -458,7 +466,30 @@ const blockText = searchableText;
 
 const outline = computed(() => (ws.value?.blocks ?? [])
   .filter((block) => block.kind === "user" && block.text?.trim())
-  .map((block) => ({ id: block.id, text: block.text!.replace(/\s+/g, " ").trim() })));
+  .map((block, index) => ({
+    id: block.id,
+    turn: index + 1,
+    text: block.text!.replace(/\s+/g, " ").trim(),
+  })));
+/** 当前视口所属的用户轮次；滚动时更新，让右侧大纲能标示位置。 */
+const activeOutlineId = ref("");
+
+function syncOutline(): void {
+  const el = scroller.value;
+  if (!el || !outline.value.length) {
+    activeOutlineId.value = "";
+    return;
+  }
+  const top = el.getBoundingClientRect().top + 8;
+  let active = outline.value[0]!.id;
+  for (const item of outline.value) {
+    const node = el.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(item.id)}"]`);
+    if (!node) continue;
+    if (node.getBoundingClientRect().top <= top) active = item.id;
+    else break;
+  }
+  activeOutlineId.value = active;
+}
 
 const copyTextByIndex = computed(() =>
   buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
@@ -468,6 +499,7 @@ const copyTextByIndex = computed(() =>
 const activityItems = computed(() => deriveActivityItems(ws.value?.blocks ?? []));
 
 function openOutline(id: string): void {
+  activeOutlineId.value = id;
   scroller.value?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });
 }
 
@@ -649,8 +681,15 @@ watch(searchMatches, () => {
           <span>{{ jumpLabel }}</span>
         </button>
       </Transition>
-      <aside v-if="outline.length" class="chat-outline">
-          <button v-for="item in outline" :key="item.id" :title="item.text" @click="openOutline(item.id)">{{ item.text }}</button>
+      <aside v-if="outline.length" class="chat-outline" aria-label="用户消息大纲">
+          <button
+            v-for="item in outline"
+            :key="item.id"
+            :class="{ active: item.id === activeOutlineId }"
+            :title="`第 ${item.turn} 轮：${item.text}`"
+            :aria-current="item.id === activeOutlineId ? 'location' : undefined"
+            @click="openOutline(item.id)"
+          >{{ item.text }}</button>
         </aside>
       </div>
 
