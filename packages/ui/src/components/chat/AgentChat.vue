@@ -51,9 +51,26 @@ let historyLoadToken = 0;
 const HISTORY_LOADING_MIN_MS = 450;
 
 const prompts = [
-  { label: "浏览代码结构", text: "先快速看一下这个项目的目录结构和关键入口，简要告诉我。" },
-  { label: "查找未完成问题", text: "检查仓库里的 TODO / FIXME 或明显未收尾的地方，列出值得处理的几项。" },
-  { label: "解释最近改动", text: "运行 git status 和 git log -n 5，总结最近在做什么。" },
+  {
+    label: "浏览代码结构",
+    text: "先快速看一下这个项目的目录结构和关键入口，简要告诉我。",
+    icon: icons.search,
+  },
+  {
+    label: "查找未完成问题",
+    text: "检查仓库里的 TODO / FIXME 或明显未收尾的地方，列出值得处理的几项。",
+    icon: icons.checkCircle,
+  },
+  {
+    label: "解释最近改动",
+    text: "运行 git status 和 git log -n 5，总结最近在做什么。",
+    icon: icons.history,
+  },
+  {
+    label: "审查当前改动",
+    text: "检查当前未提交的改动，指出风险、遗漏和可以改进的地方。",
+    icon: icons.diff,
+  },
 ];
 
 // 变更条只反映「当前还没提交的改动」：Git 状态是事实来源，
@@ -578,12 +595,13 @@ watch(searchMatches, () => {
     <WelcomeView v-if="!ws" />
 
     <template v-else>
-      <div v-if="searchOpen" class="chat-search">
+      <div v-if="searchOpen" class="chat-search" role="search">
+        <span class="chat-search-icon" v-html="icons.search" />
+        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" aria-label="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
         <span class="chat-search-count">{{ searchMatches.length ? searchIndex + 1 : 0 }}/{{ searchMatches.length }}</span>
-        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
-        <button type="button" title="上一个" @click="moveSearch(-1)">↑</button>
-        <button type="button" title="下一个" @click="moveSearch(1)">↓</button>
-        <button type="button" title="关闭" @click="toggleSearch">×</button>
+        <button type="button" title="上一个" aria-label="上一个匹配" @click="moveSearch(-1)">↑</button>
+        <button type="button" title="下一个" aria-label="下一个匹配" @click="moveSearch(1)">↓</button>
+        <button type="button" class="chat-search-close" title="关闭" aria-label="关闭搜索" @click="toggleSearch">×</button>
       </div>
       <div class="chat-body">
       <Transition name="history-notice">
@@ -601,7 +619,7 @@ watch(searchMatches, () => {
         </div>
       </Transition>
       <div ref="scroller" class="timeline" @scroll="onScroll">
-        <div class="timeline-inner">
+        <div class="timeline-inner" :class="{ 'is-empty': !ws.blocks.length && !ws.loading }">
           <!-- 加载错误提示 -->
           <div v-if="loadMoreError" class="load-error">
             <span>⚠️ {{ loadMoreError }}</span>
@@ -622,14 +640,23 @@ watch(searchMatches, () => {
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">
-            <p class="empty-kicker">{{ displayProjectName(ws.cwd) }}</p>
+            <div class="empty-thread-mark" aria-hidden="true">
+              <img src="../../assets/pi-icon.png" alt="" />
+            </div>
+            <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
-            <div class="starter-list">
+            <p class="empty-intro">选一个起点，或直接在下方描述任务。Pi 会读代码、改文件，并运行命令。</p>
+            <div class="starter-grid">
               <button v-for="p in prompts" :key="p.label" class="starter" @click="fillPrompt(p.text)">
-                <span>{{ p.label }}</span>
-                <small>{{ p.text }}</small>
+                <span class="starter-icon" v-html="p.icon" />
+                <span class="starter-copy">
+                  <span class="starter-label">{{ p.label }}</span>
+                  <small>{{ p.text }}</small>
+                </span>
+                <span class="starter-arrow" aria-hidden="true">↗</span>
               </button>
             </div>
+            <p class="empty-hint"><kbd>@</kbd> 引用文件 <span>·</span> <kbd>/</kbd> 使用命令</p>
           </div>
 
           <template v-else>

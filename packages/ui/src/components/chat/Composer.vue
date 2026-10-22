@@ -733,7 +733,7 @@ const argHint = computed(() => {
           <textarea
             ref="input"
             v-model="draft"
-            rows="2"
+            rows="1"
             :placeholder="placeholder"
             spellcheck="false"
             @keydown="onKeydown"
@@ -843,6 +843,7 @@ const argHint = computed(() => {
               @click="submit"
             >
               <span v-if="busy" class="mini-spinner" />
+              <span v-else class="send-icon" v-html="icons.send" />
               {{ exact?.local ? "执行" : "发送" }}
             </button>
           </div>

@@ -112,7 +112,7 @@ kbd {
 .btn.danger { border-color: color-mix(in srgb, var(--err) 45%, transparent); color: var(--err); }
 .btn.danger:hover { background: var(--del-bg); }
 .btn.block { width: 100%; }
-.btn.large { height: 36px; padding: 0 20px; font-size: 13.5px; }
+.btn.large { height: 36px; padding: 0 20px; border-radius: 8px; font-size: 13.5px; }
 
 .icon-btn {
   display: inline-grid;

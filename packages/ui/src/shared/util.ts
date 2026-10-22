@@ -39,6 +39,7 @@ export const icons: Record<string, string> = {
   model: svg('<path d="M8 1.8 13.5 5v6L8 14.2 2.5 11V5z"/><path d="M8 8 13.5 5M8 8 2.5 5M8 8v6.2"/>', 14),
   brain: svg('<path d="M6 2.8a2 2 0 0 0-2 2 2 2 0 0 0-1.5 3.4A2 2 0 0 0 4 11.5a2 2 0 0 0 4 .7V3.5a2 2 0 0 0-2-.7zM10 2.8a2 2 0 0 1 2 2 2 2 0 0 1 1.5 3.4 2 2 0 0 1-1.5 3.3 2 2 0 0 1-4 .7"/>', 14),
   stop: '<svg viewBox="0 0 16 16" width="12" height="12"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>',
+  send: svg('<path d="M8 13V3M4.5 6.5 8 3l3.5 3.5"/>', 13),
   reveal: svg('<path d="M9 2.5h4.5V7M13.5 2.5 8 8"/><path d="M12 9.5V13a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 3 13V5a.5.5 0 0 1 .5-.5H7"/>', 14),
   more: svg('<circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/>', 14),
   trash: svg('<path d="M2.5 4.5h11M6.5 4.5V3a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1.5M4 4.5l.6 8.6a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.6M6.8 7v4.5M9.2 7v4.5"/>', 14),
@@ -49,6 +50,16 @@ export const icons: Record<string, string> = {
   minus: svg('<path d="M3.5 8h9"/>', 14),
   chevronLeft: svg('<path d="m9.5 4.5-3.5 3.5 3.5 3.5"/>', 12),
 };
+
+/**
+ * 项目路径的可比较键：统一分隔符、去掉末尾斜杠；Windows 盘符路径忽略大小写。
+ * 只用于界面去重和“当前项目”判断，不改变实际传给宿主的工作区路径。
+ */
+export function projectPathKey(value = ""): string {
+  const normalized = String(value).trim().replace(/\\/g, "/");
+  const trimmed = normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+  return /^[A-Za-z]:(?:\/|$)/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
 
 export function shortPath(value = "", keep = 2): string {
   const parts = String(value).split(/[\\/]/).filter(Boolean);

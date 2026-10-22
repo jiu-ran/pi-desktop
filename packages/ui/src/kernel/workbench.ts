@@ -1,5 +1,5 @@
 import { computed, reactive, shallowReactive, toRaw } from "vue";
-import { displayProjectName } from "../shared/util.ts";
+import { displayProjectName, projectPathKey } from "../shared/util.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -323,6 +323,23 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
 
   const active = computed<WorkspaceState | null>(() => workspaces.get(state.activeCwd) ?? null);
 
+  /**
+   * 按规范化路径查找已打开的工作区。
+   * 主进程的 recent 可能返回反斜杠路径，而目录选择器返回正斜杠路径；
+   * 如果只用 Map 精确匹配，会为同一个项目创建第二个工作区，导致侧栏出现
+   * 两组同名项目、活动任务高亮错位。
+   */
+  function findWorkspace(cwd: string): WorkspaceState | undefined {
+    const direct = workspaces.get(cwd);
+    if (direct) return direct;
+    const key = projectPathKey(cwd);
+    if (!key) return undefined;
+    for (const ws of workspaces.values()) {
+      if (projectPathKey(ws.cwd) === key) return ws;
+    }
+    return undefined;
+  }
+
   function rpc(cwd: string, method: string, args: any[] = [], sessionFile?: string): Promise<any> {
     return host.call(cwd, method, plainArgs(args), sessionFile);
   }
@@ -431,7 +448,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       stopHostEvents?.();
       stopHostEvents = host.onEvent(({ cwd, sessionFile, event }: { cwd: string; sessionFile?: string; event: any }) => {
         if (disposed) return;
-        const ws = workspaces.get(cwd);
+        const ws = findWorkspace(cwd);
         if (!ws) return;
         const targetFile = sessionFile || ws.sessionFile;
         const thread = ensureThread(ws, targetFile);
@@ -531,12 +548,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function open(cwd: string): Promise<WorkspaceState> {
-    let ws = workspaces.get(cwd);
-    const switched = state.activeCwd !== cwd;
-    state.activeCwd = cwd;
-    if (switched) bus.emit("workspace:switched", { cwd });
+    let ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
+    const switched = projectPathKey(state.activeCwd) !== projectPathKey(target);
+    state.activeCwd = target;
+    if (switched) bus.emit("workspace:switched", { cwd: target });
     if (ws?.status === "ready") return ws;
-    const pending = opens.get(cwd);
+    const pending = opens.get(target);
     if (pending) return pending;
     if (!ws) {
       ws = makeWorkspace(cwd);
@@ -546,7 +564,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     ws.error = "";
     const task = (async () => {
       try {
-        const snap = await host.open(cwd);
+        const snap = await host.open(target);
         if (disposed) return ws!;
         applySnapshot(ws!, snap);
         ws!.status = "ready";
@@ -556,11 +574,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         ws!.status = "error";
         ws!.error = error?.message ?? String(error);
       } finally {
-        opens.delete(cwd);
+        opens.delete(target);
       }
       return ws!;
     })();
-    opens.set(cwd, task);
+    opens.set(target, task);
     return task;
   }
 
@@ -744,17 +762,18 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function removeProject(cwd: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}): Promise<any> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
     if (ws?.hasAnyRunning) throw new Error("该项目有任务正在运行，请先停止");
-    const result = await host.removeProject(cwd, { deleteSessions });
-    workspaces.delete(cwd);
+    const result = await host.removeProject(target, { deleteSessions });
+    workspaces.delete(target);
     state.recent = result.recent;
-    if (state.activeCwd === cwd) {
+    if (projectPathKey(state.activeCwd) === projectPathKey(target)) {
       const next = [...workspaces.keys()][0] ?? "";
       state.activeCwd = next;
       bus.emit("workspace:switched", { cwd: next });
     }
-    bus.emit("workspace:removed", { cwd });
+    bus.emit("workspace:removed", { cwd: target });
     return result;
   }
 
@@ -763,8 +782,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function deleteSession(cwd: string, file: string): Promise<any[]> {
-    const ws = workspaces.get(cwd);
-    const sessions = await host.deleteSession(cwd, file);
+    const ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
+    const sessions = await host.deleteSession(target, file);
     if (ws) {
       delete ws.threads[normalizeThreadKey(file)];
       if (ws.status === "ready") {
@@ -775,7 +795,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         }
       }
     }
-    bus.emit("session:deleted", { cwd, file });
+    bus.emit("session:deleted", { cwd: target, file });
     return sessions;
   }
 
@@ -887,9 +907,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   function listSessions(cwd: string): Promise<any[]> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
     if (ws?.status === "ready") return Promise.resolve(ws.sessions);
-    return host.sessions(cwd);
+    return host.sessions(ws?.cwd ?? cwd);
   }
 
   async function openSession(cwd: string, file: string): Promise<void> {
@@ -903,14 +923,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     sessionFile: string,
     limit: number = PAGE_SIZE,
   ): Promise<{ loaded: number; startIndex: number; total: number }> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
     const thread = ws ? ensureThread(ws, sessionFile) : null;
     if (!thread || thread.loadingMore || thread.historyStart <= 0) {
       return { loaded: 0, startIndex: thread?.historyStart ?? 0, total: thread?.messageTotal ?? 0 };
     }
     thread.loadingMore = true;
     try {
-      const page = await host.messagePage(cwd, sessionFile, thread.historyStart, limit, 0, PAGE_MIN_BLOCKS);
+      const page = await host.messagePage(ws!.cwd, sessionFile, thread.historyStart, limit, 0, PAGE_MIN_BLOCKS);
       if (page.messages.length > 0) {
         thread.transcript.prependMessages(page.messages);
         thread.historyStart = page.startIndex;

@@ -119,6 +119,10 @@ const mockHost = {
 };
 const service = createTerminalService({ host: mockHost, getCwd: () => "C:/mock" });
 try {
+  service.setHeight(9_999);
+  assert(service.state.height <= 640, `终端高度上限错误：${service.state.height}`);
+  service.setHeight(1);
+  assert(service.state.height === 160, `终端高度下限错误：${service.state.height}`);
   await service.run("echo mock");
   assert(service.state.tasks.length === 1, "服务应记录一条任务");
   assert(service.state.tasks[0]?.status === "exited", `终态被迟到快照覆盖：${service.state.tasks[0]?.status}`);

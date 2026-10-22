@@ -15,6 +15,8 @@ const HISTORY_MAX = 50;
 const OUTPUT_MAX = 500_000;
 const HEIGHT_MIN = 160;
 const HEIGHT_MAX = 640;
+/** 终端最多占窗口高度的一半多一点，给对话区保留可用空间 */
+const HEIGHT_VIEWPORT_RATIO = 0.55;
 
 export interface TerminalTask extends TerminalTaskInfo {
   output: string;
@@ -51,10 +53,20 @@ function storageSet(key: string, value: string): void {
   }
 }
 
+function maxHeight(): number {
+  const viewport = typeof window !== "undefined" ? window.innerHeight : 0;
+  if (!viewport) return HEIGHT_MAX;
+  return Math.max(HEIGHT_MIN, Math.min(HEIGHT_MAX, Math.floor(viewport * HEIGHT_VIEWPORT_RATIO)));
+}
+
+function clampHeight(value: number): number {
+  return Math.min(maxHeight(), Math.max(HEIGHT_MIN, Math.round(value)));
+}
+
 function loadHeight(): number {
   const value = Number(storageGet(HEIGHT_KEY));
-  if (!Number.isFinite(value) || value <= 0) return 280;
-  return Math.min(HEIGHT_MAX, Math.max(HEIGHT_MIN, Math.round(value)));
+  if (!Number.isFinite(value) || value <= 0) return clampHeight(280);
+  return clampHeight(value);
 }
 
 function loadHistory(): string[] {
@@ -260,7 +272,7 @@ export function createTerminalService({
   })();
 
   function setHeight(value: number): void {
-    const next = Math.min(HEIGHT_MAX, Math.max(HEIGHT_MIN, Math.round(Number(value) || 0)));
+    const next = clampHeight(Number(value) || 0);
     state.height = next;
     storageSet(HEIGHT_KEY, String(next));
   }
