@@ -341,7 +341,7 @@ const workspaceChannels = new Set([
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
-  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start",
+  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell",
 ]);
 
 function handle(channel: string, fn: (...args: any[]) => any) {
@@ -496,6 +496,8 @@ app.whenReady().then(() => {
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
   handle("pi:terminal-start", (cwd: string, command: string) => terminalHost.start(cwd, command));
+  handle("pi:terminal-shell", (cwd: string) => terminalHost.startShell(cwd));
+  handle("pi:terminal-write", (id: string, input: string) => terminalHost.write(id, input));
   handle("pi:terminal-stop", (id: string) => terminalHost.stop(id));
   handle("pi:terminal-list", () => terminalHost.list());
   const agentsPath = path.join(homedir(), ".pi", "agent", "AGENTS.md");

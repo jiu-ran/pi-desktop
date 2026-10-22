@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   globalAgents: () => ipcRenderer.invoke("pi:global-agents"),
   saveGlobalAgents: (content: string) => ipcRenderer.invoke("pi:global-agents-save", content),
   startTerminal: (cwd: string, command: string) => ipcRenderer.invoke("pi:terminal-start", cwd, command),
+  startTerminalShell: (cwd: string) => ipcRenderer.invoke("pi:terminal-shell", cwd),
+  writeTerminal: (id: string, input: string) => ipcRenderer.invoke("pi:terminal-write", id, input),
   stopTerminal: (id: string) => ipcRenderer.invoke("pi:terminal-stop", id),
   terminalTasks: () => ipcRenderer.invoke("pi:terminal-list"),
   onTerminalEvent: (listener: (payload: any) => void) => {

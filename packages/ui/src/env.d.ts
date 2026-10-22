@@ -312,6 +312,8 @@ export interface TerminalTaskInfo {
   status: TerminalTaskStatus;
   exitCode?: number | null;
   signal?: string | null;
+  /** 交互式会话会保持 stdin 打开，支持逐行发送输入。 */
+  interactive?: boolean;
 }
 
 export interface TerminalTaskSnapshot extends TerminalTaskInfo {
@@ -398,6 +400,8 @@ export interface PiDesktopBridge {
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
   startTerminal: (cwd: string, command: string) => Promise<TerminalTaskInfo>;
+  startTerminalShell: (cwd: string) => Promise<TerminalTaskInfo>;
+  writeTerminal: (id: string, input: string) => Promise<boolean>;
   stopTerminal: (id: string) => Promise<boolean>;
   terminalTasks: () => Promise<TerminalTaskSnapshot[]>;
   onTerminalEvent: (listener: (payload: TerminalEvent) => void) => () => void;

@@ -1,4 +1,4 @@
-import { TerminalHost, resolveTerminalShell, stripTerminalAnsi } from "../../electron/terminal-host.ts";
+import { TerminalHost, resolveInteractiveShell, resolveTerminalShell, stripTerminalAnsi } from "../../electron/terminal-host.ts";
 import { formatTerminalDuration, createTerminalService } from "../../packages/ui/src/services/terminal.ts";
 
 function assert(condition: unknown, message: string): void {
@@ -28,6 +28,13 @@ assert(windowsShell.args.includes("-NoProfile") && windowsShell.args.at(-1)?.inc
 const unixShell = resolveTerminalShell("echo ok", "linux");
 assert(unixShell.args.join(" ").includes("-lc echo ok"), "Unix shell 参数不正确");
 
+const interactiveWin = resolveInteractiveShell("win32");
+assert(interactiveWin.label === "PowerShell", "Windows 交互式 shell 应使用 PowerShell");
+assert(interactiveWin.args.join(" ").includes("chcp 65001"), "Windows 交互式 shell 应先切换到 UTF-8");
+assert(interactiveWin.args.at(-1)?.endsWith("-Command -"), "Windows 交互式 shell 应从 stdin 读取命令");
+const interactiveUnix = resolveInteractiveShell("linux");
+assert(interactiveUnix.args.join(" ") === "-l", "Unix 交互式 shell 应使用登录 shell");
+
 assert(formatTerminalDuration(0) === "0s", "0 秒格式错误");
 assert(formatTerminalDuration(59_000) === "59s", "秒格式错误");
 assert(formatTerminalDuration(61_000) === "1m 1s", "分钟格式错误");
@@ -49,14 +56,15 @@ try {
   }
   assert(rejected, "空命令应被拒绝");
 
-  const command = `"${process.execPath}" -e "process.stdout.write('terminal-ok 中文'); process.stderr.write('terminal-err'); process.exit(0)"`;
+  const command = `"${process.execPath}" -e "process.stdout.write(String.fromCharCode(27)+'[31mterminal-color'+String.fromCharCode(27)+'[0m terminal-ok 中文'); process.stderr.write('terminal-err'); process.exit(0)"`;
   const task = host.start(process.cwd(), command);
   assert(task.status === "running" && Boolean(task.pid), "任务未启动");
   await waitFor(() => host.list().find((item) => item.id === task.id && item.status !== "running"));
   const done = host.list().find((item) => item.id === task.id);
   assert(done?.status === "exited", `任务状态错误：${done?.status}`);
   assert(done?.exitCode === 0, `退出码错误：${done?.exitCode}`);
-  assert(done?.output.includes("terminal-ok 中文") && done?.output.includes("terminal-err"), `输出缺失：${JSON.stringify(done?.output)}`);
+  assert(done?.output.includes("\u001B[31mterminal-color"), `ANSI 颜色被意外移除：${JSON.stringify(done?.output)}`);
+  assert(stripTerminalAnsi(done?.output ?? "").includes("terminal-color") && done?.output.includes("terminal-err"), `输出缺失：${JSON.stringify(done?.output)}`);
   const stdoutText = events.filter((event) => event.type === "data" && event.stream === "stdout").map((event) => event.text).join("");
   const stderrText = events.filter((event) => event.type === "data" && event.stream === "stderr").map((event) => event.text).join("");
   assert(stdoutText.includes("terminal-ok 中文"), `stdout 事件缺失：${JSON.stringify(stdoutText)}`);
@@ -76,6 +84,24 @@ try {
   } finally {
     limitedHost.dispose();
   }
+
+  const shell = host.startShell(process.cwd());
+  assert(shell.interactive, "交互式会话应标记 interactive");
+  const shellMarker = `shell-${Date.now()}`;
+  const shellLines =
+    process.platform === "win32"
+      ? [`$piDesktopProbe = "ok"`, `Write-Output "${shellMarker}-$piDesktopProbe"`]
+      : [`PI_DESKTOP_PROBE=ok`, `printf "${shellMarker}-%s\\n" "$PI_DESKTOP_PROBE"`];
+  for (const line of shellLines) host.write(shell.id, line);
+  host.write(shell.id, process.platform === "win32" ? `Write-Output "中文，标点"` : `printf "中文，标点\\n"`);
+  await waitFor(() => host.list().find((item) => item.id === shell.id && item.output.includes(`${shellMarker}-ok`)));
+  assert(host.list().find((item) => item.id === shell.id)?.output.includes("中文，标点"), "交互式会话应正确传递 UTF-8 输入");
+  const shellRunning = host.list().find((item) => item.id === shell.id);
+  assert(shellRunning?.status === "running" && shellRunning.interactive, "交互式会话应保持运行");
+  assert(!shellRunning?.output.includes("PS C:") && !shellRunning?.output.includes("> $piDesktopProbe"), "交互式会话不应回显提示符或命令");
+  host.write(shell.id, "exit");
+  await waitFor(() => host.list().find((item) => item.id === shell.id && item.status !== "running"));
+  assert(host.list().find((item) => item.id === shell.id)?.status === "exited", "交互式会话退出状态错误");
 
   const long = host.start(process.cwd(), `"${process.execPath}" -e "setTimeout(() => {}, 30000)"`);
   await wait(250);
@@ -135,6 +161,65 @@ try {
   assert(service.state.input === "", "历史前进失败");
 } finally {
   service.dispose();
+}
+
+// 交互式会话：send 走 writeTerminal，密码输入不进入内存历史。
+const shellListeners = new Set<(event: any) => void>();
+let shellSeq = 0;
+const shellWrites: string[] = [];
+const shellHost = {
+  startTerminal: async (cwd: string, command: string) => ({
+    id: `plain-${++shellSeq}`,
+    command,
+    cwd,
+    shell: "sh",
+    startedAt: Date.now(),
+    status: "running",
+  }),
+  startTerminalShell: async (cwd: string) => {
+    const info = {
+      id: `shell-${++shellSeq}`,
+      command: "交互式 sh",
+      cwd,
+      shell: "sh",
+      startedAt: Date.now(),
+      status: "running",
+      interactive: true,
+    };
+    for (const listener of shellListeners) listener({ type: "start", task: info });
+    return info;
+  },
+  writeTerminal: async (id: string, input: string) => {
+    shellWrites.push(`${id}:${input}`);
+    return true;
+  },
+  stopTerminal: async () => true,
+  terminalTasks: async () => [],
+  onTerminalEvent: (listener: (event: any) => void) => {
+    shellListeners.add(listener);
+    return () => shellListeners.delete(listener);
+  },
+};
+const shellService = createTerminalService({ host: shellHost, getCwd: () => "C:/mock" });
+try {
+  assert(shellService.supportsShell, "支持交互式会话时应暴露 supportsShell");
+  await shellService.startShell();
+  const shellTask = shellService.activeTask.value;
+  assert(shellTask?.interactive && shellTask.status === "running", "startShell 未创建交互式会话");
+  shellService.state.input = "SELECT 1;";
+  await shellService.send();
+  assert(shellWrites.at(-1)?.endsWith(":SELECT 1;"), `交互式发送失败：${shellWrites.at(-1)}`);
+  assert(shellService.state.input === "", "发送后应清空输入");
+  assert(shellTask.inputs[0] === "SELECT 1;", "交互式历史未记录");
+  assert(shellTask.output.includes("❯ SELECT 1;"), "交互式会话应回显命令");
+  shellService.historyUp();
+  assert(shellService.state.input === "SELECT 1;", "交互式历史回溯失败");
+  shellService.state.input = "hunter2";
+  await shellService.send(undefined, { secret: true });
+  assert(shellTask.inputs[0] === "SELECT 1;" && !shellTask.inputs.includes("hunter2"), "密码不应进入历史");
+  assert(!shellTask.output.includes("hunter2"), "密码不应回显到输出");
+} finally {
+  shellService.dispose();
 }
 
 console.log("terminal service OK");

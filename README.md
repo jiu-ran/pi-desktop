@@ -60,9 +60,11 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 ### 终端与后台任务
 
 - 标题栏的终端按钮或 Ctrl / Cmd + 反引号键打开底部终端岛：在当前项目目录运行构建、测试、开发服务器等命令，不需要让 Agent 代跑。
-- 每条命令独立成为后台任务：任务列表显示运行中 / 已完成 / 失败 / 已停止、耗时和项目目录；切换任务查看完整输出、退出码和 shell 信息，面板收起后任务仍会继续运行。
-- 支持停止进程树、重新填入命令、复制 / 清空输出、清理已结束任务；命令历史用 ↑ / ↓ 回溯，面板高度可拖拽并记住。
-- Windows 使用 PowerShell，macOS / Linux 使用登录 shell；命令在当前项目目录启动并继承应用环境，输出按 UTF-8 处理。当前只面向非交互命令，不支持 stdin 输入，需要交互的程序请使用系统终端。
+- 每条一次性命令独立成为后台任务；交互会话则保持为一个长驻任务。任务列表显示运行中 / 已完成 / 失败 / 已停止、耗时和项目目录；切换任务查看完整输出、退出码和 shell 信息，面板收起后任务仍会继续运行。
+- 输出保留 ANSI 颜色与常见样式，按当前主题调色板渲染 16 / 256 / truecolor 颜色、背景色和反色；进度行会折叠成最终状态，复制时自动转成纯文本。
+- 终端面板提供命令回显、运行中光标、自动跟随与「回到最新」、自动换行开关、重新运行、清屏和停止；Ctrl / Cmd + L 清屏，Ctrl / Cmd + C 在无选中文本时清空草稿或停止任务，Ctrl / Cmd + U 清空输入，↑ / ↓ 回溯历史，Esc 清空或收起。交互会话中 Enter 发送，Ctrl / Cmd + Enter 把当前输入作为一次性后台任务运行。
+- Windows 使用 PowerShell，macOS / Linux 使用登录 shell；命令在当前项目目录启动并继承应用环境，输出按 UTF-8 处理。
+- 点击终端标题栏的 +（或空态「新建交互会话」）启动长驻会话：可以连续执行 cd、变量赋值等命令，也可以运行 mysql、python、psql 等行式交互程序，输入 exit 结束会话。检测到密码提示时输入框会自动隐藏，密码不会进入会话历史。仍不支持 vim / top 等全屏 TUI 和终端级 Ctrl+C，结束会话请点「结束」。
 
 ### 扩展工具与设置
 
@@ -116,7 +118,7 @@ main.ts                 组合根：创建内核、注册内置插件
 | 工作台骨架 | `packages/ui/src/shell/Shell.vue` | 摆放标题栏、对话区、编辑器、面板和活动栏 |
 | 内核 | `packages/ui/src/kernel/workbench.ts` | 多工作区状态、会话切换、发送 / 停止、文件操作 |
 | 内核 | `packages/ui/src/kernel/transcript.ts` | 把 Pi 消息与流式事件折叠成统一的消息块 |
-| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` | 后台命令子进程、任务状态和底部终端面板 |
+| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` | 一次性后台命令、长驻交互会话、任务状态和底部终端面板 |
 | 插件 | `packages/ui/src/plugins/files/` | 文件树、编辑器和文件操作 |
 | 插件 | `packages/ui/src/plugins/markdown/` | Markdown 预览与 Mermaid 共用渲染开关 |
 | 插件 | `packages/ui/src/plugins/mermaid/` | Mermaid 插件启停生命周期 |

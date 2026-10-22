@@ -12,6 +12,7 @@ import { pushToast } from "./extension-ui.ts";
 const HEIGHT_KEY = "pi-desktop:terminal:height";
 const HISTORY_KEY = "pi-desktop:terminal:history";
 const HISTORY_MAX = 50;
+const INPUT_MAX = 32_000;
 const OUTPUT_MAX = 500_000;
 const HEIGHT_MIN = 160;
 const HEIGHT_MAX = 640;
@@ -21,6 +22,10 @@ const HEIGHT_VIEWPORT_RATIO = 0.55;
 export interface TerminalTask extends TerminalTaskInfo {
   output: string;
   truncated: boolean;
+  /** 当前会话内发送过的输入，只保存在内存，不写入 localStorage。 */
+  inputs: string[];
+  inputIndex: number;
+  interactive: boolean;
 }
 
 export interface TerminalState {
@@ -34,8 +39,6 @@ export interface TerminalState {
   starting: boolean;
   now: number;
 }
-
-const ANSI = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B\[[0-?]*[ -/]*[@-~]|\u001B[@-_]/g;
 
 function storageGet(key: string): string {
   try {
@@ -107,6 +110,7 @@ export function createTerminalService({
   getCwd: () => string;
 }) {
   const available = Boolean(host?.startTerminal && host?.onTerminalEvent);
+  const supportsShell = Boolean(host?.startTerminalShell && host?.writeTerminal);
   const state = reactive<TerminalState>({
     open: false,
     height: loadHeight(),
@@ -142,11 +146,13 @@ export function createTerminalService({
 
   function append(task: TerminalTask, text: string): void {
     if (!text) return;
-    const clean = String(text).replace(ANSI, "");
-    if (!clean) return;
-    const next = task.output + clean;
+    // 保留 ANSI，颜色由渲染层解析；复制时再转成纯文本。
+    const next = task.output + String(text);
     if (next.length > OUTPUT_MAX) {
-      task.output = next.slice(-OUTPUT_MAX);
+      let sliced = next.slice(-OUTPUT_MAX);
+      const newline = sliced.indexOf("\n");
+      if (newline >= 0 && newline < 8192) sliced = sliced.slice(newline + 1);
+      task.output = sliced;
       task.truncated = true;
     } else {
       task.output = next;
@@ -165,6 +171,9 @@ export function createTerminalService({
       status: info.status,
       exitCode: info.exitCode,
       signal: info.signal,
+      interactive: Boolean(info.interactive),
+      inputs: [],
+      inputIndex: -1,
       output,
       truncated,
     };
@@ -186,6 +195,7 @@ export function createTerminalService({
     task.status = info.status;
     task.exitCode = info.exitCode;
     task.signal = info.signal;
+    if (typeof info.interactive === "boolean") task.interactive = info.interactive;
   }
 
   function upsert(info: TerminalTaskInfo, snapshot?: TerminalTaskSnapshot): TerminalTask {
@@ -283,7 +293,34 @@ export function createTerminalService({
     storageSet(HISTORY_KEY, JSON.stringify(state.history));
   }
 
+  /** 交互会话历史只保存在内存：密码等敏感输入不会被写进 localStorage。 */
+  function runningShell(): TerminalTask | null {
+    const task = activeTask.value;
+    return task?.interactive && (task.status === "running" || task.status === "stopping") ? task : null;
+  }
+
+  function rememberInput(task: TerminalTask, input: string, secret: boolean): void {
+    if (secret) return;
+    task.inputs = [input, ...task.inputs.filter((item) => item !== input)].slice(0, HISTORY_MAX);
+    task.inputIndex = -1;
+  }
+
+  /** 交互会话没有 PTY 回显，补一行淡色命令，避免输出里看不出执行过什么。 */
+  function echoInput(task: TerminalTask, input: string): void {
+    const nl = String.fromCharCode(10);
+    const prefix = task.output && !task.output.endsWith(nl) ? nl : "";
+    append(task, `${prefix}${String.fromCharCode(27)}[2m❯ ${input}${String.fromCharCode(27)}[0m${nl}`);
+  }
+
   function historyUp(): void {
+    const shell = runningShell();
+    if (shell) {
+      if (!shell.inputs.length) return;
+      const next = Math.min(shell.inputs.length - 1, shell.inputIndex + 1);
+      shell.inputIndex = next;
+      state.input = shell.inputs[next] || "";
+      return;
+    }
     if (!state.history.length) return;
     const next = Math.min(state.history.length - 1, state.historyIndex + 1);
     state.historyIndex = next;
@@ -291,6 +328,18 @@ export function createTerminalService({
   }
 
   function historyDown(): void {
+    const shell = runningShell();
+    if (shell) {
+      const next = shell.inputIndex - 1;
+      if (next < 0) {
+        shell.inputIndex = -1;
+        state.input = "";
+        return;
+      }
+      shell.inputIndex = next;
+      state.input = shell.inputs[next] || "";
+      return;
+    }
     if (!state.history.length) return;
     const next = state.historyIndex - 1;
     if (next < 0) {
@@ -323,6 +372,70 @@ export function createTerminalService({
       state.input = "";
       state.historyIndex = -1;
       remember(command);
+    } catch (error) {
+      report(error);
+    } finally {
+      state.starting = false;
+    }
+  }
+
+  /** 新建一个长驻 shell；支持连续执行命令以及 mysql / python 等行式交互程序。 */
+  async function startShell(): Promise<void> {
+    if (state.starting) return;
+    if (!supportsShell) {
+      report(new Error("当前版本不支持交互式会话"));
+      return;
+    }
+    const cwd = getCwd();
+    if (!cwd) {
+      notify("请先打开一个项目目录", "warning");
+      return;
+    }
+    state.starting = true;
+    try {
+      const info = (await host.startTerminalShell(cwd)) as TerminalTaskInfo;
+      const task = upsert(info);
+      state.activeId = task.id;
+      state.open = true;
+      state.historyIndex = -1;
+    } catch (error) {
+      report(error);
+    } finally {
+      state.starting = false;
+    }
+  }
+
+  /** 向当前交互会话发送一行输入；没有交互会话时回退为一次性命令。 */
+  async function send(raw?: string, options?: { secret?: boolean }): Promise<void> {
+    const task = activeTask.value;
+    if (!task?.interactive) {
+      await run(raw);
+      return;
+    }
+    const text = String(raw ?? state.input ?? "");
+    if (!text.trim()) return;
+    if (text.length > INPUT_MAX) {
+      notify("输入过长（最多 32000 个字符）", "warning");
+      return;
+    }
+    if (!available || typeof host.writeTerminal !== "function") {
+      report(new Error("当前版本不支持交互式会话"));
+      return;
+    }
+    if (task.status !== "running") {
+      notify("交互式会话已经结束，请新建会话", "warning");
+      return;
+    }
+    state.starting = true;
+    const hidden = Boolean(options?.secret);
+    if (!hidden) echoInput(task, text);
+    try {
+      await host.writeTerminal(task.id, text);
+      // 发送期间用户可能已经开始输入下一条，只在草稿未被改动时清空。
+      if (state.input === text) state.input = "";
+      state.historyIndex = -1;
+      task.inputIndex = -1;
+      rememberInput(task, text, Boolean(options?.secret));
     } catch (error) {
       report(error);
     } finally {
@@ -364,7 +477,11 @@ export function createTerminalService({
   }
 
   function select(id: string): void {
-    if (state.tasks.some((task) => task.id === id)) state.activeId = id;
+    const task = state.tasks.find((item) => item.id === id);
+    if (!task) return;
+    state.activeId = id;
+    state.historyIndex = -1;
+    task.inputIndex = -1;
   }
 
   function show(): void {
@@ -387,6 +504,7 @@ export function createTerminalService({
 
   return {
     available,
+    supportsShell,
     state,
     runningCount,
     activeTask,
@@ -395,6 +513,8 @@ export function createTerminalService({
     historyUp,
     historyDown,
     run,
+    startShell,
+    send,
     stop,
     clearOutput,
     clearFinished,
