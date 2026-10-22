@@ -66,6 +66,14 @@ contextBridge.exposeInMainWorld("piDesktop", {
   skillsOverview: (cwd?: string) => ipcRenderer.invoke("pi:skills-overview", cwd),
   globalAgents: () => ipcRenderer.invoke("pi:global-agents"),
   saveGlobalAgents: (content: string) => ipcRenderer.invoke("pi:global-agents-save", content),
+  startTerminal: (cwd: string, command: string) => ipcRenderer.invoke("pi:terminal-start", cwd, command),
+  stopTerminal: (id: string) => ipcRenderer.invoke("pi:terminal-stop", id),
+  terminalTasks: () => ipcRenderer.invoke("pi:terminal-list"),
+  onTerminalEvent: (listener: (payload: any) => void) => {
+    const wrapped = (_event: IpcRendererEvent, payload: any) => listener(payload);
+    ipcRenderer.on("pi:terminal-event", wrapped);
+    return () => ipcRenderer.removeListener("pi:terminal-event", wrapped);
+  },
   onEvent: (listener: (payload: any) => void) => {
     const wrapped = (_event: IpcRendererEvent, payload: any) => listener(payload);
     ipcRenderer.on("pi:event", wrapped);

@@ -14,6 +14,7 @@ import SettingsModal from "../components/overlays/SettingsModal.vue";
 import ExtensionDialog from "../components/overlays/ExtensionDialog.vue";
 import Toasts from "../components/overlays/Toasts.vue";
 import TooltipLayer from "../components/overlays/TooltipLayer.vue";
+import TerminalDock from "../components/terminal/TerminalDock.vue";
 
 /**
  * 工作台四区域 + 右侧边栏骨架：
@@ -22,7 +23,7 @@ import TooltipLayer from "../components/overlays/TooltipLayer.vue";
  *   │ [ 1区域 LeftSidebar ] [ 2区域 AgentChat ] [ 3区域 ContentStage ] [ 4区域 RightPanel ] [ 右侧边栏 ActivityBar ] │
  *   └────────────────────────────────────────────────────────────────────────────┘
  */
-const { workbench, stage, plugins, platform } = useKernel();
+const { workbench, stage, plugins, platform, terminal } = useKernel();
 const state = workbench.state;
 
 const hasStage = computed(() => {
@@ -315,9 +316,23 @@ function startPanelResize(event: PointerEvent): void {
   event.preventDefault();
 }
 
+function onTerminalShortcut(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  if (event.key !== "`" && event.code !== "Backquote") return;
+  const target = event.target;
+  const editable = target instanceof HTMLElement
+    && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+  // 非输入框交给命令注册表处理，避免同一次按键触发两次切换。
+  if (!editable) return;
+  event.preventDefault();
+  event.stopPropagation();
+  terminal.toggle();
+}
+
 onMounted(() => {
   updateWorkspaceWidth();
   window.addEventListener("resize", updateWorkspaceWidth);
+  window.addEventListener("keydown", onTerminalShortcut, true);
   if (typeof ResizeObserver !== "undefined" && workspaceEl.value) {
     workspaceObserver = new ResizeObserver(updateWorkspaceWidth);
     workspaceObserver.observe(workspaceEl.value);
@@ -329,6 +344,7 @@ onBeforeUnmount(() => {
   stopPanelResize();
   stopStageResize();
   window.removeEventListener("resize", updateWorkspaceWidth);
+  window.removeEventListener("keydown", onTerminalShortcut, true);
   workspaceObserver?.disconnect();
 });
 </script>
@@ -408,6 +424,8 @@ onBeforeUnmount(() => {
       <!-- 插件活动栏（ActivityBar） -->
       <ActivityBar class="island toolstrip" />
     </div>
+
+    <TerminalDock />
 
     <TaskOverlays />
     <CommandPalette />

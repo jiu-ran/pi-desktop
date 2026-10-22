@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
+import { TerminalHost } from "./terminal-host.ts";
 import { createAppUpdateManager } from "./network/update.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
@@ -59,6 +60,12 @@ const host = new PiHost({
   },
   trash: (file) => shell.trashItem(file),
   worktreeRoot: path.join(app.getPath("userData"), "worktrees"),
+});
+
+const terminalHost = new TerminalHost({
+  emit(event) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pi:terminal-event", plain(event));
+  },
 });
 
 const recentFile = () => path.join(app.getPath("userData"), "recent-workspaces.json");
@@ -334,7 +341,7 @@ const workspaceChannels = new Set([
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
-  "pi:packages-remove", "pi:packages-update", "pi:skills-overview",
+  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start",
 ]);
 
 function handle(channel: string, fn: (...args: any[]) => any) {
@@ -488,6 +495,9 @@ app.whenReady().then(() => {
   handle("pi:packages-remove", (cwd: string, payload: any) => host.packagesRemove(cwd, payload));
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
+  handle("pi:terminal-start", (cwd: string, command: string) => terminalHost.start(cwd, command));
+  handle("pi:terminal-stop", (id: string) => terminalHost.stop(id));
+  handle("pi:terminal-list", () => terminalHost.list());
   const agentsPath = path.join(homedir(), ".pi", "agent", "AGENTS.md");
   handle("pi:global-agents", async () => {
     try { return { path: agentsPath, content: await readFile(agentsPath, "utf8") }; }
@@ -522,6 +532,7 @@ app.on("before-quit", async (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
+  terminalHost.dispose();
   await host.stopAll();
   await appUpdateManager.cleanup();
   app.exit();

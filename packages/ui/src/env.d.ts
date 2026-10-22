@@ -299,6 +299,32 @@ export interface PiUpdateRecord {
   log: string;
 }
 
+export type TerminalTaskStatus = "running" | "stopping" | "exited" | "failed" | "stopped";
+
+export interface TerminalTaskInfo {
+  id: string;
+  command: string;
+  cwd: string;
+  pid?: number;
+  shell: string;
+  startedAt: number;
+  endedAt?: number;
+  status: TerminalTaskStatus;
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
+export interface TerminalTaskSnapshot extends TerminalTaskInfo {
+  output: string;
+  truncated: boolean;
+}
+
+export type TerminalEvent =
+  | { type: "start"; task: TerminalTaskInfo }
+  | { type: "data"; id: string; stream: "stdout" | "stderr"; text: string }
+  | { type: "status"; task: TerminalTaskInfo }
+  | { type: "exit"; id: string; status: TerminalTaskStatus; exitCode?: number | null; signal?: string | null; endedAt: number };
+
 export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
@@ -371,6 +397,10 @@ export interface PiDesktopBridge {
   skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
+  startTerminal: (cwd: string, command: string) => Promise<TerminalTaskInfo>;
+  stopTerminal: (id: string) => Promise<boolean>;
+  terminalTasks: () => Promise<TerminalTaskSnapshot[]>;
+  onTerminalEvent: (listener: (payload: TerminalEvent) => void) => () => void;
   onEvent: (listener: (payload: { cwd: string; sessionFile?: string; event: any }) => void) => () => void;
 }
 

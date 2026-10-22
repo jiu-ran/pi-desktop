@@ -56,6 +56,13 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 - 文件树直接标注 Git 状态（`M` / `U` / `D` / `R`）并汇总目录内变更数，工具栏可一键切换「只看变更」。
 - 项目根目录支持新建文件、新建文件夹、复制项目路径和在文件管理器中显示。
 
+### 终端与后台任务
+
+- 标题栏的终端按钮或 Ctrl / Cmd + 反引号键打开底部终端岛：在当前项目目录运行构建、测试、开发服务器等命令，不需要让 Agent 代跑。
+- 每条命令独立成为后台任务：任务列表显示运行中 / 已完成 / 失败 / 已停止、耗时和项目目录；切换任务查看完整输出、退出码和 shell 信息，面板收起后任务仍会继续运行。
+- 支持停止进程树、重新填入命令、复制 / 清空输出、清理已结束任务；命令历史用 ↑ / ↓ 回溯，面板高度可拖拽并记住。
+- Windows 使用 PowerShell，macOS / Linux 使用登录 shell；命令在当前项目目录启动并继承应用环境，输出按 UTF-8 处理。当前只面向非交互命令，不支持 stdin 输入，需要交互的程序请使用系统终端。
+
 ### 扩展工具与设置
 
 - **版本控制**：把 Git 仓库状态和本会话改动合并到一个面板。非 Git 项目可以一键初始化仓库；仓库支持暂存 / 取消暂存、提交、获取 / 拉取 / 推送，并用「全部 / 本会话」筛选和 `Agent` 标记区分手动改动与 Agent 改动；点击文件查看实时 Git Diff，已提交的改动仍可切到会话快照对比。提交树展示历史与 Commit 详情。实时 Diff 支持行内评审：悬停行添加意见，汇总后连同文件、行号、代码上下文一起加入输入框。
@@ -76,7 +83,7 @@ main.ts                 组合根：创建内核、注册内置插件
   ├─ plugins/            功能插件：文件、版本控制、事件、Markdown、Mermaid 等
   ├─ services/           主题、设置、命令面板、扩展 UI 等跨界面服务
   ├─ kernel/             事件总线、插件管理、工作区状态、会话投影、内容舞台
-  └─ electron/           窗口、IPC、Pi Worker 池；每个工作区可运行并行 RPC 会话
+  └─ electron/           窗口、IPC、Pi Worker 池与后台任务宿主；每个工作区可运行并行 RPC 会话
 ```
 
 ### 插件清单
@@ -94,6 +101,7 @@ main.ts                 组合根：创建内核、注册内置插件
 
 ### Electron 边界
 
+- [`electron/terminal-host.ts`](electron/terminal-host.ts) 托管后台命令子进程：任务输出限长、stdout / stderr 分批上报，退出时清理进程树；终端命令仍然只在已授权的项目工作区内启动。
 - [`electron/pi-host.ts`](electron/pi-host.ts) 负责每个工作区的 Pi Worker 池、会话目录、白名单 RPC，以及文件创建、重命名、删除和回收站操作。
 - [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。
 - IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
@@ -107,6 +115,7 @@ main.ts                 组合根：创建内核、注册内置插件
 | 工作台骨架 | `packages/ui/src/shell/Shell.vue` | 摆放标题栏、对话区、编辑器、面板和活动栏 |
 | 内核 | `packages/ui/src/kernel/workbench.ts` | 多工作区状态、会话切换、发送 / 停止、文件操作 |
 | 内核 | `packages/ui/src/kernel/transcript.ts` | 把 Pi 消息与流式事件折叠成统一的消息块 |
+| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` | 后台命令子进程、任务状态和底部终端面板 |
 | 插件 | `packages/ui/src/plugins/files/` | 文件树、编辑器和文件操作 |
 | 插件 | `packages/ui/src/plugins/markdown/` | Markdown 预览与 Mermaid 共用渲染开关 |
 | 插件 | `packages/ui/src/plugins/mermaid/` | Mermaid 插件启停生命周期 |

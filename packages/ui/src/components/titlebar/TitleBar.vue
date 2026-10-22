@@ -10,8 +10,13 @@ import { icons } from "../../shared/util.ts";
  * 左侧：应用徽标 · 项目与会话栏开关 · 新建任务 · 项目/分支/任务面包屑
  * 右侧：扩展状态 · Pi CLI 连接状态 · 主题切换 · 偏好设置 · 扩展工具面板开关
  */
-const { workbench, plugins, theme } = useKernel();
+const { workbench, plugins, theme, terminal } = useKernel();
 const state = workbench.state;
+const terminalRunning = terminal.runningCount;
+const terminalTitle = computed(() => {
+  const suffix = terminalRunning.value ? ` · ${terminalRunning.value} 个运行中` : "";
+  return `${terminal.state.open ? "收起" : "打开"}终端与后台任务 (Ctrl/Cmd+\`)${suffix}`;
+});
 const ws = computed(() => workbench.active.value);
 const pi = computed(() => state.pi);
 const enabledPlugins = computed(() => plugins.enabledList.value);
@@ -116,6 +121,17 @@ const piTitle = computed(() => {
       >
         <span class="pi-update-dot" />
         有新版本 {{ state.appUpdate.updateAvailable ? state.appUpdate.latest : pi.latest }}
+      </button>
+
+      <button
+        v-if="terminal.available"
+        class="tb-btn tb-terminal-btn"
+        :class="{ active: terminal.state.open }"
+        :title="terminalTitle"
+        @click="terminal.toggle()"
+      >
+        <span v-html="icons.terminal" />
+        <span v-if="terminalRunning" class="tb-terminal-badge">{{ terminalRunning }}</span>
       </button>
 
       <button

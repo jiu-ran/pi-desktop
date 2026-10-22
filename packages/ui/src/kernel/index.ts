@@ -7,6 +7,7 @@ import { createBuiltinSlashCommands } from "../services/slash-commands.ts";
 import { setupExtensionUi } from "../services/extension-ui.ts";
 import { createCommandRegistry, paletteState } from "../services/command-palette.ts";
 import { openSettingsModal, setupSettings } from "../services/settings.ts";
+import { createTerminalService } from "../services/terminal.ts";
 
 export const KERNEL_KEY = Symbol("pi-desktop-kernel");
 
@@ -14,12 +15,17 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
   const bus = createEventBus();
   const stage = createStage();
   const workbench = createWorkbench({ host, bus });
+  const terminal = createTerminalService({
+    host,
+    getCwd: () => workbench.state.activeCwd,
+  });
   const theme = setupTheme(workbench, host);
   const settings = setupSettings(workbench, bus);
   const commandRegistry = createCommandRegistry();
   const stopExtensionUi = setupExtensionUi(bus, host);
   const disposers: Array<() => void> = [
     () => workbench.dispose(),
+    () => terminal.dispose(),
     () => settings.dispose(),
     () => theme.dispose(),
     stopExtensionUi,
@@ -98,6 +104,14 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
       },
     },
     {
+      id: "terminal.toggle",
+      title: "切换终端与后台任务",
+      category: "视图",
+      keybinding: "Ctrl+`",
+      hint: "运行命令并查看后台任务",
+      run: () => terminal.toggle(),
+    },
+    {
       id: "theme.toggle",
       title: "切换深色 / 浅色主题",
       category: "视图",
@@ -153,6 +167,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
     bus,
     stage,
     workbench,
+    terminal,
     plugins,
     theme,
     settings,
