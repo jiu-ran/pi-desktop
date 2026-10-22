@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import { appSettings } from "../../services/settings.ts";
@@ -118,6 +118,41 @@ function scrollTabs(event: WheelEvent): void {
   target.scrollLeft += event.deltaY || event.deltaX;
   event.preventDefault();
 }
+
+/** 编辑器内接管 Ctrl+W / Ctrl+Tab；聊天输入框里只吞掉 Ctrl+W，避免 Electron 关掉整个窗口。 */
+function onStageKey(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || (event.shiftKey && event.key !== "Tab")) return;
+  if (!stage.tabs.length) return;
+  const target = event.target;
+  const inStage = target instanceof HTMLElement && Boolean(target.closest(".area-stage"));
+  if (event.key === "w" || event.key === "W") {
+    event.preventDefault();
+    event.stopPropagation();
+    const tab = inStage ? stage.activeTab.value : null;
+    if (tab) void requestClose(tab);
+    return;
+  }
+  if (!inStage) return;
+  if (event.key === "Tab" && stage.tabs.length > 1) {
+    event.preventDefault();
+    event.stopPropagation();
+    const index = stage.tabs.findIndex((tab) => tab.key === stage.activeKey.value);
+    const delta = event.shiftKey ? -1 : 1;
+    const next = stage.tabs[(Math.max(index, 0) + delta + stage.tabs.length) % stage.tabs.length];
+    if (next) stage.activate(next.key);
+    return;
+  }
+  if (/^[1-9]$/.test(event.key)) {
+    const tab = stage.tabs[Number(event.key) - 1];
+    if (!tab) return;
+    event.preventDefault();
+    event.stopPropagation();
+    stage.activate(tab.key);
+  }
+}
+
+onMounted(() => window.addEventListener("keydown", onStageKey, true));
+onBeforeUnmount(() => window.removeEventListener("keydown", onStageKey, true));
 </script>
 
 <template>
@@ -145,8 +180,9 @@ function scrollTabs(event: WheelEvent): void {
           <button
             type="button"
             class="stage-tab-close"
-            title="关闭标签页"
+            title="关闭标签页 (Ctrl+W)"
             aria-label="关闭标签页"
+            aria-keyshortcuts="Control+W"
             @click.stop="requestClose(tab)"
           >
             ×
