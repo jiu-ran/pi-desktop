@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons } from "../../shared/util.ts";
+import { displayProjectName, icons } from "../../shared/util.ts";
 import { collectChanges } from "../../shared/diff.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
@@ -549,7 +549,7 @@ watch(searchMatches, () => {
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">
-            <p class="empty-kicker">{{ baseName(ws.cwd) }}</p>
+            <p class="empty-kicker">{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
             <div class="starter-list">
               <button v-for="p in prompts" :key="p.label" class="starter" @click="fillPrompt(p.text)">

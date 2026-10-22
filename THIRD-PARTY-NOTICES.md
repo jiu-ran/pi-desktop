@@ -17,8 +17,15 @@
   - `packages/ui/src/components/chat/Composer.vue`：点击上下文占用环查看会话用量的交互。
   - `packages/ui/src/shared/skill-invocation.ts`：pi 技能调用块的解析，改编自 `apps/web/src/lib/skillInvocation.ts`。
   - `packages/ui/src/components/chat/messages/UserMessage.vue`：技能调用卡片（名称常显、正文按需展开）的呈现方式。
+  - `packages/ui/src/components/chat/messages/NoticeBlock.vue`、`packages/ui/src/kernel/transcript.ts`：
+    自动重试与上下文压缩的状态卡片，参考 `apps/web/src/chat` 中 `RetryIndicator` / `CompactionTurn` 的状态划分与
+    `tokensBefore → tokensAfter` 展示方式。
+  - `electron/pi-host.ts`、`packages/ui/src/plugins/git/GitPanel.vue`：`git worktree` 隔离工作区的分支命名、
+    去重与「主工作区 / 外部工作区 / 托管工作区」边界，参考 `packages/server/src/workspaces/workspaces.ts`；
+    本项目按 Electron 主进程 / 渲染进程边界重新实现，未复用其持久化与子 Agent 逻辑。
 - 修改说明：上游为 React 19 + Zustand + Tailwind，本项目为 Vue 3 + TypeScript + 手写 CSS；
-  移植时改写为 Vue 组合式 API，纯逻辑拆分为可测试函数（见 `scripts/checks/stats.check.ts`、`scripts/checks/git.check.ts`），
-  并适配本项目既有的事件模型与安全边界。数据仍由 pi 的 `getSessionStats` / `git status` 提供。
+  移植时改写为 Vue 组合式 API，纯逻辑拆分为可测试函数（见 `scripts/checks/stats.check.ts`、`scripts/checks/git.check.ts`、
+  `scripts/checks/transcript.check.ts`），并适配本项目既有的事件模型与安全边界。数据仍由 pi 的
+  `getSessionStats` / `git status` / `git worktree list` 提供。
 
 Apache License 2.0 要求保留版权与许可声明；分发本项目时请一并保留本文件与 `licenses/Apache-2.0.txt`。

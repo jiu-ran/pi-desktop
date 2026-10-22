@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,7 +10,8 @@ import { buildChangeTree, flattenChangeTree } from "../../packages/ui/src/shared
 
 const execFileAsync = promisify(execFile);
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-git-"));
-const host = new PiHost({ emit() {} });
+const worktreeRoot = await mkdtemp(path.join(tmpdir(), "pi-desktop-worktrees-"));
+const host = new PiHost({ emit() {}, worktreeRoot });
 const assert = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
 const expectReject = async (run: () => Promise<unknown>, message: string) => {
   let rejected = false;
@@ -75,6 +77,29 @@ try {
   await expectReject(() => host.gitAction(root, "push"), "没有远程仓库时推送应报错");
   await expectReject(() => host.gitAction(root, "pull"), "没有上游分支时拉取应报错");
   await expectReject(() => host.gitAction(root, "fetch"), "没有远程仓库时获取应报错");
+
+  // 隔离工作区：从 HEAD 派生独立分支与目录，主仓库不受影响
+  const created = await host.gitWorktreeCreate(root, "parallel task");
+  assert(created.ok && created.worktree.branch.startsWith("pi/"), "应创建 pi/ 分支");
+  assert(created.worktree.managed && !created.worktree.primary, "新工作区应标记为 Pi 托管");
+  assert(existsSync(created.worktree.path), "隔离工作区目录应存在");
+  const worktrees = await host.gitWorktrees(root);
+  assert(worktrees.some((item) => item.primary), "列表应包含主工作区");
+  assert(
+    worktrees.some((item) => item.managed && item.path === created.worktree.path),
+    "列表应包含新建的隔离工作区",
+  );
+  await writeFile(path.join(created.worktree.path, "wt.txt"), "worktree only");
+  const mainStatus = (await host.gitOverview(root)).status;
+  assert(!mainStatus.some((file) => file.path === "wt.txt"), "隔离工作区的文件不应出现在主仓库状态里");
+  await expectReject(() => host.gitWorktreeRemove(root, root), "不能移除主工作区");
+  await expectReject(() => host.gitWorktreeRemove(root, worktreeRoot), "非 worktree 目录应被拒绝");
+  const removedWorktree = await host.gitWorktreeRemove(root, created.worktree.path);
+  assert(removedWorktree.ok && !existsSync(created.worktree.path), "移除后目录应被删除");
+  assert(
+    !(await host.gitWorktrees(root)).some((item) => item.managed && item.path === created.worktree.path),
+    "移除后不应再出现在列表里",
+  );
 
   // 合并规则：Git 状态为准，会话记录只补标记与快照
   const merged = mergeRepoChanges({
@@ -144,4 +169,5 @@ try {
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
+  await rm(worktreeRoot, { recursive: true, force: true });
 }

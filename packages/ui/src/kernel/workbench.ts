@@ -1,4 +1,5 @@
 import { computed, reactive, shallowReactive, toRaw } from "vue";
+import { displayProjectName } from "../shared/util.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -7,6 +8,9 @@ import type {
   GitActionPayload,
   GitInspectResult,
   GitOverview,
+  GitWorktree,
+  GitWorktreeCreateResult,
+  GitWorktreeRemoveResult,
   McpExposureMode,
   McpOverview,
   PiPackagesOverview,
@@ -214,7 +218,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
 
     const raw: any = {
       cwd,
-      name: cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd,
+      name: displayProjectName(cwd),
       status: "idle" as const,
       error: "",
       models: [] as any[],
@@ -624,6 +628,26 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws || !host?.gitAction) throw new Error("没有打开的工作区");
     return host.gitAction(ws.cwd, action, payload);
+  }
+
+  async function gitWorktrees(): Promise<GitWorktree[]> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktrees) return [];
+    return host.gitWorktrees(ws.cwd);
+  }
+
+  async function createGitWorktree(name: string): Promise<GitWorktreeCreateResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktreeCreate) throw new Error("没有打开的工作区");
+    return host.gitWorktreeCreate(ws.cwd, name);
+  }
+
+  async function removeGitWorktree(target: string): Promise<GitWorktreeRemoveResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktreeRemove) throw new Error("没有打开的工作区");
+    const cwd = ws.cwd;
+    if (workspaces.has(target)) await removeProject(target);
+    return host.gitWorktreeRemove(cwd, target);
   }
 
   async function completePaths(query = ""): Promise<WorkspaceEntry[]> {
@@ -1570,6 +1594,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     gitOverview,
     gitInspect,
     gitAction,
+    gitWorktrees,
+    createGitWorktree,
+    removeGitWorktree,
     completePaths,
     addFiles,
     addPastedImage,

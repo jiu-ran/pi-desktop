@@ -59,6 +59,12 @@ export function baseName(value = ""): string {
   return String(value).split(/[\\/]/).filter(Boolean).at(-1) ?? value;
 }
 
+/** 隔离工作区目录名带 8 位哈希前缀，展示时去掉；普通项目名不受影响。 */
+export function displayProjectName(value = ""): string {
+  const name = baseName(value);
+  return name.replace(/^[0-9a-f]{8}-/i, "") || name;
+}
+
 export function relativeTime(timestamp?: number): string {
   if (!timestamp) return "";
   const diff = Date.now() - timestamp;

@@ -228,13 +228,22 @@
   border-top: 1px solid var(--line);
   font-size: 12px;
 }
-.msg-user-bubble .msg-skill-body .md h1 { margin: 8px 0 4px; font-size: 15px; }
-.msg-user-bubble .msg-skill-body .md h2 { margin: 8px 0 4px; font-size: 14px; }
-.msg-user-bubble .msg-skill-body .md h3 { margin: 6px 0 3px; font-size: 13px; }
-.msg-user-bubble .msg-skill-body .md h4 { margin: 6px 0 3px; font-size: 12px; }
-.msg-user-bubble .msg-skill-body .md p { margin: 4px 0; }
-.msg-user-bubble .msg-skill-body .md ul,
-.msg-user-bubble .msg-skill-body .md ol { margin: 4px 0; padding-left: 18px; }
+/* markstream 的标题/段落使用 CSS 变量与 `heading-node` 类，覆盖变量才能真正压缩字号。 */
+.msg-user-bubble .msg-skill-body .md {
+  --ms-text-h1: 15px;
+  --ms-text-h2: 14px;
+  --ms-text-h3: 13px;
+  --ms-text-h4: 12px;
+  --ms-text-body: 12px;
+  --ms-leading-body: 1.55;
+  --ms-flow-heading-1-mt: 8px;
+  --ms-flow-heading-1-mb: 4px;
+  --ms-flow-heading-2-mt: 8px;
+  --ms-flow-heading-2-mb: 4px;
+  --ms-flow-heading-3-mt: 6px;
+  --ms-flow-heading-3-mb: 3px;
+  --ms-flow-paragraph-y: 4px;
+}
 .msg-skill-loc {
   margin-top: 4px;
   color: var(--fg-3);
@@ -541,10 +550,96 @@
   background: var(--bg-3);
   font: 700 10px/1 var(--font);
 }
-.notice > span:last-child { min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.notice-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.notice-text { min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .notice[data-level="info"] .notice-icon { background: var(--accent-soft); color: var(--accent); }
 .notice[data-level="error"] { border-color: color-mix(in srgb, var(--err) 35%, transparent); background: var(--del-bg); color: var(--del-fg); }
 .notice[data-level="warning"] { border-color: color-mix(in srgb, var(--warn) 35%, transparent); color: var(--warn); }
+
+/* 自动重试：延迟条从左向右耗尽，重试结束后只留一行结果 */
+.notice[data-kind="retry"] .notice-icon { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.notice[data-kind="retry"][data-level="info"] .notice-icon { background: var(--accent-soft); color: var(--accent); }
+.notice-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.notice-retry-bar {
+  height: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.notice-retry-bar > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--warn);
+  animation: notice-retry-drain var(--retry-ms, 3s) linear forwards;
+}
+@keyframes notice-retry-drain {
+  from { width: 100%; }
+  to { width: 0; }
+}
+
+/* 上下文压缩：默认收成一行，可展开查看摘要 */
+.notice[data-kind="compaction"] { border-style: dashed; background: transparent; }
+.notice[data-kind="compaction"] .notice-icon { background: var(--accent-soft); color: var(--accent); }
+.notice-fold {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.notice-fold:hover { color: var(--fg); }
+.notice-fold-caret { display: grid; flex: none; place-items: center; margin-top: 2px; }
+.notice-compaction {
+  max-height: 50vh;
+  overflow: auto;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.notice-compaction .md {
+  --ms-text-h1: 14px;
+  --ms-text-h2: 13px;
+  --ms-text-h3: 12px;
+  --ms-text-body: 12px;
+  --ms-leading-body: 1.55;
+  --ms-flow-heading-1-mt: 6px;
+  --ms-flow-heading-1-mb: 3px;
+  --ms-flow-heading-2-mt: 6px;
+  --ms-flow-heading-2-mb: 3px;
+  --ms-flow-heading-3-mt: 4px;
+  --ms-flow-heading-3-mb: 2px;
+  --ms-flow-paragraph-y: 3px;
+}
+.notice-spin { animation: notice-spin 1.2s linear infinite; }
+@keyframes notice-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .notice-retry-bar > i { width: 0; animation: none; }
+  .notice-spin { animation: none; }
+}
 
 /* 工具展开内容 */
 .tool-card { display: flex; flex-direction: column; }

@@ -17,6 +17,18 @@
 | 回到最新 | reading band / follow 状态 | `AgentChat.vue` 的「回到最新」胶囊 + 未读数，点击恢复自动贴底 |
 | 长消息折叠 | 用户消息 500 字折叠规则 | `UserMessage.vue` 折叠 + 展开全文，搜索时自动展开 |
 | 技能调用卡片 | `skillInvocation.ts` + 折叠卡片 | `shared/skill-invocation.ts` 解析，`UserMessage.vue` 渲染技能名与可展开正文 |
+| 自动重试 / 压缩卡片 | `RetryIndicator.tsx` / `CompactionTurn.tsx` | `NoticeBlock.vue` 按 `retry` / `compaction` 渲染状态图标、延迟条与可展开摘要；事件归并放在 `kernel/transcript.ts` |
+| 隔离工作区 | `packages/server/src/workspaces` | `PiHost` 用 `git worktree` 创建 `pi/<任务名>` 分支，`GitPanel.vue` 管理主 / 隔离 / 外部工作区 |
+
+## 隔离工作区的实现边界
+
+- 只有「仓库根目录等于当前项目目录」且已有 HEAD 提交时才能创建；目录固定放在应用数据目录的
+  `worktrees/` 下，分支前缀为 `pi/`，名称会去重。
+- 列表以 `git worktree list --porcelain` 为准：主工作区、Pi Desktop 管理的隔离工作区、外部 worktree
+  分开标记。外部 worktree 可以打开和定位，但不会在这里被删除。
+- 移除只允许 Pi Desktop 管理的非主工作区，且不能是当前使用中的工作区；先关闭对应 Pi 进程，
+  再删除目录并 `prune`，分支保留，未合并的提交不会丢失。Windows 上文件短暂占用时会重试删除。
+- 工作区根目录由主进程注入，渲染进程只能传任务名和已有 worktree 路径，不能指定任意目录。
 
 ## 后续候选（按价值 / 成本排序）
 
@@ -24,12 +36,9 @@
    `scrollGeometry` 纯函数思路；当前分页上限 240 条，先做基准测试再决定是否引入。
 2. **轮次分组与活动面包屑**：把 assistant 的多次工具往返折叠成一轮，滚动时在顶部固定当前活动；
    上游的 `deriveRows` / `activityBreadcrumbs` 可作为算法参考。
-3. **错误与重试卡片**：把 provider 错误、自动重试、上下文压缩从纯文本提示升级为可操作卡片
-   （重试 / 查看压缩摘要），复用上游 `RetryIndicator` / `CompactionNotice` 的状态划分。
-4. **评审评论**：在 diff 上添加行内评论并以结构化上下文发送给 Agent（需要新增会话消息格式）。
-5. **工作区隔离**：用 `git worktree` 为每个任务创建独立工作区（改动面较大，涉及会话、Git、文件面板）。
-6. **后台任务资源面板**：集中展示后台 bash、子 Agent、MCP 调用及其输出。
-7. **编辑器体验**：标签溢出菜单、分屏编辑、行内 Git blame；上游的 workbench 布局可参考。
+3. **评审评论**：在 diff 上添加行内评论并以结构化上下文发送给 Agent（需要新增会话消息格式）。
+4. **后台任务资源面板**：集中展示后台 bash、子 Agent、MCP 调用及其输出。
+5. **编辑器体验**：标签溢出菜单、分屏编辑、行内 Git blame；上游的 workbench 布局可参考。
 
 ## 明确不采纳
 

@@ -1,7 +1,9 @@
+<!-- 工作区与变更展示参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
+import { askConfirm, askPrompt } from "../../components/sidebar/ui.ts";
 import { collectChanges } from "../../shared/diff.ts";
 import {
   badgeCode,
@@ -9,10 +11,11 @@ import {
   isSessionOnly,
   isStaged,
   mergeRepoChanges,
+  pathKey,
   type RepoChange,
 } from "../../shared/git-changes.ts";
 import { buildChangeTree, flattenChangeTree, type ChangeTreeRow } from "../../shared/git-tree.ts";
-import type { GitActionName, GitActionPayload, GitCommitNode, GitOverview } from "../../env.d.ts";
+import type { GitActionName, GitActionPayload, GitCommitNode, GitOverview, GitWorktree } from "../../env.d.ts";
 import { overviewState, type GitDiffSource, type GitStageData } from "./state.ts";
 
 interface PanelRow extends ChangeTreeRow {
@@ -39,6 +42,10 @@ const loading = ref(false);
 const error = ref("");
 const busy = ref<GitActionName | "">("");
 const history = ref(false);
+const worktreesOpen = ref(false);
+const worktrees = ref<GitWorktree[]>([]);
+const worktreeBusy = ref("");
+const worktreeError = ref("");
 const commitMessage = ref("");
 const collapsedFolders = reactive(new Set<string>());
 const collapsedGroups = reactive(new Set<string>());
@@ -77,6 +84,7 @@ async function load(): Promise<void> {
     if (current === request) {
       overview.value = res;
       overviewState.value = res;
+      void loadWorktrees();
     }
   } catch (err: any) {
     if (current === request) error.value = err?.message ?? String(err);
@@ -90,6 +98,9 @@ watch(
   () => {
     commitMessage.value = readDraft();
     history.value = false;
+    worktreesOpen.value = false;
+    worktrees.value = [];
+    worktreeError.value = "";
     collapsedFolders.clear();
     void load();
   },
@@ -105,6 +116,111 @@ function scheduleRefresh(): void {
     refreshTimer = null;
     void load();
   }, 600);
+}
+
+// 隔离工作区：从当前 HEAD 派生独立分支与目录，作为新项目打开（参考 ThinkRail 的 worktree 工作区）。
+async function loadWorktrees(): Promise<void> {
+  if (!ws.value?.cwd || !overview.value?.isRepo) {
+    worktrees.value = [];
+    return;
+  }
+  try {
+    worktrees.value = await workbench.gitWorktrees();
+    worktreeError.value = "";
+  } catch (err: any) {
+    worktrees.value = [];
+    worktreeError.value = err?.message ?? String(err);
+  }
+}
+
+async function toggleWorktrees(): Promise<void> {
+  worktreesOpen.value = !worktreesOpen.value;
+  if (worktreesOpen.value) {
+    history.value = false;
+    await loadWorktrees();
+  }
+}
+
+function toggleHistory(): void {
+  history.value = !history.value;
+  if (history.value) worktreesOpen.value = false;
+}
+
+const isolatedCount = computed(() => worktrees.value.filter((worktree) => !worktree.primary).length);
+
+const canCreateWorktree = computed(
+  () => Boolean(overview.value?.isRepo && overview.value?.canWrite && overview.value?.hasCommits && !worktreeBusy.value),
+);
+
+function isWorktreeActive(worktree: GitWorktree): boolean {
+  if (!ws.value?.cwd) return false;
+  return pathKey(ws.value.cwd) === pathKey(worktree.path);
+}
+
+async function createWorktree(): Promise<void> {
+  const name = await askPrompt({
+    title: "新建隔离工作区",
+    message: "从当前 HEAD 创建独立分支和工作目录，并在新项目中打开。适合并行运行互不干扰的任务；改动不会影响当前工作区。",
+    label: "任务名",
+    placeholder: "例如 fix-login",
+    confirmLabel: "创建",
+  });
+  if (!name) return;
+  worktreeBusy.value = "create";
+  worktreeError.value = "";
+  try {
+    const result = await workbench.createGitWorktree(name);
+    bus.emit("notify", { level: "info", text: result.message });
+    await workbench.open(result.worktree.path);
+    await loadWorktrees();
+  } catch (err: any) {
+    worktreeError.value = err?.message ?? String(err);
+    bus.emit("notify", { level: "error", text: worktreeError.value });
+  } finally {
+    worktreeBusy.value = "";
+  }
+}
+
+async function openWorktree(worktree: GitWorktree): Promise<void> {
+  if (isWorktreeActive(worktree)) return;
+  worktreeBusy.value = worktree.path;
+  try {
+    await workbench.open(worktree.path);
+  } catch (err: any) {
+    worktreeError.value = err?.message ?? String(err);
+    bus.emit("notify", { level: "error", text: worktreeError.value });
+  } finally {
+    worktreeBusy.value = "";
+  }
+}
+
+async function removeWorktree(worktree: GitWorktree): Promise<void> {
+  const confirmed = await askConfirm({
+    title: "移除隔离工作区",
+    message: `将删除目录：
+${worktree.path}
+
+未提交的改动会一起丢失；分支 ${worktree.branch || "detached"} 会保留。`,
+    confirmLabel: "移除",
+    danger: true,
+  });
+  if (!confirmed) return;
+  worktreeBusy.value = worktree.path;
+  worktreeError.value = "";
+  try {
+    const result = await workbench.removeGitWorktree(worktree.path);
+    bus.emit("notify", { level: "info", text: result.message });
+    await load();
+  } catch (err: any) {
+    worktreeError.value = err?.message ?? String(err);
+    bus.emit("notify", { level: "error", text: worktreeError.value });
+  } finally {
+    worktreeBusy.value = "";
+  }
+}
+
+function revealWorktree(worktree: GitWorktree): void {
+  workbench.reveal(worktree.path).catch((err: any) => bus.emit("notify", { level: "error", text: err?.message ?? String(err) }));
 }
 
 const stopEvents = bus.on("pi:event", ({ event }: { event: any }) => {
@@ -458,11 +574,22 @@ function reveal(change: RepoChange): void {
       />
       <button
         type="button"
+        class="icon-btn small git-worktree-toggle"
+        :class="{ active: worktreesOpen }"
+        :title="isolatedCount ? `隔离工作区（${isolatedCount}）` : '隔离工作区'"
+        :disabled="!hasRepo"
+        @click="toggleWorktrees"
+      >
+        <span v-html="icons.branch" />
+        <span v-if="isolatedCount" class="git-worktree-badge">{{ isolatedCount }}</span>
+      </button>
+      <button
+        type="button"
         class="icon-btn small"
         :class="{ active: history }"
         title="提交历史"
         :disabled="!hasRepo"
-        @click="history = !history"
+        @click="toggleHistory"
         v-html="icons.history"
       />
     </div>
@@ -483,7 +610,75 @@ function reveal(change: RepoChange): void {
         </button>
       </div>
 
-      <div v-if="history" class="git-history">
+      <div v-if="worktreesOpen" class="git-history git-worktrees">
+        <div class="git-history-head">
+          <button type="button" class="icon-btn small" title="返回更改" @click="worktreesOpen = false" v-html="icons.chevronLeft" />
+          <strong>隔离工作区</strong>
+          <span class="git-history-count">{{ isolatedCount }}</span>
+          <span class="git-sc-spacer" />
+          <span v-if="worktreeBusy === 'create'" class="mini-spinner" />
+          <button
+            type="button"
+            class="icon-btn small"
+            title="新建隔离工作区"
+            :disabled="!canCreateWorktree"
+            @click="createWorktree"
+            v-html="icons.plus"
+          />
+        </div>
+        <p class="git-worktree-hint">从当前 HEAD 派生独立分支和目录，作为新项目打开。适合并行运行互不干扰的任务，改动不会影响当前工作区。</p>
+        <div v-if="worktreeError" class="git-error"><span>{{ worktreeError }}</span></div>
+        <p v-if="!hasRepo" class="list-empty">当前项目还不是 Git 仓库</p>
+        <p v-else-if="!overview?.hasCommits" class="list-empty">提交第一个版本后才能创建隔离工作区</p>
+        <div class="git-worktree-list">
+          <div
+            v-for="worktree in worktrees"
+            :key="worktree.path"
+            class="git-worktree-row"
+            :class="{ primary: worktree.primary, active: isWorktreeActive(worktree), missing: !worktree.exists }"
+          >
+            <span class="git-worktree-icon" v-html="icons.branch" />
+            <div class="git-worktree-main">
+              <strong>{{ worktree.branch || (worktree.head ? worktree.head.slice(0, 7) : 'detached HEAD') }}</strong>
+              <small :title="worktree.path">{{ worktree.path }}</small>
+            </div>
+            <span v-if="worktree.primary" class="git-worktree-tag">主工作区</span>
+            <span v-else-if="worktree.managed" class="git-worktree-tag">隔离</span>
+            <span v-else class="git-worktree-tag">外部</span>
+            <div class="git-worktree-actions">
+              <button
+                v-if="!worktree.primary && !isWorktreeActive(worktree)"
+                type="button"
+                class="icon-btn small"
+                title="在新项目中打开"
+                :disabled="Boolean(worktreeBusy) || !worktree.exists"
+                @click="openWorktree(worktree)"
+                v-html="icons.folder"
+              />
+              <button
+                type="button"
+                class="icon-btn small"
+                title="在文件管理器中显示"
+                :disabled="!worktree.exists"
+                @click="revealWorktree(worktree)"
+                v-html="icons.reveal"
+              />
+              <button
+                v-if="worktree.managed && !isWorktreeActive(worktree)"
+                type="button"
+                class="icon-btn small danger"
+                title="移除隔离工作区"
+                :disabled="Boolean(worktreeBusy)"
+                @click="removeWorktree(worktree)"
+                v-html="icons.trash"
+              />
+            </div>
+          </div>
+        </div>
+        <p v-if="!worktrees.some((worktree) => !worktree.primary)" class="git-worktree-empty">还没有隔离工作区。点击右上角 + 新建一个。</p>
+      </div>
+
+      <div v-else-if="history" class="git-history">
         <div class="git-history-head">
           <button type="button" class="icon-btn small" title="返回更改" @click="history = false" v-html="icons.chevronLeft" />
           <strong>提交历史</strong>

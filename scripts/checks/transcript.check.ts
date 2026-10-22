@@ -189,3 +189,30 @@ onlySkill.loadMessages([{ role: "user", content: [{ type: "text", text: '<skill 
 if (onlySkill.blocks.length !== 1 || onlySkill.blocks[0].skill?.name !== "a") throw new Error("纯技能消息不应被丢弃");
 
 console.log("skill OK");
+
+// 自动重试：保留尝试次数，成功后收成一行提示
+const retry = createTranscript();
+retry.applyEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 5, delayMs: 3000, errorMessage: "429 Too Many Requests" });
+const retryNotice = retry.blocks[0];
+if (retryNotice.kind !== "notice" || retryNotice.level !== "warning") throw new Error("重试应生成 warning 提示");
+if (retryNotice.retry?.attempt !== 2 || retryNotice.retry.delayMs !== 3000 || retryNotice.retry.done) throw new Error("重试进度不正确");
+retry.applyEvent({ type: "auto_retry_end", success: true, attempt: 2 });
+if (!retryNotice.retry.done || !retryNotice.retry.success) throw new Error("重试成功后应结束进度");
+if (String(retryNotice.level) !== "info" || !retryNotice.text?.includes("成功")) throw new Error("重试成功应更新提示");
+
+// 上下文压缩：运行中可显示，结束后携带摘要与 token 变化
+const compaction = createTranscript();
+compaction.applyEvent({ type: "compaction_start", reason: "threshold" });
+const compactionNotice = compaction.blocks[0];
+if (compactionNotice.kind !== "notice" || !compactionNotice.compaction?.running) throw new Error("压缩开始应生成运行中提示");
+compaction.applyEvent({
+  type: "compaction_end",
+  reason: "threshold",
+  result: { summary: "## 摘要\n保留关键改动", tokensBefore: 154200, estimatedTokensAfter: 32000 },
+  aborted: false,
+  willRetry: false,
+});
+if (compactionNotice.compaction?.running || compactionNotice.compaction?.summary !== "## 摘要\n保留关键改动") throw new Error("压缩结束应保存摘要");
+if (!compactionNotice.text?.includes("154.2k → 32.0k")) throw new Error("压缩提示应显示 token 变化");
+
+console.log("notices OK");

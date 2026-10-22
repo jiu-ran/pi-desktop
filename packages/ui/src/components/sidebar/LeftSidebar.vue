@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons, relativeTime } from "../../shared/util.ts";
+import { displayProjectName, icons, relativeTime } from "../../shared/util.ts";
 import { askConfirm, openMenu } from "./ui.ts";
 
 export type SessionWorkState = "running" | "compacting" | "error" | "done" | "active" | "idle";
@@ -88,11 +88,11 @@ const groups = computed(() => {
       return {
         cwd,
         ws,
-        name: baseName(cwd),
+        name: displayProjectName(cwd),
         branch: ws?.branch ?? "",
         sessions,
         open: q ? sessions.length > 0 : !collapsed[cwd],
-        visible: !q || sessions.length > 0 || baseName(cwd).toLowerCase().includes(q),
+        visible: !q || sessions.length > 0 || displayProjectName(cwd).toLowerCase().includes(q),
       };
     })
     .filter((group) => group.visible);

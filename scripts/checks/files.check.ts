@@ -3,6 +3,7 @@ import { deflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PiHost } from "../../electron/pi-host.ts";
+import { displayProjectName } from "../../packages/ui/src/shared/util.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-files-"));
 const external = `${root}-outside.txt`;
@@ -70,6 +71,8 @@ try {
   const commitDetail = await host.gitInspect(process.cwd(), "commit", git.commits[0].hash);
   assert(commitDetail.kind === "commit" && commitDetail.meta.length > 0, "应读取 Git 提交详情");
   console.log("files", top.length, nested.length, "git", git.branch, git.commits.length);
+  if (displayProjectName("C:\\work\\7879f06a-login") !== "login") throw new Error("隔离工作区目录应显示任务名");
+  if (displayProjectName("C:\\work\\app") !== "app") throw new Error("普通项目名不应被改写");
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });

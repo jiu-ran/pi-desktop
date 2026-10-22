@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons, shortPath } from "../../shared/util.ts";
+import { displayProjectName, icons, shortPath } from "../../shared/util.ts";
 
 const { workbench } = useKernel();
 const state = workbench.state;
@@ -35,7 +35,7 @@ const recent = computed(() => state.recent.slice(0, 6));
           <p class="eyebrow">最近的项目</p>
           <button v-for="cwd in recent" :key="cwd" class="recent-row" :title="cwd" @click="workbench.open(cwd)">
             <span class="recent-icon" v-html="icons.folder" />
-            <strong>{{ baseName(cwd) }}</strong>
+            <strong>{{ displayProjectName(cwd) }}</strong>
             <span class="recent-path">{{ shortPath(cwd, 3) }}</span>
           </button>
         </div>

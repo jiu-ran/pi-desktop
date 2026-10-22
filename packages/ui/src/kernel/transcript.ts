@@ -1,5 +1,26 @@
+// 重试 / 压缩状态卡片的归并思路参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。
 import { splitAttachmentMarkers, type MessageAttachment } from "../shared/attachments.ts";
 import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
+import { formatTokens } from "../shared/util.ts";
+
+export interface RetryNotice {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error?: string;
+  done?: boolean;
+  success?: boolean;
+}
+
+export interface CompactionNotice {
+  reason?: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  summary?: string;
+  running?: boolean;
+  cancelled?: boolean;
+  error?: string;
+}
 
 export interface TranscriptBlock {
   kind: "user" | "text" | "thinking" | "tool" | "notice";
@@ -23,6 +44,10 @@ export interface TranscriptBlock {
   level?: string;
   local?: boolean;
   usageText?: string;
+  /** 自动重试的进度信息 */
+  retry?: RetryNotice;
+  /** 上下文压缩的状态与摘要 */
+  compaction?: CompactionNotice;
 }
 
 function textOf(content: any): string {
@@ -236,15 +261,88 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         block.durationMs = event.durationMs ?? null;
         return true;
       }
-      case "auto_retry_start":
-        blocks.push({ kind: "notice", id: uid("n"), level: "warning", text: `第 ${event.attempt}/${event.maxAttempts} 次重试：${event.errorMessage ?? ""}` });
+      case "auto_retry_start": {
+        const delay = Math.max(0, Number(event.delayMs ?? 0));
+        blocks.push({
+          kind: "notice",
+          id: uid("n"),
+          level: "warning",
+          text: `连接中断，${(delay / 1000).toFixed(1)} 秒后自动重试（${event.attempt}/${event.maxAttempts}）`,
+          retry: {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: delay,
+            error: event.errorMessage ? String(event.errorMessage) : undefined,
+          },
+        });
         return true;
-      case "compaction_end":
-        if (event.result) {
-          blocks.push({ kind: "notice", id: uid("n"), level: "info", text: `上下文已压缩：${event.result.tokensBefore} → ${event.result.estimatedTokensAfter} tokens` });
-          return true;
+      }
+      case "auto_retry_end": {
+        const notice = [...blocks].reverse().find((block) => block.kind === "notice" && block.retry && !block.retry.done);
+        if (!notice?.retry) return false;
+        notice.retry.done = true;
+        notice.retry.success = Boolean(event.success);
+        if (event.success) {
+          notice.level = "info";
+          notice.text = `自动重试成功（第 ${event.attempt} 次）`;
+        } else {
+          notice.level = "error";
+          notice.text = `自动重试失败：${event.finalError ?? "未知错误"}`;
         }
-        return false;
+        return true;
+      }
+      case "compaction_start": {
+        blocks.push({
+          kind: "notice",
+          id: uid("n"),
+          level: "info",
+          text: "正在压缩上下文…",
+          compaction: { reason: event.reason, running: true },
+        });
+        return true;
+      }
+      case "compaction_end": {
+        const notice = [...blocks].reverse().find((block) => block.kind === "notice" && block.compaction?.running);
+        const result = event.result;
+        const text = result
+          ? `上下文已压缩：${formatTokens(result.tokensBefore)} → ${formatTokens(result.estimatedTokensAfter)} tokens`
+          : event.aborted
+            ? "上下文压缩已取消"
+            : `上下文压缩失败${event.errorMessage ? `：${event.errorMessage}` : ""}`;
+        if (notice) {
+          notice.text = text;
+          notice.level = result || event.aborted ? "info" : "error";
+          notice.compaction = {
+            reason: event.reason,
+            running: false,
+            cancelled: Boolean(event.aborted),
+            error: result ? undefined : event.errorMessage ? String(event.errorMessage) : undefined,
+            ...(result
+              ? {
+                  tokensBefore: result.tokensBefore,
+                  tokensAfter: result.estimatedTokensAfter,
+                  summary: result.summary,
+                }
+              : {}),
+          };
+        } else if (result) {
+          blocks.push({
+            kind: "notice",
+            id: uid("n"),
+            level: "info",
+            text,
+            compaction: {
+              reason: event.reason,
+              tokensBefore: result.tokensBefore,
+              tokensAfter: result.estimatedTokensAfter,
+              summary: result.summary,
+            },
+          });
+        } else {
+          return false;
+        }
+        return true;
+      }
       case "extension_error":
         blocks.push({ kind: "notice", id: uid("n"), level: "error", text: `扩展出错：${event.error}` });
         return true;

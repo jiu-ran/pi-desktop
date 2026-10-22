@@ -1,6 +1,8 @@
+// 隔离工作区的分支命名与托管边界参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath } from "node:fs/promises";
+import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -229,6 +231,36 @@ export interface PiSkillsOverview {
 export interface PiHostOptions {
   emit: (payload: { cwd: string; sessionFile?: string; event: any }) => void;
   trash?: (file: string) => Promise<any>;
+  /** Pi Desktop 托管的隔离工作区根目录 */
+  worktreeRoot?: string;
+}
+
+export interface GitWorktree {
+  path: string;
+  branch: string;
+  head: string;
+  detached: boolean;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** Git 的主工作区（仓库根目录） */
+  primary: boolean;
+  /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
+  managed: boolean;
+  exists: boolean;
+}
+
+export interface GitWorktreeCreateResult {
+  ok: true;
+  message: string;
+  worktree: GitWorktree;
+}
+
+export interface GitWorktreeRemoveResult {
+  ok: true;
+  message: string;
+  branch: string;
+  path: string;
 }
 
 export interface WorkerSlot {
@@ -554,6 +586,64 @@ function samePath(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
+/** 判断 child 是否严格位于 parent 目录内（不含 parent 自身）。 */
+function pathWithin(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/** 把用户输入的任务名变成可用的分支名 / 目录名。 */
+function worktreeSlug(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+    .replace(/\.{2,}/g, "-")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.lock$/i, "")
+    .slice(0, 40)
+    .replace(/^[._-]+|[._-]+$/g, "");
+}
+
+function parseWorktreeList(stdout: string): Array<Omit<GitWorktree, "primary" | "managed" | "exists">> {
+  const items: Array<Omit<GitWorktree, "primary" | "managed" | "exists">> = [];
+  let current: Omit<GitWorktree, "primary" | "managed" | "exists"> | null = null;
+  const flush = () => {
+    if (current) items.push(current);
+    current = null;
+  };
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) {
+      flush();
+      current = {
+        path: path.resolve(line.slice("worktree ".length)),
+        branch: "",
+        head: "",
+        detached: false,
+        bare: false,
+        locked: false,
+        prunable: false,
+      };
+    } else if (!current) {
+      continue;
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length).trim();
+    } else if (line.startsWith("branch refs/heads/")) {
+      current.branch = line.slice("branch refs/heads/".length).trim();
+    } else if (line === "detached") {
+      current.detached = true;
+    } else if (line === "bare") {
+      current.bare = true;
+    } else if (line.startsWith("locked")) {
+      current.locked = true;
+    } else if (line.startsWith("prunable")) {
+      current.prunable = true;
+    }
+  }
+  flush();
+  return items;
+}
+
 /** 解析 `git status --porcelain=v1` 输出。 */
 function parseGitStatus(stdout: string): GitStatusFile[] {
   const files: GitStatusFile[] = [];
@@ -674,16 +764,18 @@ export class PiHost {
   clients: Map<string, WorkspaceClientPool>;
   starting: Map<string, Promise<void>>;
   maxIdleWorkers: number;
+  worktreeRoot: string;
   private authorizedAttachmentPaths = new Set<string>();
   private authorizedWorkspaces = new Map<string, string>();
   private closing = false;
 
-  constructor({ emit, trash }: PiHostOptions) {
+  constructor({ emit, trash, worktreeRoot }: PiHostOptions) {
     this.emit = emit;
     this.trash = trash ?? ((file: string) => unlink(file));
     this.clients = new Map();
     this.starting = new Map();
     this.maxIdleWorkers = 3;
+    this.worktreeRoot = path.resolve(worktreeRoot ?? path.join(homedir(), ".pi-desktop", "worktrees"));
   }
 
   private workspaceKey(cwd: string): string {
@@ -1336,6 +1428,128 @@ export class PiHost {
       subtitle: relative,
       meta: "工作区未提交变更",
       diff,
+    };
+  }
+
+/** 列出当前仓库的 worktree；managed 表示由 Pi Desktop 创建、可安全移除。 */
+  async gitWorktrees(cwd: string): Promise<GitWorktree[]> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) return [];
+    const out = await gitProbe(root, ["worktree", "list", "--porcelain"]);
+    return parseWorktreeList(out).map((item) => ({
+      ...item,
+      primary: samePath(item.path, root),
+      managed: pathWithin(this.worktreeRoot, item.path) && !samePath(item.path, root),
+      exists: existsSync(item.path),
+    }));
+  }
+
+  /** 从当前 HEAD 创建隔离工作区（独立分支 + 独立目录）。 */
+  async gitWorktreeCreate(cwd: string, name: string): Promise<GitWorktreeCreateResult> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库，请先初始化");
+    if (!samePath(root, workspace)) throw new Error("请在仓库根目录创建隔离工作区");
+    const head = (await gitProbe(root, ["rev-parse", "--verify", "HEAD"])).trim();
+    if (!head) throw new Error("仓库还没有提交，无法创建隔离工作区");
+
+    const slug = worktreeSlug(name);
+    if (!slug) throw new Error("任务名不能为空");
+    const repoKey = createHash("sha1").update(workspace).digest("hex").slice(0, 8);
+    const baseDir = path.join(this.worktreeRoot, `${repoKey}-${slug}`);
+    let branch = "";
+    let target = "";
+    let reserved = false;
+    for (let index = 1; index <= 100; index += 1) {
+      branch = `pi/${slug}${index === 1 ? "" : `-${index}`}`;
+      target = `${baseDir}${index === 1 ? "" : `-${index}`}`;
+      const exists = (await gitProbe(root, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
+      if (!exists && !existsSync(target)) {
+        reserved = true;
+        break;
+      }
+    }
+    if (!reserved) throw new Error("同名隔离工作区过多，请换一个任务名");
+    if (!(await gitProbe(root, ["check-ref-format", "--branch", branch])).trim()) {
+      throw new Error("任务名无法生成合法的 Git 分支名，请换一个名称");
+    }
+
+    await mkdir(path.dirname(target), { recursive: true });
+    await gitRun(root, ["worktree", "add", "-b", branch, target, head]);
+    const worktree = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    return {
+      ok: true,
+      message: `已创建隔离工作区（${branch}）`,
+      worktree: worktree ?? {
+        path: target,
+        branch,
+        head,
+        detached: false,
+        bare: false,
+        locked: false,
+        prunable: false,
+        primary: false,
+        managed: true,
+        exists: true,
+      },
+    };
+  }
+
+  /** 移除由 Pi Desktop 创建的工作区；分支会保留，未合并的提交不会丢失。 */
+  async gitWorktreeRemove(cwd: string, target: string): Promise<GitWorktreeRemoveResult> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库");
+    if (!samePath(root, workspace)) throw new Error("请在仓库根目录移除隔离工作区");
+    const entry = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    if (!entry) throw new Error("该目录不是当前仓库的 worktree");
+    if (entry.primary) throw new Error("不能移除仓库的主工作区");
+    if (!entry.managed) throw new Error("只能移除由 Pi Desktop 创建的隔离工作区");
+    if (samePath(entry.path, workspace)) throw new Error("不能移除当前正在使用的工作区");
+    const inUse = [...this.clients.keys()].some((cwd) => samePath(cwd, entry.path))
+      || [...this.starting.keys()].some((cwd) => samePath(cwd, entry.path));
+    if (inUse) throw new Error("该隔离工作区仍有 Pi 进程在运行，请先切换到其他项目再移除");
+
+    if (entry.exists) {
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          await gitRun(root, ["worktree", "remove", "--force", entry.path]);
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      if (lastError) {
+        let removed = false;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            await rm(entry.path, { recursive: true, force: true });
+            removed = true;
+            break;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+        if (!removed) {
+          throw new Error("隔离工作区文件仍被占用，请关闭占用该目录的程序后重试");
+        }
+      } else {
+        await rm(entry.path, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    await gitProbe(root, ["worktree", "prune"]);
+    return {
+      ok: true,
+      message: `已移除隔离工作区（${entry.branch || entry.head.slice(0, 7) || "detached"}）`,
+      branch: entry.branch,
+      path: entry.path,
     };
   }
 

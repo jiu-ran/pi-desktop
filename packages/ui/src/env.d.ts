@@ -132,6 +132,34 @@ export interface GitInspectResult {
   diff: string;
 }
 
+export interface GitWorktree {
+  path: string;
+  branch: string;
+  head: string;
+  detached: boolean;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** Git 的主工作区（仓库根目录） */
+  primary: boolean;
+  /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
+  managed: boolean;
+  exists: boolean;
+}
+
+export interface GitWorktreeCreateResult {
+  ok: true;
+  message: string;
+  worktree: GitWorktree;
+}
+
+export interface GitWorktreeRemoveResult {
+  ok: true;
+  message: string;
+  branch: string;
+  path: string;
+}
+
 export type McpExposureMode = "codemode" | "deferred" | "direct" | "hidden";
 
 export interface McpServerItem {
@@ -304,6 +332,9 @@ export interface PiDesktopBridge {
   gitOverview: (cwd: string) => Promise<GitOverview>;
   gitInspect: (cwd: string, kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
   gitAction: (cwd: string, action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
+  gitWorktrees: (cwd: string) => Promise<GitWorktree[]>;
+  gitWorktreeCreate: (cwd: string, name: string) => Promise<GitWorktreeCreateResult>;
+  gitWorktreeRemove: (cwd: string, target: string) => Promise<GitWorktreeRemoveResult>;
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;
