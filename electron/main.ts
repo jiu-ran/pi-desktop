@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
 import { TerminalHost } from "./terminal-host.ts";
+import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
@@ -53,6 +54,7 @@ const DEV_URL = (() => {
 })();
 const DEV_ORIGIN = new URL(DEV_URL).origin;
 let mainWindow: BrowserWindow | null = null;
+let terminalFocused = false;
 
 const host = new PiHost({
   emit(payload) {
@@ -294,6 +296,11 @@ function createWindow() {
       sandbox: true,
     },
   });
+  terminalFocused = false;
+  mainWindow.webContents.on("did-start-loading", () => {
+    terminalFocused = false;
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.setIgnoreMenuShortcuts(false);
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -304,7 +311,7 @@ function createWindow() {
   // Chromium 自带 Ctrl/Cmd + - / + / 0 页面缩放。缩放只允许设置页，
   // 这里把这些组合（含 Shift、小键盘）全部吃掉，避免和输入法抢键。
   mainWindow.webContents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown") return;
+    if (input.type !== "keyDown" || terminalFocused) return;
     if ((!input.control && !input.meta) || input.alt) return;
     const zoom =
       input.code === "Minus" || input.code === "NumpadSubtract" ||
@@ -341,7 +348,7 @@ const workspaceChannels = new Set([
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
-  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell",
+  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
 ]);
 
 function handle(channel: string, fn: (...args: any[]) => any) {
@@ -495,9 +502,28 @@ app.whenReady().then(() => {
   handle("pi:packages-remove", (cwd: string, payload: any) => host.packagesRemove(cwd, payload));
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
-  handle("pi:terminal-start", (cwd: string, command: string) => terminalHost.start(cwd, command));
+  handle("pi:terminal-start", (cwd: string, command: string, options?: TerminalPtyOptions) => terminalHost.startWithProfile(cwd, command, options));
   handle("pi:terminal-shell", (cwd: string) => terminalHost.startShell(cwd));
+  handle("pi:terminal-pty", (cwd: string, cols?: number, rows?: number, options?: TerminalPtyOptions) => terminalHost.startPty(cwd, cols, rows, options));
+  handle("pi:terminal-profiles", () => listTerminalProfiles());
+  handle("pi:terminal-choose-executable", async () => {
+    const selected = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择终端 shell 可执行文件",
+      properties: ["openFile"],
+      ...(process.platform === "win32" ? { filters: [{ name: "可执行程序", extensions: ["exe"] }] } : {}),
+    });
+    return selected.canceled ? null : selected.filePaths[0];
+  });
+  handle("pi:terminal-profile-validate", (options: TerminalPtyOptions) => resolveTerminalProfile(options));
   handle("pi:terminal-write", (id: string, input: string) => terminalHost.write(id, input));
+  handle("pi:terminal-pty-write", (id: string, data: string, binary = false) => terminalHost.writePty(id, data, binary));
+  handle("pi:terminal-pty-resize", (id: string, cols: number, rows: number) => terminalHost.resizePty(id, cols, rows));
+  handle("pi:terminal-focus", (focused: boolean) => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return false;
+    terminalFocused = focused === true;
+    mainWindow.webContents.setIgnoreMenuShortcuts(terminalFocused);
+    return true;
+  });
   handle("pi:terminal-stop", (id: string) => terminalHost.stop(id));
   handle("pi:terminal-list", () => terminalHost.list());
   const agentsPath = path.join(homedir(), ".pi", "agent", "AGENTS.md");
@@ -534,7 +560,7 @@ app.on("before-quit", async (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
-  terminalHost.dispose();
+  await terminalHost.dispose();
   await host.stopAll();
   await appUpdateManager.cleanup();
   app.exit();

@@ -22,6 +22,8 @@ npm run check        # TypeScript 检查 + 各层自检（包含 Mermaid 高度�
 npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 ```
 
+完整终端使用 `node-pty`（N-API 原生模块）：Windows / macOS 使用随依赖提供的预构建产物；Linux 安装依赖时需要 `python3`、`make`、`g++`（例如先安装 `build-essential python3`）。npm 12 若提示安装脚本被拦截，运行 `npm install-scripts approve node-pty`。原生模块通过 `asarUnpack` 随包解压分发，打包阶段不重复进行 Electron ABI 重编译。
+
 开发服务器默认监听 `127.0.0.1:1420`。如果只需要调试前端，可以在 `packages/ui` 下运行 `npm run dev`。
 
 开发实例使用独立的 Chromium profile（`%APPDATA%/Pi Desktop Dev`），与已安装的 Pi Desktop 互不影响，可以同时运行；需要自定义目录时设置 `PI_DESKTOP_PROFILE` 环境变量。
@@ -59,12 +61,16 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 
 ### 终端与后台任务
 
-- 标题栏的终端按钮或 Ctrl / Cmd + 反引号键打开底部终端岛：在当前项目目录运行构建、测试、开发服务器等命令，不需要让 Agent 代跑。
-- 每条一次性命令独立成为后台任务；交互会话则保持为一个长驻任务。任务列表显示运行中 / 已完成 / 失败 / 已停止、耗时和项目目录；切换任务查看完整输出、退出码和 shell 信息，面板收起后任务仍会继续运行。
-- 输出保留 ANSI 颜色与常见样式，按当前主题调色板渲染 16 / 256 / truecolor 颜色、背景色和反色；进度行会折叠成最终状态，复制时自动转成纯文本。
-- 终端面板提供命令回显、运行中光标、自动跟随与「回到最新」、自动换行开关、重新运行、清屏和停止；Ctrl / Cmd + L 清屏，Ctrl / Cmd + C 在无选中文本时清空草稿或停止任务，Ctrl / Cmd + U 清空输入，↑ / ↓ 回溯历史，Esc 清空或收起。交互会话中 Enter 发送，Ctrl / Cmd + Enter 把当前输入作为一次性后台任务运行。
-- Windows 使用 PowerShell，macOS / Linux 使用登录 shell；命令在当前项目目录启动并继承应用环境，输出按 UTF-8 处理。
-- 点击终端标题栏的 +（或空态「新建交互会话」）启动长驻会话：可以连续执行 cd、变量赋值等命令，也可以运行 mysql、python、psql 等行式交互程序，输入 exit 结束会话。检测到密码提示时输入框会自动隐藏，密码不会进入会话历史。仍不支持 vim / top 等全屏 TUI 和终端级 Ctrl+C，结束会话请点「结束」。
+- **终端是默认关闭的可选插件**：在「设置 → 终端」或「插件管理 → 工作台工具」启用「终端与后台任务」后，才显示标题栏终端按钮、底部终端岛和 Ctrl / Cmd + 反引号快捷键。启停选择会保存；停用只隐藏界面、不强制结束已有任务，设置页可查看运行数量并选择结束所有任务。
+- 点击标题栏 **+ / 新建终端** 启动真实 PTY 会话：Windows 默认读取 `%ComSpec%`（通常是 CMD）并使用 ConPTY，macOS / Linux 默认读取 `$SHELL` / 用户登录 shell。直接点击终端屏幕输入，支持连续命令、Tab 补全、方向键、密码输入、全屏界面和鼠标报告；可运行本机已经安装的 Pi、Claude Code、Codex、mysql、psql、Node REPL、vim / top 等 CLI。应用不会代为安装或登录这些工具。
+- 在「设置 → 终端」修改新建会话的默认 shell：自动列出已安装的 pwsh、Windows PowerShell、Git Bash、CMD，以及 macOS / Linux 的 Zsh、Bash、Fish 等；也支持选择自定义绝对可执行路径和 JSON 字符串数组启动参数。只校验文件、不执行探测命令，参数分开传给宿主，不拼接为 shell 命令。这里选择的是 shell，不会修改 Windows Terminal 等外部终端应用的默认设置。
+- **+ 旁的「选择 shell…」菜单**可临时用另一 shell 新建会话，不改变已保存的默认配置。修改默认配置只影响未来的新会话，已有终端仍使用启动时的 shell。
+- **Ctrl+C 中断终端内的当前程序**，不会把整个 shell 当作后台任务强制结束；输入 `exit` 退出 shell，或者点击「结束」停止该会话的进程树。Esc、Ctrl+W、Ctrl+L 等按键原样交给终端程序，聚焦终端时不会误触发 Electron 关窗 / 刷新等菜单快捷键。
+- 鼠标滚轮优先交给应用协商的鼠标协议；全屏备用屏幕没有滚轮协议时，改用 PageUp / PageDown 滚动内容，而不是模拟 ↑ / ↓ 去切换 Agent 的输入历史。普通 shell 仍滚动终端日志，键盘 ↑ / ↓ 的历史命令功能不变。
+- 用鼠标选择终端内容后，点击复制按钮或 Ctrl+Shift+C 复制；Ctrl+Shift+V /「粘贴」按钮粘贴，Windows 也支持 Ctrl+V，macOS 支持 Cmd+C/V。密码是否回显由终端程序控制，PTY 输入不进入应用的命令历史、不做人为回显。shell 自身的历史遵循该 shell 的设置。
+- 可以同时启动多个终端和一次性后台任务（总共最多 8 个运行中）；每个 PTY 会话保留独立屏幕和滚动位置，切换任务、收起面板不会中断程序或重放控制序列。面板/窗口尺寸变化会同步行列数，适配全屏程序；终端主题跟随深色 / 浅色界面。
+- 不需要交互的构建、测试、开发服务器等命令仍可用底部命令输入框启动为一次性后台任务（同样使用设置中选定的默认 shell）：支持 ANSI 颜色与样式、自动跟随 / 回到最新、自动换行、重新填入命令、复制 / 清空输出、停止进程树和清理已结束任务。一次性输入框 Enter 运行，↑ / ↓ 回溯历史，Ctrl / Cmd + L 清屏。
+- 任务由 Electron 主进程托管，切换项目或刷新窗口后可接回；宿主保留每个任务最近 1 MB 的原始输出，界面日志缓存最多 500 KB。重新加载时只能恢复该尾部记录；已有 PTY 屏幕在日志裁剪时不会重置。面板可拖拽调高并记住，最多占窗口高度的 55%（最高 640px）。
 
 ### 扩展工具与设置
 
@@ -97,14 +103,15 @@ main.ts                 组合根：创建内核、注册内置插件
 | `git` | 扩展工具 | 仓库状态与本会话改动合并、暂存 / 提交 / 同步、提交树与 Diff |
 | `events` | 扩展工具 | Pi JSON-RPC 事件流 |
 | `plugin-manager` | 扩展工具 | 管理插件启停；自身为核心插件 |
+| `terminal` | 工作台工具（底部停靠区） | 默认关闭的完整 PTY / 后台任务、shell 配置与快捷键 |
 | `markdown` | 文件区域 / 对话区域 | `.md` 源码高亮、实时预览，以及对话代码块语法高亮 |
 | `mermaid` | 对话区域 | 对话和 Markdown 文件中的 Mermaid 图表；与 Markdown 渲染共用 |
 
-内置插件清单位于 [`packages/ui/src/plugins/index.ts`](packages/ui/src/plugins/index.ts)，插件生命周期和注册接口位于 [`packages/ui/src/kernel/plugin-manager.ts`](packages/ui/src/kernel/plugin-manager.ts)。插件停用时会执行其清理回调、取消订阅并关闭对应面板 / 详情标签。
+插件可通过 `dock` 贡献工作台停靠组件，`defaultEnabled: false` 声明主动启用的可选功能；终端屏幕按需加载，未启用时不注册终端命令或启动宿主订阅。内置插件清单位于 [`packages/ui/src/plugins/index.ts`](packages/ui/src/plugins/index.ts)，插件生命周期和注册接口位于 [`packages/ui/src/kernel/plugin-manager.ts`](packages/ui/src/kernel/plugin-manager.ts)。插件停用时会执行其清理回调、取消订阅并关闭对应面板 / 详情标签。
 
 ### Electron 边界
 
-- [`electron/terminal-host.ts`](electron/terminal-host.ts) 托管后台命令子进程：任务输出限长、stdout / stderr 分批上报，退出时清理进程树；终端命令仍然只在已授权的项目工作区内启动。
+- [`electron/terminal-host.ts`](electron/terminal-host.ts) 托管一次性后台命令与 node-pty 会话：原始输出限长、分批上报，退出时清理进程树和终端句柄；[`PtyTerminal.vue`](packages/ui/src/components/terminal/PtyTerminal.vue) 为每个会话维护独立 xterm 屏幕。终端仍只在已授权项目目录启动，后续 `cd` 等行为由用户运行的 shell 控制。
 - [`electron/pi-host.ts`](electron/pi-host.ts) 负责每个工作区的 Pi Worker 池、会话目录、白名单 RPC，以及文件创建、重命名、删除和回收站操作。
 - [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。
 - IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
@@ -118,7 +125,7 @@ main.ts                 组合根：创建内核、注册内置插件
 | 工作台骨架 | `packages/ui/src/shell/Shell.vue` | 摆放标题栏、对话区、编辑器、面板和活动栏 |
 | 内核 | `packages/ui/src/kernel/workbench.ts` | 多工作区状态、会话切换、发送 / 停止、文件操作 |
 | 内核 | `packages/ui/src/kernel/transcript.ts` | 把 Pi 消息与流式事件折叠成统一的消息块 |
-| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` | 一次性后台命令、长驻交互会话、任务状态和底部终端面板 |
+| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` + `components/terminal/` | 一次性后台命令、真实 PTY / xterm 屏幕、原始输入、resize、任务状态和底部面板 |
 | 插件 | `packages/ui/src/plugins/files/` | 文件树、编辑器和文件操作 |
 | 插件 | `packages/ui/src/plugins/markdown/` | Markdown 预览与 Mermaid 共用渲染开关 |
 | 插件 | `packages/ui/src/plugins/mermaid/` | Mermaid 插件启停生命周期 |

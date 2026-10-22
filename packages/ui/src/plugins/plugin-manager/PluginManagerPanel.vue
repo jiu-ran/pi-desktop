@@ -13,6 +13,7 @@ const areaCaps: Record<PluginArea, string[]> = {
   conversation: ["对话区域渲染"],
   files: ["文件区域渲染"],
   sidebar: ["插件活动栏", "扩展工具面板"],
+  shell: ["工作台停靠区", "终端快捷键"],
 };
 
 const groups = computed(() =>
@@ -48,6 +49,7 @@ function onToggle(id: string, event: Event): void {
             <div class="plugin-manager-tags">
               <span v-for="cap in areaCaps[record.area]" :key="cap">{{ cap }}</span>
               <b v-if="record.stage">编辑器与详情视图</b>
+              <b v-if="record.dock">底部停靠面板</b>
             </div>
             <p v-if="record.error" class="plugin-manager-error">激活失败：{{ record.error }}</p>
           </div>

@@ -143,4 +143,36 @@ if (lateRecord?.enabled || lateDeactivated !== 1 || lateDisposed !== 1) {
   throw new Error("late plugin activation should rollback after manager disposal");
 }
 
+// 默认关闭的工作台工具只有用户选择后才启用，并跨重启保留选择。
+let optionalActivations = 0;
+const createOptionalManager = () => createPluginManager({
+  createContext: (_plugin, disposers) => ({
+    pluginId: _plugin.id, on: () => () => {}, emit: () => {},
+    onDispose: (dispose) => { disposers.push(dispose); return dispose; },
+    registerCommand: () => () => {}, togglePlugin: async () => {},
+    workbench: {} as any, workspace: {} as any, stage: {} as any, host: {} as any,
+  }),
+  onPluginDeactivated: () => {},
+});
+const optional: SidebarPlugin = {
+  id: "optional-dock", name: "Optional dock", description: "", version: "1.0.0", icon: "",
+  defaultEnabled: false, area: "shell", dock: {},
+  activate: () => { optionalActivations += 1; },
+};
+const optionalManager = createOptionalManager();
+await optionalManager.register(optional);
+if (optionalManager.get(optional.id)?.enabled || optionalActivations !== 0) throw new Error("可选插件不应强制默认启用");
+await optionalManager.setEnabled(optional.id, true);
+if (!optionalManager.get(optional.id)?.enabled) throw new Error("可选停靠插件无法主动启用");
+optionalManager.dispose();
+const restoredOptional = createOptionalManager();
+await restoredOptional.register(optional);
+if (!restoredOptional.get(optional.id)?.enabled) throw new Error("重启后没有保留用户启用插件的选择");
+await restoredOptional.setEnabled(optional.id, false);
+restoredOptional.dispose();
+const disabledOptional = createOptionalManager();
+await disabledOptional.register(optional);
+if (disabledOptional.get(optional.id)?.enabled) throw new Error("重启后忽略了用户停用插件的选择");
+disabledOptional.dispose();
+
 console.log("plugin-lifecycle OK");

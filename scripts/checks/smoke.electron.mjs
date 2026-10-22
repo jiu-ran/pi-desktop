@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from "electron";
+import { checkTerminalInElectron } from "./terminal.smoke.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
@@ -81,7 +82,14 @@ app.whenReady().then(async () => {
     if (!ready[key]) errors.push(`missing required UI region: ${key}`);
   }
   if (!ready.ws || ready.ws.status !== "ready") errors.push("workspace did not become ready");
-  console.log("[errors]", errors.length ? errors.join("\n") : "none");
+  if (ready.ws?.status === "ready") {
+    try {
+      await checkTerminalInElectron(win);
+    } catch (error) {
+      errors.push(`terminal: ${error.message || String(error)}`);
+    }
+  }
+  console.log("[errors]",  errors.length ? errors.join("\n") : "none");
   const passed = ready.ws?.status === "ready" && !errors.length;
   console.log("[result]", passed ? "PASS" : "FAIL");
   app.exit(passed ? 0 : 1);

@@ -1,6 +1,19 @@
 # 第三方代码声明
 
-本项目包含参考或改编自以下开源项目的代码。
+本项目包含参考或改编自以下开源项目的代码，以及以下随应用分发的终端组件。
+
+## 终端组件
+
+- **node-pty 1.1.0**：<https://github.com/microsoft/node-pty>，MIT；版权与许可全文见
+  [`licenses/node-pty-MIT.txt`](licenses/node-pty-MIT.txt)。用于 Electron 主进程中的 Windows ConPTY / Unix PTY。
+  原生模块和辅助程序保留在 `app.asar.unpacked/node_modules/node-pty/`，不从压缩归档执行。
+  `electron/terminal-pty-cleanup.ts` 为本项目的兼容清理代码，针对该固定版本的 Windows 资源回收问题，未修改依赖源码。
+- **xterm.js 6.0.0**：<https://github.com/xtermjs/xterm.js>，MIT；版权与许可全文见
+  [`licenses/xterm-MIT.txt`](licenses/xterm-MIT.txt)。用于终端屏幕、光标、备用屏幕、键盘和鼠标控制序列的解析。
+- **@xterm/addon-fit 0.11.0**：同属 xterm.js 项目，MIT；版权与许可全文见
+  [`licenses/xterm-addon-fit-MIT.txt`](licenses/xterm-addon-fit-MIT.txt)。用于根据面板实际尺寸适配终端行列数。
+
+分发应用时保留上述许可文件；node-pty 依赖目录中的 winpty / ConPTY 第三方版权文件同样随包保留。
 
 ## ThinkRail
 

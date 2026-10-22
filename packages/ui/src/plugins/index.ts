@@ -5,6 +5,7 @@ import eventsPlugin from "./events/index.ts";
 import pluginManagerPlugin from "./plugin-manager/index.ts";
 import markdownPlugin from "./markdown/index.ts";
 import mermaidPlugin from "./mermaid/index.ts";
+import terminalPlugin from "./terminal/index.ts";
 
 /**
  * 内置插件清单，按作用区域分组：
@@ -19,4 +20,5 @@ export const builtinPlugins: SidebarPlugin[] = [
   pluginManagerPlugin,
   mermaidPlugin,
   markdownPlugin,
+  terminalPlugin,
 ];

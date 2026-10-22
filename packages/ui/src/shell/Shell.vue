@@ -14,7 +14,6 @@ import SettingsModal from "../components/overlays/SettingsModal.vue";
 import ExtensionDialog from "../components/overlays/ExtensionDialog.vue";
 import Toasts from "../components/overlays/Toasts.vue";
 import TooltipLayer from "../components/overlays/TooltipLayer.vue";
-import TerminalDock from "../components/terminal/TerminalDock.vue";
 
 /**
  * 工作台四区域 + 右侧边栏骨架：
@@ -25,6 +24,7 @@ import TerminalDock from "../components/terminal/TerminalDock.vue";
  */
 const { workbench, stage, plugins, platform, terminal } = useKernel();
 const state = workbench.state;
+const dockPlugins = computed(() => plugins.records.filter((plugin) => plugin.dock));
 
 const hasStage = computed(() => {
   const activeTab = stage.activeTab.value;
@@ -317,7 +317,7 @@ function startPanelResize(event: PointerEvent): void {
 }
 
 function onTerminalShortcut(event: KeyboardEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  if (!terminal.state.enabled || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
   if (event.key !== "`" && event.code !== "Backquote") return;
   const target = event.target;
   const editable = target instanceof HTMLElement
@@ -425,7 +425,12 @@ onBeforeUnmount(() => {
       <ActivityBar class="island toolstrip" />
     </div>
 
-    <TerminalDock />
+    <!-- 停靠区由可选插件贡献；KeepAlive 保留停用前的屏幕，不强制卸载后台任务视图。 -->
+    <template v-for="plugin in dockPlugins" :key="plugin.id">
+      <KeepAlive>
+        <component :is="plugin.dock" v-if="plugin.enabled" />
+      </KeepAlive>
+    </template>
 
     <TaskOverlays />
     <CommandPalette />

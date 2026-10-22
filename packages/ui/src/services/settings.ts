@@ -4,7 +4,7 @@ import type { Workbench } from "../kernel/workbench.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
-export type SettingsTabId = "conversation" | "appearance" | "mcp" | "packages" | "agents" | "skills" | "plugins" | "environment";
+export type SettingsTabId = "conversation" | "appearance" | "terminal" | "mcp" | "packages" | "agents" | "skills" | "plugins" | "environment";
 
 export type AutoSaveMode = "off" | "afterDelay" | "onFocusChange" | "onWindowChange";
 
@@ -39,6 +39,10 @@ export interface AppSettings {
   uiFontSize: number;
   /** 代码与终端字号（px） */
   codeFontSize: number;
+  /** 新建完整终端的 shell 配置，system = 系统默认命令解释器。 */
+  terminalProfile: string;
+  terminalCustomPath: string;
+  terminalCustomArgs: string[];
   /** 对话消息排版密度 */
   messageDensity: "comfortable" | "compact";
   /** 界面缩放倍率（Chromium zoom factor），由设置页控制，不设快捷键 */
@@ -61,6 +65,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   appUpdateCheck: true,
   uiFontSize: 13,
   codeFontSize: 12.5,
+  terminalProfile: "system",
+  terminalCustomPath: "",
+  terminalCustomArgs: [],
   messageDensity: "comfortable",
   uiZoom: 1,
 }
@@ -94,6 +101,11 @@ function loadSavedSettings(): AppSettings {
       appUpdateCheck: typeof parsed.appUpdateCheck === "boolean" ? parsed.appUpdateCheck : DEFAULT_SETTINGS.appUpdateCheck,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
+      terminalProfile: typeof parsed.terminalProfile === "string" && /^[a-z0-9-]{1,80}$/.test(parsed.terminalProfile)
+        ? parsed.terminalProfile : "system",
+      terminalCustomPath: typeof parsed.terminalCustomPath === "string" ? parsed.terminalCustomPath.slice(0, 4000) : "",
+      terminalCustomArgs: Array.isArray(parsed.terminalCustomArgs)
+        ? parsed.terminalCustomArgs.filter((arg: unknown) => typeof arg === "string" && !arg.includes("\0")).slice(0, 64).map((arg: string) => arg.slice(0, 4000)) : [],
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
       uiZoom: Math.min(3, Math.max(0.5, Number(parsed.uiZoom) || DEFAULT_SETTINGS.uiZoom)),
     };

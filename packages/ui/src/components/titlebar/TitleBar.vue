@@ -19,7 +19,7 @@ const terminalTitle = computed(() => {
 });
 const ws = computed(() => workbench.active.value);
 const pi = computed(() => state.pi);
-const enabledPlugins = computed(() => plugins.enabledList.value);
+const enabledPlugins = computed(() => plugins.sidebarPlugins.value);
 const hasOpenPanel = computed(() => Boolean(state.activePanelId && enabledPlugins.value.some((p) => p.id === state.activePanelId)));
 
 const title = computed(() => {
@@ -124,7 +124,7 @@ const piTitle = computed(() => {
       </button>
 
       <button
-        v-if="terminal.available"
+        v-if="terminal.available && terminal.state.enabled"
         class="tb-btn tb-terminal-btn"
         :class="{ active: terminal.state.open }"
         :title="terminalTitle"

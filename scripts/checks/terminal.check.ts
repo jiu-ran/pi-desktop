@@ -1,4 +1,6 @@
-import { TerminalHost, resolveInteractiveShell, resolveTerminalShell, stripTerminalAnsi } from "../../electron/terminal-host.ts";
+import { fileURLToPath } from "node:url";
+import { listTerminalProfiles, resolveTerminalProfile, systemShellCandidate } from "../../electron/terminal-profiles.ts";
+import { TerminalHost, resolveInteractiveShell, resolvePtyShell, resolveTerminalShell, stripTerminalAnsi } from "../../electron/terminal-host.ts";
 import { formatTerminalDuration, createTerminalService } from "../../packages/ui/src/services/terminal.ts";
 
 function assert(condition: unknown, message: string): void {
@@ -34,6 +36,12 @@ assert(interactiveWin.args.join(" ").includes("chcp 65001"), "Windows 交互式 
 assert(interactiveWin.args.at(-1)?.endsWith("-Command -"), "Windows 交互式 shell 应从 stdin 读取命令");
 const interactiveUnix = resolveInteractiveShell("linux");
 assert(interactiveUnix.args.join(" ") === "-l", "Unix 交互式 shell 应使用登录 shell");
+const ptyWin = resolvePtyShell("win32");
+assert(ptyWin.label === "CMD" && !ptyWin.args.includes("-NonInteractive"), "Windows 系统默认应来自 ComSpec");
+assert(systemShellCandidate({ platform: "win32", env: { ComSpec: "C:\\custom\\cmd.exe" } }).file === "C:\\custom\\cmd.exe", "系统默认终端忽略了 ComSpec");
+assert(systemShellCandidate({ platform: "darwin", env: {}, loginShell: "/bin/zsh" }).file === "/bin/zsh", "macOS 默认应使用登录 shell");
+assert(systemShellCandidate({ platform: "linux", env: { SHELL: "/bin/fish" }, loginShell: "/bin/bash" }).file === "/bin/fish", "Unix 系统默认应优先遵循 SHELL");
+assert(resolvePtyShell("linux").args.join(" ") === "-l", "Unix PTY 应使用登录 shell");
 
 assert(formatTerminalDuration(0) === "0s", "0 秒格式错误");
 assert(formatTerminalDuration(59_000) === "59s", "秒格式错误");
@@ -82,7 +90,7 @@ try {
     const snapshot = limitedHost.list().find((item) => item.id === limited.id);
     assert(snapshot?.output.length === 120 && snapshot?.truncated, `输出截尾错误：${snapshot?.output.length}/${snapshot?.truncated}`);
   } finally {
-    limitedHost.dispose();
+    await limitedHost.dispose();
   }
 
   const shell = host.startShell(process.cwd());
@@ -103,6 +111,87 @@ try {
   await waitFor(() => host.list().find((item) => item.id === shell.id && item.status !== "running"));
   assert(host.list().find((item) => item.id === shell.id)?.status === "exited", "交互式会话退出状态错误");
 
+  // 真实 PTY：全屏/光标序列、原始按键、尺寸变更、Ctrl+C 都交给终端程序。
+  const pty = await host.startPty(process.cwd(), 80, 24);
+  assert(pty.pty && pty.interactive && Boolean(pty.pid), "PTY 会话未启动");
+  assert(pty.cols === 80 && pty.rows === 24, "PTY 初始尺寸错误");
+  const fixture = fileURLToPath(new URL("./terminal-pty.fixture.cjs", import.meta.url));
+  const ptyCommand = `"${process.execPath}" "${fixture}"`;
+  host.writePty(pty.id, `${ptyCommand}\r`);
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-PROBE-READY")));
+  const probe = host.list().find((item) => item.id === pty.id);
+  assert(probe?.output.includes("TTY: input=true output=true"), "PTY 子进程必须拿到真实 TTY");
+  assert(probe?.output.includes("TERM:xterm-256color"), "PTY 应声明 xterm 能力");
+  assert(probe?.output.includes("\u001B[?1049h"), "全屏备用屏幕控制序列被丢弃");
+  host.writePty(pty.id, "\u001B[A");
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-HEX:1b5b41")));
+  host.writePty(pty.id, "中文\r");
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("e4b8ade69687")));
+  assert(host.resizePty(pty.id, 110, 34), "PTY resize 失败");
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-SIZE:110x34")));
+  const resized = host.list().find((item) => item.id === pty.id);
+  assert(resized?.cols === 110 && resized?.rows === 34, "PTY 尺寸快照未同步");
+  host.writePty(pty.id, String.fromCharCode(3));
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-CTRL-C")));
+  assert(host.list().find((item) => item.id === pty.id)?.status === "running", "Ctrl+C 不应杀掉外层 shell");
+  host.writePty(pty.id, "exit\r");
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.status !== "running"));
+  assert(host.list().find((item) => item.id === pty.id)?.pty, "PTY 结束后的快照应保留终端类型");
+
+  // 启动时可临时选择另一 shell；配置改变不会影响已有任务。
+  const profiles = await listTerminalProfiles();
+  assert(profiles.some((profile) => profile.id === "system"), "缺少系统默认终端");
+  for (const id of process.platform === "win32" ? ["pwsh", "powershell", "git-bash"] : ["bash", "zsh"]) {
+    const profile = profiles.find((item) => item.id === id);
+    if (!profile) continue;
+    const selected = await host.startPty(process.cwd(), 100, 24, { profileId: id });
+    assert(selected.profileId === id && selected.shellPath === profile.file, "选中的 shell 配置未传给宿主");
+    const marker = `profile-${id}-${Date.now()}`;
+    const command = id === "pwsh" || id === "powershell"
+      ? `Write-Output ("${marker}" + "-done")` : `printf "%s-done\\n" "${marker}"`;
+    host.writePty(selected.id, `${command}\r`);
+    await waitFor(() => host.list().find((item) => item.id === selected.id && item.output.includes(`${marker}-done`)));
+    assert(host.stop(selected.id), "可选 shell 无法停止");
+    await waitFor(() => host.list().find((item) => item.id === selected.id && item.status === "stopped"));
+    const background = await host.startWithProfile(process.cwd(), command, { profileId: id });
+    await waitFor(() => host.list().find((item) => item.id === background.id && item.status !== "running"));
+    const backgroundDone = host.list().find((item) => item.id === background.id);
+    assert(backgroundDone?.status === "exited" && backgroundDone.output.includes(`${marker}-done`), `一次性命令未使用选定 shell：${id}/${backgroundDone?.output}`);
+  }
+  const defaultTask = await host.startWithProfile(process.cwd(), `"${process.execPath}" -e "process.stdout.write('default-shell-ok 中文')"`);
+  await waitFor(() => host.list().find((item) => item.id === defaultTask.id && item.status !== "running"));
+  const defaultDone = host.list().find((item) => item.id === defaultTask.id);
+  assert(defaultDone?.status === "exited" && defaultDone.output.includes("default-shell-ok 中文"), `系统默认 shell 带引号路径/UTF-8 输出错误：${defaultDone?.output}`);
+  const custom = await resolveTerminalProfile({ profileId: "custom", customPath: process.execPath, customArgs: ["--version"] });
+  assert(custom.args[0] === "--version", "自定义 shell 参数不应进行命令行拆分");
+  const customTask = await host.startPty(process.cwd(), 80, 24, { profileId: "custom", customPath: process.execPath, customArgs: ["--version"] });
+  await waitFor(() => host.list().find((item) => item.id === customTask.id && item.status === "exited"));
+  assert(host.list().find((item) => item.id === customTask.id)?.output.includes(process.version), "自定义可执行文件未按独立参数运行");
+  for (const options of [{ profileId: "missing-shell" }, { profileId: "custom", customPath: "relative.exe" }, { profileId: "custom", customPath: process.execPath, customArgs: [3] as any }]) {
+    const result = await Promise.allSettled([resolveTerminalProfile(options)]);
+    assert(result[0].status === "rejected", "非法 shell 配置应被拒绝");
+  }
+
+  // 异步加载期间也计入并发限制；退出时不允许迟到的创建留下子进程。
+  const singleHost = new TerminalHost({ emit: () => {}, maxTasks: 1 });
+  try {
+    const first = singleHost.startPty(process.cwd(), 80, 24);
+    const second = singleHost.startPty(process.cwd(), 80, 24);
+    const results = await Promise.allSettled([first, second]);
+    assert(results.filter((result) => result.status === "fulfilled").length === 1, "并发 PTY 创建绕过了任务上限");
+    const runningPty = singleHost.list().find((item) => item.status === "running");
+    assert(runningPty && singleHost.stop(runningPty.id), "结束 PTY 会话失败");
+    await waitFor(() => singleHost.list().find((item) => item.id === runningPty.id && item.status === "stopped"));
+  } finally {
+    await singleHost.dispose();
+  }
+  const closingHost = new TerminalHost({ emit: () => {} });
+  const pendingStart = closingHost.startPty(process.cwd());
+  const closedHost = closingHost.dispose();
+  const lateStart = await Promise.allSettled([pendingStart]);
+  await closedHost;
+  assert(lateStart[0].status === "rejected" && closingHost.list().length === 0, "关闭宿主后不应继续启动 PTY");
+
   const long = host.start(process.cwd(), `"${process.execPath}" -e "setTimeout(() => {}, 30000)"`);
   await wait(250);
   assert(host.stop(long.id), "停止任务失败");
@@ -112,7 +201,7 @@ try {
   assert(events.some((event) => event.type === "status" && event.task?.id === long.id), "缺少 stopping 状态事件");
   assert(events.some((event) => event.type === "exit" && event.id === long.id), "缺少退出事件");
 } finally {
-  host.dispose();
+  await host.dispose();
 }
 
 console.log("terminal OK");
@@ -220,6 +309,110 @@ try {
   assert(!shellTask.output.includes("hunter2"), "密码不应回显到输出");
 } finally {
   shellService.dispose();
+}
+
+// PTY 服务：输出按会话订阅，按键按序且不记历史；尺寸失败可重试，迟到快照不回退。
+const ptyListeners = new Set<(event: any) => void>();
+const ptyWrites: Array<{ id: string; data: string; binary: boolean }> = [];
+const ptySizes: Array<{ id: string; cols: number; rows: number }> = [];
+let failResize = true;
+let ptySeq = 0;
+const ptyHost = {
+  ...mockHost,
+  startTerminalPty: async (cwd: string, cols: number, rows: number) => {
+    const info = {
+      id: `pty-${++ptySeq}`, command: "sh", cwd, shell: "sh", startedAt: Date.now(),
+      status: "running", interactive: true, pty: true, cols, rows,
+    };
+    for (const listener of ptyListeners) listener({ type: "start", task: info });
+    return info;
+  },
+  writeTerminalPty: async (id: string, data: string, binary: boolean) => {
+    await wait(data === "first" ? 20 : 0);
+    ptyWrites.push({ id, data, binary });
+    return true;
+  },
+  resizeTerminalPty: async (id: string, cols: number, rows: number) => {
+    ptySizes.push({ id, cols, rows });
+    if (failResize) { failResize = false; return false; }
+    return true;
+  },
+  onTerminalEvent: (listener: (event: any) => void) => {
+    ptyListeners.add(listener);
+    return () => ptyListeners.delete(listener);
+  },
+};
+const ptyService = createTerminalService({ host: ptyHost, getCwd: () => "C:/mock" });
+try {
+  assert(ptyService.supportsPty, "PTY 桥存在时应暴露 supportsPty");
+  await ptyService.startPty(80, 24);
+  const ptyTask = ptyService.activeTask.value;
+  assert(ptyTask?.pty && ptyTask.interactive, "PTY 类型未同步到渲染层");
+  const chunks: string[] = [];
+  const offData = ptyService.onData(ptyTask.id, (text) => chunks.push(text));
+  const terminalOutput = `${String.fromCharCode(27)}[?1049h${"x".repeat(510_000)}`;
+  for (const listener of ptyListeners) listener({ type: "data", id: ptyTask.id, stream: "stdout", text: terminalOutput });
+  assert(chunks[0] === terminalOutput, "PTY 输出订阅不能被尾部日志裁剪影响");
+  assert(ptyTask.output.length <= 500_000 && ptyTask.truncated, "PTY 日志缓存应仍限长");
+  offData();
+  for (const listener of ptyListeners) listener({ type: "data", id: ptyTask.id, stream: "stdout", text: "more" });
+  assert(chunks.length === 1, "PTY 输出订阅未正确注销");
+
+  await Promise.all([ptyService.writePty(ptyTask.id, "first"), ptyService.writePty(ptyTask.id, "second")]);
+  assert(ptyWrites[0]?.data === "first" && ptyWrites[1]?.data === "second", "异步 IPC 改变了按键顺序");
+  await ptyService.writePty(ptyTask.id, String.fromCharCode(0, 3, 255), true);
+  assert(ptyWrites.at(-1)?.binary && ptyWrites.at(-1)?.data === String.fromCharCode(0, 3, 255), "原始按键/二进制鼠标输入被改写");
+  const outputBeforeInput = ptyTask.output;
+  ptyService.state.input = "hunter2";
+  await ptyService.send(undefined, { secret: true });
+  assert(ptyWrites.at(-1)?.data === "hunter2\r" && ptyTask.inputs.length === 0, "PTY 输入不能做人工回显或存历史");
+  assert(ptyTask.output === outputBeforeInput && !ptyService.state.history.includes("hunter2"), "密码进入了日志/命令历史");
+  ptyService.clearOutput(ptyTask.id);
+  assert(ptyTask.output === outputBeforeInput, "PTY 不应通过清空日志破坏备用屏幕");
+
+  await ptyService.resizePty(ptyTask.id, 110, 34);
+  assert(ptyTask.cols === 80 && ptyTask.rows === 24, "失败的 resize 不应标记为已同步");
+  await ptyService.resizePty(ptyTask.id, 110, 34);
+  assert(ptyTask.cols === 110 && ptyTask.rows === 34 && ptySizes.length === 2, "resize 失败后无法重试");
+  for (const listener of ptyListeners) listener({ type: "status", task: { ...ptyTask, cols: 80, rows: 24 } });
+  assert(ptyTask.cols === 110 && ptyTask.rows === 34, "迟到状态快照覆盖了 xterm 尺寸");
+
+  await ptyService.startPty(90, 26);
+  await ptyService.writePty(ptyTask.id, "old-task");
+  assert(ptyWrites.at(-1)?.id === ptyTask.id, "切换任务后按键被发给了新会话");
+  const received: string[] = [];
+  ptyService.onData(ptyTask.id, (text) => received.push(text));
+  ptyService.dispose();
+  for (const listener of ptyListeners) listener({ type: "data", id: ptyTask.id, stream: "stdout", text: "after-dispose" });
+  assert(received.length === 0, "销毁终端服务后不应继续推送输出");
+} finally {
+  ptyService.dispose();
+}
+
+// 关闭插件时不做宿主订阅 / 快照请求，不启动后台任务；用户开启后才连接。
+let disabledSubscriptions = 0;
+let disabledStarts = 0;
+const disabledService = createTerminalService({
+  host: {
+    ...ptyHost,
+    onTerminalEvent: () => { disabledSubscriptions += 1; return () => {}; },
+    startTerminalPty: async (...args: any[]) => { disabledStarts += 1; return ptyHost.startTerminalPty(args[0], args[1], args[2]); },
+  },
+  getCwd: () => "C:/mock",
+  enabled: false,
+  getProfileOptions: () => ({ profileId: "pwsh" }),
+});
+try {
+  await disabledService.startPty();
+  disabledService.toggle();
+  assert(!disabledService.state.open && disabledSubscriptions === 0 && disabledStarts === 0, "停用插件仍在启动或订阅终端");
+  disabledService.setEnabled(true);
+  await disabledService.startPty();
+  assert(disabledSubscriptions === 1 && disabledStarts === 1, "首次启用终端插件后没有连接宿主");
+  disabledService.setEnabled(false);
+  assert(disabledService.activeTask.value?.status === "running" && !disabledService.state.open, "停用终端插件强制杀掉了已有会话");
+} finally {
+  disabledService.dispose();
 }
 
 console.log("terminal service OK");

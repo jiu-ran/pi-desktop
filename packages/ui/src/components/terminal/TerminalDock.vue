@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from "vue";
+import PtyTerminal from "./PtyTerminal.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { TERMINAL_STATUS_LABEL, formatTerminalDuration, type TerminalTask } from "../../services/terminal.ts";
 import { renderTerminalHtml, stripTerminalAnsi, terminalPlainText } from "../../shared/terminal-text.ts";
+import { appSettings, openSettingsModal } from "../../services/settings.ts";
 import { baseName, displayProjectName, icons } from "../../shared/util.ts";
 
 const { workbench, terminal } = useKernel();
@@ -12,11 +14,16 @@ const tasks = terminal.sortedTasks;
 
 const inputEl = ref<HTMLInputElement | null>(null);
 const outputEl = ref<HTMLElement | null>(null);
+const ptySize = ref({ cols: 100, rows: 30 });
+interface PtyScreen { focus: () => void; copySelection: () => Promise<boolean>; paste: () => Promise<void> }
+const ptyScreens = new Map<string, PtyScreen>();
 const stick = ref(true);
 const resizing = ref(false);
 const copied = ref(false);
+const selection = ref("");
 const wrap = ref(loadWrap());
 const secret = ref(false);
+const shellChoice = ref("");
 
 const cwd = computed(() => workbench.state.activeCwd);
 const composerCwd = computed(() => (interactive.value && task.value ? task.value.cwd : cwd.value));
@@ -24,10 +31,16 @@ const composerCwdLabel = computed(() => displayProjectName(composerCwd.value) ||
 const statusLabel = computed(() => (task.value ? TERMINAL_STATUS_LABEL[task.value.status] : ""));
 const isRunning = computed(() => task.value?.status === "running" || task.value?.status === "stopping");
 const interactive = computed(() => Boolean(task.value?.interactive));
+const pty = computed(() => Boolean(task.value?.pty));
+const ptyTasks = computed(() => state.tasks.filter((item) => item.pty));
+const legacyInteractive = computed(() => interactive.value && !pty.value);
+const ptyRunning = computed(() => pty.value && isRunning.value);
 const interactiveRunning = computed(() => interactive.value && isRunning.value);
 const shellEnded = computed(() => interactive.value && !isRunning.value);
+const canStartTerminal = computed(() => terminal.supportsPty || terminal.supportsShell);
+const startLabel = computed(() => (terminal.supportsPty ? "新建终端" : "新建交互会话"));
 const finishedCount = computed(() => state.tasks.filter((item) => item.status !== "running" && item.status !== "stopping").length);
-const outputHtml = computed(() => (task.value ? renderTerminalHtml(task.value.output) : ""));
+const outputHtml = computed(() => (task.value && !task.value.pty ? renderTerminalHtml(task.value.output) : ""));
 const inputPlaceholder = computed(() => {
   if (shellEnded.value) return "会话已结束，点击“新建会话”继续";
   if (secret.value) return "输入密码，Enter 发送";
@@ -58,6 +71,7 @@ const quickCommands = computed(() => {
 
 let resizeStartY = 0;
 let resizeStartHeight = 0;
+let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loadWrap(): boolean {
   try {
@@ -122,9 +136,9 @@ function scrollToLatestNow(): void {
 }
 
 function detectPasswordPrompt(): void {
-  if (!interactiveRunning.value) return;
-  // mysql / sudo 等程序在管道模式下仍会打印密码提示；看到提示后自动
-  // 切到密码输入，避免密码明文留在输入框和会话历史里。
+  if (!legacyInteractive.value || !interactiveRunning.value) return;
+  // 旧的管道式会话没有 PTY；mysql / sudo 等程序仍会打印密码提示，
+  // 看到提示后自动切到密码输入，避免密码明文留在输入框和会话历史里。
   const tail = stripTerminalAnsi((task.value?.output ?? "").slice(-240)).slice(-200);
   const lastLine = tail.split(/\r?\n/).filter(Boolean).at(-1) ?? "";
   if (!lastLine.startsWith("❯ ") && /(?:password|密码)[^\r\n]{0,80}[:：]\s*$/i.test(lastLine)) {
@@ -136,9 +150,46 @@ function detectPasswordPrompt(): void {
   }
 }
 
+function setPtyScreen(id: string, screen: any): void {
+  if (screen) ptyScreens.set(id, screen as PtyScreen);
+  else ptyScreens.delete(id);
+}
+
+function onPtySelection(id: string, text: string): void {
+  if (id === task.value?.id) selection.value = text;
+}
+
+function focusTerminal(): void {
+  if (!pty.value) {
+    focusInput();
+    return;
+  }
+  void nextTick(() => {
+    if (state.open) ptyScreens.get(task.value?.id || "")?.focus();
+  });
+}
+
+function markCopied(): void {
+  copied.value = true;
+  if (copyTimer) clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
+    copied.value = false;
+    copyTimer = null;
+  }, 1200);
+}
+
+async function copySelection(): Promise<void> {
+  await ptyScreens.get(task.value?.id || "")?.copySelection();
+}
+
+function pasteTerminal(): void {
+  void ptyScreens.get(task.value?.id || "")?.paste();
+}
+
 function submit(): void {
+  if (pty.value) return;
   if (shellEnded.value) {
-    void startShell();
+    void startTerminal();
     return;
   }
   const text = state.input;
@@ -159,22 +210,36 @@ function submit(): void {
 
 /** 交互会话中 Ctrl+Enter 仍可把当前输入作为一次性后台任务启动。 */
 function submitBackground(): void {
+  if (pty.value) return;
   const command = state.input.trim();
   if (!command || state.starting || secret.value) return;
   scrollToLatestNow();
   void terminal.run(command);
 }
 
-async function startShell(): Promise<void> {
+async function chooseShell(event: Event): Promise<void> {
+  const id = (event.target as HTMLSelectElement).value;
+  shellChoice.value = "";
+  (event.target as HTMLSelectElement).value = "";
+  if (id === "settings") { openSettingsModal("terminal"); return; }
+  if (id) {
+    await terminal.startPty(ptySize.value.cols, ptySize.value.rows, id);
+    focusTerminal();
+  }
+}
+
+async function startTerminal(): Promise<void> {
+  if (terminal.supportsPty) {
+    await terminal.startPty(ptySize.value.cols, ptySize.value.rows);
+    focusTerminal();
+    return;
+  }
   await terminal.startShell();
-  nextTick(() => {
-    inputEl.value?.focus();
-    inputEl.value?.setSelectionRange(state.input.length, state.input.length);
-  });
+  focusInput();
 }
 
 function clearActiveOutput(): void {
-  if (!task.value) return;
+  if (!task.value || pty.value) return;
   terminal.clearOutput(task.value.id);
   if (secret.value) state.input = "";
   secret.value = false;
@@ -246,7 +311,10 @@ function useExample(command: string): void {
 function selectTask(id: string): void {
   terminal.select(id);
   stick.value = true;
-  scrollLatest(true);
+  void nextTick(() => {
+    if (pty.value) focusTerminal();
+    else scrollLatest(true);
+  });
 }
 
 function onTaskSelect(event: Event): void {
@@ -260,13 +328,10 @@ function rerun(item: TerminalTask): void {
 }
 
 async function copyOutput(): Promise<void> {
-  if (!task.value?.output) return;
+  if (!task.value?.output || pty.value) return;
   try {
     await navigator.clipboard.writeText(terminalPlainText(task.value.output));
-    copied.value = true;
-    setTimeout(() => {
-      copied.value = false;
-    }, 1200);
+    markCopied();
   } catch {
     // 剪贴板权限被拒绝时不打断终端使用。
   }
@@ -316,10 +381,10 @@ function onResizeKey(event: KeyboardEvent): void {
 }
 
 watch(
-  () => task.value?.output,
+  () => (task.value?.pty ? "" : task.value?.output),
   () => {
-    // 输出增长本身会触发滚动事件；如果此时再读取 stick，可能已被该事件
-    // 误判为“用户离开底部”。只要变更发生时仍跟随底部，就强制贴底。
+    if (pty.value) return;
+    // 只跟随后台任务的日志；PTY 屏幕由自身缓冲区管理滚动。
     if (stick.value) scrollLatest(true);
     detectPasswordPrompt();
   },
@@ -329,10 +394,14 @@ watch(
   () => {
     if (secret.value) state.input = "";
     secret.value = false;
+    selection.value = "";
+    copied.value = false;
     stick.value = true;
     void nextTick(() => {
-      detectPasswordPrompt();
-      scrollLatest(true);
+      if (!pty.value) {
+        detectPasswordPrompt();
+        scrollLatest(true);
+      }
     });
   },
 );
@@ -346,23 +415,19 @@ watch(
   () => state.open,
   (open) => {
     if (!open) return;
-    void nextTick(() => {
-      focusInput();
-      scrollLatest(true);
-    });
-  },
-);
-watch(
-  () => state.activeId,
-  () => {
-    stick.value = true;
-    void nextTick(() => scrollLatest(true));
+    void terminal.refreshProfiles();
+    focusTerminal();
+    if (!pty.value) scrollLatest(true);
   },
 );
 
-onBeforeUnmount(stopResize);
+onDeactivated(stopResize);
+onBeforeUnmount(() => {
+  stopResize();
+  if (copyTimer) clearTimeout(copyTimer);
+});
 onMounted(() => {
-  focusInput();
+  if (state.open) focusTerminal();
   void nextTick(() => detectPasswordPrompt());
   scrollLatest(true);
 });
@@ -370,7 +435,7 @@ onMounted(() => {
 
 <template>
   <section
-    v-if="state.open"
+    v-show="state.open && state.enabled"
     class="terminal-dock"
     :style="{ height: `${state.height}px` }"
     aria-label="终端与后台任务"
@@ -406,20 +471,38 @@ onMounted(() => {
           aria-label="切换后台任务"
           @change="onTaskSelect"
         >
-          <option v-for="item in tasks" :key="item.id" :value="item.id">{{ item.command }}</option>
+          <option v-for="item in tasks" :key="item.id" :value="item.id">
+            {{ item.pty ? "终端 · " : "" }}{{ item.command }}
+          </option>
         </select>
       </div>
       <div class="terminal-head-actions">
         <button
-          v-if="terminal.supportsShell"
+          v-if="canStartTerminal"
           class="icon-btn"
           type="button"
-          title="新建交互会话（支持 mysql、python 等）"
-          aria-label="新建交互会话"
+          :title="terminal.supportsPty ? `新建终端 · ${terminal.defaultProfile.value}` : '新建交互会话'"
+          :aria-label="startLabel"
           :disabled="state.starting"
-          @click="startShell"
+          @click="startTerminal"
           v-html="icons.plus"
         />
+        <select
+          v-if="terminal.supportsPty"
+          class="terminal-profile-select"
+          :value="shellChoice"
+          :disabled="state.starting"
+          aria-label="选择 shell 新建终端"
+          title="临时使用其他 shell 新建终端；不修改默认配置"
+          @pointerdown="terminal.refreshProfiles()"
+          @change="chooseShell"
+        >
+          <option value="" disabled>选择 shell…</option>
+          <option v-for="profile in state.profiles" :key="profile.id" :value="profile.id">{{ profile.label }}</option>
+          <option v-if="appSettings.terminalCustomPath" value="custom">自定义终端</option>
+          <option value="settings">终端设置…</option>
+        </select>
+        <button class="icon-btn" type="button" title="终端设置" @click="openSettingsModal('terminal')" v-html="icons.gear" />
         <button
           v-if="finishedCount"
           class="terminal-head-btn"
@@ -453,7 +536,7 @@ onMounted(() => {
             <span class="terminal-task-dot" :data-status="statusClass(item)" />
             <span class="terminal-task-main">
               <span class="terminal-task-command">
-                <span v-if="item.interactive" class="terminal-task-kind">会话</span>
+                <span v-if="item.interactive" class="terminal-task-kind">{{ item.pty ? "终端" : "会话" }}</span>
                 {{ item.command }}
               </span>
               <span class="terminal-task-meta">
@@ -490,43 +573,76 @@ onMounted(() => {
                 {{ task.status === "stopping" ? "停止中" : stopLabel }}
               </button>
               <button
-                class="icon-btn small"
-                :class="{ 'is-on': wrap }"
-                type="button"
-                :title="wrap ? '关闭自动换行' : '自动换行'"
-                :aria-pressed="wrap"
-                @click="toggleWrap"
-                v-html="icons.wrap"
-              />
-              <button
+                v-if="pty"
                 class="icon-btn small"
                 type="button"
-                :title="copied ? '已复制' : '复制全部输出'"
-                :disabled="!task.output"
-                @click="copyOutput"
+                :title="copied ? '已复制' : '复制选中内容'"
+                :disabled="!selection"
+                @click="copySelection"
                 v-html="copied ? icons.check : icons.copy"
               />
               <button
-                class="icon-btn small"
+                v-if="pty"
+                class="terminal-head-btn"
                 type="button"
-                title="清屏 (Ctrl/Cmd+L)"
-                :disabled="!task.output"
-                @click="clearActiveOutput"
-                v-html="icons.trash"
-              />
-              <button
-                v-if="!interactive"
-                class="icon-btn small"
-                type="button"
-                title="重新填入命令"
-                @click="rerun(task)"
-                v-html="icons.refresh"
-              />
+                title="粘贴到终端 (Ctrl+Shift+V)"
+                :disabled="!ptyRunning"
+                @click="pasteTerminal"
+              >粘贴</button>
+              <template v-if="!pty">
+                <button
+                  class="icon-btn small"
+                  :class="{ 'is-on': wrap }"
+                  type="button"
+                  :title="wrap ? '关闭自动换行' : '自动换行'"
+                  :aria-pressed="wrap"
+                  @click="toggleWrap"
+                  v-html="icons.wrap"
+                />
+                <button
+                  class="icon-btn small"
+                  type="button"
+                  :title="copied ? '已复制' : '复制全部输出'"
+                  :disabled="!task.output"
+                  @click="copyOutput"
+                  v-html="copied ? icons.check : icons.copy"
+                />
+                <button
+                  class="icon-btn small"
+                  type="button"
+                  title="清屏 (Ctrl/Cmd+L)"
+                  :disabled="!task.output"
+                  @click="clearActiveOutput"
+                  v-html="icons.trash"
+                />
+                <button
+                  v-if="!interactive"
+                  class="icon-btn small"
+                  type="button"
+                  title="重新填入命令"
+                  @click="rerun(task)"
+                  v-html="icons.refresh"
+                />
+              </template>
               <button class="icon-btn small" type="button" title="在文件管理器中打开任务目录" @click="revealCwd(task.cwd)" v-html="icons.reveal" />
             </div>
           </div>
           <div class="terminal-stage">
+            <div v-show="pty" class="terminal-pty-screens">
+              <PtyTerminal
+                v-for="item in ptyTasks"
+                v-show="item.id === task.id"
+                :key="item.id"
+                :ref="(screen) => setPtyScreen(item.id, screen)"
+                :task="item"
+                :active="state.enabled && state.open && item.id === task.id"
+                @selection="onPtySelection(item.id, $event)"
+                @copied="markCopied"
+                @size="ptySize = $event"
+              />
+            </div>
             <div
+              v-if="!pty"
               ref="outputEl"
               class="terminal-output-scroll"
               :class="{ 'is-nowrap': !wrap }"
@@ -535,18 +651,18 @@ onMounted(() => {
               <div class="terminal-command-line">
                 <span class="terminal-command-prompt" aria-hidden="true">❯</span>
                 <span class="terminal-command-text" :title="task.interactive ? `${task.shell} · ${task.cwd}` : task.command">
-                  {{ task.interactive ? "交互式会话" : task.command }}
+                  {{ task.interactive ? (task.pty ? "终端" : "交互式会话") : task.command }}
                 </span>
                 <span class="terminal-command-meta">{{ task.shell }} · {{ task.cwd }}</span>
               </div>
               <div v-if="!task.output" class="terminal-output-placeholder">
-                {{ isRunning ? (interactive ? "会话已启动，输入命令或 SQL 开始…" : "等待命令输出…") : "这个任务没有输出。" }}
+                {{ isRunning ? (task.interactive ? "会话已启动，输入命令开始…" : "等待命令输出…") : "这个任务没有输出。" }}
                 <span v-if="isRunning" class="terminal-cursor" aria-hidden="true" />
               </div>
               <pre v-else class="terminal-output-text" :class="{ 'is-running': isRunning }" v-html="outputHtml" />
               <div v-if="task.truncated" class="terminal-output-truncated">输出过长，仅保留最近部分内容。</div>
             </div>
-            <button v-if="!stick" class="terminal-jump" type="button" @click="scrollLatest(true)">
+            <button v-if="!pty && !stick" class="terminal-jump" type="button" @click="scrollLatest(true)">
               回到最新
               <span aria-hidden="true">↓</span>
             </button>
@@ -561,20 +677,22 @@ onMounted(() => {
             </span>
             <div class="terminal-empty-copy">
               <strong>后台终端</strong>
-              <p v-if="terminal.available">一次性命令在后台运行；需要连续输入时可新建交互会话（mysql / python 等）。</p>
+              <p v-if="terminal.available">
+                一次性命令在后台运行；新建终端后可使用 Claude Code、Codex、Pi、vim 等全屏交互程序。
+              </p>
               <p v-else>终端功能仅在桌面端可用。</p>
             </div>
             <div v-if="terminal.available" class="terminal-empty-actions">
               <span class="terminal-empty-badge">本地运行</span>
               <button
-                v-if="terminal.supportsShell"
+                v-if="canStartTerminal"
                 class="terminal-empty-start"
                 type="button"
                 :disabled="state.starting"
-                @click="startShell"
+                @click="startTerminal"
               >
                 <span v-html="icons.terminal" />
-                新建交互会话
+                {{ startLabel }}
               </button>
             </div>
           </div>
@@ -610,7 +728,40 @@ onMounted(() => {
       </section>
     </div>
 
-    <footer class="terminal-composer">
+    <footer v-if="pty" class="terminal-pty-footer">
+      <div class="terminal-pty-meta" :title="task?.shellPath">
+        <span class="terminal-pty-shell">{{ task?.shell }}</span>
+        <span class="terminal-pty-divider" aria-hidden="true">·</span>
+        <span class="terminal-status-dot" :data-status="task?.status" />
+        <span class="terminal-output-state">{{ statusLabel }}</span>
+        <span class="terminal-pty-divider" aria-hidden="true">·</span>
+        <button
+          class="terminal-cwd"
+          type="button"
+          :title="composerCwd ? `在文件管理器中打开 ${composerCwd}` : '未打开项目'"
+          @click="revealCwd(composerCwd)"
+        >
+          <span class="terminal-cwd-icon" v-html="icons.folder" />
+          {{ composerCwdLabel }}
+        </button>
+      </div>
+      <div class="terminal-pty-actions">
+        <span class="terminal-pty-hint">
+          {{ ptyRunning ? "Ctrl+C 中断 · Ctrl+Shift+C/V 复制/粘贴 · 点击终端输入" : "终端已结束" }}
+        </span>
+        <button
+          v-if="!ptyRunning"
+          class="terminal-run-btn"
+          type="button"
+          :disabled="state.starting"
+          @click="startTerminal"
+        >
+          {{ state.starting ? "启动中…" : "新建终端" }}
+        </button>
+      </div>
+    </footer>
+
+    <footer v-else class="terminal-composer">
       <div class="terminal-input-row">
         <span class="terminal-prompt" aria-hidden="true">❯</span>
         <input

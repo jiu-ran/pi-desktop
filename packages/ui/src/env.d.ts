@@ -314,6 +314,26 @@ export interface TerminalTaskInfo {
   signal?: string | null;
   /** 交互式会话会保持 stdin 打开，支持逐行发送输入。 */
   interactive?: boolean;
+  /** 使用真实伪终端（PTY）承载全屏 TUI 与终端级信号。 */
+  pty?: boolean;
+  cols?: number;
+  rows?: number;
+  profileId?: string;
+  shellPath?: string;
+}
+
+export interface TerminalShellProfile {
+  id: string;
+  label: string;
+  file: string;
+  args: string[];
+  source: "system" | "detected" | "custom";
+}
+
+export interface TerminalPtyOptions {
+  profileId?: string;
+  customPath?: string;
+  customArgs?: string[];
 }
 
 export interface TerminalTaskSnapshot extends TerminalTaskInfo {
@@ -399,9 +419,18 @@ export interface PiDesktopBridge {
   skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
-  startTerminal: (cwd: string, command: string) => Promise<TerminalTaskInfo>;
+  startTerminal: (cwd: string, command: string, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;
+  /** 启动真实 PTY 终端（全屏 TUI、Ctrl+C 等）；cols/rows 为初始尺寸。 */
+  startTerminalPty: (cwd: string, cols?: number, rows?: number, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;
+  terminalProfiles: () => Promise<TerminalShellProfile[]>;
+  chooseTerminalExecutable: () => Promise<string | null>;
+  validateTerminalProfile: (options: TerminalPtyOptions) => Promise<TerminalShellProfile>;
   startTerminalShell: (cwd: string) => Promise<TerminalTaskInfo>;
   writeTerminal: (id: string, input: string) => Promise<boolean>;
+  writeTerminalPty: (id: string, data: string, binary?: boolean) => Promise<boolean>;
+  resizeTerminalPty: (id: string, cols: number, rows: number) => Promise<boolean>;
+  /** PTY 聚焦时禁止 Electron 菜单快捷键吞掉 Ctrl+W / Ctrl+R 等终端按键。 */
+  setTerminalFocus: (focused: boolean) => Promise<boolean>;
   stopTerminal: (id: string) => Promise<boolean>;
   terminalTasks: () => Promise<TerminalTaskSnapshot[]>;
   onTerminalEvent: (listener: (payload: TerminalEvent) => void) => () => void;

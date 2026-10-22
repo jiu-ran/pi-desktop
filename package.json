@@ -19,7 +19,7 @@
     "build:ui": "npm run build --prefix packages/ui",
     "build": "npm run build:electron && npm run build:ui",
     "dist": "npm run build && npx --yes electron-builder",
-    "check": "tsc --noEmit && npm run typecheck --prefix packages/ui && node scripts/checks/transcript.check.ts && node scripts/checks/mention.check.ts && node scripts/checks/diff.check.ts && node scripts/checks/event-bus.check.ts && node scripts/checks/stage.check.ts && node scripts/checks/plugin-lifecycle.check.ts && node scripts/checks/host.check.ts && node scripts/checks/history.check.ts && node scripts/checks/delete.check.ts && node scripts/checks/attachments.check.ts && node scripts/checks/files.check.ts && node scripts/checks/notify-text.check.ts && node scripts/checks/terminal-text.check.ts && node scripts/checks/terminal.check.ts && node scripts/checks/git.check.ts && node scripts/checks/stats.check.ts && node scripts/checks/activity.check.ts && node scripts/checks/review.check.ts && node scripts/checks/recent-files.check.ts && node scripts/checks/project-path.check.ts && node scripts/checks/mermaid-fit.check.ts && node scripts/checks/product-boundary.check.ts",
+    "check": "tsc --noEmit && npm run typecheck --prefix packages/ui && node scripts/checks/transcript.check.ts && node scripts/checks/mention.check.ts && node scripts/checks/diff.check.ts && node scripts/checks/event-bus.check.ts && node scripts/checks/stage.check.ts && node scripts/checks/plugin-lifecycle.check.ts && node scripts/checks/host.check.ts && node scripts/checks/history.check.ts && node scripts/checks/delete.check.ts && node scripts/checks/attachments.check.ts && node scripts/checks/files.check.ts && node scripts/checks/notify-text.check.ts && node scripts/checks/terminal-text.check.ts && node scripts/checks/terminal-wheel.check.ts && node scripts/checks/terminal.check.ts && node scripts/checks/git.check.ts && node scripts/checks/stats.check.ts && node scripts/checks/activity.check.ts && node scripts/checks/review.check.ts && node scripts/checks/recent-files.check.ts && node scripts/checks/project-path.check.ts && node scripts/checks/mermaid-fit.check.ts && node scripts/checks/product-boundary.check.ts",
     "check:smoke": "npm run build && electron scripts/checks/smoke.electron.mjs"
   },
   "build": {
@@ -36,6 +36,7 @@
     "asarUnpack": [
       "node_modules/**/*"
     ],
+    "npmRebuild": false,
     "win": {
       "icon": "build/icon.ico",
       "target": [
@@ -67,7 +68,8 @@
     }
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.2.0"
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "node-pty": "1.1.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
@@ -77,6 +79,7 @@
     "wait-on": "^8.0.3"
   },
   "allowScripts": {
-    "electron@35.7.5": true
+    "electron@35.7.5": true,
+    "node-pty@1.1.0": true
   }
 }

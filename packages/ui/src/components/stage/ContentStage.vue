@@ -119,11 +119,13 @@ function scrollTabs(event: WheelEvent): void {
   event.preventDefault();
 }
 
-/** 编辑器内接管 Ctrl+W / Ctrl+Tab；聊天输入框里只吞掉 Ctrl+W，避免 Electron 关掉整个窗口。 */
+/** 编辑器内接管 Ctrl+W / Ctrl+Tab；PTY 按键原样交给终端，其余输入框吞掉 Ctrl+W 防止误关窗口。 */
 function onStageKey(event: KeyboardEvent): void {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || (event.shiftKey && event.key !== "Tab")) return;
   if (!stage.tabs.length) return;
   const target = event.target;
+  // PTY 的 Ctrl+W 是 shell 的删除单词；Electron 菜单由终端聚焦桥禁用。
+  if (target instanceof HTMLElement && target.closest(".terminal-xterm")) return;
   const inStage = target instanceof HTMLElement && Boolean(target.closest(".area-stage"));
   if (event.key === "w" || event.key === "W") {
     event.preventDefault();
