@@ -51,7 +51,7 @@ const images = computed(() => props.block.imageItems ?? []);
 </script>
 
 <template>
-  <ToolCard :block="block" :verb="verb" :subtitle="subtitle" :badge="mcp ? `MCP · ${mcp.server}` : ''">
+  <ToolCard :block="block" :verb="verb" :subtitle="subtitle" :badge="mcp ? `MCP · ${mcp.server}` : ''" :query="query">
     <div v-if="argsText" class="tool-section">
       <span class="tool-section-label">参数</span>
       <pre class="term-out"><SearchHighlight :text="argsText" :query="query" /></pre>

@@ -20,6 +20,10 @@
   - `packages/ui/src/components/chat/messages/NoticeBlock.vue`、`packages/ui/src/kernel/transcript.ts`：
     自动重试与上下文压缩的状态卡片，参考 `apps/web/src/chat` 中 `RetryIndicator` / `CompactionTurn` 的状态划分与
     `tokensBefore → tokensAfter` 展示方式。
+  - `packages/ui/src/shared/activity.ts`、`packages/ui/src/components/chat/ActivityGroup.vue`、`AgentChat.vue`：
+    连续思考 / 常规工具调用的活动分组、折叠头摘要与展开状态，参考 `apps/web/src/chat/ActivityGroup.tsx`、
+    `activityBreadcrumbs.tsx` 的分组与吸顶思路；本项目改为纯函数 `deriveActivityItems` + Vue 组件，
+    并保留主要工具（编辑 / 写入 / 需要用户回答）为独立卡片。
   - `electron/pi-host.ts`、`packages/ui/src/plugins/git/GitPanel.vue`：`git worktree` 隔离工作区的分支命名、
     去重与「主工作区 / 外部工作区 / 托管工作区」边界，参考 `packages/server/src/workspaces/workspaces.ts`；
     本项目按 Electron 主进程 / 渲染进程边界重新实现，未复用其持久化与子 Agent 逻辑。

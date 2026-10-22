@@ -43,7 +43,7 @@ function openInEditor(): void {
 </script>
 
 <template>
-  <ToolCard :block="block" :verb="block.status === 'running' ? '正在读取' : '读取'" :subtitle="baseName(path)" :meta="range">
+  <ToolCard :block="block" :verb="block.status === 'running' ? '正在读取' : '读取'" :subtitle="baseName(path)" :meta="range" :query="query">
     <div class="diff-file clickable" :title="`在代码编辑器中打开 ${path}`" @click="openInEditor">{{ path }}</div>
     <ToolImages v-if="images.length" :items="images" />
     <pre v-if="preview" class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="preview" :query="query" /></pre>

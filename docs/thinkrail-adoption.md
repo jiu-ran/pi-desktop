@@ -19,6 +19,7 @@
 | 技能调用卡片 | `skillInvocation.ts` + 折叠卡片 | `shared/skill-invocation.ts` 解析，`UserMessage.vue` 渲染技能名与可展开正文 |
 | 自动重试 / 压缩卡片 | `RetryIndicator.tsx` / `CompactionTurn.tsx` | `NoticeBlock.vue` 按 `retry` / `compaction` 渲染状态图标、延迟条与可展开摘要；事件归并放在 `kernel/transcript.ts` |
 | 隔离工作区 | `packages/server/src/workspaces` | `PiHost` 用 `git worktree` 创建 `pi/<任务名>` 分支，`GitPanel.vue` 管理主 / 隔离 / 外部工作区 |
+| 活动分组与吸顶头 | `ActivityGroup.tsx` / `activityBreadcrumbs.tsx` | 连续 4 步以上思考 / 常规工具折叠成活动组（单组最多 20 步，超长工具链自动拆分）；折叠头显示工具与思考数量、动作摘要、运行中 / 失败状态，并在组内吸顶。编辑 / 写入 / 需要用户回答的工具保持独立。纯逻辑在 `shared/activity.ts`，断言在 `activity.check.ts` |
 
 ## 隔离工作区的实现边界
 
@@ -34,8 +35,7 @@
 
 1. **转录虚拟滚动**：长会话只挂载可视区附近的行，配合上游的 `rowHeightEstimates` /
    `scrollGeometry` 纯函数思路；当前分页上限 240 条，先做基准测试再决定是否引入。
-2. **轮次分组与活动面包屑**：把 assistant 的多次工具往返折叠成一轮，滚动时在顶部固定当前活动；
-   上游的 `deriveRows` / `activityBreadcrumbs` 可作为算法参考。
+2. **轮次分组与全局活动面包屑**：活动组已支持组内吸顶；下一步可按 user 轮次分组，并在滚动时于对话区顶部固定「当前轮次 / 当前活动」的全局面包屑。上游的 `deriveRows` / `activityBreadcrumbs` 可作为算法参考。
 3. **评审评论**：在 diff 上添加行内评论并以结构化上下文发送给 Agent（需要新增会话消息格式）。
 4. **后台任务资源面板**：集中展示后台 bash、子 Agent、MCP 调用及其输出。
 5. **编辑器体验**：标签溢出菜单、分屏编辑、行内 Git blame；上游的 workbench 布局可参考。

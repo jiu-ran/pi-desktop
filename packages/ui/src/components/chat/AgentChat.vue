@@ -6,6 +6,9 @@ import { collectChanges } from "../../shared/diff.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
+import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
+import { searchableText } from "../../shared/search-text.ts";
+import ActivityGroup from "./ActivityGroup.vue";
 import BlockView from "./BlockView.vue";
 import Composer from "./Composer.vue";
 import WelcomeView from "./WelcomeView.vue";
@@ -18,6 +21,9 @@ const stick = ref(true);
 const searchOpen = ref(false);
 const searchQuery = ref("");
 const searchIndex = ref(0);
+let searchFocusToken = 0;
+/** 用户手动展开/收起活动组的覆盖状态；未设置时默认折叠，搜索命中的组强制展开。 */
+const activityOverrides = ref<Record<string, boolean>>({});
 let scrollFrame = 0;
 let scrollForce = false;
 let ignoreScroll = false;
@@ -107,6 +113,7 @@ watch(
   () => ws.value?.sessionFile,
   () => {
     seenBlocks.value = ws.value?.blocks.length ?? 0;
+    activityOverrides.value = {};
   },
   { immediate: true },
 );
@@ -447,9 +454,7 @@ function openChangesPanel(): void {
   workbench.state.activePanelId = "git";
 }
 
-function blockText(block: any): string {
-  return [block.text, block.output, block.name, block.args ? JSON.stringify(block.args) : ""].filter(Boolean).join("\n");
-}
+const blockText = searchableText;
 
 const outline = computed(() => (ws.value?.blocks ?? [])
   .filter((block) => block.kind === "user" && block.text?.trim())
@@ -458,6 +463,9 @@ const outline = computed(() => (ws.value?.blocks ?? [])
 const copyTextByIndex = computed(() =>
   buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
 );
+
+// 连续的工具 / 思考折叠成活动组；搜索命中时自动展开，错误组只用红色徽标提示。
+const activityItems = computed(() => deriveActivityItems(ws.value?.blocks ?? []));
 
 function openOutline(id: string): void {
   scroller.value?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });
@@ -468,6 +476,29 @@ const searchMatches = computed(() => {
   if (!query) return [];
   return (ws.value?.blocks ?? []).filter((block: any) => blockText(block).toLowerCase().includes(query));
 });
+
+function groupHasSearchHit(group: ActivityGroupModel): boolean {
+  // 只展开当前命中所在的组，避免一次搜索把整页几十个活动组全部撑开。
+  const current = searchMatches.value[searchIndex.value];
+  return Boolean(current && group.entries.some((entry) => entry.block.id === current.id));
+}
+
+function activityOpen(group: ActivityGroupModel): boolean {
+  // 搜索命中优先于手动折叠，保证上一个 / 下一个命中总能滚到目标块。
+  if (groupHasSearchHit(group)) return true;
+  const override = activityOverrides.value[group.id];
+  if (override !== undefined) return override;
+  // 错误组默认也保持折叠，只在折叠头用红色「失败」提示，避免一次展开几十个工具。
+  return false;
+}
+
+function toggleActivity(group: ActivityGroupModel): void {
+  if (groupHasSearchHit(group)) return;
+  activityOverrides.value = {
+    ...activityOverrides.value,
+    [group.id]: !activityOpen(group),
+  };
+}
 
 function toggleSearch(): void {
   searchOpen.value = !searchOpen.value;
@@ -487,14 +518,24 @@ function moveSearch(direction: number): void {
 function focusSearchMatch(): void {
   const block = searchMatches.value[searchIndex.value] as { id?: string } | undefined;
   if (!block?.id) return;
+  const token = ++searchFocusToken;
   void nextTick(() => {
-    const container = scroller.value?.querySelector(`[data-block-id="${CSS.escape(block.id!)}"]`);
-    const mark = container?.querySelector("mark.search-mark");
-    (mark ?? container)?.scrollIntoView({ block: "center" });
+    if (token !== searchFocusToken) return;
+    const focus = () => {
+      const container = scroller.value?.querySelector(`[data-block-id="${CSS.escape(block.id!)}"]`);
+      const mark = container?.querySelector("mark.search-mark");
+      (mark ?? container)?.scrollIntoView({ block: "center" });
+    };
+    focus();
+    // 命中项在折叠组 / 折叠的工具卡里时，展开动作可能晚一帧才挂载 mark。
+    window.setTimeout(() => {
+      if (token === searchFocusToken) focus();
+    }, 80);
   });
 }
 
 watch(searchMatches, () => {
+  searchFocusToken += 1;
   searchIndex.value = 0;
   focusSearchMatch();
 });
@@ -560,19 +601,42 @@ watch(searchMatches, () => {
           </div>
 
           <template v-else>
-            <div
-              v-for="(block, index) in ws.blocks"
-              :key="block.id"
-              :data-block-id="block.id"
-              :class="{ 'search-hit': searchMatches[searchIndex]?.id === block.id, 'history-enter': historyEnterIds.has(block.id) }"
-            >
-              <BlockView
-                :block="block"
-                :query="searchQuery"
-                :copy-text="copyTextByIndex.get(index) ?? ''"
-                :collapse-long="index < ws.blocks.length - 1"
-              />
-            </div>
+            <template v-for="item in activityItems" :key="item.kind === 'block' ? item.block.id : item.group.id">
+              <div
+                v-if="item.kind === 'block'"
+                :data-block-id="item.block.id"
+                :class="{ 'search-hit': searchMatches[searchIndex]?.id === item.block.id, 'history-enter': historyEnterIds.has(item.block.id) }"
+              >
+                <BlockView
+                  :block="item.block"
+                  :query="searchQuery"
+                  :copy-text="copyTextByIndex.get(item.index) ?? ''"
+                  :collapse-long="item.index < ws.blocks.length - 1"
+                />
+              </div>
+              <ActivityGroup
+                v-else
+                :group="item.group"
+                :expanded="activityOpen(item.group)"
+                :search-hit="groupHasSearchHit(item.group)"
+                :class="{ 'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)) }"
+                @toggle="toggleActivity(item.group)"
+              >
+                <div
+                  v-for="entry in item.group.entries"
+                  :key="entry.block.id"
+                  :data-block-id="entry.block.id"
+                  :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
+                >
+                  <BlockView
+                    :block="entry.block"
+                    :query="searchQuery"
+                    :copy-text="''"
+                    :collapse-long="false"
+                  />
+                </div>
+              </ActivityGroup>
+            </template>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">
               <span class="mini-spinner" />思考中…
             </div>
