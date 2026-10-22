@@ -2160,6 +2160,16 @@ html[data-density="compact"] .tool-card {
 .palette-item .palette-hint {
   margin-left: auto;
 }
+/* 快速打开文件：复用命令面板外壳，列表里额外显示文件所在目录与“最近”标记 */
+.quick-open .palette-list { max-height: min(52vh, 440px); padding: 5px; }
+.quick-open-state { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; color: var(--fg-3); font-size: 12.5px; }
+.quick-open-item { gap: 9px; }
+.quick-open-icon { display: grid; flex: none; color: var(--fg-3); }
+.quick-open-name { flex: none; max-width: 46%; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.quick-open-path { flex: 1; min-width: 0; overflow: hidden; color: var(--fg-3); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.quick-open-tag { flex: none; padding: 1px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+.quick-open-foot { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 11px; }
+.quick-open-foot kbd { padding: 1px 4px; border: 1px solid var(--line-2); border-radius: 3px; background: var(--bg); color: var(--fg-2); font: 10px var(--mono); }
 .dialog {
   width: min(480px, 92vw);
   padding: 16px;

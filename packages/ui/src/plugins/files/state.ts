@@ -1,4 +1,5 @@
 import { baseName } from "../../shared/util.ts";
+import { rememberRecentFile } from "../../shared/recent-files.ts";
 import type { StageController } from "../../kernel/stage.ts";
 import type { Workbench } from "../../kernel/workbench.ts";
 import type { EventBus } from "../../kernel/event-bus.ts";
@@ -47,6 +48,7 @@ export async function openFileInStage(
   const existing = stage.findTab<FileStageData>("files", relative);
   if (existing && !existing.data.error && !existing.data.loading) {
     stage.activate(existing.key);
+    rememberRecentFile(cwd, relative);
     return;
   }
 
@@ -81,6 +83,7 @@ export async function openFileInStage(
     tab.title = detail.name || name;
     tab.subtitle = detail.relative || relative;
     tab.dirty = false;
+    rememberRecentFile(cwd, relative);
     tab.data = {
       path: detail.path,
       relative: detail.relative,

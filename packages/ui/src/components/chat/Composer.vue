@@ -505,6 +505,12 @@ function autosize(): void {
 watch(draft, () => nextTick(autosize));
 
 function focus(): void {
+  // 会话加载完成、附件添加等异步回调会再次聚焦输入框；
+  // 如果用户已经在快速打开 / 搜索 / 设置等输入框里，不能把焦点抢回来。
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== input.value) {
+    if (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return;
+  }
   input.value?.focus();
 }
 

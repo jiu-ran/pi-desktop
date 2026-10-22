@@ -9,6 +9,7 @@ import ContentStage from "../components/stage/ContentStage.vue";
 import RightPanel from "../components/panel/RightPanel.vue";
 import ActivityBar from "../components/panel/ActivityBar.vue";
 import CommandPalette from "../components/overlays/CommandPalette.vue";
+import QuickOpen from "../components/overlays/QuickOpen.vue";
 import SettingsModal from "../components/overlays/SettingsModal.vue";
 import ExtensionDialog from "../components/overlays/ExtensionDialog.vue";
 import Toasts from "../components/overlays/Toasts.vue";
@@ -409,6 +410,7 @@ onBeforeUnmount(() => {
 
     <TaskOverlays />
     <CommandPalette />
+    <QuickOpen />
     <SettingsModal />
     <ExtensionDialog />
     <Toasts />

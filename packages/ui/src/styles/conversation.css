@@ -768,6 +768,81 @@
 }
 .diff-body { display: inline-block; min-width: 100%; vertical-align: top; }
 .diff-row { display: flex; align-items: center; width: 100%; min-height: 22px; }
+/* 评审：行左侧留出固定宽度的 + 按钮，悬停时才显现，避免代码行左右跳动 */
+.diff-comment-gutter { display: flex; flex: none; align-items: center; justify-content: center; width: 18px; align-self: stretch; }
+.diff-comment-add {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--accent);
+  font: 13px/1 var(--sans);
+  opacity: 0;
+  cursor: pointer;
+}
+.diff-row:hover .diff-comment-add, .diff-comment-add:focus-visible { opacity: 1; }
+.diff-comment-add:hover { border-color: var(--accent); background: var(--accent-soft); }
+.diff-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px 6px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  color: var(--fg);
+  font: 12px/1.5 var(--sans);
+}
+.diff-comment-label {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+}
+.diff-comment-body { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.diff-comment-remove {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.diff-comment-remove:hover { background: var(--del-bg); color: var(--del-fg); }
+.diff-comment-composer {
+  width: 100%;
+  padding: 8px 10px 8px 18px;
+  border-top: 1px solid var(--line-2);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--bg-1);
+}
+.diff-comment-composer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.5 var(--sans);
+  resize: vertical;
+}
+.diff-comment-composer textarea:focus { border-color: var(--accent); }
+.diff-comment-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--fg-3); font-size: 11px; }
+.diff-comment-actions > span { margin-right: auto; }
 .diff-row[data-type="ctx"] { background: var(--bg); }
 .diff-num { flex: none; width: 44px; padding-right: 8px; color: var(--fg-3); text-align: right; user-select: none; }
 .diff-sign { flex: none; width: 16px; color: var(--fg-3); text-align: center; user-select: none; }
