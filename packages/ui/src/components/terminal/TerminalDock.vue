@@ -176,6 +176,7 @@ async function startShell(): Promise<void> {
 function clearActiveOutput(): void {
   if (!task.value) return;
   terminal.clearOutput(task.value.id);
+  if (secret.value) state.input = "";
   secret.value = false;
   scrollLatest(true);
 }
@@ -326,6 +327,7 @@ watch(
 watch(
   () => task.value?.id,
   () => {
+    if (secret.value) state.input = "";
     secret.value = false;
     stick.value = true;
     void nextTick(() => {
@@ -335,7 +337,10 @@ watch(
   },
 );
 watch(interactiveRunning, (running) => {
-  if (!running) secret.value = false;
+  if (!running) {
+    if (secret.value) state.input = "";
+    secret.value = false;
+  }
 });
 watch(
   () => state.open,
