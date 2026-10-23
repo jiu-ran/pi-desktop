@@ -1,6 +1,8 @@
+// 隔离工作区的分支命名与托管边界参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath } from "node:fs/promises";
+import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,8 @@ import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, S
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
 import { firstUserTitle, sessionTitleFromText } from "./session-title.ts";
+import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
+import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +56,8 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  /** 文件内容版本，用于阻止覆盖 Agent / 外部编辑器的修改。 */
+  revision?: string;
   /** 图片等二进制文件的预览内容（data URL） */
   preview?: { mimeType: string; dataUrl: string };
   /** 非文本文件：只读，不能保存 */
@@ -104,7 +110,7 @@ export interface GitOverview {
   userEmail: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
 
 export interface GitActionPayload {
   /** 仓库内相对路径列表 */
@@ -113,6 +119,9 @@ export interface GitActionPayload {
   all?: boolean;
   /** 提交信息 */
   message?: string;
+  branch?: string;
+  localName?: string;
+  startPoint?: string;
 }
 
 export interface GitActionResult {
@@ -122,7 +131,7 @@ export interface GitActionResult {
 }
 
 export interface GitInspectResult {
-  kind: "commit" | "working";
+  kind: "commit" | "working" | "staged" | "unstaged";
   target: string;
   title: string;
   subtitle: string;
@@ -229,6 +238,36 @@ export interface PiSkillsOverview {
 export interface PiHostOptions {
   emit: (payload: { cwd: string; sessionFile?: string; event: any }) => void;
   trash?: (file: string) => Promise<any>;
+  /** Pi Desktop 托管的隔离工作区根目录 */
+  worktreeRoot?: string;
+}
+
+export interface GitWorktree {
+  path: string;
+  branch: string;
+  head: string;
+  detached: boolean;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** Git 的主工作区（仓库根目录） */
+  primary: boolean;
+  /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
+  managed: boolean;
+  exists: boolean;
+}
+
+export interface GitWorktreeCreateResult {
+  ok: true;
+  message: string;
+  worktree: GitWorktree;
+}
+
+export interface GitWorktreeRemoveResult {
+  ok: true;
+  message: string;
+  branch: string;
+  path: string;
 }
 
 export interface WorkerSlot {
@@ -353,7 +392,7 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   ".avif": "image/avif",
 };
 
-const TEXT_PREVIEW_MAX = 2 * 1024 * 1024;
+const TEXT_PREVIEW_MAX = 20 * 1024 * 1024;
 const IMAGE_PREVIEW_MAX = 20 * 1024 * 1024;
 
 function sniffImageMime(head: Buffer): string | null {
@@ -381,7 +420,26 @@ async function readFileHead(target: string, length = 16): Promise<Buffer> {
 /** 二进制文件：含 NUL 字节或无法按 UTF-8 解码 */
 function looksBinary(buffer: Buffer): boolean {
   const head = buffer.subarray(0, 8192);
-  return head.includes(0) || head.toString("utf8").includes("\uFFFD");
+  if (head.includes(0)) return true;
+  // 文件比探测窗口长时，窗口末尾可能正好截断一个多字节字符。
+  // Buffer.toString("utf8") 会把截断产生的 U+FFFD 当成非法字节，
+  // 导致中文 Markdown / 代码在 8 KB 边界被误判为二进制。先退回完整字符边界再严格解码。
+  let end = head.length;
+  if (buffer.length > head.length) {
+    let lead = end - 1;
+    while (lead >= 0 && end - lead <= 4 && (head[lead] & 0xc0) === 0x80) lead -= 1;
+    if (lead >= 0) {
+      const byte = head[lead];
+      const expected = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+      if (lead + expected > end) end = lead;
+    }
+  }
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(0, end));
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function workspaceFilePath(cwd: string, requested: string): { root: string; target: string; external: boolean } {
@@ -554,18 +612,76 @@ function samePath(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
+/** 判断 child 是否严格位于 parent 目录内（不含 parent 自身）。 */
+function pathWithin(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/** 把用户输入的任务名变成可用的分支名 / 目录名。 */
+function worktreeSlug(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+    .replace(/\.{2,}/g, "-")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.lock$/i, "")
+    .slice(0, 40)
+    .replace(/^[._-]+|[._-]+$/g, "");
+}
+
+function parseWorktreeList(stdout: string): Array<Omit<GitWorktree, "primary" | "managed" | "exists">> {
+  const items: Array<Omit<GitWorktree, "primary" | "managed" | "exists">> = [];
+  let current: Omit<GitWorktree, "primary" | "managed" | "exists"> | null = null;
+  const flush = () => {
+    if (current) items.push(current);
+    current = null;
+  };
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) {
+      flush();
+      current = {
+        path: path.resolve(line.slice("worktree ".length)),
+        branch: "",
+        head: "",
+        detached: false,
+        bare: false,
+        locked: false,
+        prunable: false,
+      };
+    } else if (!current) {
+      continue;
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length).trim();
+    } else if (line.startsWith("branch refs/heads/")) {
+      current.branch = line.slice("branch refs/heads/".length).trim();
+    } else if (line === "detached") {
+      current.detached = true;
+    } else if (line === "bare") {
+      current.bare = true;
+    } else if (line.startsWith("locked")) {
+      current.locked = true;
+    } else if (line.startsWith("prunable")) {
+      current.prunable = true;
+    }
+  }
+  flush();
+  return items;
+}
+
 /** 解析 `git status --porcelain=v1` 输出。 */
 function parseGitStatus(stdout: string): GitStatusFile[] {
   const files: GitStatusFile[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
+  const entries = stdout.split("\0");
+  for (let n = 0; n < entries.length; n++) {
+    const line = entries[n];
+    if (!line) continue;
     const index = line[0] ?? " ";
     const worktree = line[1] ?? " ";
-    let target = line.slice(3).trim();
-    // 重命名/复制："R  old -> new"，取新路径
-    const arrow = target.indexOf(" -> ");
-    if (arrow >= 0) target = target.slice(arrow + 4);
-    target = target.replace(/^"(.*)"$/, "$1");
+    const target = line.slice(3);
+    // -z 模式不引用 / 转义路径，重命名先输出新路径，再输出旧路径。
+    if (index === "R" || index === "C" || worktree === "R" || worktree === "C") n++;
     if (!target) continue;
     files.push({
       code: `${index}${worktree}`.trim() || "M",
@@ -674,16 +790,18 @@ export class PiHost {
   clients: Map<string, WorkspaceClientPool>;
   starting: Map<string, Promise<void>>;
   maxIdleWorkers: number;
+  worktreeRoot: string;
   private authorizedAttachmentPaths = new Set<string>();
   private authorizedWorkspaces = new Map<string, string>();
   private closing = false;
 
-  constructor({ emit, trash }: PiHostOptions) {
+  constructor({ emit, trash, worktreeRoot }: PiHostOptions) {
     this.emit = emit;
     this.trash = trash ?? ((file: string) => unlink(file));
     this.clients = new Map();
     this.starting = new Map();
     this.maxIdleWorkers = 3;
+    this.worktreeRoot = path.resolve(worktreeRoot ?? path.join(homedir(), ".pi-desktop", "worktrees"));
   }
 
   private workspaceKey(cwd: string): string {
@@ -981,34 +1099,41 @@ export class PiHost {
       };
     }
 
-    if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 2 MB，暂不支持在桌面端预览");
+    if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持在桌面端预览，可使用系统程序打开");
     const buffer = await readFile(target);
     if (looksBinary(buffer)) return { ...pathInfo, content: "", binary: true };
-    return { ...pathInfo, content: buffer.toString("utf8") };
+    return { ...pathInfo, content: buffer.toString("utf8"), revision: createHash("sha256").update(buffer).digest("hex") };
   }
 
-  async writeWorkspaceFile(cwd: string, relative: string, content: string): Promise<WorkspaceFileData> {
+  async writeWorkspaceFile(cwd: string, relative: string, content: string, expectedRevision?: string): Promise<WorkspaceFileData> {
     const resolved = workspaceFilePath(cwd, relative);
-    await assertReadableFilePath(cwd, resolved.target, resolved.external);
     const { root, target } = resolved;
     if (typeof content !== "string") throw new Error("文件内容必须是文本");
-    if (Buffer.byteLength(content, "utf8") > 20 * 1024 * 1024) throw new Error("文件超过 20 MB，暂不支持保存");
-    const info = await lstat(target).catch(() => null);
-    if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法修改");
-    const head = await readFileHead(target);
-    if (sniffImageMime(head) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()]) {
-      throw new Error("图片等二进制文件不支持在文本编辑器中保存");
-    }
-    await writeFile(target, content, "utf8");
-    return {
-      path: target,
-      relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
-      name: path.basename(target),
-      content,
-      size: Buffer.byteLength(content, "utf8"),
-    };
+    if (Buffer.byteLength(content, "utf8") > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持保存");
+    return withFileWrite(target, async () => {
+      await assertReadableFilePath(cwd, target, resolved.external);
+      const info = await lstat(target).catch(() => null);
+      if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法修改");
+      if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持保存");
+      const previous = await readFile(target);
+      if ((sniffImageMime(previous) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()]) || looksBinary(previous)) {
+        throw new Error("图片等二进制文件不支持在文本编辑器中保存");
+      }
+      const revision = createHash("sha256").update(previous).digest("hex");
+      if (expectedRevision !== undefined && revision !== expectedRevision) {
+        throw new Error("文件已被外部程序或 Agent 修改，已阻止覆盖；请保留草稿并重新读取后合并修改");
+      }
+      await atomicWriteText(target, content);
+      return {
+        path: target,
+        relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
+        name: path.basename(target),
+        content,
+        size: Buffer.byteLength(content, "utf8"),
+        revision: createHash("sha256").update(content, "utf8").digest("hex"),
+      };
+    });
   }
-
   async openWorkspacePath(cwd: string, relative: string): Promise<string> {
     const resolved = workspaceFilePath(cwd, relative);
     await assertReadableFilePath(cwd, resolved.target, resolved.external);
@@ -1108,7 +1233,7 @@ export class PiHost {
     }
 
     const [statusOut, logOut, headOut, symbolicOut, upstreamOut, remoteOut, userName, userEmail] = await Promise.all([
-      gitProbe(root, ["status", "--porcelain=v1", "-uall"]),
+      gitProbe(root, ["status", "--porcelain=v1", "-z", "-uall"]),
       gitProbe(root, [
         "log",
         "--graph",
@@ -1178,11 +1303,23 @@ export class PiHost {
     };
   }
 
+  async gitBranches(cwd: string): Promise<GitBranch[]> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    return root ? listGitBranches(root) : [];
+  }
+
   /**
    * 执行 Git 写操作。所有路径参数都会被重新校验为仓库内相对路径，
    * 且只有仓库根目录就是当前项目目录时才允许写入。
    */
   async gitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
+    // 同一工作区的 Git 写入串行，避免切换 / 暂存 / 提交竞争索引锁。
+    return withFileWrite(path.join(path.resolve(cwd), ".git-pi-operation"), () => this.performGitAction(cwd, action, payload));
+  }
+
+  private async performGitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
     const workspace = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, workspace);
     const name = String(action ?? "") as GitActionName;
@@ -1208,6 +1345,16 @@ export class PiHost {
     let message = "";
 
     switch (name) {
+      case "switchBranch":
+      case "createBranch": {
+        const pool = this.clients.get(workspace);
+        if (pool && [...pool.workers.values()].some(slot => slot.streaming || slot.compacting)) {
+          throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换或新建分支");
+        }
+        message = await changeGitBranch(root, name, payload);
+        completionCache.delete(completionKey(workspace));
+        break;
+      }
       case "stage": {
         const paths = payload.all ? [] : gitOperationPaths(root, payload.paths);
         await gitRun(root, payload.all ? ["add", "-A"] : ["add", "--", ...paths]);
@@ -1278,7 +1425,7 @@ export class PiHost {
     return { ok: true, message, overview: await this.gitOverview(cwd) };
   }
 
-  async gitInspect(cwd: string, kind: "commit" | "working", target: string): Promise<GitInspectResult> {
+  async gitInspect(cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string): Promise<GitInspectResult> {
     const root = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, root);
     if (kind === "commit") {
@@ -1314,14 +1461,17 @@ export class PiHost {
     const { root: safeRoot, target: safeTarget } = workspacePath(root, target);
     await assertRealWorkspacePath(root, safeTarget, true);
     const relative = path.relative(safeRoot, safeTarget).replace(/\\/g, "/");
+    const area = kind === "staged" ? ["--cached"] : kind === "unstaged" ? [] : ["HEAD"];
     const { stdout } = await execFileAsync(
       "git",
-      ["diff", "HEAD", "--unified=3", "--", relative],
+      ["diff", ...area, "--unified=3", "--", relative],
       { cwd: safeRoot, maxBuffer: 4 * 1024 * 1024 },
     ).catch(() => ({ stdout: "" }));
 
     let diff = stdout;
-    if (!diff.trim()) {
+    // 只有未跟踪文件才合成新增 Diff；无改动的已跟踪文件不能被误显示为新增。
+    const untracked = (await gitProbe(safeRoot, ["ls-files", "--others", "--exclude-standard", "--", relative])).trim();
+    if (!diff.trim() && kind !== "staged" && untracked) {
       const content = await readFile(safeTarget, "utf8").catch(() => "");
       if (content) {
         const addedLines = content.split(/\r?\n/).map((l) => `+${l}`).join("\n");
@@ -1330,12 +1480,134 @@ export class PiHost {
     }
 
     return {
-      kind: "working",
+      kind,
       target: relative,
       title: path.basename(relative),
       subtitle: relative,
-      meta: "工作区未提交变更",
+      meta: kind === "staged" ? "暂存区变更" : kind === "unstaged" ? "未暂存变更" : "工作区未提交变更",
       diff,
+    };
+  }
+
+/** 列出当前仓库的 worktree；managed 表示由 Pi Desktop 创建、可安全移除。 */
+  async gitWorktrees(cwd: string): Promise<GitWorktree[]> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) return [];
+    const out = await gitProbe(root, ["worktree", "list", "--porcelain"]);
+    return parseWorktreeList(out).map((item) => ({
+      ...item,
+      primary: samePath(item.path, root),
+      managed: pathWithin(this.worktreeRoot, item.path) && !samePath(item.path, root),
+      exists: existsSync(item.path),
+    }));
+  }
+
+  /** 从当前 HEAD 创建隔离工作区（独立分支 + 独立目录）。 */
+  async gitWorktreeCreate(cwd: string, name: string): Promise<GitWorktreeCreateResult> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库，请先初始化");
+    if (!samePath(root, workspace)) throw new Error("请在仓库根目录创建隔离工作区");
+    const head = (await gitProbe(root, ["rev-parse", "--verify", "HEAD"])).trim();
+    if (!head) throw new Error("仓库还没有提交，无法创建隔离工作区");
+
+    const slug = worktreeSlug(name);
+    if (!slug) throw new Error("任务名不能为空");
+    const repoKey = createHash("sha1").update(workspace).digest("hex").slice(0, 8);
+    const baseDir = path.join(this.worktreeRoot, `${repoKey}-${slug}`);
+    let branch = "";
+    let target = "";
+    let reserved = false;
+    for (let index = 1; index <= 100; index += 1) {
+      branch = `pi/${slug}${index === 1 ? "" : `-${index}`}`;
+      target = `${baseDir}${index === 1 ? "" : `-${index}`}`;
+      const exists = (await gitProbe(root, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
+      if (!exists && !existsSync(target)) {
+        reserved = true;
+        break;
+      }
+    }
+    if (!reserved) throw new Error("同名隔离工作区过多，请换一个任务名");
+    if (!(await gitProbe(root, ["check-ref-format", "--branch", branch])).trim()) {
+      throw new Error("任务名无法生成合法的 Git 分支名，请换一个名称");
+    }
+
+    await mkdir(path.dirname(target), { recursive: true });
+    await gitRun(root, ["worktree", "add", "-b", branch, target, head]);
+    const worktree = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    return {
+      ok: true,
+      message: `已创建隔离工作区（${branch}）`,
+      worktree: worktree ?? {
+        path: target,
+        branch,
+        head,
+        detached: false,
+        bare: false,
+        locked: false,
+        prunable: false,
+        primary: false,
+        managed: true,
+        exists: true,
+      },
+    };
+  }
+
+  /** 移除由 Pi Desktop 创建的工作区；分支会保留，未合并的提交不会丢失。 */
+  async gitWorktreeRemove(cwd: string, target: string): Promise<GitWorktreeRemoveResult> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库");
+    if (!samePath(root, workspace)) throw new Error("请在仓库根目录移除隔离工作区");
+    const entry = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    if (!entry) throw new Error("该目录不是当前仓库的 worktree");
+    if (entry.primary) throw new Error("不能移除仓库的主工作区");
+    if (!entry.managed) throw new Error("只能移除由 Pi Desktop 创建的隔离工作区");
+    if (samePath(entry.path, workspace)) throw new Error("不能移除当前正在使用的工作区");
+    const inUse = [...this.clients.keys()].some((cwd) => samePath(cwd, entry.path))
+      || [...this.starting.keys()].some((cwd) => samePath(cwd, entry.path));
+    if (inUse) throw new Error("该隔离工作区仍有 Pi 进程在运行，请先切换到其他项目再移除");
+
+    if (entry.exists) {
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          await gitRun(root, ["worktree", "remove", "--force", entry.path]);
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      if (lastError) {
+        let removed = false;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            await rm(entry.path, { recursive: true, force: true });
+            removed = true;
+            break;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+        if (!removed) {
+          throw new Error("隔离工作区文件仍被占用，请关闭占用该目录的程序后重试");
+        }
+      } else {
+        await rm(entry.path, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    await gitProbe(root, ["worktree", "prune"]);
+    return {
+      ok: true,
+      message: `已移除隔离工作区（${entry.branch || entry.head.slice(0, 7) || "detached"}）`,
+      branch: entry.branch,
+      path: entry.path,
     };
   }
 
@@ -1505,7 +1777,7 @@ export class PiHost {
     if (sessionFile) {
       const byFile = pool.workers.get(normSessionFile(sessionFile));
       if (byFile) return byFile;
-      throw new Error("未知的会话文件");
+      throw new Error(`未知的会话文件：${path.basename(sessionFile)}`);
     }
     const active = pool.workers.get(normSessionFile(pool.activeSessionFile));
     if (active) return active;
@@ -2422,15 +2694,19 @@ export async function readRecent(file: string): Promise<string[]> {
 }
 
 export async function writeRecent(file: string, cwd: string): Promise<string[]> {
-  const next = [cwd, ...(await readRecent(file)).filter((item) => item !== cwd)].slice(0, 20);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(next, null, 2));
-  return next;
+  return withFileWrite(file, async () => {
+    const next = [cwd, ...(await readRecent(file)).filter(item => !samePath(item, cwd))].slice(0, 20);
+    await mkdir(path.dirname(file), { recursive: true });
+    await atomicWriteText(file, JSON.stringify(next, null, 2));
+    return next;
+  });
 }
 
 export async function forgetRecent(file: string, cwd: string): Promise<string[]> {
-  const next = (await readRecent(file)).filter((item) => item !== cwd);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(next, null, 2));
-  return next;
+  return withFileWrite(file, async () => {
+    const next = (await readRecent(file)).filter(item => !samePath(item, cwd));
+    await mkdir(path.dirname(file), { recursive: true });
+    await atomicWriteText(file, JSON.stringify(next, null, 2));
+    return next;
+  });
 }

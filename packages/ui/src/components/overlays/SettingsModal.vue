@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import type {
   McpExposureMode,
   McpOverview,
@@ -19,6 +19,7 @@ import {
 } from "../../services/settings.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
 
+const TerminalSettings = defineAsyncComponent(() => import("../terminal/TerminalSettings.vue"));
 const { workbench, plugins, bus } = useKernel();
 const state = workbench.state;
 const ws = computed(() => workbench.active.value);
@@ -35,6 +36,12 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
     label: "外观与布局",
     icon: icons.palette,
     desc: "深浅色主题、字号排版与各工作区面板默认宽度调节",
+  },
+  {
+    id: "terminal",
+    label: "终端",
+    icon: icons.terminal,
+    desc: "按需启用完整终端插件，配置系统默认 shell、pwsh、Git Bash 与自定义启动参数",
   },
   {
     id: "mcp",
@@ -109,6 +116,7 @@ const pluginAreaLabels: Record<PluginArea, string> = {
   conversation: "对话区域",
   files: "文件区域",
   sidebar: "扩展工具",
+  shell: "工作台工具",
 };
 
 function togglePlugin(id: string): void {
@@ -1001,6 +1009,10 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="settingsModalState.tab === 'terminal'">
+            <TerminalSettings />
+          </template>
+
           <!-- 3. MCP 服务配置 -->
           <template v-else-if="settingsModalState.tab === 'mcp'">
             <div class="settings-group">
@@ -1699,6 +1711,7 @@ onBeforeUnmount(() => {
                   <button type="button" class="btn ghost small" :disabled="state.appUpdate.checking || state.appUpdate.phase === 'downloading'" @click="checkAppUpdateNow">
                     <span v-if="state.appUpdate.checking" class="mini-spinner" />检查更新
                   </button>
+                  <button v-if="state.appUpdate.phase === 'downloading'" type="button" class="btn ghost small" @click="workbench.cancelAppUpdate()">取消下载</button>
                   <button v-if="state.appUpdate.updateAvailable && state.appUpdate.phase !== 'ready'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'downloading'" @click="downloadAppUpdateNow">
                     <span v-if="state.appUpdate.phase === 'downloading'" class="mini-spinner" />下载更新
                   </button>

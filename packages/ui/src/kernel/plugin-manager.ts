@@ -1,9 +1,11 @@
 import { computed, markRaw, reactive, type ComputedRef } from "vue";
 import type { OpenStageInput, StageController, StageTab } from "./stage.ts";
 import type { Workbench, WorkspaceState } from "./workbench.ts";
+import type { TerminalController } from "../services/terminal.ts";
 import type { GitActionResult, GitActionName, GitActionPayload, GitInspectResult, GitOverview, WorkspaceEntry, WorkspaceFileData } from "../env.d.ts";
 
 const STORAGE_KEY = "pi-desktop.plugins.disabled";
+const ENABLED_KEY = "pi-desktop.plugins.enabled";
 
 export interface PluginCommand {
   id: string;
@@ -32,6 +34,8 @@ export interface PluginContext {
   readonly workspace: ComputedRef<WorkspaceState | null>;
   /** 3 区域（内容展示区）控制器 */
   readonly stage: StageController;
+  /** 可选的终端服务，由终端插件控制启用状态。 */
+  readonly terminal?: TerminalController;
   /** 当前工作区受控宿主能力快捷封装 */
   readonly host: {
     listDirectory: (relative?: string) => Promise<WorkspaceEntry[]>;
@@ -39,7 +43,7 @@ export interface PluginContext {
     writeFile: (relative: string, content: string) => Promise<WorkspaceFileData>;
     openExternal: (relative: string) => Promise<void>;
     gitOverview: () => Promise<GitOverview>;
-    gitInspect: (kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+    gitInspect: (kind: "commit" | "working" | "staged" | "unstaged", target: string) => Promise<GitInspectResult>;
     gitAction: (action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   };
 }
@@ -49,13 +53,15 @@ export interface PluginContext {
  * - `sidebar`：扩展工具（活动栏图标 + 扩展工具面板 + 详情视图）
  * - `conversation`：对话区域（渲染对话消息里的 Markdown / 图表等）
  * - `files`：文件区域（渲染打开的文件，如 Markdown 预览）
+ * - `shell`：工作台工具（可选停靠面板，不占用右侧活动栏）
  */
-export type PluginArea = "sidebar" | "conversation" | "files";
+export type PluginArea = "sidebar" | "conversation" | "files" | "shell";
 
 export const PLUGIN_AREAS: Array<{ id: PluginArea; label: string }> = [
   { id: "conversation", label: "对话区域" },
   { id: "files", label: "文件区域" },
   { id: "sidebar", label: "扩展工具" },
+  { id: "shell", label: "工作台工具" },
 ];
 
 /**
@@ -71,6 +77,10 @@ export interface SidebarPlugin {
   icon: string;
   order?: number;
   core?: boolean;
+  /** 默认启用状态；false 为用户主动选择启用（不影响已保存的选择）。 */
+  defaultEnabled?: boolean;
+  /** 工作台停靠组件，例如底部终端（不会占用右侧活动栏）。 */
+  dock?: any;
   /** 归属区域，默认 `sidebar` */
   area?: PluginArea;
   /** 4 区域面板组件（仅扩展工具区域） */
@@ -92,6 +102,7 @@ export interface RegisteredSidebarPlugin {
   order: number;
   core: boolean;
   area: PluginArea;
+  dock?: any;
   panel?: any;
   stage?: any;
   badge?: () => string | number | null | undefined;
@@ -114,11 +125,16 @@ function loadDisabled(): Set<string> {
 export function createPluginManager({
   createContext,
   onPluginDeactivated,
+  beforeDisable = async () => true,
 }: {
   createContext: (plugin: SidebarPlugin, disposers: Array<() => void>) => PluginContext;
   onPluginDeactivated: (pluginId: string) => void;
+  beforeDisable?: (pluginId: string) => Promise<boolean>;
 }) {
   const disabled = loadDisabled();
+  const enabled = (() => {
+    try { return new Set<string>(JSON.parse(localStorage.getItem(ENABLED_KEY) || "[]")); } catch { return new Set<string>(); }
+  })();
   const records = reactive<RegisteredSidebarPlugin[]>([]);
   const runtime = new Map<
     string,
@@ -145,7 +161,10 @@ export function createPluginManager({
 
   function persist(): void {
     const ids = records.filter((record) => !record.enabled).map((record) => record.id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+      localStorage.setItem(ENABLED_KEY, JSON.stringify(records.filter((record) => record.enabled).map((record) => record.id)));
+    } catch { /* 隐私模式下不影响本次启停 */ }
   }
 
   async function activate(record: RegisteredSidebarPlugin): Promise<void> {
@@ -241,6 +260,7 @@ export function createPluginManager({
       ...rawPlugin,
       panel: rawPlugin.panel ? markRaw(rawPlugin.panel) : undefined,
       stage: rawPlugin.stage ? markRaw(rawPlugin.stage) : undefined,
+      dock: rawPlugin.dock ? markRaw(rawPlugin.dock) : undefined,
     };
     const record = reactive<RegisteredSidebarPlugin>({
       id: plugin.id,
@@ -251,6 +271,7 @@ export function createPluginManager({
       order: plugin.order ?? 50,
       core: Boolean(plugin.core),
       area: plugin.area ?? "sidebar",
+      dock: plugin.dock,
       panel: plugin.panel,
       stage: plugin.stage,
       badge: plugin.badge ? () => plugin.badge?.() : undefined,
@@ -260,7 +281,7 @@ export function createPluginManager({
     records.push(record);
     records.sort((a, b) => a.order - b.order);
     runtime.set(plugin.id, { plugin, ctx: null, disposers: [], generation: 0, activationPending: false });
-    if (record.core || !disabled.has(plugin.id)) await activate(record);
+    if (record.core || (!disabled.has(plugin.id) && (plugin.defaultEnabled !== false || enabled.has(plugin.id)))) await activate(record);
   }
 
   async function setEnabled(id: string, enabled: boolean): Promise<void> {
@@ -273,7 +294,10 @@ export function createPluginManager({
       if (!entry) return;
       if (record.enabled === enabled && !entry.activationPending) return;
       if (enabled) await activate(record);
-      else deactivate(record);
+      else {
+        if (!(await beforeDisable(id))) return;
+        deactivate(record);
+      }
       persist();
     });
     operations.set(id, operation);

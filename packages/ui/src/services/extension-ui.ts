@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import type { EventBus } from "../kernel/event-bus.ts";
+import { localizeNotification } from "../shared/notify-text.ts";
 
 export interface ToastItem {
   id: number;
@@ -19,7 +20,8 @@ let toastSeq = 0;
 export function pushToast(level: string, text: string): void {
   toastSeq += 1;
   const id = toastSeq;
-  extState.toasts.push({ id, level, text });
+  // 所有通知从同一个入口中文化，避免 Electron IPC 前缀和 Node 英文错误直接弹给用户。
+  extState.toasts.push({ id, level, text: localizeNotification(text, level) });
   setTimeout(() => {
     const index = extState.toasts.findIndex((item) => item.id === id);
     if (index >= 0) extState.toasts.splice(index, 1);

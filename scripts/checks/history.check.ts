@@ -113,6 +113,16 @@ assert.ok(blockEight.messages.length > 8, `minBlocks 应扩页，实际 ${blockE
 assert.ok(blockEight.startIndex < plainEight.startIndex, "minBlocks 页首应更靠前");
 assert.equal(blockEight.endIndex, plainEight.endIndex, "endIndex 不变");
 
+// v3 分叉：最新叶子只包含当前 parent 链，不应混入另一分支的旧回复。
+const branched = parseSessionHistory([
+  line({ type: "session", id: "header", version: 3 }),
+  line({ type: "message", id: "u", parentId: null, message: { role: "user", content: "root" } }),
+  line({ type: "message", id: "old", parentId: "u", message: { role: "assistant", content: "discarded" } }),
+  line({ type: "message", id: "new", parentId: "u", message: { role: "assistant", content: "current" } }),
+  line({ type: "label", id: "label", parentId: "new", label: "branch" }),
+].join("\n"));
+assert.deepEqual(branched.map(message => message.content), ["root", "current"], "历史只显示当前分支");
+
 // 旧格式（顶层 role）仍需兼容
 const legacy = parseSessionHistory([line({ role: "user", content: "hi" }), line({ role: "system" })].join("\n"));
 assert.equal(legacy.length, 1);

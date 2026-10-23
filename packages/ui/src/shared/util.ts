@@ -15,6 +15,9 @@ export const icons: Record<string, string> = {
   json: svg('<path d="M6 3.5c-1.5 0-1.5 1.2-1.5 2.2v.8C4.5 7.3 4 8 3 8c1 0 1.5.7 1.5 1.5v.8c0 1 .1 2.2 1.5 2.2M10 3.5c1.5 0 1.5 1.2 1.5 2.2v.8c0 .8.5 1.5 1.5 1.5-1 0 1.5.7-1.5 1.5v.8c0 1-.1 2.2-1.5 2.2"/>', 15),
   archive: svg('<path d="M3 4h10v9H3zM3 4l1-1h8l1 1M6 6h4M6.5 9h3"/>', 15),
   text: svg('<path d="M3 4h10M3 8h10M3 12h7"/>', 15),
+  wrap: svg('<path d="M2.5 4h11M2.5 8h8.2a2 2 0 0 1 0 4H9.5M2.5 12h3"/><path d="m7.5 10 2 2-2 2"/>', 14),
+  eye: svg('<path d="M1.8 8s2.2-4 6.2-4 6.2 4 6.2 4-2.2 4-6.2 4-6.2-4-6.2-4z"/><circle cx="8" cy="8" r="1.8"/>', 14),
+  eyeOff: svg('<path d="M2 2l12 12M6.2 4.3A7.6 7.6 0 0 1 8 4c4 0 6.2 4 6.2 4a10 10 0 0 1-2.2 2.5M4.1 6.1A10.8 10.8 0 0 0 1.8 8s2.2 4 6.2 4c.8 0 1.5-.15 2.2-.4"/><path d="M6.7 6.7a1.8 1.8 0 0 0 2.6 2.6"/>', 14),
   diff: svg('<path d="M5 2.5v7M2 6h6"/><path d="M2 12.5h6"/><path d="M11 3v10"/><circle cx="11" cy="3" r="1.2"/><circle cx="11" cy="13" r="1.2"/>'),
   terminal: svg('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M4.5 6.5 6.5 8l-2 1.5M8 10h3"/>'),
   events: svg('<path d="M2 8h2.5l1.5-4 2.5 8 1.5-4H14"/>'),
@@ -39,6 +42,7 @@ export const icons: Record<string, string> = {
   model: svg('<path d="M8 1.8 13.5 5v6L8 14.2 2.5 11V5z"/><path d="M8 8 13.5 5M8 8 2.5 5M8 8v6.2"/>', 14),
   brain: svg('<path d="M6 2.8a2 2 0 0 0-2 2 2 2 0 0 0-1.5 3.4A2 2 0 0 0 4 11.5a2 2 0 0 0 4 .7V3.5a2 2 0 0 0-2-.7zM10 2.8a2 2 0 0 1 2 2 2 2 0 0 1 1.5 3.4 2 2 0 0 1-1.5 3.3 2 2 0 0 1-4 .7"/>', 14),
   stop: '<svg viewBox="0 0 16 16" width="12" height="12"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>',
+  send: svg('<path d="M8 13V3M4.5 6.5 8 3l3.5 3.5"/>', 13),
   reveal: svg('<path d="M9 2.5h4.5V7M13.5 2.5 8 8"/><path d="M12 9.5V13a.5.5 0 0 1-.5.5h-8A.5.5 0 0 1 3 13V5a.5.5 0 0 1 .5-.5H7"/>', 14),
   more: svg('<circle cx="3.5" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r=".9" fill="currentColor" stroke="none"/>', 14),
   trash: svg('<path d="M2.5 4.5h11M6.5 4.5V3a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1.5M4 4.5l.6 8.6a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.6M6.8 7v4.5M9.2 7v4.5"/>', 14),
@@ -50,6 +54,16 @@ export const icons: Record<string, string> = {
   chevronLeft: svg('<path d="m9.5 4.5-3.5 3.5 3.5 3.5"/>', 12),
 };
 
+/**
+ * 项目路径的可比较键：统一分隔符、去掉末尾斜杠；Windows 盘符路径忽略大小写。
+ * 只用于界面去重和“当前项目”判断，不改变实际传给宿主的工作区路径。
+ */
+export function projectPathKey(value = ""): string {
+  const normalized = String(value).trim().replace(/\\/g, "/");
+  const trimmed = normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+  return /^[A-Za-z]:(?:\/|$)/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+}
+
 export function shortPath(value = "", keep = 2): string {
   const parts = String(value).split(/[\\/]/).filter(Boolean);
   return parts.length <= keep ? value : `…/${parts.slice(-keep).join("/")}`;
@@ -57,6 +71,12 @@ export function shortPath(value = "", keep = 2): string {
 
 export function baseName(value = ""): string {
   return String(value).split(/[\\/]/).filter(Boolean).at(-1) ?? value;
+}
+
+/** 隔离工作区目录名带 8 位哈希前缀，展示时去掉；普通项目名不受影响。 */
+export function displayProjectName(value = ""): string {
+  const name = baseName(value);
+  return name.replace(/^[0-9a-f]{8}-/i, "") || name;
 }
 
 export function relativeTime(timestamp?: number): string {

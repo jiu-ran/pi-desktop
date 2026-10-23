@@ -1,9 +1,15 @@
 import { baseName } from "../../shared/util.ts";
+import { rememberRecentFile } from "../../shared/recent-files.ts";
+import { localizeNotification } from "../../shared/notify-text.ts";
 import type { StageController } from "../../kernel/stage.ts";
 import type { Workbench } from "../../kernel/workbench.ts";
 import type { EventBus } from "../../kernel/event-bus.ts";
 
 export interface FileStageData {
+  cwd?: string;
+  revision?: string;
+  saving?: boolean;
+  saveError?: string;
   path: string;
   relative: string;
   name: string;
@@ -24,7 +30,10 @@ export function normalizeRelativePath(cwd: string, targetPath: string): string {
   if (!raw) return "";
   const normCwd = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
   const normTarget = raw.replace(/\\/g, "/");
-  if (normTarget.toLowerCase().startsWith(`${normCwd.toLowerCase()}/`)) {
+  const windows = /^[A-Za-z]:\//.test(normCwd) || normCwd.startsWith("//");
+  const comparedCwd = windows ? normCwd.toLowerCase() : normCwd;
+  const comparedTarget = windows ? normTarget.toLowerCase() : normTarget;
+  if (comparedTarget.startsWith(`${comparedCwd}/`)) {
     return normTarget.slice(normCwd.length + 1);
   }
   // 项目外文件保留绝对路径，交给主进程按“单文件绝对路径”处理。
@@ -47,11 +56,13 @@ export async function openFileInStage(
   const existing = stage.findTab<FileStageData>("files", relative);
   if (existing && !existing.data.error && !existing.data.loading) {
     stage.activate(existing.key);
+    rememberRecentFile(cwd, relative);
     return;
   }
 
   const name = baseName(relative);
   const initialData: FileStageData = existing?.data ?? {
+    cwd,
     path: relative,
     relative,
     name,
@@ -64,6 +75,7 @@ export async function openFileInStage(
     preview: undefined,
     binary: false,
   };
+  if (existing?.data.loading) { stage.activate(existing.key); return; }
   initialData.loading = true;
   initialData.error = "";
 
@@ -78,10 +90,14 @@ export async function openFileInStage(
 
   try {
     const detail = await workbench.readFile(relative);
+    if (!stage.allTabs.value.includes(tab)) return;
     tab.title = detail.name || name;
     tab.subtitle = detail.relative || relative;
     tab.dirty = false;
+    rememberRecentFile(cwd, relative);
     tab.data = {
+      cwd,
+      revision: detail.revision,
       path: detail.path,
       relative: detail.relative,
       name: detail.name,
@@ -95,8 +111,9 @@ export async function openFileInStage(
       binary: detail.binary,
     };
   } catch (error: any) {
+    if (!stage.allTabs.value.includes(tab)) return;
     tab.data.loading = false;
-    tab.data.error = error?.message ?? String(error);
+    tab.data.error = localizeNotification(error, "error");
     bus.emit("notify", { level: "error", text: tab.data.error });
   }
 }

@@ -1,0 +1,269 @@
+/* 终端工作台：工具栏 / 横向会话导航 / 全宽画布 / 常驻后台命令栏。
+   跟随工作台主题；按实际面板宽度布局，不挤占 PTY 的内容区域。 */
+.terminal-dock {
+  --terminal-surface: color-mix(in srgb, var(--bg-2) 72%, var(--bg));
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 160px;
+  max-height: min(55vh, 640px);
+  margin: 0 var(--gap) var(--gap);
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line);
+  container: terminal / inline-size;
+}
+/* 浅色主题下栏带用 bg-2 形成清晰分层；深色主题由半透明混合得到。 */
+:root[data-theme="light"] .terminal-dock { --terminal-surface: var(--bg-2); }
+.terminal-dock button:focus-visible,
+.terminal-dock select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.terminal-dock button:disabled { cursor: default; opacity: 0.45; }
+.terminal-dock .icon-btn { flex: none; width: 28px; min-width: 28px; height: 28px; border-radius: 5px; color: var(--fg-2); }
+.terminal-dock .icon-btn.small { width: 24px; min-width: 24px; height: 24px; }
+.terminal-dock svg { display: block; flex: none; }
+.terminal-resizer { position: absolute; z-index: 6; top: 0; right: 0; left: 0; height: 6px; cursor: row-resize; touch-action: none; }
+.terminal-resizer::after { position: absolute; top: 2px; left: 50%; width: 32px; height: 2px; border-radius: 2px; background: var(--line-2); content: ""; transform: translateX(-50%); }
+.terminal-resizer:hover::after,
+.terminal-resizer.dragging::after,
+.terminal-resizer:focus-visible::after { background: var(--accent); }
+.terminal-resizer:focus-visible { outline: none; }
+
+/* 第一层：工作台动作，不混入当前任务的操作。 */
+.terminal-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 10px; height: 40px; padding: 5px 10px 2px 14px; background: var(--terminal-surface); }
+.terminal-head-title { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--fg-2); font-size: 12px; white-space: nowrap; }
+.terminal-head-title strong { color: var(--fg); font-size: 12px; font-weight: 600; }
+.terminal-head-icon { color: var(--accent); }
+.terminal-head-icon svg { width: 16px; height: 16px; }
+.terminal-running-pill { display: inline-flex; flex: none; align-items: center; gap: 6px; padding: 2px 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+.terminal-idle-pill { overflow: hidden; color: var(--fg-3); font-size: 10px; text-overflow: ellipsis; }
+.terminal-head-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.terminal-toolbar-divider { width: 1px; height: 16px; margin: 0 3px; background: var(--line-2); }
+.terminal-create-group { display: flex; align-items: stretch; height: 26px; overflow: hidden; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg); }
+.terminal-create-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--fg); font-size: 11px; }
+.terminal-create-btn:hover:not(:disabled) { background: var(--hover); color: var(--accent); }
+.terminal-create-btn svg { width: 13px; height: 13px; }
+.terminal-profile-picker { display: grid; flex: none; place-items: center; width: 26px; border-left: 1px solid var(--line); color: var(--fg-2); }
+.terminal-profile-picker .terminal-select-btn { height: 24px; padding: 0; border: 0; background: transparent; color: inherit; }
+.terminal-profile-picker .terminal-select-btn:hover { background: var(--hover); color: var(--accent); }
+.terminal-profile-picker:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* 第二层：类型分组的横向标签；始终保留全部任务入口。 */
+.terminal-navigation { display: flex; flex: none; align-items: center; gap: 8px; height: 36px; min-width: 0; padding: 0 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--terminal-surface); }
+.terminal-tabs { display: flex; flex: 1; align-items: stretch; gap: 12px; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.terminal-tabs::-webkit-scrollbar { display: none; }
+/* 溢出时在溢出侧淡出，提示还有更多任务；不靠滚动条占高度。 */
+.terminal-tabs.fade-end { mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); }
+.terminal-tabs.fade-start { mask-image: linear-gradient(to right, transparent, #000 30px); }
+.terminal-tabs.fade-start.fade-end { mask-image: linear-gradient(to right, transparent, #000 30px, #000 calc(100% - 30px), transparent); }
+.terminal-tab-group { display: flex; flex: none; align-items: center; gap: 4px; }
+.terminal-tab-group + .terminal-tab-group { padding-left: 12px; border-left: 1px solid var(--line); }
+.terminal-tab-group-label { display: inline-flex; align-items: center; gap: 5px; padding: 0 5px 0 2px; color: var(--fg-3); font-size: 10px; white-space: nowrap; }
+.terminal-tab-group-label small { color: var(--fg-2); font-size: 9px; font-variant-numeric: tabular-nums; }
+.terminal-tab { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 240px; height: 28px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--fg-2); }
+.terminal-tab:hover { background: var(--hover); color: var(--fg); }
+.terminal-tab.active { border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); background: var(--accent-soft); color: var(--fg); }
+.terminal-tab.active::after { position: absolute; right: 9px; bottom: -1px; left: 9px; height: 2px; border-radius: 2px; background: var(--accent); content: ""; }
+.terminal-tab-main { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 100%; padding: 0 3px 0 9px; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: left; }
+/* 关闭按钮始终占位，避免悬停时标签宽度跳动；未悬停时不可点击。 */
+.terminal-tab-close { display: grid; flex: none; place-items: center; width: 17px; height: 17px; margin: 0 5px 0 1px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--fg-3); visibility: hidden; }
+.terminal-tab:hover .terminal-tab-close,
+.terminal-tab.active .terminal-tab-close,
+.terminal-tab:focus-within .terminal-tab-close { visibility: visible; }
+.terminal-tab-close:hover { background: var(--del-bg); color: var(--err); }
+.terminal-tab-close svg { width: 10px; height: 10px; }
+.terminal-tab-icon { color: var(--fg-3); }
+.terminal-tab.active .terminal-tab-icon { color: var(--accent); }
+.terminal-tab-icon svg { width: 13px; height: 13px; }
+.terminal-tab-label { min-width: 0; overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-all-tasks { flex: none; }
+.terminal-all-tasks .terminal-select-btn { height: 24px; padding: 0 7px; gap: 4px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 10px; }
+.terminal-all-tasks .terminal-select-btn:hover { border-color: var(--accent); color: var(--accent); }
+.terminal-status-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--fg-3); }
+.terminal-status-dot[data-status="running"] { background: var(--accent); }
+.terminal-status-dot[data-status="stopping"] { background: var(--warn); }
+.terminal-status-dot[data-status="exited"] { background: var(--ok-fg); }
+.terminal-status-dot[data-status="failed"] { background: var(--err); }
+
+/* 第三层：全宽内容画布；辅助信息与当前任务动作只占一行。 */
+.terminal-body { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.terminal-output { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.terminal-output-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; height: 30px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); }
+.terminal-output-meta { display: flex; align-items: center; gap: 9px; min-width: 0; overflow: hidden; color: var(--fg-3); font-size: 10px; white-space: nowrap; }
+.terminal-output-state { flex: none; color: var(--fg-2); font-weight: 500; }
+.terminal-output-state[data-status="running"] { color: var(--accent); }
+.terminal-output-state[data-status="failed"] { color: var(--err); }
+.terminal-output-state[data-status="exited"] { color: var(--ok-fg); }
+.terminal-output-elapsed { flex: none; font-variant-numeric: tabular-nums; }
+.terminal-output-context { overflow: hidden; text-overflow: ellipsis; }
+.terminal-output-exit { flex: none; color: var(--ok-fg); }
+.terminal-output-exit[data-ok="false"] { color: var(--err); }
+.terminal-output-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.terminal-output-actions .icon-btn.is-on { background: var(--accent-soft); color: var(--accent); }
+.terminal-stop-btn { display: inline-flex; align-items: center; gap: 4px; height: 23px; margin-left: 7px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--err); font-size: 10.5px; }
+.terminal-stop-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--err) 30%, var(--line)); background: var(--del-bg); }
+.terminal-stop-btn svg { width: 10px; height: 10px; }
+.terminal-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.terminal-pty-screens { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.terminal-xterm { flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--term-bg); }
+.terminal-xterm .xterm { box-sizing: border-box; height: 100%; padding: 8px 14px 6px; }
+.terminal-xterm .xterm-viewport { background: transparent !important; scrollbar-color: color-mix(in srgb, var(--term-fg) 18%, transparent) transparent; }
+.terminal-xterm .xterm-viewport::-webkit-scrollbar { width: 10px; }
+.terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background: color-mix(in srgb, var(--term-fg) 20%, transparent); background-clip: padding-box; }
+.terminal-xterm .xterm-screen canvas,
+.terminal-xterm .xterm-helper-textarea { outline: none; }
+.terminal-xterm ::selection,
+.terminal-output-scroll ::selection { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+.terminal-output-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 12px 16px; background: var(--term-bg); color: var(--term-fg); overscroll-behavior: contain; }
+.terminal-command-line { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.terminal-command-prompt { flex: none; color: var(--accent); font-weight: 600; }
+.terminal-command-text { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.terminal-output-text { margin: 0; color: var(--term-fg); font-family: var(--mono); font-size: var(--code-font-size, 12.5px); line-height: 1.55; overflow-wrap: anywhere; tab-size: 4; white-space: pre-wrap; }
+.terminal-output-scroll.is-nowrap .terminal-output-text { white-space: pre; overflow-wrap: normal; }
+.terminal-output-text .ansi-bold { font-weight: 650; }
+.terminal-output-text .ansi-dim { opacity: 0.68; }
+.terminal-output-text .ansi-italic { font-style: italic; }
+.terminal-output-text .ansi-underline { text-decoration: underline; text-underline-offset: 2px; }
+.terminal-output-text .ansi-strike { text-decoration: line-through; }
+.terminal-output-text .ansi-underline.ansi-strike { text-decoration: underline line-through; }
+.terminal-output-text .ansi-hidden { display: none; }
+.terminal-output-text span { border-radius: 1px; }
+.terminal-output-placeholder { color: color-mix(in srgb, var(--term-fg) 55%, transparent); font-family: var(--mono); font-size: 12px; }
+.terminal-cursor { display: inline-block; width: 6px; height: 13px; margin-left: 4px; vertical-align: -2px; background: var(--term-fg); animation: terminal-cursor 1s steps(1) infinite; }
+@keyframes terminal-cursor { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+.terminal-jump { position: absolute; right: 16px; bottom: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); color: var(--fg-2); font-size: 11px; box-shadow: 0 3px 12px #0002; }
+.terminal-jump:hover { border-color: var(--accent); color: var(--accent); }
+.terminal-output-truncated { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-2); color: var(--warn); font-size: 11px; }
+
+/* 无任务时两种明确入口；不用大块 hero 和游离的光标装饰。 */
+.terminal-empty { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 20px 24px; }
+.terminal-empty-inner { display: flex; flex: none; flex-direction: column; gap: 16px; width: min(100%, 960px); margin: auto; }
+.terminal-empty-heading { display: flex; align-items: baseline; gap: 12px; color: var(--fg-3); font-size: 11px; }
+.terminal-empty-heading strong { color: var(--fg); font-size: 14px; font-weight: 600; }
+.terminal-launchers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.terminal-launcher { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--terminal-surface); color: var(--fg-2); text-align: left; }
+.terminal-launcher:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--accent-soft); }
+.terminal-launcher-icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.terminal-launcher-icon svg { width: 20px; height: 20px; }
+.terminal-launcher.command .terminal-launcher-icon { background: var(--bg-2); color: var(--fg-2); }
+.terminal-launcher-copy { display: flex; flex: 1; flex-direction: column; gap: 5px; min-width: 0; }
+.terminal-launcher-copy strong { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; color: var(--fg); font-size: 12px; font-weight: 600; }
+.terminal-launcher-copy small { overflow: hidden; color: var(--fg-3); font-size: 10px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-launcher-copy > span { color: var(--fg-2); font-size: 10.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.terminal-launcher-action { display: flex; flex: none; align-items: center; gap: 4px; color: var(--accent); font-size: 10.5px; }
+.terminal-quick { display: flex; flex-direction: column; gap: 8px; }
+.terminal-quick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--fg-3); font-size: 10px; }
+.terminal-quick-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+.terminal-quick-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 260px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg-2); }
+.terminal-quick-item:hover:not(:disabled) { border-color: var(--accent); background: var(--hover); color: var(--fg); }
+.terminal-quick-item > span { flex: none; color: var(--fg-3); }
+.terminal-quick-item svg { width: 12px; height: 12px; }
+.terminal-quick-item code { overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-empty-warning { margin: 0; color: var(--warn); font-size: 11px; }
+
+/* 常驻命令栏：在视觉上明确这是独立任务，而不是 PTY 的第二个输入框。 */
+.terminal-composer { flex: none; min-width: 0; padding: 8px 12px 6px; border-top: 1px solid var(--line); background: var(--terminal-surface); }
+.terminal-input-row { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px 0 10px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--bg); }
+.terminal-input-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.terminal-input-mode { flex: none; padding-right: 9px; border-right: 1px solid var(--line-2); color: var(--fg-2); font-size: 10px; white-space: nowrap; }
+.terminal-prompt { flex: none; color: var(--accent); font-family: var(--mono); font-size: 12px; }
+.terminal-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--fg); font-family: var(--mono); font-size: 12px; }
+.terminal-input::placeholder { color: var(--fg-3); }
+.terminal-input[type="password"] { letter-spacing: 1.5px; }
+.terminal-history-picker { flex: none; }
+.terminal-history-picker .terminal-select-btn { height: 24px; padding: 0 2px; gap: 3px; border: 0; background: transparent; color: var(--fg-3); font-size: 10px; }
+.terminal-history-picker .terminal-select-btn:hover { color: var(--fg); }
+.terminal-run-btn { display: flex; flex: none; align-items: center; gap: 10px; height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 500; }
+.terminal-run-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.terminal-run-key { opacity: 0.7; }
+.terminal-secret.is-on { background: var(--accent-soft); color: var(--accent); }
+.terminal-new-inline { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; color: var(--fg-2); font-size: 10.5px; }
+.terminal-new-inline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.terminal-composer-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; height: 19px; margin-top: 3px; color: var(--fg-3); font-size: 10px; }
+.terminal-cwd { display: inline-flex; flex: none; align-items: center; gap: 5px; max-width: 35%; padding: 0; overflow: hidden; border: 0; background: transparent; color: var(--fg-2); font-size: 10px; white-space: nowrap; }
+.terminal-cwd > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.terminal-cwd svg { width: 12px; height: 12px; }
+.terminal-cwd:hover { color: var(--accent); }
+.terminal-footer-hint { min-width: 0; overflow: hidden; color: var(--fg-3); font-size: 10px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-footer-hint.is-note { color: var(--accent); }
+
+/* 低高度优先保证一行命令输入与真正可用的终端行数。 */
+.terminal-dock.is-compact .terminal-head { height: 32px; }
+.terminal-dock.is-compact .terminal-navigation { height: 28px; }
+.terminal-dock.is-compact .terminal-tab { height: 23px; padding: 0 7px; }
+.terminal-dock.is-compact .terminal-tab-group-label { display: none; }
+.terminal-dock.is-compact .terminal-output-head { height: 24px; }
+.terminal-dock.is-compact .terminal-output-context { display: none; }
+.terminal-dock.is-compact .terminal-composer { padding: 4px 10px; }
+.terminal-dock.is-compact .terminal-composer-meta { display: none; }
+.terminal-dock.is-compact .terminal-input-row { height: 29px; }
+.terminal-dock.is-compact .terminal-xterm .xterm { padding: 3px 12px 2px; }
+.terminal-dock.is-compact .terminal-output-scroll { padding: 8px 12px; }
+.terminal-dock.is-compact .terminal-command-line { margin-bottom: 8px; padding-bottom: 6px; }
+.terminal-dock.is-compact .terminal-empty { padding: 12px 20px; }
+.terminal-dock.is-compact .terminal-empty-heading,
+.terminal-dock.is-compact .terminal-launcher-copy > span,
+.terminal-dock.is-compact .terminal-quick-head { display: none; }
+.terminal-dock.is-compact .terminal-empty-inner { gap: 10px; }
+.terminal-dock.is-compact .terminal-launcher { padding: 8px 12px; }
+.terminal-dock.is-compact .terminal-launcher-icon { width: 24px; height: 24px; }
+
+@container terminal (max-width: 900px) {
+  .terminal-tab-group-label { display: none; }
+  .terminal-tab { max-width: 180px; }
+  .terminal-launcher { gap: 9px; padding: 12px; }
+  .terminal-launcher-copy strong { flex-direction: column; gap: 2px; }
+}
+@container terminal (max-width: 760px) {
+  .terminal-tab { max-width: 170px; }
+}
+@container terminal (max-width: 620px) {
+  .terminal-head { padding-left: 10px; }
+  .terminal-idle-pill,
+  .terminal-output-context,
+  .terminal-reveal-task,
+  .terminal-run-key { display: none; }
+  .terminal-head-title { gap: 6px; }
+  .terminal-create-label { display: none; }
+  .terminal-tab { max-width: 155px; }
+  .terminal-launchers { grid-template-columns: 1fr; gap: 8px; }
+  .terminal-empty { padding: 16px; }
+  .terminal-empty-heading { flex-wrap: wrap; gap: 4px 10px; }
+  .terminal-launcher-copy strong { flex-direction: row; }
+  .terminal-launcher-copy > span { font-size: 10px; }
+  .terminal-composer { padding-right: 8px; padding-left: 8px; }
+  .terminal-input-mode { padding-right: 6px; font-size: 9px; }
+  .terminal-input-row { gap: 6px; }
+  .terminal-history-picker .terminal-select-btn { padding: 0; }
+  .terminal-footer-hint { font-size: 9px; }
+}
+@media (max-height: 450px) {
+  .terminal-composer-meta { display: none; }
+  .terminal-head { height: 34px; }
+  .terminal-navigation { height: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-cursor { animation: none; }
+}
+
+/* 自绘下拉：原生 select 的弹出层由系统绘制，深色主题下会变成浅色系统菜单。 */
+.terminal-select { position: relative; display: flex; min-width: 0; }
+.terminal-select-btn { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 11px; }
+.terminal-select-btn:hover:not(:disabled), .terminal-select.open .terminal-select-btn { border-color: var(--accent); color: var(--accent); }
+.terminal-select.is-chevron .terminal-select-btn { width: 100%; justify-content: center; border: 0; background: transparent; color: inherit; }
+.terminal-select-icon, .terminal-select-caret { display: grid; flex: none; place-items: center; }
+.terminal-select-icon svg, .terminal-select-caret svg { width: 12px; height: 12px; }
+.terminal-select-caret { opacity: 0.7; }
+.terminal-select-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 浮层传送到 body 并用 fixed 定位，既跟随主题又不会被终端面板的 overflow 裁掉。 */
+.terminal-select-menu { position: fixed; z-index: 80; display: flex; flex-direction: column; padding: 4px; overflow-y: auto; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-1); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3); }
+.terminal-select-group { flex: none; margin: 4px 8px 2px; color: var(--fg-3); font-size: 9.5px; letter-spacing: 0.04em; }
+.terminal-select-item { display: flex; flex: none; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--fg-2); font-size: 11.5px; text-align: left; }
+.terminal-select-item:hover, .terminal-select-item:focus-visible { outline: none; background: var(--hover); color: var(--fg); }
+.terminal-select-item.active { color: var(--fg); }
+.terminal-select-item.action { color: var(--accent); }
+.terminal-select-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-select-item small { flex: none; color: var(--fg-3); font-size: 10px; }
+.terminal-select-check { display: grid; flex: none; color: var(--accent); }
+.terminal-select-check svg { width: 12px; height: 12px; }

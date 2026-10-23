@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons, relativeTime } from "../../shared/util.ts";
-import { askConfirm, openMenu } from "./ui.ts";
+import { displayProjectName, icons, projectPathKey, relativeTime } from "../../shared/util.ts";
+import { askConfirm, askPrompt, openMenu } from "./ui.ts";
 
 export type SessionWorkState = "running" | "compacting" | "error" | "done" | "active" | "idle";
 
@@ -34,8 +34,20 @@ const offEvent = bus.on(
 onBeforeUnmount(offEvent);
 
 const projects = computed(() => {
-  const open = [...workbench.workspaces.values()].map((ws) => ws.cwd);
-  return [...new Set([...open, ...state.recent])];
+  const seen = new Set<string>();
+  const list: string[] = [];
+  // 打开中的工作区优先；recent 里同一个目录可能使用不同的分隔符或大小写，
+  // 必须按可比较路径去重，否则侧栏会出现两个同名项目。
+  for (const cwd of [
+    ...[...workbench.workspaces.values()].map((ws) => ws.cwd),
+    ...state.recent,
+  ]) {
+    const key = projectPathKey(cwd);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    list.push(cwd);
+  }
+  return list;
 });
 
 function sessionsOf(cwd: string): any[] {
@@ -88,11 +100,12 @@ const groups = computed(() => {
       return {
         cwd,
         ws,
-        name: baseName(cwd),
+        name: displayProjectName(cwd),
         branch: ws?.branch ?? "",
+        count: all.length,
         sessions,
         open: q ? sessions.length > 0 : !collapsed[cwd],
-        visible: !q || sessions.length > 0 || baseName(cwd).toLowerCase().includes(q),
+        visible: !q || sessions.length > 0 || displayProjectName(cwd).toLowerCase().includes(q),
       };
     })
     .filter((group) => group.visible);
@@ -104,7 +117,7 @@ function isGroupCurrent(group: any, item: any): boolean {
 }
 
 function isActive(group: any, item: any): boolean {
-  return group.cwd === state.activeCwd && isGroupCurrent(group, item);
+  return projectPathKey(group.cwd) === projectPathKey(state.activeCwd) && isGroupCurrent(group, item);
 }
 
 function isRunning(group: any, item: any): boolean {
@@ -227,6 +240,8 @@ async function removeProject(group: any): Promise<void> {
   if (!ok) return;
   try {
     const result = await workbench.removeProject(group.cwd, { deleteSessions: ok.checked });
+    // 用户在「未保存草稿」二次确认里取消：保持原状，不提示错误。
+    if (result?.cancelled) return;
     delete cache[group.cwd];
     delete collapsed[group.cwd];
     info(
@@ -284,10 +299,31 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
       icon: icons.chat,
       run: () => selectSession(group, item).catch(fail),
     },
+    {
+      label: "重命名任务…",
+      icon: icons.text,
+      disabled: !isActive(group, item),
+      run: () => renameTask(group, item),
+    },
     { label: "在文件管理器中显示会话文件", icon: icons.folder, run: () => workbench.reveal(item.path) },
     { separator: true },
     { label: "删除任务…", icon: icons.trash, danger: true, disabled: running, run: () => removeTask(group, item) },
   ]);
+}
+
+async function renameTask(group: any, item: any): Promise<void> {
+  if (!isActive(group, item)) return;
+  const name = await askPrompt({
+    title: "重命名任务",
+    message: "名称会显示在左侧任务列表与任务信息中。",
+    label: "任务名称",
+    value: item.title ?? "",
+    confirmLabel: "保存",
+  });
+  if (!name) return;
+  if (!isActive(group, item)) return;
+  await workbench.renameSession(name);
+  info("已重命名任务");
 }
 </script>
 
@@ -299,7 +335,15 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
     </div>
     <div class="tasks-search">
       <span class="tasks-search-icon" v-html="icons.search" />
-      <input v-model="query" placeholder="搜索项目或会话" />
+      <input v-model="query" placeholder="搜索项目或任务" />
+      <button
+        v-if="query"
+        type="button"
+        class="tasks-search-clear"
+        title="清除搜索"
+        aria-label="清除搜索"
+        @click="query = ''"
+      >×</button>
     </div>
 
     <div class="tasks-list">
@@ -316,6 +360,7 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
           <span class="project-caret" v-html="group.open ? icons.chevronDown : icons.chevronRight" />
           <span class="project-name">{{ group.name }}</span>
           <span v-if="group.branch" class="project-branch"><span v-html="icons.branch" />{{ group.branch }}</span>
+          <span v-if="group.count" class="project-count" :title="`${group.count} 个任务`">{{ group.count > 99 ? "99+" : group.count }}</span>
           <span v-if="group.ws?.status === 'starting'" class="project-status starting">
             <span class="mini-spinner" />启动中
           </span>

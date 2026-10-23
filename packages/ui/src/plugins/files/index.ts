@@ -3,6 +3,7 @@ import { icons } from "../../shared/util.ts";
 import FilesPanel from "./FilesPanel.vue";
 import FileStage from "./FileStage.vue";
 import { openFileInStage } from "./state.ts";
+import { openQuickOpen } from "../../services/quick-open.ts";
 
 export default definePlugin({
   id: "files",
@@ -19,6 +20,15 @@ export default definePlugin({
   activate(ctx) {
     ctx.on("file:open", (targetPath: string) => {
       openFileInStage(ctx.workbench, ctx.stage, { emit: ctx.emit } as any, targetPath);
+    });
+
+    ctx.registerCommand({
+      id: "files.quickOpen",
+      title: "快速打开文件",
+      category: "文件",
+      hint: "按文件名或路径模糊搜索当前项目",
+      keybinding: "Ctrl+P",
+      run: () => openQuickOpen(),
     });
 
     ctx.registerCommand({

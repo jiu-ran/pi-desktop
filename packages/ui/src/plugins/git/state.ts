@@ -11,6 +11,7 @@ export type GitDiffSource = "live" | "snapshot";
 export interface GitStageData {
   kind: "commit" | "working" | "session";
   target: string;
+  area?: "working" | "staged" | "unstaged";
   source: GitDiffSource;
   loading: boolean;
   error: string;

@@ -59,6 +59,7 @@ function countBlocks(message: any): number {
 
 export function parseSessionHistory(text: string): any[] {
   const messages: any[] = [];
+  const entries: any[] = [];
   if (!text) return messages;
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -70,6 +71,25 @@ export function parseSessionHistory(text: string): any[] {
       continue;
     }
     if (!entry || typeof entry !== "object") continue;
+    entries.push(entry);
+  }
+  // v3 JSONL 是树而不是扁平聊天：只沿最新叶子的 parentId 取当前分支，
+  // 不能把 fork 前的另一条回复也混入历史。旧文件没有 parentId 时维持兼容。
+  const linked = entries.filter(entry => entry.type !== "session" && typeof entry.id === "string");
+  let branch = entries;
+  if (linked.length && linked.some(entry => Object.prototype.hasOwnProperty.call(entry, "parentId"))) {
+    const index = new Map(linked.map(entry => [entry.id, entry]));
+    const visited = new Set<string>();
+    const selected: any[] = [];
+    let entry = linked.at(-1);
+    while (entry && !visited.has(entry.id)) {
+      visited.add(entry.id);
+      selected.push(entry);
+      entry = typeof entry.parentId === "string" ? index.get(entry.parentId) : undefined;
+    }
+    branch = selected.reverse();
+  }
+  for (const entry of branch) {
     const payload = entry.type === "message" ? entry.message : entry.role ? entry : null;
     if (!payload || typeof payload.role !== "string") continue;
     if (!HISTORY_ROLES.has(payload.role)) continue;

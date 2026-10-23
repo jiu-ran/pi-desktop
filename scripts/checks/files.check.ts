@@ -1,8 +1,9 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PiHost } from "../../electron/pi-host.ts";
+import { displayProjectName } from "../../packages/ui/src/shared/util.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-files-"));
 const external = `${root}-outside.txt`;
@@ -38,13 +39,38 @@ try {
   let imageSave = false;
   try { await host.writeWorkspaceFile(root, "logo.png", "text"); } catch { imageSave = true; }
   assert(imageSave, "图片不应允许在文本编辑器里覆盖保存");
+  let binarySave = false;
+  try { await host.writeWorkspaceFile(root, "blob.bin", "text"); } catch { binarySave = true; }
+  assert(binarySave, "所有二进制文件都必须阻止文本覆盖");
 
   const opened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(opened.content.includes("export {}"), "应读取文件内容");
+
+  // 8 KB 探测窗口恰好截断一个中文字符时，不能把整个文件误判为二进制。
+  // README / CHANGELOG 这类文件很容易正好命中这个边界。
+  const boundaryText = `${"a".repeat(8191)}你\n`;
+  await writeFile(path.join(root, "boundary.md"), boundaryText);
+  const boundary = await host.readWorkspaceFile(root, "boundary.md");
+  assert(!boundary.binary && boundary.content === boundaryText, "UTF-8 多字节字符不应因探测截断被误判为二进制");
+
+  // 2 MB 以上文本仍可读取，界面会切换为只读大文件预览。
+  const largeText = `${"x".repeat(3 * 1024 * 1024)}\n`;
+  await writeFile(path.join(root, "large.md"), largeText);
+  const large = await host.readWorkspaceFile(root, "large.md");
+  assert(!large.binary && large.content.length === largeText.length, "大文本文件应返回完整内容");
   const saved = await host.writeWorkspaceFile(root, "src/main.ts", "export const changed = true;\n");
   assert(saved.content.includes("changed"), "保存应返回更新后的内容");
   const reopened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(reopened.content.includes("changed"), "保存后磁盘文件应更新");
+  assert(Boolean(reopened.revision), "读取应包含内容版本");
+  await writeFile(path.join(root, "src/main.ts"), "external-change");
+  let conflict = false;
+  try { await host.writeWorkspaceFile(root, "src/main.ts", "stale-draft", reopened.revision); } catch { conflict = true; }
+  assert(conflict && await readFile(path.join(root, "src/main.ts"), "utf8") === "external-change", "不能覆盖外部修改");
+  assert(!(await readdir(path.join(root, "src"))).some(name => name.endsWith(".tmp")), "保存临时文件应清理");
+  const latest = await host.readWorkspaceFile(root, "src/main.ts");
+  const raced = await Promise.allSettled([host.writeWorkspaceFile(root, "src/main.ts", "first-write", latest.revision), host.writeWorkspaceFile(root, "src/main.ts", "second-write", latest.revision)]);
+  assert(raced.filter(result => result.status === "fulfilled").length === 1, "两个相同旧版本保存不能同时覆盖成功");
 
   await writeFile(external, "outside");
   const externalOpened = await host.readWorkspaceFile(root, external);
@@ -70,6 +96,8 @@ try {
   const commitDetail = await host.gitInspect(process.cwd(), "commit", git.commits[0].hash);
   assert(commitDetail.kind === "commit" && commitDetail.meta.length > 0, "应读取 Git 提交详情");
   console.log("files", top.length, nested.length, "git", git.branch, git.commits.length);
+  if (displayProjectName("C:\\work\\7879f06a-login") !== "login") throw new Error("隔离工作区目录应显示任务名");
+  if (displayProjectName("C:\\work\\app") !== "app") throw new Error("普通项目名不应被改写");
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });

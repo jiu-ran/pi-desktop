@@ -41,6 +41,26 @@
   --input-bg: #090909;
   --shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
 
+  /* 终端表面与 ANSI 调色板（深色） */
+  --term-bg: #111214;
+  --term-fg: #d7dae0;
+  --ansi-black: #5c6370;
+  --ansi-red: #e06c75;
+  --ansi-green: #98c379;
+  --ansi-yellow: #e5c07b;
+  --ansi-blue: #61afef;
+  --ansi-magenta: #c678dd;
+  --ansi-cyan: #56b6c2;
+  --ansi-white: #c8ccd4;
+  --ansi-bright-black: #7f848e;
+  --ansi-bright-red: #ff7b86;
+  --ansi-bright-green: #b5e890;
+  --ansi-bright-yellow: #ffd68a;
+  --ansi-bright-blue: #82c4ff;
+  --ansi-bright-magenta: #e09eff;
+  --ansi-bright-cyan: #7fd6e0;
+  --ansi-bright-white: #f0f2f5;
+
   --radius: 8px;
   --radius-sm: 6px;
   --ui-font-size: 13px;
@@ -112,7 +132,7 @@ kbd {
 .btn.danger { border-color: color-mix(in srgb, var(--err) 45%, transparent); color: var(--err); }
 .btn.danger:hover { background: var(--del-bg); }
 .btn.block { width: 100%; }
-.btn.large { height: 36px; padding: 0 20px; font-size: 13.5px; }
+.btn.large { height: 36px; padding: 0 20px; border-radius: 8px; font-size: 13.5px; }
 
 .icon-btn {
   display: inline-grid;

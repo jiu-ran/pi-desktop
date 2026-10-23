@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
@@ -6,10 +6,15 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
+import { TerminalHost } from "./terminal-host.ts";
+import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
+import { atomicWriteText } from "./atomic-file.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ownsInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!ownsInstance) app.quit();
 
 // 开发实例使用独立 profile：
 // Electron 的 userData 目录取自 package.json 的 productName，而 dev 与已安装版本
@@ -52,12 +57,20 @@ const DEV_URL = (() => {
 })();
 const DEV_ORIGIN = new URL(DEV_URL).origin;
 let mainWindow: BrowserWindow | null = null;
+let terminalFocused = false;
 
 const host = new PiHost({
   emit(payload) {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pi:event", plain(payload));
   },
   trash: (file) => shell.trashItem(file),
+  worktreeRoot: path.join(app.getPath("userData"), "worktrees"),
+});
+
+const terminalHost = new TerminalHost({
+  emit(event) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pi:terminal-event", plain(event));
+  },
 });
 
 const recentFile = () => path.join(app.getPath("userData"), "recent-workspaces.json");
@@ -286,9 +299,26 @@ function createWindow() {
       sandbox: true,
     },
   });
+  mainWindow.webContents.on("will-prevent-unload", (event) => {
+    const choice = dialog.showMessageBoxSync(mainWindow!, {
+      type: "warning", title: "存在未保存的修改",
+      message: "关闭或刷新会丢失文件编辑器中尚未保存的草稿。",
+      buttons: ["取消，返回保存", "放弃修改并继续"], defaultId: 0, cancelId: 0,
+    });
+    if (choice === 1) event.preventDefault();
+  });
+  terminalFocused = false;
+  mainWindow.webContents.on("did-start-loading", () => {
+    terminalFocused = false;
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.setIgnoreMenuShortcuts(false);
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  mainWindow.webContents.on("will-frame-navigate", (event) => {
+    if (!isAllowedRendererUrl(event.url)) event.preventDefault();
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedRendererUrl(url)) event.preventDefault();
@@ -296,7 +326,7 @@ function createWindow() {
   // Chromium 自带 Ctrl/Cmd + - / + / 0 页面缩放。缩放只允许设置页，
   // 这里把这些组合（含 Shift、小键盘）全部吃掉，避免和输入法抢键。
   mainWindow.webContents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown") return;
+    if (input.type !== "keyDown" || terminalFocused) return;
     if ((!input.control && !input.meta) || input.alt) return;
     const zoom =
       input.code === "Minus" || input.code === "NumpadSubtract" ||
@@ -329,11 +359,11 @@ const workspaceChannels = new Set([
   "pi:forget", "pi:snapshot", "pi:prepare-attachments", "pi:list-directory",
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
-  "pi:git-overview", "pi:git-inspect", "pi:complete-paths", "pi:restart", "pi:sessions",
+  "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:complete-paths", "pi:restart", "pi:sessions",
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
-  "pi:packages-remove", "pi:packages-update", "pi:skills-overview",
+  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
 ]);
 
 function handle(channel: string, fn: (...args: any[]) => any) {
@@ -346,11 +376,22 @@ function handle(channel: string, fn: (...args: any[]) => any) {
   });
 }
 
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.whenReady().then(() => {
+  if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
   handle("app:check-update", () => appUpdateManager.check());
   handle("app:download-update", () => appUpdateManager.download());
+  handle("app:cancel-update", () => appUpdateManager.cancelDownload());
+  // 终端 Ctrl+V 读取系统剪贴板；渲染进程的 navigator.clipboard.readText 在部分平台上需要额外权限。
+  handle("app:read-clipboard", () => clipboard.readText());
   handle("app:install-update", (version = "") => appUpdateManager.install(version));
   handle("app:open-update", (url = "") => {
     if (!isAllowedExternalUrl(url)) return false;
@@ -441,14 +482,22 @@ app.whenReady().then(() => {
   });
   handle("pi:list-directory", (cwd: string, relative: string) => host.listDirectory(cwd, relative));
   handle("pi:read-workspace-file", (cwd: string, relative: string) => host.readWorkspaceFile(cwd, relative));
-  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string) => host.writeWorkspaceFile(cwd, relative, content));
+  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => host.writeWorkspaceFile(cwd, relative, content, revision));
   handle("pi:open-workspace-path", async (cwd: string, relative: string) => shell.openPath(await host.openWorkspacePath(cwd, relative)));
   handle("pi:create-workspace-entry", (cwd: string, parent: string, name: string, kind: "file" | "folder") => host.createWorkspaceEntry(cwd, parent, name, kind));
   handle("pi:rename-workspace-entry", (cwd: string, relative: string, name: string) => host.renameWorkspaceEntry(cwd, relative, name));
   handle("pi:delete-workspace-entry", (cwd: string, relative: string) => host.deleteWorkspaceEntry(cwd, relative));
   handle("pi:git-overview", (cwd: string) => host.gitOverview(cwd));
+  handle("pi:git-branches", (cwd: string) => host.gitBranches(cwd));
   handle("pi:git-action", (cwd: string, action: any, payload: any) => host.gitAction(cwd, action, payload));
-  handle("pi:git-inspect", (cwd: string, kind: "commit" | "working", target: string) => host.gitInspect(cwd, kind, target));
+  handle("pi:git-worktrees", (cwd: string) => host.gitWorktrees(cwd));
+  handle("pi:git-worktree-create", (cwd: string, name: string) => host.gitWorktreeCreate(cwd, name));
+  handle("pi:git-worktree-remove", async (cwd: string, target: string) => {
+    const result = await host.gitWorktreeRemove(cwd, target);
+    await forgetRecent(recentFile(), path.resolve(target));
+    return result;
+  });
+  handle("pi:git-inspect", (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => host.gitInspect(cwd, kind, target));
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));
   handle("pi:sessions", (cwd: string) => host.sessions(cwd));
@@ -480,6 +529,30 @@ app.whenReady().then(() => {
   handle("pi:packages-remove", (cwd: string, payload: any) => host.packagesRemove(cwd, payload));
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
+  handle("pi:terminal-start", (cwd: string, command: string, options?: TerminalPtyOptions) => terminalHost.startWithProfile(cwd, command, options));
+  handle("pi:terminal-shell", (cwd: string) => terminalHost.startShell(cwd));
+  handle("pi:terminal-pty", (cwd: string, cols?: number, rows?: number, options?: TerminalPtyOptions) => terminalHost.startPty(cwd, cols, rows, options));
+  handle("pi:terminal-profiles", () => listTerminalProfiles());
+  handle("pi:terminal-choose-executable", async () => {
+    const selected = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择终端 shell 可执行文件",
+      properties: ["openFile"],
+      ...(process.platform === "win32" ? { filters: [{ name: "可执行程序", extensions: ["exe"] }] } : {}),
+    });
+    return selected.canceled ? null : selected.filePaths[0];
+  });
+  handle("pi:terminal-profile-validate", (options: TerminalPtyOptions) => resolveTerminalProfile(options));
+  handle("pi:terminal-write", (id: string, input: string) => terminalHost.write(id, input));
+  handle("pi:terminal-pty-write", (id: string, data: string, binary = false) => terminalHost.writePty(id, data, binary));
+  handle("pi:terminal-pty-resize", (id: string, cols: number, rows: number) => terminalHost.resizePty(id, cols, rows));
+  handle("pi:terminal-focus", (focused: boolean) => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return false;
+    terminalFocused = focused === true;
+    mainWindow.webContents.setIgnoreMenuShortcuts(terminalFocused);
+    return true;
+  });
+  handle("pi:terminal-stop", (id: string) => terminalHost.stop(id));
+  handle("pi:terminal-list", () => terminalHost.list());
   const agentsPath = path.join(homedir(), ".pi", "agent", "AGENTS.md");
   handle("pi:global-agents", async () => {
     try { return { path: agentsPath, content: await readFile(agentsPath, "utf8") }; }
@@ -488,7 +561,7 @@ app.whenReady().then(() => {
   handle("pi:global-agents-save", async (content: string) => {
     if (typeof content !== "string" || content.length > 1024 * 1024) throw new Error("全局提示词不能超过 1 MB");
     await mkdir(path.dirname(agentsPath), { recursive: true });
-    await writeFile(agentsPath, content, "utf8");
+    await atomicWriteText(agentsPath, content);
     return { path: agentsPath, content };
   });
   handle("pi:titlebar", ({ color = "#111214", symbolColor = "#a8adb5" }: { color?: string; symbolColor?: string } = {}) => {
@@ -514,8 +587,8 @@ app.on("before-quit", async (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
-  await host.stopAll();
-  await appUpdateManager.cleanup();
+  appUpdateManager.cancelDownload();
+  await Promise.allSettled([terminalHost.dispose(), host.stopAll(), appUpdateManager.cleanup()]);
   app.exit();
 });
 

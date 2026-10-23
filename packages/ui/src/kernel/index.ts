@@ -6,28 +6,79 @@ import { setupTheme } from "../services/theme.ts";
 import { createBuiltinSlashCommands } from "../services/slash-commands.ts";
 import { setupExtensionUi } from "../services/extension-ui.ts";
 import { createCommandRegistry, paletteState } from "../services/command-palette.ts";
-import { openSettingsModal, setupSettings } from "../services/settings.ts";
+import { appSettings, openSettingsModal, setupSettings } from "../services/settings.ts";
+import { createTerminalService } from "../services/terminal.ts";
+import { saveFileTab } from "../plugins/files/save.ts";
+import type { FileStageData } from "../plugins/files/state.ts";
+import type { StageTab } from "./stage.ts";
+import { askConfirm } from "../components/sidebar/ui.ts";
 
 export const KERNEL_KEY = Symbol("pi-desktop-kernel");
+
+/** 文件页签记录打开时的项目目录，用于按项目收敛未保存草稿。 */
+function tabCwd(tab: StageTab): string {
+  return String((tab.data as { cwd?: string } | undefined)?.cwd ?? "");
+}
 
 export function createKernel({ host = typeof window !== "undefined" ? window.piDesktop : undefined }: { host?: any } = {}) {
   const bus = createEventBus();
   const stage = createStage();
-  const workbench = createWorkbench({ host, bus });
+  const workbench = createWorkbench({
+    host,
+    bus,
+    async beforeGitBranchChange(cwd: string) {
+      return !stage.allTabs.value.some(tab => tab.pluginId === "files" && tab.dirty && tabCwd(tab) === cwd);
+    },
+    async beforeRemoveWorkspace(cwd: string) {
+      // 移除项目会卸载舞台，先兜住该项目未保存的草稿：能自动保存就直接保存，
+      // 关掉自动保存时必须由用户确认放弃。
+      const dirty = stage.allTabs.value.filter(tab => tab.pluginId === "files" && tab.dirty && tabCwd(tab) === cwd);
+      if (!dirty.length) return true;
+      if (appSettings.autoSave !== "off") {
+        try {
+          for (const tab of dirty) await saveFileTab(workbench, tab as StageTab<FileStageData>);
+          return !dirty.some(tab => tab.dirty);
+        } catch (error: any) {
+          bus.emit("notify", { level: "error", text: `保存失败，已取消移除项目：${error?.message || String(error)}` });
+          return false;
+        }
+      }
+      return Boolean(await askConfirm({ title: "移除项目会关闭未保存的文件", message: `共有 ${dirty.length} 个文件含未保存修改，确定放弃并移除吗？`, confirmLabel: "放弃并移除", danger: true }));
+    },
+  });
+  const terminal = createTerminalService({
+    host,
+    getCwd: () => workbench.state.activeCwd,
+    enabled: false,
+    getProfileOptions: () => ({
+      profileId: appSettings.terminalProfile,
+      customPath: appSettings.terminalCustomPath,
+      customArgs: [...appSettings.terminalCustomArgs],
+    }),
+  });
   const theme = setupTheme(workbench, host);
   const settings = setupSettings(workbench, bus);
   const commandRegistry = createCommandRegistry();
   const stopExtensionUi = setupExtensionUi(bus, host);
   const disposers: Array<() => void> = [
     () => workbench.dispose(),
+    () => terminal.dispose(),
     () => settings.dispose(),
     () => theme.dispose(),
     stopExtensionUi,
   ];
 
-  // 切换项目目录时清空 3 区域打开的内容标签页
-  disposers.push(bus.on("workspace:switched", () => {
-    stage.clear();
+  // 按项目保留页签和未保存草稿；离开项目不销毁文件数据。
+  disposers.push(bus.on("workspace:switched", ({ cwd }: { cwd: string }) => {
+    stage.switchWorkspace(cwd);
+  }));
+  disposers.push(bus.on("workspace:removed", ({ cwd }: { cwd: string }) => {
+    stage.removeWorkspace(cwd);
+  }));
+
+  // 切换分支后磁盘基线变了：关闭已保存的源码和实时 Diff，防止旧内容被再次保存。
+  disposers.push(bus.on("git:branch-changed", ({ cwd }: { cwd: string }) => {
+    stage.closeWorkspaceTabs(cwd, tab => !tab.dirty && (tab.pluginId === "files" || (tab.pluginId === "git" && tab.data?.kind !== "commit")));
   }));
 
   // 注册主程序内置全局命令（1 区域 & 全局）
@@ -129,13 +180,14 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
       workbench,
       workspace: workbench.active,
       stage,
+      terminal,
       host: {
         listDirectory: (relative = "") => workbench.listDirectory(relative),
         readFile: (relative: string) => workbench.readWorkspaceFile(relative),
         writeFile: (relative: string, content: string) => workbench.writeWorkspaceFile(relative, content),
         openExternal: (relative: string) => workbench.openWorkspacePath(relative),
         gitOverview: () => workbench.gitOverview(),
-        gitInspect: (kind: "commit" | "working", target: string) => workbench.gitInspect(kind, target),
+        gitInspect: (kind: "commit" | "working" | "staged" | "unstaged", target: string) => workbench.gitInspect(kind, target),
         gitAction: (action, payload) => workbench.gitAction(action, payload),
       },
     });
@@ -143,6 +195,20 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
 
   const plugins = createPluginManager({
     createContext,
+    async beforeDisable(id) {
+      const dirty = stage.allTabs.value.filter(tab => tab.pluginId === id && tab.dirty);
+      if (!dirty.length) return true;
+      if (appSettings.autoSave !== "off") {
+        try {
+          for (const tab of dirty) await saveFileTab(workbench, tab as StageTab<FileStageData>);
+          return !dirty.some(tab => tab.dirty);
+        } catch (error: any) {
+          bus.emit("notify", { level: "error", text: `保存失败，插件未停用：${error?.message || String(error)}` });
+          return false;
+        }
+      }
+      return Boolean(await askConfirm({ title: "停用插件会关闭未保存的文件", message: `共有 ${dirty.length} 个文件含未保存修改，确定放弃并停用吗？`, confirmLabel: "放弃并停用", danger: true }));
+    },
     onPluginDeactivated(pluginId: string) {
       workbench.closePanel(pluginId);
       stage.closeByPlugin(pluginId);
@@ -153,6 +219,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
     bus,
     stage,
     workbench,
+    terminal,
     plugins,
     theme,
     settings,

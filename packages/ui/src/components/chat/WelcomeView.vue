@@ -1,15 +1,28 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons, shortPath } from "../../shared/util.ts";
+import { displayProjectName, icons, projectPathKey, shortPath } from "../../shared/util.ts";
 
-const { workbench } = useKernel();
+const { workbench, plugins } = useKernel();
 const state = workbench.state;
-const recent = computed(() => state.recent.slice(0, 6));
+// 终端是可关闭的可选插件，未启用时不要把它列成已有功能。
+const terminalEnabled = computed(() => Boolean(plugins.get("terminal")?.enabled));
+const recent = computed(() => {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const cwd of state.recent) {
+    const key = projectPathKey(cwd);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    list.push(cwd);
+  }
+  return list.slice(0, 6);
+});
 </script>
 
 <template>
   <section class="welcome">
+    <div class="welcome-glow" aria-hidden="true" />
     <div class="welcome-card">
       <img class="welcome-logo" src="../../assets/pi-icon.png" alt="Pi Desktop" />
 
@@ -27,18 +40,33 @@ const recent = computed(() => state.recent.slice(0, 6));
         <h1>Pi Desktop</h1>
         <p>打开一个本地项目，开始编码、查看文件修改，并使用本机 Pi 的模型、Skills 与 MCP。</p>
         <div class="welcome-actions">
-          <button class="btn primary large" @click="workbench.chooseAndOpen()">打开项目</button>
+          <button class="btn primary large welcome-open" @click="workbench.chooseAndOpen()">
+            <span v-html="icons.folder" />打开项目
+          </button>
           <span class="version-tag">Pi {{ state.pi.version }}</span>
         </div>
 
-        <div v-if="recent.length" class="recent">
-          <p class="eyebrow">最近的项目</p>
-          <button v-for="cwd in recent" :key="cwd" class="recent-row" :title="cwd" @click="workbench.open(cwd)">
-            <span class="recent-icon" v-html="icons.folder" />
-            <strong>{{ baseName(cwd) }}</strong>
-            <span class="recent-path">{{ shortPath(cwd, 3) }}</span>
-          </button>
+        <div class="welcome-features" aria-label="主要功能">
+          <span><i v-html="icons.folder" />项目文件</span>
+          <span><i v-html="icons.diff" />版本控制</span>
+          <span v-if="terminalEnabled"><i v-html="icons.terminal" />终端任务</span>
         </div>
+
+        <div v-if="recent.length" class="recent">
+          <p class="eyebrow">最近项目</p>
+          <div class="recent-list">
+            <button v-for="cwd in recent" :key="cwd" class="recent-row" :title="cwd" @click="workbench.open(cwd)">
+              <span class="recent-icon" v-html="icons.folder" />
+              <span class="recent-copy">
+                <strong>{{ displayProjectName(cwd) }}</strong>
+                <span class="recent-path">{{ shortPath(cwd, 3) }}</span>
+              </span>
+              <span class="recent-go" v-html="icons.chevronRight" />
+            </button>
+          </div>
+        </div>
+
+        <p class="welcome-hint"><kbd>@</kbd> 引用文件 <span>·</span> <kbd>/</kbd> 使用命令 <span>·</span> <kbd>Ctrl P</kbd> 快速打开</p>
       </template>
     </div>
   </section>

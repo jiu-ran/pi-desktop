@@ -36,6 +36,7 @@ function openInEditor(): void {
     :subtitle="baseName(path)"
     :added="stat.added"
     :removed="isWrite ? null : stat.removed"
+    :query="query"
   >
     <div class="diff-file clickable" :title="`在代码编辑器中打开 ${path}`" @click="openInEditor">{{ path }}</div>
     <DiffView :lines="lines" />

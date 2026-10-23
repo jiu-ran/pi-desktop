@@ -43,6 +43,26 @@
 .file-tree-icon.file { color: var(--code); }
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-dirty { flex: none; color: var(--accent); font-size: 9px; line-height: 1; }
+/* 文件树里的 Git 状态：与版本控制面板使用同一套字母与配色 */
+.file-tree-git { flex: none; margin-left: auto; padding-left: 6px; color: var(--warn); font: 600 10.5px/1 var(--mono); }
+.file-tree-git[data-kind="新增"] { color: var(--ok-fg); }
+.file-tree-git[data-kind="删除"] { color: var(--del-fg); }
+.file-tree-git[data-kind="重命名"] { color: var(--code); }
+.file-tree-git-count {
+  flex: none;
+  margin-left: auto;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  font: 600 9.5px/1.5 var(--mono);
+  text-align: center;
+}
+.files-actions .icon-btn.active { background: var(--bg-3); color: var(--accent); }
+/* 图标 + 计数改成横向排列：图标按钮默认是 grid 居中，两个子元素会叠在同一格里。 */
+.files-actions .files-changes-btn { display: inline-flex; align-items: center; gap: 4px; width: auto; min-width: 22px; padding: 0 6px; }
+.files-changes-count { font: 600 10px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .file-tree-children { min-width: 0; }
 .file-tree-empty { padding-top: 4px; padding-bottom: 4px; color: var(--fg-3); font-size: 12px; }
 .files-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; color: var(--fg-2); font-size: 12.5px; }
@@ -237,6 +257,57 @@
   color: var(--fg-3);
   font: 11.5px var(--mono);
 }
+.file-editor-large {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--input-bg);
+}
+.file-editor-large-note {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 11.5px;
+}
+.file-editor-large-note strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.file-editor-large-note span {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-3);
+}
+.file-editor-large-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+  color: var(--fg);
+  font: 12px/1.6 var(--mono);
+  overscroll-behavior: contain;
+}
+.file-editor-large-chunk {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  /* 长文件按 64 KB 分块，只排版视口附近的块，避免打开即卡住主线程。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1200px;
+}
 
 .file-editor-body {
   display: grid;
@@ -278,6 +349,17 @@
 .file-editor-input::selection { background: var(--accent-soft); }
 .file-editor-state { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--fg-2); font-size: 12.5px; }
 .file-editor-state.error { color: var(--err); }
+.file-editor-state.conflict {
+  flex: none;
+  flex-wrap: wrap;
+  height: auto;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+}
+.file-editor-state.conflict span { flex: 1; min-width: 220px; text-align: left; line-height: 1.5; }
 .file-view-toggle { flex: none; }
 .md-preview {
   flex: 1;
@@ -296,47 +378,81 @@
 
 /* 任务导航（侧栏） */
 .tasks { display: flex; flex-direction: column; min-height: 0; }
-.tasks-head { display: flex; flex: none; align-items: center; justify-content: space-between; height: 38px; padding: 0 8px 0 14px; }
-.tasks-title { font-size: 12.5px; font-weight: 600; }
+.tasks-head { display: flex; flex: none; align-items: center; justify-content: space-between; height: 42px; padding: 0 8px 0 14px; }
+.tasks-title { color: var(--fg); font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
 .tasks-search {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  margin: 0 10px 6px;
-  padding: 0 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
-  background: var(--input-bg);
+  gap: 7px;
+  height: 30px;
+  margin: 0 8px 8px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-1) 88%, var(--bg));
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.tasks-search:focus-within { border-color: var(--accent); }
+.tasks-search:hover { background: var(--bg-1); }
+.tasks-search:focus-within {
+  background: var(--bg-1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
 .tasks-search-icon { display: grid; color: var(--fg-3); }
 .tasks-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 12.5px; }
 .tasks-search input::placeholder { color: var(--fg-3); }
-.tasks-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.tasks-search-clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 14px;
+  line-height: 1;
+}
+.tasks-search-clear:hover { background: var(--hover); color: var(--fg); }
+.tasks-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
 .tasks-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 8px; color: var(--fg-2); font-size: 12.5px; }
 .tasks-empty p { margin: 0; }
 
-.project { margin-top: 4px; }
+.project { margin-top: 6px; }
 .project-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 30px;
   padding: 0 8px 0 6px;
-  border-radius: var(--radius-sm);
+  border-radius: 7px;
   color: var(--fg-2);
   cursor: pointer;
   user-select: none;
+  transition: background 0.12s, color 0.12s;
 }
 .project-row:hover { background: var(--hover); color: var(--fg); padding-right: 52px; }
-.project.current .project-row { color: var(--fg); }
+.project.current .project-row { background: color-mix(in srgb, var(--bg-2) 52%, transparent); color: var(--fg); }
+.project.current .project-row:hover { background: var(--bg-2); }
 .project-caret { display: grid; flex: none; width: 12px; color: var(--fg-3); }
-.project-name { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.project-name { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
 .project-branch { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 3px; min-width: 0; overflow: hidden; max-width: 110px; color: var(--fg-3); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .project-branch > span { display: grid; flex: none; }
+.project-count {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg-3);
+  font: 500 10px/17px var(--mono);
+  text-align: center;
+}
+.project-row:hover .project-count { visibility: hidden; }
 .project-status {
   display: inline-flex;
   flex: none;
@@ -396,10 +512,10 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 31px;
+  height: 32px;
   padding: 0 8px 0 22px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 7px;
   background: transparent;
   color: var(--fg-2);
   font-size: 12.5px;
@@ -408,8 +524,9 @@
 }
 .task-row:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .task-row.active {
-  background: var(--bg-3);
+  background: var(--bg-2);
   color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line-2) 55%, transparent);
 }
 .task-row.active .task-title {
   font-weight: 500;
@@ -419,12 +536,12 @@
 .task-row.state-compacting::before {
   content: "";
   position: absolute;
-  top: 7px;
-  bottom: 7px;
-  left: 6px;
+  top: 9px;
+  bottom: 9px;
+  left: 7px;
   width: 2.5px;
   border-radius: 99px;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
 }
 .task-row.state-compacting::before {
   background: var(--warn);
@@ -728,7 +845,7 @@
   scrollbar-width: thin;
 }
 .prompt-field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; color: var(--fg-2); font-size: 12.5px; }
-.prompt-field .panel-filter { width: 100%; }
+.prompt-field .panel-filter { width: 100%; border-color: var(--line-2); background: var(--input-bg); }
 .confirm-check { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 14px; color: var(--fg-2); font-size: 12.5px; cursor: pointer; }
 .confirm-check input { margin: 3px 0 0; accent-color: var(--err); }
 .btn.danger-solid { border-color: transparent; background: var(--err); color: #fff; }
@@ -835,20 +952,26 @@
 
 /* 4 区域过滤框与 Git 树插件 */
 .panel-filter-wrap {
-  padding: 6px 8px 2px;
+  padding: 6px 8px 4px;
 }
 .panel-filter {
   width: 100%;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius-sm);
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   outline: none;
-  background: var(--input-bg);
+  background: color-mix(in srgb, var(--bg-1) 88%, var(--bg));
   color: var(--fg);
-  font-size: 12px;
+  font-size: 12.5px;
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.panel-filter:focus { border-color: var(--accent); }
+.panel-filter:hover { background: var(--bg-1); }
+.panel-filter:focus {
+  background: var(--bg-1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.panel-filter::placeholder { color: var(--fg-3); }
 .file-search-rel {
   margin-left: auto;
   max-width: 45%;
@@ -1015,6 +1138,23 @@
 .git-sc-toolbar .icon-btn { opacity: 0.75; }
 .git-sc-toolbar .icon-btn:hover:not(:disabled) { opacity: 1; }
 .git-sc-toolbar .icon-btn.active { background: var(--bg-3); color: var(--accent); opacity: 1; }
+.git-worktree-toggle { position: relative; }
+.git-worktree-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
 
 .git-tree {
   display: flex;
@@ -1198,6 +1338,69 @@
   margin-left: auto;
   color: var(--fg-3);
   font-size: 11px;
+}
+
+/* 隔离工作区：独立分支 + 独立目录，可并行运行任务 */
+.git-worktree-hint {
+  margin: 0;
+  padding: 8px 10px 6px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.git-worktree-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 8px 8px;
+}
+.git-worktree-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.git-worktree-row:hover { background: var(--hover); }
+.git-worktree-row.active { border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: var(--accent-soft); }
+.git-worktree-row.missing { opacity: 0.55; }
+.git-worktree-icon { display: grid; flex: none; place-items: center; color: var(--accent); }
+.git-worktree-main { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.git-worktree-main strong {
+  overflow: hidden;
+  font: 600 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-worktree-main small {
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 10.5px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-worktree-tag {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  font-size: 9.5px;
+}
+.git-worktree-row.active .git-worktree-tag { background: var(--accent); color: var(--bg); }
+.git-worktree-actions { display: flex; flex: none; align-items: center; gap: 1px; opacity: 0.6; }
+.git-worktree-row:hover .git-worktree-actions,
+.git-worktree-row.active .git-worktree-actions { opacity: 1; }
+.git-worktree-actions .danger:hover { color: var(--err); }
+.git-worktree-empty {
+  margin: 4px 10px 12px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.55;
 }
 .git-error {
   display: flex;
@@ -2062,6 +2265,16 @@ html[data-density="compact"] .tool-card {
 .palette-item .palette-hint {
   margin-left: auto;
 }
+/* 快速打开文件：复用命令面板外壳，列表里额外显示文件所在目录与“最近”标记 */
+.quick-open .palette-list { max-height: min(52vh, 440px); padding: 5px; }
+.quick-open-state { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; color: var(--fg-3); font-size: 12.5px; }
+.quick-open-item { gap: 9px; }
+.quick-open-icon { display: grid; flex: none; color: var(--fg-3); }
+.quick-open-name { flex: none; max-width: 46%; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.quick-open-path { flex: 1; min-width: 0; overflow: hidden; color: var(--fg-3); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.quick-open-tag { flex: none; padding: 1px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+.quick-open-foot { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 11px; }
+.quick-open-foot kbd { padding: 1px 4px; border: 1px solid var(--line-2); border-radius: 3px; background: var(--bg); color: var(--fg-2); font: 10px var(--mono); }
 .dialog {
   width: min(480px, 92vw);
   padding: 16px;
@@ -2115,4 +2328,33 @@ html[data-density="compact"] .tool-card {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* 主题化 title 提示：替代原生系统白底 tooltip */
+.pi-tooltip {
+  position: fixed;
+  z-index: 130;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  animation: pi-tooltip-in 90ms ease-out;
+}
+@keyframes pi-tooltip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-tooltip { animation: none; }
 }

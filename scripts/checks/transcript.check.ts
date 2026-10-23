@@ -163,3 +163,56 @@ if (removable.blocks.filter((block) => block.id === secondUser.id).length !== 1)
   throw new Error("removeBlock 不存在的 id 不应改变内容");
 }
 console.log("removeBlock ok");
+
+// 技能调用：正文折叠成卡片，只保留技能名与调用者追加的问题
+const skill = createTranscript();
+const skillText = [
+  '<skill name="frontend-design" location="/home/u/.pi/skills/frontend-design/SKILL.md">',
+  "References are relative to /home/u/.pi/skills/frontend-design.",
+  "",
+  "# Frontend",
+  "写点东西",
+  "</skill>",
+  "",
+  "帮我做个页面",
+].join("\n");
+skill.loadMessages([{ role: "user", content: [{ type: "text", text: skillText }] }]);
+const skillBlock = skill.blocks[0];
+if (skill.blocks.length !== 1 || skillBlock.kind !== "user") throw new Error("技能消息应保留为一个用户块");
+if (skillBlock.skill?.name !== "frontend-design") throw new Error("技能名解析失败");
+if (skillBlock.text !== "帮我做个页面") throw new Error("应只保留追加的问题");
+if (!skillBlock.skill.content.includes("写点东西") || skillBlock.skill.content.includes("</skill>")) throw new Error("技能正文解析失败");
+
+// 只有技能、没有追加问题时也必须保留
+const onlySkill = createTranscript();
+onlySkill.loadMessages([{ role: "user", content: [{ type: "text", text: '<skill name="a" location="/x/SKILL.md">\nbody\n</skill>' }] }]);
+if (onlySkill.blocks.length !== 1 || onlySkill.blocks[0].skill?.name !== "a") throw new Error("纯技能消息不应被丢弃");
+
+console.log("skill OK");
+
+// 自动重试：保留尝试次数，成功后收成一行提示
+const retry = createTranscript();
+retry.applyEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 5, delayMs: 3000, errorMessage: "429 Too Many Requests" });
+const retryNotice = retry.blocks[0];
+if (retryNotice.kind !== "notice" || retryNotice.level !== "warning") throw new Error("重试应生成 warning 提示");
+if (retryNotice.retry?.attempt !== 2 || retryNotice.retry.delayMs !== 3000 || retryNotice.retry.done) throw new Error("重试进度不正确");
+retry.applyEvent({ type: "auto_retry_end", success: true, attempt: 2 });
+if (!retryNotice.retry.done || !retryNotice.retry.success) throw new Error("重试成功后应结束进度");
+if (String(retryNotice.level) !== "info" || !retryNotice.text?.includes("成功")) throw new Error("重试成功应更新提示");
+
+// 上下文压缩：运行中可显示，结束后携带摘要与 token 变化
+const compaction = createTranscript();
+compaction.applyEvent({ type: "compaction_start", reason: "threshold" });
+const compactionNotice = compaction.blocks[0];
+if (compactionNotice.kind !== "notice" || !compactionNotice.compaction?.running) throw new Error("压缩开始应生成运行中提示");
+compaction.applyEvent({
+  type: "compaction_end",
+  reason: "threshold",
+  result: { summary: "## 摘要\n保留关键改动", tokensBefore: 154200, estimatedTokensAfter: 32000 },
+  aborted: false,
+  willRetry: false,
+});
+if (compactionNotice.compaction?.running || compactionNotice.compaction?.summary !== "## 摘要\n保留关键改动") throw new Error("压缩结束应保存摘要");
+if (!compactionNotice.text?.includes("154.2k → 32.0k")) throw new Error("压缩提示应显示 token 变化");
+
+console.log("notices OK");

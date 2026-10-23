@@ -12,6 +12,7 @@ const emit = defineEmits<{
 
 const { workbench } = useKernel();
 const input = ref<HTMLTextAreaElement | null>(null);
+const overlay = ref<HTMLElement | null>(null);
 const lines = ref<HighlightToken[][]>([[{ content: "" }]]);
 let requestId = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -43,7 +44,11 @@ function onInput(event: Event): void {
 
 function onKeydown(event: KeyboardEvent): void {
   emit("keydown", event);
-  nextTick(() => input.value?.focus());
+}
+
+function syncScroll(): void {
+  if (overlay.value && input.value) { overlay.value.scrollTop = input.value.scrollTop; overlay.value.scrollLeft = input.value.scrollLeft; }
+  emit("scroll");
 }
 
 watch(() => [model.value, workbench.state.theme], scheduleRender, { immediate: true });
@@ -57,7 +62,7 @@ defineExpose({ input });
 
 <template>
   <div class="markdown-highlight-editor">
-    <pre aria-hidden="true"><code><span v-for="(line, index) in renderedLines" :key="index" class="markdown-highlight-line"><span v-for="(token, tokenIndex) in line" :key="tokenIndex" :style="{ color: token.color }">{{ token.content }}</span><br /></span></code></pre>
+    <pre ref="overlay" aria-hidden="true"><code><span v-for="(line, index) in renderedLines" :key="index" class="markdown-highlight-line"><span v-for="(token, tokenIndex) in line" :key="tokenIndex" :style="{ color: token.color }">{{ token.content }}</span><br /></span></code></pre>
     <textarea
       ref="input"
       :value="model"
@@ -67,7 +72,7 @@ defineExpose({ input });
       @input="onInput"
       @blur="emit('blur')"
       @keydown="onKeydown"
-      @scroll="emit('scroll')"
+      @scroll="syncScroll"
     />
   </div>
 </template>
@@ -84,7 +89,7 @@ defineExpose({ input });
 .markdown-highlight-input {
   margin: 0;
   padding: 10px 16px 20px 12px;
-  font: 12.5px/1.7 var(--mono);
+  font: var(--code-font-size, 12.5px)/1.7 var(--mono);
   letter-spacing: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

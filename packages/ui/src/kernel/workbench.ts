@@ -1,4 +1,6 @@
 import { computed, reactive, shallowReactive, toRaw } from "vue";
+import { displayProjectName, projectPathKey } from "../shared/util.ts";
+import { readStorage, writeStorage } from "../shared/storage.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -7,6 +9,10 @@ import type {
   GitActionPayload,
   GitInspectResult,
   GitOverview,
+  GitBranch,
+  GitWorktree,
+  GitWorktreeCreateResult,
+  GitWorktreeRemoveResult,
   McpExposureMode,
   McpOverview,
   PiPackagesOverview,
@@ -95,7 +101,7 @@ function normalizeThreadKey(file = ""): string {
 }
 
 function savedWidth(key: string, min: number, max: number, fallback: number): number {
-  const raw = localStorage.getItem(key);
+  const raw = readStorage(key);
   if (raw === null || raw === "") return fallback;
   const value = Number(raw);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
@@ -130,7 +136,7 @@ export function emptyGitOverview(): GitOverview {
   };
 }
 
-export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
+export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () => true, beforeGitBranchChange = async () => true }: { host: any; bus: EventBus; beforeRemoveWorkspace?: (cwd: string) => Promise<boolean>; beforeGitBranchChange?: (cwd: string) => Promise<boolean> }) {
   const state = reactive({
     pi: {
       found: false,
@@ -155,7 +161,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     },
     recent: [] as string[],
     activeCwd: "",
-    theme: localStorage.getItem(THEME_KEY) || "dark",
+    theme: readStorage(THEME_KEY) === "light" ? "light" : "dark",
     sidebarOpen: true,
     sidebarWidth: savedSidebarWidth(),
     panelWidth: savedWidth(PANEL_WIDTH_KEY, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, 320),
@@ -170,6 +176,8 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
   let stopHostEvents: (() => void) | null = null;
   let initPromise: Promise<void> | null = null;
   let disposed = false;
+  /** 用户点了「取消下载」后，下载 Promise 的失败不应再报成错误 Toast。 */
+  let appUpdateCancelled = false;
 
   function makeThread(sessionFile = ""): SessionThreadState {
     const transcript = createTranscript(reactive as any);
@@ -214,7 +222,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
 
     const raw: any = {
       cwd,
-      name: cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd,
+      name: displayProjectName(cwd),
       status: "idle" as const,
       error: "",
       models: [] as any[],
@@ -318,6 +326,23 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
   }
 
   const active = computed<WorkspaceState | null>(() => workspaces.get(state.activeCwd) ?? null);
+
+  /**
+   * 按规范化路径查找已打开的工作区。
+   * 主进程的 recent 可能返回反斜杠路径，而目录选择器返回正斜杠路径；
+   * 如果只用 Map 精确匹配，会为同一个项目创建第二个工作区，导致侧栏出现
+   * 两组同名项目、活动任务高亮错位。
+   */
+  function findWorkspace(cwd: string): WorkspaceState | undefined {
+    const direct = workspaces.get(cwd);
+    if (direct) return direct;
+    const key = projectPathKey(cwd);
+    if (!key) return undefined;
+    for (const ws of workspaces.values()) {
+      if (projectPathKey(ws.cwd) === key) return ws;
+    }
+    return undefined;
+  }
 
   function rpc(cwd: string, method: string, args: any[] = [], sessionFile?: string): Promise<any> {
     return host.call(cwd, method, plainArgs(args), sessionFile);
@@ -427,7 +452,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
       stopHostEvents?.();
       stopHostEvents = host.onEvent(({ cwd, sessionFile, event }: { cwd: string; sessionFile?: string; event: any }) => {
         if (disposed) return;
-        const ws = workspaces.get(cwd);
+        const ws = findWorkspace(cwd);
         if (!ws) return;
         const targetFile = sessionFile || ws.sessionFile;
         const thread = ensureThread(ws, targetFile);
@@ -527,12 +552,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function open(cwd: string): Promise<WorkspaceState> {
-    let ws = workspaces.get(cwd);
-    const switched = state.activeCwd !== cwd;
-    state.activeCwd = cwd;
-    if (switched) bus.emit("workspace:switched", { cwd });
+    let ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
+    const switched = projectPathKey(state.activeCwd) !== projectPathKey(target);
+    state.activeCwd = target;
+    if (switched) bus.emit("workspace:switched", { cwd: target });
     if (ws?.status === "ready") return ws;
-    const pending = opens.get(cwd);
+    const pending = opens.get(target);
     if (pending) return pending;
     if (!ws) {
       ws = makeWorkspace(cwd);
@@ -542,7 +568,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     ws.error = "";
     const task = (async () => {
       try {
-        const snap = await host.open(cwd);
+        const snap = await host.open(target);
         if (disposed) return ws!;
         applySnapshot(ws!, snap);
         ws!.status = "ready";
@@ -552,11 +578,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         ws!.status = "error";
         ws!.error = error?.message ?? String(error);
       } finally {
-        opens.delete(cwd);
+        opens.delete(target);
       }
       return ws!;
     })();
-    opens.set(cwd, task);
+    opens.set(target, task);
     return task;
   }
 
@@ -577,10 +603,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.readWorkspaceFile(ws.cwd, relative);
   }
 
-  async function writeWorkspaceFile(relative: string, content: string): Promise<WorkspaceFileData> {
-    const ws = active.value;
-    if (!ws) throw new Error("没有打开的工作区");
-    return host.writeWorkspaceFile(ws.cwd, relative, content);
+  async function writeWorkspaceFile(relative: string, content: string, revision?: string, cwd?: string): Promise<WorkspaceFileData> {
+    const target = cwd || active.value?.cwd;
+    if (!target) throw new Error("没有打开的工作区");
+    return host.writeWorkspaceFile(target, relative, content, revision);
   }
 
   async function openWorkspacePath(relative: string): Promise<void> {
@@ -614,16 +640,56 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.gitOverview(ws.cwd);
   }
 
-  async function gitInspect(kind: "commit" | "working", target: string): Promise<GitInspectResult> {
+  async function gitInspect(kind: "commit" | "working" | "staged" | "unstaged", target: string): Promise<GitInspectResult> {
     const ws = active.value;
     if (!ws || !host?.gitInspect) throw new Error("没有打开的工作区");
     return host.gitInspect(ws.cwd, kind, target);
   }
 
-  async function gitAction(action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
+  async function gitBranches(): Promise<GitBranch[]> {
     const ws = active.value;
-    if (!ws || !host?.gitAction) throw new Error("没有打开的工作区");
-    return host.gitAction(ws.cwd, action, payload);
+    return ws && host?.gitBranches ? host.gitBranches(ws.cwd) : [];
+  }
+
+  async function gitAction(action: GitActionName, payload: GitActionPayload = {}, cwd?: string): Promise<GitActionResult> {
+    const target = cwd || active.value?.cwd;
+    if (!target || !host?.gitAction) throw new Error("没有打开的工作区");
+    const branchChange = action === "switchBranch" || action === "createBranch";
+    if (branchChange) {
+      const ws = findWorkspace(target);
+      if (ws?.hasAnyRunning) throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换或新建分支");
+      if (!await beforeGitBranchChange(target)) throw new Error("请先保存或关闭未保存的文件，再切换或新建分支");
+    }
+    const result = await host.gitAction(target, action, payload);
+    const ws = findWorkspace(target);
+    if (ws) ws.branch = result.overview.branch;
+    if (branchChange) bus.emit("git:branch-changed", { cwd: target });
+    if (state.activeCwd === target) bus.emit("files:changed", { directory: "" });
+    return result;
+  }
+
+  async function gitWorktrees(): Promise<GitWorktree[]> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktrees) return [];
+    return host.gitWorktrees(ws.cwd);
+  }
+
+  async function createGitWorktree(name: string): Promise<GitWorktreeCreateResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktreeCreate) throw new Error("没有打开的工作区");
+    return host.gitWorktreeCreate(ws.cwd, name);
+  }
+
+  async function removeGitWorktree(target: string): Promise<GitWorktreeRemoveResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktreeRemove) throw new Error("没有打开的工作区");
+    const cwd = ws.cwd;
+    if (workspaces.has(target)) {
+      // 移除工作树会删除目录：用户取消保存未保存草稿时必须中止，不能继续删。
+      const removed = await removeProject(target);
+      if (removed?.cancelled) throw new Error("已取消移除工作树：仍有未保存的文件修改");
+    }
+    return host.gitWorktreeRemove(cwd, target);
   }
 
   async function completePaths(query = ""): Promise<WorkspaceEntry[]> {
@@ -635,14 +701,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function addFiles(paths: string[] = []): Promise<void> {
     const ws = active.value;
     if (!ws || !paths.length) return;
-    const known = new Set(ws.attachments.map((item: any) => item.path));
+    const thread = ws.activeThread;
+    const known = new Set(thread.attachments.map((item: any) => item.path));
     const seen = new Set<string>();
     const fresh = paths.filter((path) => {
       if (!path || known.has(path) || seen.has(path)) return false;
       seen.add(path);
       return true;
     });
-    const room = Math.max(0, MAX_ATTACHMENTS - ws.attachments.length);
+    const room = Math.max(0, MAX_ATTACHMENTS - thread.attachments.length);
     const accepted = fresh.slice(0, room);
     if (accepted.length < fresh.length) {
       bus.emit("notify", {
@@ -653,9 +720,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (!accepted.length) return;
     const prepared = await host.prepareAttachments(ws.cwd, accepted, accepted);
     for (const item of prepared.items ?? []) {
-      if (!item?.path || known.has(item.path)) continue;
-      known.add(item.path);
-      ws.attachments.push(item);
+      if (!item?.path || thread.attachments.some(existing => existing.path === item.path)) continue;
+      if (thread.attachments.length >= MAX_ATTACHMENTS) break;
+      thread.attachments.push(item);
     }
   }
 
@@ -664,9 +731,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws) throw new Error("没有打开的工作区");
     if (!host?.savePastedImage) throw new Error("当前环境不支持粘贴图片");
+    const thread = ws.activeThread;
     const file = await host.savePastedImage(payload);
     if (!file) throw new Error("剪贴板图片保存失败");
-    await addFiles([file]);
+    const prepared = await host.prepareAttachments(ws.cwd, [file], [file]);
+    for (const item of prepared.items ?? []) {
+      if (thread.attachments.length >= MAX_ATTACHMENTS) break;
+      if (!thread.attachments.some(existing => existing.path === item.path)) thread.attachments.push(item);
+    }
   }
 
   function extractDroppedPaths(dataTransfer: DataTransfer | null): string[] {
@@ -720,17 +792,21 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function removeProject(cwd: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}): Promise<any> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
     if (ws?.hasAnyRunning) throw new Error("该项目有任务正在运行，请先停止");
-    const result = await host.removeProject(cwd, { deleteSessions });
-    workspaces.delete(cwd);
+    if (!(await beforeRemoveWorkspace(target))) {
+      return { cancelled: true, recent: state.recent, deleted: 0, failed: 0 };
+    }
+    const result = await host.removeProject(target, { deleteSessions });
+    workspaces.delete(target);
     state.recent = result.recent;
-    if (state.activeCwd === cwd) {
+    if (projectPathKey(state.activeCwd) === projectPathKey(target)) {
       const next = [...workspaces.keys()][0] ?? "";
       state.activeCwd = next;
       bus.emit("workspace:switched", { cwd: next });
     }
-    bus.emit("workspace:removed", { cwd });
+    bus.emit("workspace:removed", { cwd: target });
     return result;
   }
 
@@ -739,8 +815,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   async function deleteSession(cwd: string, file: string): Promise<any[]> {
-    const ws = workspaces.get(cwd);
-    const sessions = await host.deleteSession(cwd, file);
+    const ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
+    const sessions = await host.deleteSession(target, file);
     if (ws) {
       delete ws.threads[normalizeThreadKey(file)];
       if (ws.status === "ready") {
@@ -751,7 +828,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         }
       }
     }
-    bus.emit("session:deleted", { cwd, file });
+    bus.emit("session:deleted", { cwd: target, file });
     return sessions;
   }
 
@@ -776,7 +853,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.sidebarWidth;
     state.sidebarWidth = Math.round(width);
-    if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
+    if (persist) writeStorage(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
     return state.sidebarWidth;
   }
 
@@ -784,7 +861,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.panelWidth;
     state.panelWidth = Math.round(width);
-    if (persist) localStorage.setItem(PANEL_WIDTH_KEY, String(state.panelWidth));
+    if (persist) writeStorage(PANEL_WIDTH_KEY, String(state.panelWidth));
     return state.panelWidth;
   }
 
@@ -792,7 +869,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(EDITOR_MAX_WIDTH, Math.max(EDITOR_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.stageWidth;
     state.stageWidth = Math.round(width);
-    if (persist) localStorage.setItem(EDITOR_WIDTH_KEY, String(state.stageWidth));
+    if (persist) writeStorage(EDITOR_WIDTH_KEY, String(state.stageWidth));
     return state.stageWidth;
   }
 
@@ -863,9 +940,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   function listSessions(cwd: string): Promise<any[]> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
     if (ws?.status === "ready") return Promise.resolve(ws.sessions);
-    return host.sessions(cwd);
+    return host.sessions(ws?.cwd ?? cwd);
   }
 
   async function openSession(cwd: string, file: string): Promise<void> {
@@ -879,14 +956,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     sessionFile: string,
     limit: number = PAGE_SIZE,
   ): Promise<{ loaded: number; startIndex: number; total: number }> {
-    const ws = workspaces.get(cwd);
+    const ws = findWorkspace(cwd);
     const thread = ws ? ensureThread(ws, sessionFile) : null;
     if (!thread || thread.loadingMore || thread.historyStart <= 0) {
       return { loaded: 0, startIndex: thread?.historyStart ?? 0, total: thread?.messageTotal ?? 0 };
     }
     thread.loadingMore = true;
     try {
-      const page = await host.messagePage(cwd, sessionFile, thread.historyStart, limit, 0, PAGE_MIN_BLOCKS);
+      const page = await host.messagePage(ws!.cwd, sessionFile, thread.historyStart, limit, 0, PAGE_MIN_BLOCKS);
       if (page.messages.length > 0) {
         thread.transcript.prependMessages(page.messages);
         thread.historyStart = page.startIndex;
@@ -898,15 +975,25 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  const pendingNewSessions = new Map<string, Promise<void>>();
+  /** 会话切换期间阻止统计等 RPC 抢在 worker 切换完成前使用新文件。 */
+  const pendingSessionSwitches = new Map<string, Promise<void>>();
+
   async function call(method: string, ...args: any[]): Promise<any> {
+    let current = active.value;
+    if (!current) throw new Error("没有打开的工作区");
+    // 只在确实有新建 / 切换流程时等待。空闲时不能 await（哪怕已 resolve 的
+    // Promise 也会让出微任务），否则等待期间刚开始的切换会把新文件暴露给宿主。
+    for (let guard = 0; guard < 8; guard += 1) {
+      const pending = pendingNewSessions.get(current.cwd) ?? pendingSessionSwitches.get(current.cwd);
+      if (!pending) break;
+      await pending.catch(() => {});
+      current = active.value ?? current;
+    }
     const ws = active.value;
     if (!ws) throw new Error("没有打开的工作区");
-    const pending = pendingNewSessions.get(ws.cwd);
-    if (pending) await pending.catch(() => {});
     return rpc(ws.cwd, method, args, ws.sessionFile);
   }
-
-  const pendingNewSessions = new Map<string, Promise<void>>();
 
   async function send(text: string, { mode }: { mode?: string } = {}): Promise<boolean> {
     const ws = active.value;
@@ -949,7 +1036,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         thread.loaded = true;
       }
       const prompt = [prepared.text, message].filter(Boolean).join("\n");
-      thread.attachments = [];
+      // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
+      const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
+      thread.attachments = thread.attachments.filter(item => !sentPaths.has(item.path));
       const disposition = await rpc(ws.cwd, "prompt", [prompt, prepared.images, behavior], targetSessionFile);
       accepted = true;
       if (disposition === "handled") {
@@ -959,11 +1048,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       await refreshSessions(ws);
       return true;
     } catch (error: any) {
-      thread.streaming = false;
+      if (!accepted && !behavior) thread.streaming = false;
       if (!accepted) {
         // 未送达：撤回乐观消息并恢复附件，让用户可以改完再发
         if (optimisticId) thread.transcript.removeBlock(optimisticId);
-        thread.attachments = attachmentSnapshot;
+        thread.attachments = [...attachmentSnapshot, ...thread.attachments.filter(item => !attachmentSnapshot.some(sent => sent.path === item.path))].slice(0, MAX_ATTACHMENTS);
       }
       bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       return accepted;
@@ -994,6 +1083,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const prevLevels = [...ws.levels];
     const prevThinking = ws.thinking;
     const prevSessions = [...ws.sessions];
+
+    // 在暴露临时文件之前先占住闸门：同步触发的统计请求也必须等真实会话落位。
+    let releaseNewSession!: () => void;
+    const newSessionGate = new Promise<void>((resolve) => {
+      releaseNewSession = resolve;
+    });
+    pendingNewSessions.set(ws.cwd, newSessionGate);
 
     // 1. 乐观即时切换（0ms UI 响应）：立即创建空白线程并切换界面，无需等待后端进程/RPC
     const tempFile = `__optimistic_new_${Date.now()}__`;
@@ -1060,49 +1156,65 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         ws.sessions = prevSessions;
         bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       } finally {
-        pendingNewSessions.delete(ws.cwd);
+        if (pendingNewSessions.get(ws.cwd) === newSessionGate) pendingNewSessions.delete(ws.cwd);
+        releaseNewSession();
       }
     })();
 
-    pendingNewSessions.set(ws.cwd, task);
     return task;
   }
 
   async function switchSession(file: string): Promise<void> {
-    const ws = active.value;
+    let ws = active.value;
     if (!ws || !file || normalizeThreadKey(file) === normalizeThreadKey(ws.sessionFile)) return;
-    const pending = pendingNewSessions.get(ws.cwd);
-    if (pending) await pending.catch(() => {});
+    const pendingNew = pendingNewSessions.get(ws.cwd);
+    if (pendingNew) await pendingNew.catch(() => {});
+    const pendingSwitch = pendingSessionSwitches.get(ws.cwd);
+    if (pendingSwitch) await pendingSwitch.catch(() => {});
+    ws = active.value;
+    if (!ws || normalizeThreadKey(file) === normalizeThreadKey(ws.sessionFile)) return;
 
-    const previousFile = ws.sessionFile;
-    const targetThread = ws.threads[normalizeThreadKey(file)];
-    const alreadyLoaded = Boolean(targetThread?.loaded);
-    if (alreadyLoaded) {
-      // 如果目标会话已在内存中加载过（如正在后台运行的并行会话），立即 0ms 切换视图
-      ws.sessionFile = file;
-      bus.emit("session:switched", { cwd: ws.cwd, sessionFile: file });
-    }
-
+    // 乐观切换会立刻改写 ws.sessionFile；先设闸门，统计等 RPC 才不会
+    // 拿着尚未在宿主注册的文件去调用。
+    let releaseSwitch!: () => void;
+    const switchGate = new Promise<void>((resolve) => {
+      releaseSwitch = resolve;
+    });
+    pendingSessionSwitches.set(ws.cwd, switchGate);
     try {
-      const res = await rpc(ws.cwd, "switchSession", [file]);
-      if (res?.cancelled) {
+      const previousFile = ws.sessionFile;
+      const targetThread = ws.threads[normalizeThreadKey(file)];
+      const alreadyLoaded = Boolean(targetThread?.loaded);
+      if (alreadyLoaded) {
+        // 如果目标会话已在内存中加载过（如正在后台运行的并行会话），立即 0ms 切换视图
+        ws.sessionFile = file;
+        bus.emit("session:switched", { cwd: ws.cwd, sessionFile: file });
+      }
+
+      try {
+        const res = await rpc(ws.cwd, "switchSession", [file]);
+        if (res?.cancelled) {
+          if (ws.sessionFile === file) ws.sessionFile = previousFile;
+          return;
+        }
+
+        if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming && targetThread.historyStart >= 0) {
+          // 复用了正在流式输出的温备 Worker，无需重新拉取完整历史覆盖实时流
+          return;
+        }
+
+        await reload(ws, file);
+        if (!alreadyLoaded) {
+          bus.emit("session:switched", { cwd: ws.cwd, sessionFile: ws.sessionFile });
+        }
+      } catch (error) {
         if (ws.sessionFile === file) ws.sessionFile = previousFile;
-        return;
+        if (alreadyLoaded) bus.emit("session:switched", { cwd: ws.cwd, sessionFile: previousFile });
+        throw error;
       }
-
-      if (alreadyLoaded && res?.reusedWorker && targetThread?.streaming && targetThread.historyStart >= 0) {
-        // 复用了正在流式输出的温备 Worker，无需重新拉取完整历史覆盖实时流
-        return;
-      }
-
-      await reload(ws, file);
-      if (!alreadyLoaded) {
-        bus.emit("session:switched", { cwd: ws.cwd, sessionFile: ws.sessionFile });
-      }
-    } catch (error) {
-      if (ws.sessionFile === file) ws.sessionFile = previousFile;
-      if (alreadyLoaded) bus.emit("session:switched", { cwd: ws.cwd, sessionFile: previousFile });
-      throw error;
+    } finally {
+      if (pendingSessionSwitches.get(ws.cwd) === switchGate) pendingSessionSwitches.delete(ws.cwd);
+      releaseSwitch();
     }
   }
 
@@ -1131,7 +1243,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   function setTheme(id: string): void {
     state.theme = id;
-    localStorage.setItem(THEME_KEY, id);
+    writeStorage(THEME_KEY, id);
   }
 
   /**
@@ -1220,6 +1332,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   async function downloadAppUpdate(): Promise<boolean> {
     if (!host?.downloadAppUpdate || state.appUpdate.phase === "downloading") return false;
+    appUpdateCancelled = false;
     state.appUpdate.phase = "downloading";
     try {
       const prepared = await host.downloadAppUpdate();
@@ -1231,9 +1344,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return true;
     } catch (error: any) {
       state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
-      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      if (appUpdateCancelled) bus.emit("notify", { level: "info", text: "已取消下载更新" });
+      else bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      appUpdateCancelled = false;
       return false;
     }
+  }
+
+  /** 取消正在进行的更新下载；后端只发中止信号，由下载 Promise 统一复位状态。 */
+  function cancelAppUpdate(): boolean {
+    if (!host?.cancelAppUpdate || state.appUpdate.phase !== "downloading") return false;
+    appUpdateCancelled = true;
+    const started = Boolean(host.cancelAppUpdate());
+    if (started) state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
+    return started;
   }
 
   async function installAppUpdate(): Promise<boolean> {
@@ -1568,8 +1692,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     renameEntry,
     deleteEntry,
     gitOverview,
+    gitBranches,
     gitInspect,
     gitAction,
+    gitWorktrees,
+    createGitWorktree,
+    removeGitWorktree,
     completePaths,
     addFiles,
     addPastedImage,
@@ -1598,6 +1726,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     checkPiUpdate,
     checkAppUpdate,
     downloadAppUpdate,
+    cancelAppUpdate,
     installAppUpdate,
     openAppUpdate,
     updatePi,

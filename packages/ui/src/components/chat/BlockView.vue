@@ -16,11 +16,13 @@ defineProps<{
   block: TranscriptBlock;
   query?: string;
   copyText?: string;
+  /** 后面还有内容时，长用户消息默认折叠 */
+  collapseLong?: boolean;
 }>();
 </script>
 
 <template>
-  <UserMessage v-if="block.kind === 'user'" :block="block" :query="query" />
+  <UserMessage v-if="block.kind === 'user'" :block="block" :query="query" :collapse-long="collapseLong" />
   <AssistantText v-else-if="block.kind === 'text'" :block="block" :query="query" :copy-text="copyText" />
   <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" :query="query" />
   <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" :query="query" />

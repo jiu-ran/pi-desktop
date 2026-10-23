@@ -9,8 +9,8 @@ export default definePlugin({
   id: "git",
   name: "版本控制",
   description:
-    "合并 Git 仓库状态与本会话改动：初始化仓库、暂存与提交、获取 / 拉取 / 推送，并在详情视图查看提交与 Diff。",
-  version: "0.3.0",
+    "清晰分区的版本控制：更改 / 分支 / 历史 / 工作区 / 会话快照，支持分支切换与新建、暂存提交、获取 / 拉取 / 推送和 Diff。",
+  version: "0.4.0",
   icon: icons.branch,
   order: 20,
   panel: GitPanel,
@@ -22,7 +22,10 @@ export default definePlugin({
       return collectChanges(ctx.workspace.value?.blocks).length || null;
     };
 
+    let request = 0;
     const refresh = () => {
+      const current = ++request;
+      const cwd = ctx.workspace.value?.cwd;
       if (!ctx.workspace.value?.cwd) {
         overviewState.value = null;
         return;
@@ -30,15 +33,16 @@ export default definePlugin({
       ctx.host
         .gitOverview()
         .then((repo) => {
-          overviewState.value = repo;
+          if (request === current && ctx.workspace.value?.cwd === cwd) overviewState.value = repo;
         })
         .catch(() => {
-          overviewState.value = null;
+          if (request === current) overviewState.value = null;
         });
     };
     refresh();
     ctx.on("workspace:switched", refresh);
     ctx.on("workspace:opened", refresh);
+    ctx.on("git:branch-changed", refresh);
 
     ctx.registerCommand({
       id: "git.toggle",

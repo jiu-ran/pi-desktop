@@ -68,6 +68,7 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  revision?: string;
   /** 图片等二进制文件的预览内容（data URL） */
   preview?: { mimeType: string; dataUrl: string };
   /** 非文本文件：只读，不能保存 */
@@ -109,12 +110,27 @@ export interface GitOverview {
   userEmail: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+export interface GitBranch {
+  ref: string;
+  name: string;
+  remote: boolean;
+  current: boolean;
+  hash: string;
+  subject: string;
+  upstream: string;
+  tracking: string;
+  worktreePath: string;
+}
+
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
 
 export interface GitActionPayload {
   paths?: string[];
   all?: boolean;
   message?: string;
+  branch?: string;
+  localName?: string;
+  startPoint?: string;
 }
 
 export interface GitActionResult {
@@ -124,12 +140,40 @@ export interface GitActionResult {
 }
 
 export interface GitInspectResult {
-  kind: "commit" | "working";
+  kind: "commit" | "working" | "staged" | "unstaged";
   target: string;
   title: string;
   subtitle: string;
   meta: string;
   diff: string;
+}
+
+export interface GitWorktree {
+  path: string;
+  branch: string;
+  head: string;
+  detached: boolean;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /** Git 的主工作区（仓库根目录） */
+  primary: boolean;
+  /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
+  managed: boolean;
+  exists: boolean;
+}
+
+export interface GitWorktreeCreateResult {
+  ok: true;
+  message: string;
+  worktree: GitWorktree;
+}
+
+export interface GitWorktreeRemoveResult {
+  ok: true;
+  message: string;
+  branch: string;
+  path: string;
 }
 
 export type McpExposureMode = "codemode" | "deferred" | "direct" | "hidden";
@@ -271,6 +315,54 @@ export interface PiUpdateRecord {
   log: string;
 }
 
+export type TerminalTaskStatus = "running" | "stopping" | "exited" | "failed" | "stopped";
+
+export interface TerminalTaskInfo {
+  id: string;
+  command: string;
+  cwd: string;
+  pid?: number;
+  shell: string;
+  startedAt: number;
+  endedAt?: number;
+  status: TerminalTaskStatus;
+  exitCode?: number | null;
+  signal?: string | null;
+  /** 交互式会话会保持 stdin 打开，支持逐行发送输入。 */
+  interactive?: boolean;
+  /** 使用真实伪终端（PTY）承载全屏 TUI 与终端级信号。 */
+  pty?: boolean;
+  cols?: number;
+  rows?: number;
+  profileId?: string;
+  shellPath?: string;
+}
+
+export interface TerminalShellProfile {
+  id: string;
+  label: string;
+  file: string;
+  args: string[];
+  source: "system" | "detected" | "custom";
+}
+
+export interface TerminalPtyOptions {
+  profileId?: string;
+  customPath?: string;
+  customArgs?: string[];
+}
+
+export interface TerminalTaskSnapshot extends TerminalTaskInfo {
+  output: string;
+  truncated: boolean;
+}
+
+export type TerminalEvent =
+  | { type: "start"; task: TerminalTaskInfo }
+  | { type: "data"; id: string; stream: "stdout" | "stderr"; text: string }
+  | { type: "status"; task: TerminalTaskInfo }
+  | { type: "exit"; id: string; status: TerminalTaskStatus; exitCode?: number | null; signal?: string | null; endedAt: number };
+
 export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
@@ -281,6 +373,9 @@ export interface PiDesktopBridge {
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
   checkAppUpdate: () => Promise<AppUpdateCheck>;
   downloadAppUpdate: () => Promise<PreparedAppUpdate>;
+  cancelAppUpdate: () => boolean;
+  /** 读取系统剪贴板文本（终端 Ctrl+V 粘贴用，主进程读取避免渲染进程权限差异）。 */
+  readClipboard: () => Promise<string>;
   installAppUpdate: (version: string) => Promise<void>;
   openAppUpdate: (url: string) => Promise<boolean>;
   /** scope: self = pi update（默认）；all = pi update --all */
@@ -296,14 +391,18 @@ export interface PiDesktopBridge {
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
   listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
-  writeWorkspaceFile: (cwd: string, relative: string, content: string) => Promise<WorkspaceFileData>;
+  writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => Promise<WorkspaceFileData>;
   openWorkspacePath: (cwd: string, relative: string) => Promise<string>;
   createWorkspaceEntry: (cwd: string, parent: string, name: string, kind: "file" | "folder") => Promise<WorkspaceEntry>;
   renameWorkspaceEntry: (cwd: string, relative: string, name: string) => Promise<WorkspaceEntry>;
   deleteWorkspaceEntry: (cwd: string, relative: string) => Promise<void>;
   gitOverview: (cwd: string) => Promise<GitOverview>;
-  gitInspect: (cwd: string, kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+  gitBranches: (cwd: string) => Promise<GitBranch[]>;
+  gitInspect: (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => Promise<GitInspectResult>;
   gitAction: (cwd: string, action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
+  gitWorktrees: (cwd: string) => Promise<GitWorktree[]>;
+  gitWorktreeCreate: (cwd: string, name: string) => Promise<GitWorktreeCreateResult>;
+  gitWorktreeRemove: (cwd: string, target: string) => Promise<GitWorktreeRemoveResult>;
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;
@@ -340,6 +439,21 @@ export interface PiDesktopBridge {
   skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
+  startTerminal: (cwd: string, command: string, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;
+  /** 启动真实 PTY 终端（全屏 TUI、Ctrl+C 等）；cols/rows 为初始尺寸。 */
+  startTerminalPty: (cwd: string, cols?: number, rows?: number, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;
+  terminalProfiles: () => Promise<TerminalShellProfile[]>;
+  chooseTerminalExecutable: () => Promise<string | null>;
+  validateTerminalProfile: (options: TerminalPtyOptions) => Promise<TerminalShellProfile>;
+  startTerminalShell: (cwd: string) => Promise<TerminalTaskInfo>;
+  writeTerminal: (id: string, input: string) => Promise<boolean>;
+  writeTerminalPty: (id: string, data: string, binary?: boolean) => Promise<boolean>;
+  resizeTerminalPty: (id: string, cols: number, rows: number) => Promise<boolean>;
+  /** PTY 聚焦时禁止 Electron 菜单快捷键吞掉 Ctrl+W / Ctrl+R 等终端按键。 */
+  setTerminalFocus: (focused: boolean) => Promise<boolean>;
+  stopTerminal: (id: string) => Promise<boolean>;
+  terminalTasks: () => Promise<TerminalTaskSnapshot[]>;
+  onTerminalEvent: (listener: (payload: TerminalEvent) => void) => () => void;
   onEvent: (listener: (payload: { cwd: string; sessionFile?: string; event: any }) => void) => () => void;
 }
 

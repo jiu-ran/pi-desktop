@@ -15,7 +15,7 @@ const running = computed(() => props.block.status === "running" || props.block.s
 </script>
 
 <template>
-  <ToolCard :block="block" :verb="running ? '正在运行' : '运行'" :subtitle="oneLine">
+  <ToolCard :block="block" :verb="running ? '正在运行' : '运行'" :subtitle="oneLine" :query="query">
     <div class="term">
       <div class="term-cmd"><span class="term-prompt">$</span><SearchHighlight :text="command" :query="query" /></div>
       <pre v-if="block.output" class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="block.output" :query="query" /></pre>

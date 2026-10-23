@@ -35,6 +35,8 @@ export function normalizeLanguage(language = ""): BundledLanguage | "text" {
 }
 
 export async function highlightCode(code: string, language: string, dark: boolean): Promise<HighlightToken[][]> {
+  // 大文件每键重跑正则语法高亮会冻结界面；文本仍可正常编辑。
+  if (code.length > 150_000) return code.split(/\r?\n/).map(content => [{ content }]);
   const engine = await highlighter();
   const resolved = normalizeLanguage(language);
   if (resolved !== "text" && !loaded.has(resolved)) {

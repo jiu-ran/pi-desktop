@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { baseName, icons } from "../../shared/util.ts";
+import { displayProjectName, icons } from "../../shared/util.ts";
 import { collectChanges } from "../../shared/diff.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
+import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
+import { searchableText } from "../../shared/search-text.ts";
+import ActivityGroup from "./ActivityGroup.vue";
 import BlockView from "./BlockView.vue";
 import Composer from "./Composer.vue";
 import WelcomeView from "./WelcomeView.vue";
@@ -18,12 +21,17 @@ const stick = ref(true);
 const searchOpen = ref(false);
 const searchQuery = ref("");
 const searchIndex = ref(0);
+let searchFocusToken = 0;
+/** 用户手动展开/收起活动组的覆盖状态；未设置时默认折叠，搜索命中的组强制展开。 */
+const activityOverrides = ref<Record<string, boolean>>({});
 let scrollFrame = 0;
 let scrollForce = false;
 let ignoreScroll = false;
 let ignoreScrollTimer = 0;
 let settleTimer = 0;
-let userScrolled = false;
+const userScrolled = ref(false);
+// 用户上翻后记录已看过的块数，用于「N 条新消息」提示。
+const seenBlocks = ref(0);
 let resizeObserver: ResizeObserver | null = null;
 let boundScroller: HTMLElement | null = null;
 
@@ -43,9 +51,26 @@ let historyLoadToken = 0;
 const HISTORY_LOADING_MIN_MS = 450;
 
 const prompts = [
-  { label: "浏览代码结构", text: "先快速看一下这个项目的目录结构和关键入口，简要告诉我。" },
-  { label: "查找未完成问题", text: "检查仓库里的 TODO / FIXME 或明显未收尾的地方，列出值得处理的几项。" },
-  { label: "解释最近改动", text: "运行 git status 和 git log -n 5，总结最近在做什么。" },
+  {
+    label: "浏览代码结构",
+    text: "先快速看一下这个项目的目录结构和关键入口，简要告诉我。",
+    icon: icons.search,
+  },
+  {
+    label: "查找未完成问题",
+    text: "检查仓库里的 TODO / FIXME 或明显未收尾的地方，列出值得处理的几项。",
+    icon: icons.checkCircle,
+  },
+  {
+    label: "解释最近改动",
+    text: "运行 git status 和 git log -n 5，总结最近在做什么。",
+    icon: icons.history,
+  },
+  {
+    label: "审查当前改动",
+    text: "检查当前未提交的改动，指出风险、遗漏和可以改进的地方。",
+    icon: icons.diff,
+  },
 ];
 
 // 变更条只反映「当前还没提交的改动」：Git 状态是事实来源，
@@ -78,6 +103,46 @@ const changedTotals = computed(() =>
 );
 const changedDiff = computed(() => changedTotals.value.added > 0 || changedTotals.value.removed > 0);
 
+// 「回到最新」与未读数参考 ThinkRail 的 reading band / follow 状态（Apache-2.0）。
+const unreadCount = computed(() => Math.max(0, (ws.value?.blocks.length ?? 0) - seenBlocks.value));
+const showJump = computed(() => !stick.value && Boolean(ws.value?.blocks.length));
+const jumpLabel = computed(() => {
+  if (ws.value?.streaming) return unreadCount.value ? `${unreadCount.value} 条新内容` : "正在回复";
+  if (unreadCount.value) return `${unreadCount.value} 条新消息`;
+  return "回到底部";
+});
+
+function jumpToLatest(): void {
+  userScrolled.value = false;
+  stick.value = true;
+  seenBlocks.value = ws.value?.blocks.length ?? 0;
+  scrollToBottom(true);
+}
+
+watch(
+  () => ws.value?.blocks.length,
+  (count) => {
+    if (count && stick.value) seenBlocks.value = count;
+  },
+);
+
+watch(
+  () => ws.value?.sessionFile,
+  () => {
+    seenBlocks.value = ws.value?.blocks.length ?? 0;
+    activityOverrides.value = {};
+  },
+  { immediate: true },
+);
+
+// 自己发出新消息时总是回到最新，不把这条消息算成「新内容」。
+watch(
+  () => (ws.value?.blocks.at(-1) as any)?.kind,
+  (kind) => {
+    if (kind === "user") jumpToLatest();
+  },
+);
+
 // 是否还有更早的消息可加载：historyStart > 0 表示还没读到文件开头
 const canLoadMore = computed(() => {
   const thread = ws.value?.activeThread;
@@ -103,9 +168,10 @@ function onScroll(): void {
   if (ignoreScroll) return;
   // 刚打开会话时 hydrate / DOM 替换会触发非用户滚动，不能据此放弃贴底。
   // 用户一旦用滚轮、触摸、滚动条或键盘滚动，userScrolled 才置真。
-  if (!userScrolled) return;
+  if (!userScrolled.value) return;
   
   stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+  syncOutline();
   
   // 检测是否滚到顶部，触发加载更多
   const isNearTop = el.scrollTop < 100;
@@ -130,24 +196,25 @@ function scrollToBottom(force = false): void {
     void nextTick(() => {
       const el = scroller.value;
       if (el) setScrollTop(el, el.scrollHeight);
+      syncOutline();
     });
   }) as number;
 }
 
 /** 会话打开阶段连续贴底，等 hydrate 和异步内容稳定后再交还给用户滚动。 */
 function settleAtBottom(): void {
-  userScrolled = false;
+  userScrolled.value = false;
   stick.value = true;
   scrollToBottom(true);
   if (settleTimer) window.clearTimeout(settleTimer);
   settleTimer = window.setTimeout(() => {
     settleTimer = 0;
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
   }, 320);
 }
 
 function markUserScroll(): void {
-  userScrolled = true;
+  userScrolled.value = true;
 }
 
 /** 只把“点在滚动条上”当成用户滚动，避免点卡片/复制按钮也取消自动贴底。 */
@@ -156,12 +223,12 @@ function onPointerDown(event: PointerEvent): void {
   if (!el) return;
   const rect = el.getBoundingClientRect();
   const onScrollbar = event.clientX - rect.left >= el.clientWidth || event.clientY - rect.top >= el.clientHeight;
-  if (onScrollbar) userScrolled = true;
+  if (onScrollbar) userScrolled.value = true;
 }
 
 function onWindowFocus(): void {
   // 窗口在后台时 rAF 可能被节流，首屏贴底没执行；重新获得焦点时补一次。
-  if (!userScrolled) scrollToBottom(true);
+  if (!userScrolled.value) scrollToBottom(true);
   else if (stick.value) scrollToBottom();
 }
 
@@ -171,7 +238,7 @@ function onScrollKey(event: KeyboardEvent): void {
   const active = document.activeElement;
   if (active !== el && !el.contains(active)) return;
   if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
-    userScrolled = true;
+    userScrolled.value = true;
   }
 }
 
@@ -298,12 +365,12 @@ function bindScroller(el: HTMLElement | null): void {
   if (inner && typeof ResizeObserver !== "undefined") {
     // 图片、代码高亮等异步撑高内容时也能继续贴底；用户上翻后 stick=false 则不打扰。
     resizeObserver = new ResizeObserver(() => {
-      if (!userScrolled) scrollToBottom(true);
+      if (!userScrolled.value) scrollToBottom(true);
       else scrollToBottom();
     });
     resizeObserver.observe(inner);
   }
-  if (!userScrolled) scrollToBottom(true);
+  if (!userScrolled.value) scrollToBottom(true);
 }
 
 // ws 初始为空时 .timeline 还没渲染，onMounted 里拿不到 ref；
@@ -326,7 +393,7 @@ let stopGitFiles: (() => void) | null = null;
 
 onMounted(() => {
   stopHeightChange = bus.on("markdown:height-change", () => {
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
     else scrollToBottom();
   });
   stopGitEvents = bus.on("pi:event", ({ event }: { event: any }) => {
@@ -393,9 +460,15 @@ watch(
     (ws.value?.blocks.at(-1) as any)?.output?.length,
   ],
   () => {
-    if (!userScrolled) scrollToBottom(true);
+    if (!userScrolled.value) scrollToBottom(true);
     else scrollToBottom();
   },
+);
+
+watch(
+  () => [ws.value?.sessionFile, ws.value?.blocks.length],
+  () => void nextTick(syncOutline),
+  { immediate: true },
 );
 
 function fillPrompt(text: string): void {
@@ -406,19 +479,44 @@ function openChangesPanel(): void {
   workbench.state.activePanelId = "git";
 }
 
-function blockText(block: any): string {
-  return [block.text, block.output, block.name, block.args ? JSON.stringify(block.args) : ""].filter(Boolean).join("\n");
-}
+const blockText = searchableText;
 
 const outline = computed(() => (ws.value?.blocks ?? [])
   .filter((block) => block.kind === "user" && block.text?.trim())
-  .map((block) => ({ id: block.id, text: block.text!.replace(/\s+/g, " ").trim() })));
+  .map((block, index) => ({
+    id: block.id,
+    turn: index + 1,
+    text: block.text!.replace(/\s+/g, " ").trim(),
+  })));
+/** 当前视口所属的用户轮次；滚动时更新，让右侧大纲能标示位置。 */
+const activeOutlineId = ref("");
+
+function syncOutline(): void {
+  const el = scroller.value;
+  if (!el || !outline.value.length) {
+    activeOutlineId.value = "";
+    return;
+  }
+  const top = el.getBoundingClientRect().top + 8;
+  let active = outline.value[0]!.id;
+  for (const item of outline.value) {
+    const node = el.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(item.id)}"]`);
+    if (!node) continue;
+    if (node.getBoundingClientRect().top <= top) active = item.id;
+    else break;
+  }
+  activeOutlineId.value = active;
+}
 
 const copyTextByIndex = computed(() =>
   buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
 );
 
+// 连续的工具 / 思考折叠成活动组；搜索命中时自动展开，错误组只用红色徽标提示。
+const activityItems = computed(() => deriveActivityItems(ws.value?.blocks ?? []));
+
 function openOutline(id: string): void {
+  activeOutlineId.value = id;
   scroller.value?.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });
 }
 
@@ -427,6 +525,29 @@ const searchMatches = computed(() => {
   if (!query) return [];
   return (ws.value?.blocks ?? []).filter((block: any) => blockText(block).toLowerCase().includes(query));
 });
+
+function groupHasSearchHit(group: ActivityGroupModel): boolean {
+  // 只展开当前命中所在的组，避免一次搜索把整页几十个活动组全部撑开。
+  const current = searchMatches.value[searchIndex.value];
+  return Boolean(current && group.entries.some((entry) => entry.block.id === current.id));
+}
+
+function activityOpen(group: ActivityGroupModel): boolean {
+  // 搜索命中优先于手动折叠，保证上一个 / 下一个命中总能滚到目标块。
+  if (groupHasSearchHit(group)) return true;
+  const override = activityOverrides.value[group.id];
+  if (override !== undefined) return override;
+  // 错误组默认也保持折叠，只在折叠头用红色「失败」提示，避免一次展开几十个工具。
+  return false;
+}
+
+function toggleActivity(group: ActivityGroupModel): void {
+  if (groupHasSearchHit(group)) return;
+  activityOverrides.value = {
+    ...activityOverrides.value,
+    [group.id]: !activityOpen(group),
+  };
+}
 
 function toggleSearch(): void {
   searchOpen.value = !searchOpen.value;
@@ -446,14 +567,24 @@ function moveSearch(direction: number): void {
 function focusSearchMatch(): void {
   const block = searchMatches.value[searchIndex.value] as { id?: string } | undefined;
   if (!block?.id) return;
+  const token = ++searchFocusToken;
   void nextTick(() => {
-    const container = scroller.value?.querySelector(`[data-block-id="${CSS.escape(block.id!)}"]`);
-    const mark = container?.querySelector("mark.search-mark");
-    (mark ?? container)?.scrollIntoView({ block: "center" });
+    if (token !== searchFocusToken) return;
+    const focus = () => {
+      const container = scroller.value?.querySelector(`[data-block-id="${CSS.escape(block.id!)}"]`);
+      const mark = container?.querySelector("mark.search-mark");
+      (mark ?? container)?.scrollIntoView({ block: "center" });
+    };
+    focus();
+    // 命中项在折叠组 / 折叠的工具卡里时，展开动作可能晚一帧才挂载 mark。
+    window.setTimeout(() => {
+      if (token === searchFocusToken) focus();
+    }, 80);
   });
 }
 
 watch(searchMatches, () => {
+  searchFocusToken += 1;
   searchIndex.value = 0;
   focusSearchMatch();
 });
@@ -464,12 +595,13 @@ watch(searchMatches, () => {
     <WelcomeView v-if="!ws" />
 
     <template v-else>
-      <div v-if="searchOpen" class="chat-search">
+      <div v-if="searchOpen" class="chat-search" role="search">
+        <span class="chat-search-icon" v-html="icons.search" />
+        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" aria-label="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
         <span class="chat-search-count">{{ searchMatches.length ? searchIndex + 1 : 0 }}/{{ searchMatches.length }}</span>
-        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
-        <button type="button" title="上一个" @click="moveSearch(-1)">↑</button>
-        <button type="button" title="下一个" @click="moveSearch(1)">↓</button>
-        <button type="button" title="关闭" @click="toggleSearch">×</button>
+        <button type="button" title="上一个" aria-label="上一个匹配" @click="moveSearch(-1)">↑</button>
+        <button type="button" title="下一个" aria-label="下一个匹配" @click="moveSearch(1)">↓</button>
+        <button type="button" class="chat-search-close" title="关闭" aria-label="关闭搜索" @click="toggleSearch">×</button>
       </div>
       <div class="chat-body">
       <Transition name="history-notice">
@@ -487,7 +619,7 @@ watch(searchMatches, () => {
         </div>
       </Transition>
       <div ref="scroller" class="timeline" @scroll="onScroll">
-        <div class="timeline-inner">
+        <div class="timeline-inner" :class="{ 'is-empty': !ws.blocks.length && !ws.loading }">
           <!-- 加载错误提示 -->
           <div v-if="loadMoreError" class="load-error">
             <span>⚠️ {{ loadMoreError }}</span>
@@ -508,38 +640,88 @@ watch(searchMatches, () => {
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">
-            <p class="empty-kicker">{{ baseName(ws.cwd) }}</p>
+            <div class="empty-thread-mark" aria-hidden="true">
+              <img src="../../assets/pi-icon.png" alt="" />
+            </div>
+            <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
-            <div class="starter-list">
+            <p class="empty-intro">选一个起点，或直接在下方描述任务。Pi 会读代码、改文件，并运行命令。</p>
+            <div class="starter-grid">
               <button v-for="p in prompts" :key="p.label" class="starter" @click="fillPrompt(p.text)">
-                <span>{{ p.label }}</span>
-                <small>{{ p.text }}</small>
+                <span class="starter-icon" v-html="p.icon" />
+                <span class="starter-copy">
+                  <span class="starter-label">{{ p.label }}</span>
+                  <small>{{ p.text }}</small>
+                </span>
+                <span class="starter-arrow" aria-hidden="true">↗</span>
               </button>
             </div>
+            <p class="empty-hint"><kbd>@</kbd> 引用文件 <span>·</span> <kbd>/</kbd> 使用命令</p>
           </div>
 
           <template v-else>
-            <div
-              v-for="(block, index) in ws.blocks"
-              :key="block.id"
-              :data-block-id="block.id"
-              :class="{ 'search-hit': searchMatches[searchIndex]?.id === block.id, 'history-enter': historyEnterIds.has(block.id) }"
-            >
-              <BlockView :block="block" :query="searchQuery" :copy-text="copyTextByIndex.get(index) ?? ''" />
-            </div>
+            <template v-for="item in activityItems" :key="item.kind === 'block' ? item.block.id : item.group.id">
+              <div
+                v-if="item.kind === 'block'"
+                :data-block-id="item.block.id"
+                :class="{ 'search-hit': searchMatches[searchIndex]?.id === item.block.id, 'history-enter': historyEnterIds.has(item.block.id) }"
+              >
+                <BlockView
+                  :block="item.block"
+                  :query="searchQuery"
+                  :copy-text="copyTextByIndex.get(item.index) ?? ''"
+                  :collapse-long="item.index < ws.blocks.length - 1"
+                />
+              </div>
+              <ActivityGroup
+                v-else
+                :group="item.group"
+                :expanded="activityOpen(item.group)"
+                :search-hit="groupHasSearchHit(item.group)"
+                :class="{ 'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)) }"
+                @toggle="toggleActivity(item.group)"
+              >
+                <div
+                  v-for="entry in item.group.entries"
+                  :key="entry.block.id"
+                  :data-block-id="entry.block.id"
+                  :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
+                >
+                  <BlockView
+                    :block="entry.block"
+                    :query="searchQuery"
+                    :copy-text="''"
+                    :collapse-long="false"
+                  />
+                </div>
+              </ActivityGroup>
+            </template>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">
               <span class="mini-spinner" />思考中…
             </div>
           </template>
         </div>
       </div>
-      <aside v-if="outline.length" class="chat-outline">
-          <button v-for="item in outline" :key="item.id" :title="item.text" @click="openOutline(item.id)">{{ item.text }}</button>
+      <Transition name="jump-fade">
+        <button v-if="showJump" type="button" class="jump-latest" @click="jumpToLatest">
+          <span class="jump-latest-icon" v-html="icons.chevronDown" />
+          <span>{{ jumpLabel }}</span>
+        </button>
+      </Transition>
+      <aside v-if="outline.length" class="chat-outline" data-tooltip-group aria-label="用户消息大纲">
+          <button
+            v-for="item in outline"
+            :key="item.id"
+            :class="{ active: item.id === activeOutlineId }"
+            :title="`第 ${item.turn} 轮：${item.text}`"
+            :aria-current="item.id === activeOutlineId ? 'location' : undefined"
+            @click="openOutline(item.id)"
+          >{{ item.text }}</button>
         </aside>
       </div>
 
       <div v-if="changedFiles.length" class="changes-bar">
-        <button class="changes-bar-main" @click="openChangesPanel">
+        <button class="changes-bar-main" :aria-label="`${changedFiles.length} 个文件已变更，查看改动`" :title="`${changedFiles.length} 个文件已变更，点击查看改动`" @click="openChangesPanel">
           <span class="changes-bar-icon" v-html="icons.diff" />
           <strong>{{ changedFiles.length }} 个文件已变更</strong>
           <span v-if="changedDiff" class="diff-stat">
@@ -561,6 +743,39 @@ watch(searchMatches, () => {
 <style scoped>
 .chat-body {
   position: relative;
+}
+
+.jump-latest {
+  position: absolute;
+  z-index: 6;
+  right: 18px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-2) 94%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.jump-latest:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.jump-latest-icon { display: grid; place-items: center; color: var(--accent); }
+.jump-fade-enter-active, .jump-fade-leave-active { transition: opacity 160ms ease, transform 160ms ease; }
+.jump-fade-enter-from, .jump-fade-leave-to { opacity: 0; transform: translateY(6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .jump-fade-enter-active, .jump-fade-leave-active { transition: none; }
 }
 
 .history-enter {
