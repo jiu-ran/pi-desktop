@@ -10,7 +10,8 @@ import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
-import { firstUserTitle, sessionTitleFromText } from "./session-title.ts";
+import { firstUserTitle } from "./session-title.ts";
+import { readSessionName } from "./session-name.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
@@ -748,9 +749,8 @@ export async function listSessions(cwd: string, keepFile: string | Iterable<stri
       let header: Record<string, any> = {};
       try { header = JSON.parse(lines[0] || "{}"); } catch { header = {}; }
       const title = firstUserTitle(lines);
-      // 自定义名称也走同一套压缩/截断，避免 header.name 绕过 SESSION_TITLE_MAX
-      // 把侧边栏或删除确认弹窗撑爆。
-      const customTitle = sessionTitleFromText(header.name);
+      // Pi 重命名会追加 session_info，并不修改文件头；长会话必须从尾部读取最新名称。
+      const customTitle = await readSessionName(file, info.size, header.name);
       const summary: SessionSummary = {
         id: file,
         path: file,

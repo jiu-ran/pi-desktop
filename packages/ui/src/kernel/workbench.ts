@@ -544,6 +544,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         break;
       case "session_info_changed":
         thread.sessionName = event.name ?? "";
+        updateSessionTitle(ws, thread);
         scheduleSessionsRefresh(ws);
         break;
       default:
@@ -892,9 +893,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (!ws) return;
     const pending = pendingNewSessions.get(ws.cwd);
     if (pending) await pending.catch(() => {});
-    await rpc(ws.cwd, "setSessionName", [name], ws.sessionFile);
-    ws.sessionName = name;
+    // 绑定发送 RPC 时的会话；等待期间切换到另一个会话不能改错线程。
+    const file = ws.sessionFile;
+    const thread = ensureThread(ws, file);
+    await rpc(ws.cwd, "setSessionName", [name], file);
+    thread.sessionName = name.replace(/[\r\n]+/g, " ").trim();
+    updateSessionTitle(ws, thread);
     await refreshSessions(ws);
+  }
+
+  function updateSessionTitle(ws: WorkspaceState, thread: SessionThreadState): void {
+    if (!thread.sessionFile || !thread.sessionName) return;
+    const key = normalizeThreadKey(thread.sessionFile);
+    // 即时更新侧栏与顶部标题，无需等待后端刷新
+    ws.sessions = ws.sessions.map(item => normalizeThreadKey(item.path) === key ? { ...item, title: thread.sessionName, empty: false } : item);
   }
 
   async function refreshSessions(ws: WorkspaceState | null = active.value): Promise<void> {
@@ -908,7 +920,19 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return;
     }
     const request = host.sessions(ws.cwd).then((sessions) => {
-      if (!disposed && generation === previous.generation && workspaces.get(ws.cwd) === ws) ws.sessions = sessions;
+      if (!disposed && generation === previous.generation && workspaces.get(ws.cwd) === ws) {
+        // 合并线程名称：已命名线程优先保留，避免重命名后被列表刷新改回旧标题
+        const threadNames = new Map<string, string>();
+        for (const [, thread] of Object.entries(ws.threads as Record<string, SessionThreadState>)) {
+          if (thread.sessionFile && thread.sessionName) {
+            threadNames.set(normalizeThreadKey(thread.sessionFile), thread.sessionName);
+          }
+        }
+        ws.sessions = sessions.map(item => {
+          const threadName = threadNames.get(normalizeThreadKey(item.path));
+          return threadName && threadName !== item.title ? { ...item, title: threadName } : item;
+        });
+      }
     }).catch(() => {
       // Session refresh is advisory; the active transcript remains usable when the host is unavailable.
     }).finally(() => {
