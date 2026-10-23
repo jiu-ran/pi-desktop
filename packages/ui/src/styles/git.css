@@ -35,10 +35,52 @@
 .git-commit-summary { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 7px; font-size: 10px; color: var(--fg-3); }
 .git-commit-summary strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--fg-2); }
 .git-commit-summary span { flex: none; }
-.git-panel .git-sc-commit { padding: 10px; }
-.git-panel .git-commit-input { min-height: 54px; border-radius: 6px; font-size: 11px; }
-.git-panel .git-sc-commit-actions { flex-wrap: wrap; }
-.git-panel .git-commit-hint { font-size: 9px; }
+.git-panel .git-sc-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 0;
+}
+.git-panel .git-commit-input {
+  min-height: 54px;
+  max-height: 280px;
+  resize: vertical;
+  border-radius: 6px;
+  font-size: 11px;
+  overflow-y: auto;
+  word-wrap: break-word;
+  font-family: inherit;
+  line-height: 1.5;
+  padding: 6px 8px;
+}
+.git-panel .git-sc-commit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-start;
+}
+.git-panel .git-sc-commit-actions .btn {
+  flex: 0 1 auto;
+}
+.git-panel .git-sc-commit-actions .git-sync-busy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: var(--fg-3);
+}
+.git-panel .git-sc-commit-actions .git-commit-hint {
+  margin-left: auto;
+  text-align: right;
+}
+.git-panel .git-commit-hint {
+  font-size: 9px;
+  color: var(--fg-3);
+  flex-shrink: 1;
+  min-width: 80px;
+}
 .git-view-head { display: flex; align-items: center; flex: none; gap: 6px; padding: 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .git-view-head .btn { display: inline-flex; align-items: center; gap: 4px; }
 .git-view-head .btn svg { width: 12px; height: 12px; }
@@ -62,5 +104,17 @@
   .git-view-tabs { padding: 0 4px; }
   .git-view-tabs small { display: none; }
   .git-commit-summary { flex-wrap: wrap; }
-  .git-sc-commit-actions .git-commit-hint { width: 100%; }
+  .git-sc-commit-actions {
+    gap: 4px;
+  }
+  .git-sc-commit-actions .btn {
+    flex: 0 1 calc(50% - 2px);
+  }
+  .git-sc-commit-actions .git-commit-hint,
+  .git-sc-commit-actions .git-sync-busy {
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+    order: 10;
+  }
 }
