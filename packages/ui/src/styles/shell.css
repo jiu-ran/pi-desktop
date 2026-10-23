@@ -850,7 +850,7 @@
   font-size: 15px;
   font-weight: 700;
 }
-.terminal-empty-mark i { display: block; width: 10px; height: 2px; margin-top: -2px; background: currentColor; animation: terminal-cursor 1.05s steps(1) infinite; }
+.terminal-empty-mark i { display: block; width: 10px; height: 2px; margin-top: -2px; overflow: hidden; background: currentColor; font-size: 0; animation: terminal-cursor 1.05s steps(1) infinite; }
 .terminal-empty-copy { min-width: 0; }
 .terminal-empty-copy strong { display: block; color: var(--fg); font-size: 12.5px; font-weight: 600; }
 .terminal-empty-copy p { max-width: 560px; margin: 1px 0 0; font-size: 11.5px; }

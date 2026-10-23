@@ -728,7 +728,7 @@ ${item.cwd}`"
               <div class="terminal-empty-top">
                 <span class="terminal-empty-mark" aria-hidden="true">
                   <span>❯</span>
-                  <i>_</i>
+                  <i />
                 </span>
                 <div class="terminal-empty-copy">
                   <strong>在项目目录中运行命令</strong>
