@@ -47,15 +47,6 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
-      # 重建不可变标签时只更新验证脚本，不改应用源码 / lockfile / 版本号。
-      - name: Apply CI-only regression fixes for rebuild
-        if: inputs.release_tag != ''
-        shell: bash
-        env:
-          VERIFICATION_REF: ${{ github.sha }}
-        run: |
-          node -e 'const fs = require("node:fs"); const { execFileSync } = require("node:child_process"); for (const file of ["scripts/checks/host.check.ts", "scripts/checks/terminal.check.ts"]) fs.writeFileSync(file, execFileSync("git", ["show", process.env.VERIFICATION_REF + ":" + file]));'
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -75,6 +66,11 @@ jobs:
         run: |
           npm ci
           npm ci --prefix packages/ui
+
+      - name: Prepare POSIX PTY helper permissions
+        if: runner.os != 'Windows'
+        shell: bash
+        run: find node_modules/node-pty -type f -name spawn-helper -exec chmod +x {} \;
 
       - name: Run regression checks
         run: npm run check

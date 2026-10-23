@@ -601,7 +601,7 @@ async function gitProbe(cwd: string, args: string[]): Promise<string> {
 /** 仓库根目录；不是仓库时返回空字符串。 */
 async function gitRepoRoot(cwd: string): Promise<string> {
   const top = (await gitProbe(path.resolve(cwd), ["rev-parse", "--show-toplevel"])).trim();
-  return top ? path.resolve(top) : "";
+  return top ? await realpath(path.resolve(top)) : "";
 }
 
 function samePath(a: string, b: string): boolean {
@@ -1207,7 +1207,7 @@ export class PiHost {
   }
 
   async gitOverview(cwd: string): Promise<GitOverview> {
-    const workspace = path.resolve(cwd);
+    const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const empty: GitOverview = {
       isRepo: false,
@@ -1320,7 +1320,7 @@ export class PiHost {
   }
 
   private async performGitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
-    const workspace = path.resolve(cwd);
+    const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const name = String(action ?? "") as GitActionName;
 
@@ -1506,7 +1506,7 @@ export class PiHost {
 
   /** 从当前 HEAD 创建隔离工作区（独立分支 + 独立目录）。 */
   async gitWorktreeCreate(cwd: string, name: string): Promise<GitWorktreeCreateResult> {
-    const workspace = path.resolve(cwd);
+    const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const root = await gitRepoRoot(workspace);
     if (!root) throw new Error("当前目录不是 Git 仓库，请先初始化");

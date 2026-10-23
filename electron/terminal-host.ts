@@ -457,6 +457,9 @@ export class TerminalHost {
     const emitter = ptyProcess as IPty & { on?: (name: string, listener: (error: Error) => void) => void };
     emitter.on?.("error", (error) => {
       if (task.finished) return;
+      // POSIX PTY 的 read EIO 表示 slave 已关闭，是正常退出信号；
+      // 等 node-pty 的 onExit 提供真实退出码，不要抢先标为启动失败。
+      if (process.platform !== "win32" && (error as NodeJS.ErrnoException).code === "EIO") return;
       task.spawnError = error.message;
       this.append(task, "stderr", `\n[终端错误] ${error.message}\n`);
       try { if (!closeWindowsPty(ptyProcess)) ptyProcess.kill(); } catch { /* PTY 已关闭 */ }
