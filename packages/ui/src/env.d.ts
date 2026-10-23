@@ -358,6 +358,7 @@ export interface PiDesktopBridge {
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
   checkAppUpdate: () => Promise<AppUpdateCheck>;
   downloadAppUpdate: () => Promise<PreparedAppUpdate>;
+  cancelAppUpdate: () => boolean;
   installAppUpdate: (version: string) => Promise<void>;
   openAppUpdate: (url: string) => Promise<boolean>;
   /** scope: self = pi update（默认）；all = pi update --all */

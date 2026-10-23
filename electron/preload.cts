@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   checkPiUpdate: (customPath = "") => ipcRenderer.invoke("pi:check-update", customPath),
   checkAppUpdate: () => ipcRenderer.invoke("app:check-update"),
   downloadAppUpdate: () => ipcRenderer.invoke("app:download-update"),
+  cancelAppUpdate: () => ipcRenderer.invoke("app:cancel-update"),
   installAppUpdate: (version = "") => ipcRenderer.invoke("app:install-update", version),
   openAppUpdate: (url = "") => ipcRenderer.invoke("app:open-update", url),
   updatePi: (customPath = "", scope: "self" | "all" = "self") => ipcRenderer.invoke("pi:update", customPath, scope),

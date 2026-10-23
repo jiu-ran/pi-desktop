@@ -1711,6 +1711,7 @@ onBeforeUnmount(() => {
                   <button type="button" class="btn ghost small" :disabled="state.appUpdate.checking || state.appUpdate.phase === 'downloading'" @click="checkAppUpdateNow">
                     <span v-if="state.appUpdate.checking" class="mini-spinner" />检查更新
                   </button>
+                  <button v-if="state.appUpdate.phase === 'downloading'" type="button" class="btn ghost small" @click="workbench.cancelAppUpdate()">取消下载</button>
                   <button v-if="state.appUpdate.updateAvailable && state.appUpdate.phase !== 'ready'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'downloading'" @click="downloadAppUpdateNow">
                     <span v-if="state.appUpdate.phase === 'downloading'" class="mini-spinner" />下载更新
                   </button>

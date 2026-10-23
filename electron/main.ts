@@ -389,6 +389,7 @@ app.whenReady().then(() => {
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
   handle("app:check-update", () => appUpdateManager.check());
   handle("app:download-update", () => appUpdateManager.download());
+  handle("app:cancel-update", () => appUpdateManager.cancelDownload());
   handle("app:install-update", (version = "") => appUpdateManager.install(version));
   handle("app:open-update", (url = "") => {
     if (!isAllowedExternalUrl(url)) return false;

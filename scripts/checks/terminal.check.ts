@@ -103,6 +103,8 @@ try {
   for (const line of shellLines) host.write(shell.id, line);
   host.write(shell.id, process.platform === "win32" ? `Write-Output "中文，标点"` : `printf "中文，标点\\n"`);
   await waitFor(() => host.list().find((item) => item.id === shell.id && item.output.includes(`${shellMarker}-ok`)));
+  // 中文行与标记行是两次写入，输出到达顺序不保证；等到中文行出现再断言，避免偶发失败。
+  await waitFor(() => host.list().find((item) => item.id === shell.id && item.output.includes("中文，标点")));
   assert(host.list().find((item) => item.id === shell.id)?.output.includes("中文，标点"), "交互式会话应正确传递 UTF-8 输入");
   const shellRunning = host.list().find((item) => item.id === shell.id);
   assert(shellRunning?.status === "running" && shellRunning.interactive, "交互式会话应保持运行");

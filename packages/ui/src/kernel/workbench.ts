@@ -175,6 +175,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   let stopHostEvents: (() => void) | null = null;
   let initPromise: Promise<void> | null = null;
   let disposed = false;
+  /** 用户点了「取消下载」后，下载 Promise 的失败不应再报成错误 Toast。 */
+  let appUpdateCancelled = false;
 
   function makeThread(sessionFile = ""): SessionThreadState {
     const transcript = createTranscript(reactive as any);
@@ -1307,6 +1309,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   async function downloadAppUpdate(): Promise<boolean> {
     if (!host?.downloadAppUpdate || state.appUpdate.phase === "downloading") return false;
+    appUpdateCancelled = false;
     state.appUpdate.phase = "downloading";
     try {
       const prepared = await host.downloadAppUpdate();
@@ -1318,9 +1321,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return true;
     } catch (error: any) {
       state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
-      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      if (appUpdateCancelled) bus.emit("notify", { level: "info", text: "已取消下载更新" });
+      else bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      appUpdateCancelled = false;
       return false;
     }
+  }
+
+  /** 取消正在进行的更新下载；后端只发中止信号，由下载 Promise 统一复位状态。 */
+  function cancelAppUpdate(): boolean {
+    if (!host?.cancelAppUpdate || state.appUpdate.phase !== "downloading") return false;
+    appUpdateCancelled = true;
+    const started = Boolean(host.cancelAppUpdate());
+    if (started) state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
+    return started;
   }
 
   async function installAppUpdate(): Promise<boolean> {
@@ -1688,6 +1702,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     checkPiUpdate,
     checkAppUpdate,
     downloadAppUpdate,
+    cancelAppUpdate,
     installAppUpdate,
     openAppUpdate,
     updatePi,
