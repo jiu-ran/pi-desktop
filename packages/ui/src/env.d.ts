@@ -68,6 +68,7 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  revision?: string;
   /** 图片等二进制文件的预览内容（data URL） */
   preview?: { mimeType: string; dataUrl: string };
   /** 非文本文件：只读，不能保存 */
@@ -372,7 +373,7 @@ export interface PiDesktopBridge {
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
   listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
-  writeWorkspaceFile: (cwd: string, relative: string, content: string) => Promise<WorkspaceFileData>;
+  writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => Promise<WorkspaceFileData>;
   openWorkspacePath: (cwd: string, relative: string) => Promise<string>;
   createWorkspaceEntry: (cwd: string, parent: string, name: string, kind: "file" | "folder") => Promise<WorkspaceEntry>;
   renameWorkspaceEntry: (cwd: string, relative: string, name: string) => Promise<WorkspaceEntry>;

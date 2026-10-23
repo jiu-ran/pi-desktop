@@ -1,6 +1,7 @@
 import { reactive, watch, watchEffect } from "vue";
 import type { EventBus } from "../kernel/event-bus.ts";
 import type { Workbench } from "../kernel/workbench.ts";
+import { writeStorage } from "../shared/storage.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
@@ -131,7 +132,7 @@ export function closeSettingsModal(): void {
 }
 
 export function resetSettingsToDefault(): void {
-  Object.assign(appSettings, DEFAULT_SETTINGS);
+  Object.assign(appSettings, { ...DEFAULT_SETTINGS, terminalCustomArgs: [] });
 }
 
 export function setupSettings(workbench: Workbench, bus: EventBus) {
@@ -140,7 +141,7 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     disposers.push(watch(
       appSettings,
       (val) => {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(val));
+        writeStorage(SETTINGS_STORAGE_KEY, JSON.stringify(val));
       },
       { deep: true },
     ));

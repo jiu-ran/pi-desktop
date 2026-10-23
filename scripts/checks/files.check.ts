@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -39,6 +39,9 @@ try {
   let imageSave = false;
   try { await host.writeWorkspaceFile(root, "logo.png", "text"); } catch { imageSave = true; }
   assert(imageSave, "图片不应允许在文本编辑器里覆盖保存");
+  let binarySave = false;
+  try { await host.writeWorkspaceFile(root, "blob.bin", "text"); } catch { binarySave = true; }
+  assert(binarySave, "所有二进制文件都必须阻止文本覆盖");
 
   const opened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(opened.content.includes("export {}"), "应读取文件内容");
@@ -59,6 +62,15 @@ try {
   assert(saved.content.includes("changed"), "保存应返回更新后的内容");
   const reopened = await host.readWorkspaceFile(root, "src/main.ts");
   assert(reopened.content.includes("changed"), "保存后磁盘文件应更新");
+  assert(Boolean(reopened.revision), "读取应包含内容版本");
+  await writeFile(path.join(root, "src/main.ts"), "external-change");
+  let conflict = false;
+  try { await host.writeWorkspaceFile(root, "src/main.ts", "stale-draft", reopened.revision); } catch { conflict = true; }
+  assert(conflict && await readFile(path.join(root, "src/main.ts"), "utf8") === "external-change", "不能覆盖外部修改");
+  assert(!(await readdir(path.join(root, "src"))).some(name => name.endsWith(".tmp")), "保存临时文件应清理");
+  const latest = await host.readWorkspaceFile(root, "src/main.ts");
+  const raced = await Promise.allSettled([host.writeWorkspaceFile(root, "src/main.ts", "first-write", latest.revision), host.writeWorkspaceFile(root, "src/main.ts", "second-write", latest.revision)]);
+  assert(raced.filter(result => result.status === "fulfilled").length === 1, "两个相同旧版本保存不能同时覆盖成功");
 
   await writeFile(external, "outside");
   const externalOpened = await host.readWorkspaceFile(root, external);

@@ -32,25 +32,12 @@ export async function fetchStableRelease(
   repo: string,
   pageSize: number = 20,
 ): Promise<GitHubRelease | null> {
-  try {
-    const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=${pageSize}`;
-
-    const releases = await requestJson<GitHubRelease[]>(url, {
-      headers: {
-        Accept: "application/vnd.github+json",
-      },
-    });
-
-    // 过滤正式版本
-    const stable = releases
-      .filter((r) => !r.draft && !r.prerelease && /^v?\d+(?:\.\d+){1,3}$/i.test(r.tag_name ?? ""))
-      .sort((a, b) => compareVersions(b.tag_name ?? "", a.tag_name ?? ""));
-
-    return stable[0] ?? null;
-  } catch (error) {
-    console.error("Failed to fetch stable release:", error);
-    return null;
-  }
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=${pageSize}`;
+  const releases = await requestJson<GitHubRelease[]>(url, { headers: { Accept: "application/vnd.github+json" } });
+  if (!Array.isArray(releases)) throw new Error("GitHub 返回了无效的版本列表");
+  const stable = releases.filter(r => !r.draft && !r.prerelease && /^v?\d+(?:\.\d+){1,3}$/i.test(r.tag_name ?? ""))
+    .sort((a, b) => compareVersions(b.tag_name ?? "", a.tag_name ?? ""));
+  return stable[0] ?? null;
 }
 
 /**
@@ -85,6 +72,7 @@ export function compareVersions(left: string, right: string): number {
 export function findReleaseAsset(
   assets: GitHubReleaseAsset[] = [],
   platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
 ): GitHubReleaseAsset | null {
   const patterns =
     platform === "win32"
@@ -94,7 +82,10 @@ export function findReleaseAsset(
         : [/\.AppImage$/i, /linux.*\.tar\.gz$/i];
 
   for (const pattern of patterns) {
-    const asset = assets.find((a) => pattern.test(a.name ?? ""));
+    const matching = assets.filter(a => pattern.test(a.name ?? "") && a.browser_download_url);
+    const compatible = matching.filter(a => !/(?:arm64|aarch64|x64|x86_64|ia32)(?:[.-]|$)/i.test(a.name ?? "")
+      || (arch === "arm64" ? /arm64|aarch64/i.test(a.name ?? "") : arch === "x64" ? /x64|x86_64/i.test(a.name ?? "") : /ia32/i.test(a.name ?? "")));
+    const asset = compatible.find(a => (a.name ?? "").includes(arch)) ?? compatible[0];
     if (asset) return asset;
   }
 
@@ -109,6 +100,6 @@ export function findReleaseAsset(
 export function extractSha256FromDigest(digest?: string): string {
   if (!digest) return "";
 
-  const match = digest.match(/sha256:([a-f0-9]{64})/i);
+  const match = digest.match(/^sha256:([a-f0-9]{64})$/i);
   return match ? match[1] : "";
 }

@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { MermaidBlockNode } from "markstream-vue";
 import { layoutCursorFlow } from "./cursor-layout.ts";
 import type { CursorDiagram } from "./cursor-layout.ts";
 
 const props = defineProps<{ node: { code?: string }; isDark?: boolean }>();
+// markstream 的 NodeRenderer 会把整组预览 / 交互开关一起透传过来，
+// 本组件只关心 node / isDark，且根节点是多根片段，不去继承这些属性，
+// 避免开发模式下刷出 Extraneous non-props attributes 警告。
+defineOptions({ inheritAttrs: false });
 const diagram = ref<CursorDiagram | null>(null);
 const error = ref("");
 const mode = ref<"preview" | "source">("preview");
@@ -22,13 +27,15 @@ const markerId = `cursor-arrow-${Math.random().toString(36).slice(2)}`;
 let generation = 0;
 
 const code = computed(() => props.node?.code ?? "");
+// 非流程图不能用简化解析器输出空图，交给 Mermaid 原生渲染。
+const isFlow = computed(() => /^\s*(?:%%[^\n]*\n)*\s*(?:flowchart|graph)\b/i.test(code.value));
 const width = computed(() => diagram.value?.width ?? 320);
 const height = computed(() => diagram.value?.height ?? 120);
 
 async function render(): Promise<void> {
   const current = ++generation;
   error.value = "";
-  if (!code.value.trim()) {
+  if (!code.value.trim() || !isFlow.value) {
     diagram.value = null;
     return;
   }
@@ -103,7 +110,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <section class="cursor-diagram" :data-scheme="isDark ? 'dark' : 'light'">
+  <MermaidBlockNode v-if="!isFlow" :node="{ ...node, type: 'code_block', language: 'mermaid', code, raw: code }" :is-dark="isDark" />
+  <section v-else class="cursor-diagram" :data-scheme="isDark ? 'dark' : 'light'">
     <header>
       <span>Mermaid</span>
       <div>

@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) => ipcRenderer.invoke("pi:prepare-attachments", cwd, paths, authorizePaths),
   listDirectory: (cwd: string, relative: string) => ipcRenderer.invoke("pi:list-directory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => ipcRenderer.invoke("pi:read-workspace-file", cwd, relative),
-  writeWorkspaceFile: (cwd: string, relative: string, content: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content),
+  writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content, revision),
   openWorkspacePath: (cwd: string, relative: string) => ipcRenderer.invoke("pi:open-workspace-path", cwd, relative),
   createWorkspaceEntry: (cwd: string, parent: string, name: string, kind: "file" | "folder") => ipcRenderer.invoke("pi:create-workspace-entry", cwd, parent, name, kind),
   renameWorkspaceEntry: (cwd: string, relative: string, name: string) => ipcRenderer.invoke("pi:rename-workspace-entry", cwd, relative, name),

@@ -3,8 +3,10 @@ import { computed } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons, projectPathKey, shortPath } from "../../shared/util.ts";
 
-const { workbench } = useKernel();
+const { workbench, plugins } = useKernel();
 const state = workbench.state;
+// 终端是可关闭的可选插件，未启用时不要把它列成已有功能。
+const terminalEnabled = computed(() => Boolean(plugins.get("terminal")?.enabled));
 const recent = computed(() => {
   const seen = new Set<string>();
   const list: string[] = [];
@@ -47,7 +49,7 @@ const recent = computed(() => {
         <div class="welcome-features" aria-label="主要功能">
           <span><i v-html="icons.folder" />项目文件</span>
           <span><i v-html="icons.diff" />版本控制</span>
-          <span><i v-html="icons.terminal" />终端任务</span>
+          <span v-if="terminalEnabled"><i v-html="icons.terminal" />终端任务</span>
         </div>
 
         <div v-if="recent.length" class="recent">

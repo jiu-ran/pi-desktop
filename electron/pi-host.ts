@@ -11,6 +11,7 @@ import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, S
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
 import { firstUserTitle, sessionTitleFromText } from "./session-title.ts";
+import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -54,6 +55,8 @@ export interface WorkspaceFileData {
   name: string;
   content: string;
   size: number;
+  /** 文件内容版本，用于阻止覆盖 Agent / 外部编辑器的修改。 */
+  revision?: string;
   /** 图片等二进制文件的预览内容（data URL） */
   preview?: { mimeType: string; dataUrl: string };
   /** 非文本文件：只读，不能保存 */
@@ -1095,31 +1098,38 @@ export class PiHost {
     if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持在桌面端预览，可使用系统程序打开");
     const buffer = await readFile(target);
     if (looksBinary(buffer)) return { ...pathInfo, content: "", binary: true };
-    return { ...pathInfo, content: buffer.toString("utf8") };
+    return { ...pathInfo, content: buffer.toString("utf8"), revision: createHash("sha256").update(buffer).digest("hex") };
   }
 
-  async writeWorkspaceFile(cwd: string, relative: string, content: string): Promise<WorkspaceFileData> {
+  async writeWorkspaceFile(cwd: string, relative: string, content: string, expectedRevision?: string): Promise<WorkspaceFileData> {
     const resolved = workspaceFilePath(cwd, relative);
-    await assertReadableFilePath(cwd, resolved.target, resolved.external);
     const { root, target } = resolved;
     if (typeof content !== "string") throw new Error("文件内容必须是文本");
-    if (Buffer.byteLength(content, "utf8") > 20 * 1024 * 1024) throw new Error("文件超过 20 MB，暂不支持保存");
-    const info = await lstat(target).catch(() => null);
-    if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法修改");
-    const head = await readFileHead(target);
-    if (sniffImageMime(head) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()]) {
-      throw new Error("图片等二进制文件不支持在文本编辑器中保存");
-    }
-    await writeFile(target, content, "utf8");
-    return {
-      path: target,
-      relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
-      name: path.basename(target),
-      content,
-      size: Buffer.byteLength(content, "utf8"),
-    };
+    if (Buffer.byteLength(content, "utf8") > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持保存");
+    return withFileWrite(target, async () => {
+      await assertReadableFilePath(cwd, target, resolved.external);
+      const info = await lstat(target).catch(() => null);
+      if (!info || !info.isFile() || info.isSymbolicLink()) throw new Error("文件不存在或无法修改");
+      if (info.size > TEXT_PREVIEW_MAX) throw new Error("文件超过 20 MB，暂不支持保存");
+      const previous = await readFile(target);
+      if ((sniffImageMime(previous) ?? IMAGE_MIME_BY_EXT[path.extname(target).toLowerCase()]) || looksBinary(previous)) {
+        throw new Error("图片等二进制文件不支持在文本编辑器中保存");
+      }
+      const revision = createHash("sha256").update(previous).digest("hex");
+      if (expectedRevision !== undefined && revision !== expectedRevision) {
+        throw new Error("文件已被外部程序或 Agent 修改，已阻止覆盖；请保留草稿并重新读取后合并修改");
+      }
+      await atomicWriteText(target, content);
+      return {
+        path: target,
+        relative: resolved.external ? target : path.relative(root, target).replace(/\\/g, "/"),
+        name: path.basename(target),
+        content,
+        size: Buffer.byteLength(content, "utf8"),
+        revision: createHash("sha256").update(content, "utf8").digest("hex"),
+      };
+    });
   }
-
   async openWorkspacePath(cwd: string, relative: string): Promise<string> {
     const resolved = workspaceFilePath(cwd, relative);
     await assertReadableFilePath(cwd, resolved.target, resolved.external);
@@ -2655,15 +2665,19 @@ export async function readRecent(file: string): Promise<string[]> {
 }
 
 export async function writeRecent(file: string, cwd: string): Promise<string[]> {
-  const next = [cwd, ...(await readRecent(file)).filter((item) => item !== cwd)].slice(0, 20);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(next, null, 2));
-  return next;
+  return withFileWrite(file, async () => {
+    const next = [cwd, ...(await readRecent(file)).filter(item => !samePath(item, cwd))].slice(0, 20);
+    await mkdir(path.dirname(file), { recursive: true });
+    await atomicWriteText(file, JSON.stringify(next, null, 2));
+    return next;
+  });
 }
 
 export async function forgetRecent(file: string, cwd: string): Promise<string[]> {
-  const next = (await readRecent(file)).filter((item) => item !== cwd);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(next, null, 2));
-  return next;
+  return withFileWrite(file, async () => {
+    const next = (await readRecent(file)).filter(item => !samePath(item, cwd));
+    await mkdir(path.dirname(file), { recursive: true });
+    await atomicWriteText(file, JSON.stringify(next, null, 2));
+    return next;
+  });
 }

@@ -125,9 +125,11 @@ function loadDisabled(): Set<string> {
 export function createPluginManager({
   createContext,
   onPluginDeactivated,
+  beforeDisable = async () => true,
 }: {
   createContext: (plugin: SidebarPlugin, disposers: Array<() => void>) => PluginContext;
   onPluginDeactivated: (pluginId: string) => void;
+  beforeDisable?: (pluginId: string) => Promise<boolean>;
 }) {
   const disabled = loadDisabled();
   const enabled = (() => {
@@ -292,7 +294,10 @@ export function createPluginManager({
       if (!entry) return;
       if (record.enabled === enabled && !entry.activationPending) return;
       if (enabled) await activate(record);
-      else deactivate(record);
+      else {
+        if (!(await beforeDisable(id))) return;
+        deactivate(record);
+      }
       persist();
     });
     operations.set(id, operation);

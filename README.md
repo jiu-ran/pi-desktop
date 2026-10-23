@@ -7,7 +7,7 @@
 ## 下载与安装
 
 - **预构建安装包 / 便携包**：前往 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载对应系统的最新版本（Windows `.exe` / `.zip`、macOS `.dmg` / `.zip`、Linux `.AppImage` / `.tar.gz`）。
-- **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）。
+- **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）；从源码构建还需要 Node.js `>= 22.18.0`。
 
 ## 从源码运行与打包
 
@@ -19,12 +19,16 @@ npm run build        # 构建 Electron 主进程与前端静态资源
 npm start            # 直接启动桌面端
 npm run dist         # 打包当前系统安装包与便携包（输出到 dist/）
 npm run check        # TypeScript 检查 + 各层自检（包含 Mermaid 高度计算检查）
-npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
+npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编辑器冒烟检查
 ```
+
+发布前请对照 [`docs/release-review.md`](docs/release-review.md) 的清单执行依赖审计、冒烟、打包与手工验收。
 
 完整终端使用 `node-pty`（N-API 原生模块）：Windows / macOS 使用随依赖提供的预构建产物；Linux 安装依赖时需要 `python3`、`make`、`g++`（例如先安装 `build-essential python3`）。npm 12 若提示安装脚本被拦截，运行 `npm install-scripts approve node-pty`。原生模块通过 `asarUnpack` 随包解压分发，打包阶段不重复进行 Electron ABI 重编译。
 
 开发服务器默认监听 `127.0.0.1:1420`。如果只需要调试前端，可以在 `packages/ui` 下运行 `npm run dev`。
+
+主进程使用 Electron 45（运行 `npx --no-install electron --version` 可查看当前版本）。渲染进程加载了内容安全策略（CSP），只允许自身脚本 / 样式、`data:` / `blob:` / `https` 图片与本地工作线程；新增依赖如果依赖 `eval`、内联脚本或远程 `http` 资源，需要同步调整 `packages/ui/index.html` 的策略。
 
 开发实例使用独立的 Chromium profile（`%APPDATA%/Pi Desktop Dev`），与已安装的 Pi Desktop 互不影响，可以同时运行；需要自定义目录时设置 `PI_DESKTOP_PROFILE` 环境变量。
 
@@ -53,7 +57,7 @@ npm run check:smoke  # 构建 Electron 后运行最小宿主冒烟检查
 
 - 浏览、搜索和刷新项目文件树；文件可以拖拽到输入框作为附件，截图/图片可用 Ctrl+V 直接粘贴；输入框里图片显示为缩略图（点击预览、右上角一键移除）。
 - 输入框输入 `@` 按 Pi TUI 的方式插入文件引用：只写入 `@相对路径`（含空格或中文标点自动加引号，目录保留 `/` 并继续补全子路径），不内联内容，由模型用 `read` 工具按需读取；拖拽和“+”按钮仍然作为附件添加。
-- 在编辑器中打开文本文件，支持多标签、未保存状态、自动保存和 Markdown 预览；按 Ctrl / Cmd + P 快速打开文件（空输入时显示最近打开，支持模糊路径搜索），标签右键可关闭其他 / 右侧 / 已保存标签、复制路径或在文件管理器中显示；关闭自动保存且仍有未保存修改时会先确认。
+- 在编辑器中打开文本文件，支持多标签、未保存状态、自动保存和 Markdown 预览；按 Ctrl / Cmd + P 快速打开文件（空输入时显示最近打开，支持模糊路径搜索），标签右键可关闭其他 / 右侧 / 已保存标签、复制路径或在文件管理器中显示；关闭自动保存且仍有未保存修改时会先确认。每个标签绑定打开时的项目目录和文件版本：切换项目后再保存不会写错目标；保存前发现文件已被外部修改会提示冲突并保留草稿；写入采用同目录临时文件 + 原子替换。
 - 编辑器支持 Ctrl / Cmd + W 关闭当前标签、Ctrl / Cmd + Tab 循环切换、Ctrl / Cmd + 1–9 直达标签；聊天输入框里的 Ctrl / Cmd + W 不会误关窗口。
 - 文件树和搜索结果提供常用右键操作：用系统程序打开、重命名、复制绝对路径、复制相对路径、在文件管理器中显示，以及将文件或文件夹移入回收站。
 - 文件树直接标注 Git 状态（`M` / `U` / `D` / `R`）并汇总目录内变更数，工具栏可一键切换「只看变更」。
@@ -113,7 +117,8 @@ main.ts                 组合根：创建内核、注册内置插件
 
 - [`electron/terminal-host.ts`](electron/terminal-host.ts) 托管一次性后台命令与 node-pty 会话：原始输出限长、分批上报，退出时清理进程树和终端句柄；[`PtyTerminal.vue`](packages/ui/src/components/terminal/PtyTerminal.vue) 为每个会话维护独立 xterm 屏幕。终端仍只在已授权项目目录启动，后续 `cd` 等行为由用户运行的 shell 控制。
 - [`electron/pi-host.ts`](electron/pi-host.ts) 负责每个工作区的 Pi Worker 池、会话目录、白名单 RPC，以及文件创建、重命名、删除和回收站操作。
-- [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。
+- [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。窗口禁止附加 `webview`，导航按允许列表校验，打包版限制单实例。
+- 文件写入由 [`electron/atomic-file.ts`](electron/atomic-file.ts) 统一串行化并原子替换；宿主在写入前校验调用方持有的内容版本，发现外部修改时拒绝覆盖。
 - IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
 - 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。文本读取上限为 20 MB；超过 2 MB 的文本以只读大文件模式打开，保存上限为 20 MB。
 

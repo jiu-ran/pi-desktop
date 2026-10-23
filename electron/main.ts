@@ -9,9 +9,12 @@ import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
 import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
+import { atomicWriteText } from "./atomic-file.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ownsInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!ownsInstance) app.quit();
 
 // 开发实例使用独立 profile：
 // Electron 的 userData 目录取自 package.json 的 productName，而 dev 与已安装版本
@@ -296,6 +299,14 @@ function createWindow() {
       sandbox: true,
     },
   });
+  mainWindow.webContents.on("will-prevent-unload", (event) => {
+    const choice = dialog.showMessageBoxSync(mainWindow!, {
+      type: "warning", title: "存在未保存的修改",
+      message: "关闭或刷新会丢失文件编辑器中尚未保存的草稿。",
+      buttons: ["取消，返回保存", "放弃修改并继续"], defaultId: 0, cancelId: 0,
+    });
+    if (choice === 1) event.preventDefault();
+  });
   terminalFocused = false;
   mainWindow.webContents.on("did-start-loading", () => {
     terminalFocused = false;
@@ -304,6 +315,10 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  mainWindow.webContents.on("will-frame-navigate", (event) => {
+    if (!isAllowedRendererUrl(event.url)) event.preventDefault();
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isAllowedRendererUrl(url)) event.preventDefault();
@@ -361,7 +376,15 @@ function handle(channel: string, fn: (...args: any[]) => any) {
   });
 }
 
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.whenReady().then(() => {
+  if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
   handle("app:check-update", () => appUpdateManager.check());
@@ -456,7 +479,7 @@ app.whenReady().then(() => {
   });
   handle("pi:list-directory", (cwd: string, relative: string) => host.listDirectory(cwd, relative));
   handle("pi:read-workspace-file", (cwd: string, relative: string) => host.readWorkspaceFile(cwd, relative));
-  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string) => host.writeWorkspaceFile(cwd, relative, content));
+  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => host.writeWorkspaceFile(cwd, relative, content, revision));
   handle("pi:open-workspace-path", async (cwd: string, relative: string) => shell.openPath(await host.openWorkspacePath(cwd, relative)));
   handle("pi:create-workspace-entry", (cwd: string, parent: string, name: string, kind: "file" | "folder") => host.createWorkspaceEntry(cwd, parent, name, kind));
   handle("pi:rename-workspace-entry", (cwd: string, relative: string, name: string) => host.renameWorkspaceEntry(cwd, relative, name));
@@ -534,7 +557,7 @@ app.whenReady().then(() => {
   handle("pi:global-agents-save", async (content: string) => {
     if (typeof content !== "string" || content.length > 1024 * 1024) throw new Error("全局提示词不能超过 1 MB");
     await mkdir(path.dirname(agentsPath), { recursive: true });
-    await writeFile(agentsPath, content, "utf8");
+    await atomicWriteText(agentsPath, content);
     return { path: agentsPath, content };
   });
   handle("pi:titlebar", ({ color = "#111214", symbolColor = "#a8adb5" }: { color?: string; symbolColor?: string } = {}) => {
@@ -560,9 +583,8 @@ app.on("before-quit", async (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
-  await terminalHost.dispose();
-  await host.stopAll();
-  await appUpdateManager.cleanup();
+  appUpdateManager.cancelDownload();
+  await Promise.allSettled([terminalHost.dispose(), host.stopAll(), appUpdateManager.cleanup()]);
   app.exit();
 });
 

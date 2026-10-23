@@ -5,6 +5,8 @@ import { icons } from "../../shared/util.ts";
 import { appSettings } from "../../services/settings.ts";
 import { askConfirm, openMenu } from "../sidebar/ui.ts";
 import type { StageTab } from "../../kernel/stage.ts";
+import { saveFileTab } from "../../plugins/files/save.ts";
+import type { FileStageData } from "../../plugins/files/state.ts";
 
 const { stage, plugins, workbench, bus } = useKernel();
 
@@ -23,6 +25,15 @@ function needsDiscardConfirm(tab: StageTab): boolean {
 }
 
 async function confirmDiscard(tabs: readonly StageTab[]): Promise<boolean> {
+  if (appSettings.autoSave !== "off") {
+    try {
+      for (const tab of tabs) if (tab.dirty && tab.pluginId === "files") await saveFileTab(workbench, tab as StageTab<FileStageData>);
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: `保存失败，已保留标签：${error?.message || String(error)}` });
+      return false;
+    }
+    if (tabs.some(tab => tab.dirty)) return false;
+  }
   const dirty = tabs.filter(needsDiscardConfirm);
   if (!dirty.length) return true;
   const ok = await askConfirm({
@@ -122,7 +133,6 @@ function scrollTabs(event: WheelEvent): void {
 /** 编辑器内接管 Ctrl+W / Ctrl+Tab；PTY 按键原样交给终端，其余输入框吞掉 Ctrl+W 防止误关窗口。 */
 function onStageKey(event: KeyboardEvent): void {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || (event.shiftKey && event.key !== "Tab")) return;
-  if (!stage.tabs.length) return;
   const target = event.target;
   // PTY 的 Ctrl+W 是 shell 的删除单词；Electron 菜单由终端聚焦桥禁用。
   if (target instanceof HTMLElement && target.closest(".terminal-xterm")) return;
@@ -222,7 +232,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onStageKey, true));
     </header>
 
     <div class="stage-body">
-      <component :is="stageComponent" :key="activeTab.key" :tab="activeTab" />
+      <component :is="stageComponent" :key="`${workbench.state.activeCwd}:${activeTab.key}`" :tab="activeTab" />
     </div>
   </section>
 </template>

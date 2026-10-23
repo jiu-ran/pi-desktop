@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { appSettings, openSettingsModal } from "../../services/settings.ts";
 import MarkdownPreview from "../markdown/MarkdownPreview.vue";
+import MarkdownHighlightEditor from "../markdown/MarkdownHighlightEditor.vue";
 import { isMarkdownFile } from "../markdown/markdown.ts";
 import { icons } from "../../shared/util.ts";
 import { formatBytes } from "../../shared/attachments.ts";
@@ -10,12 +11,13 @@ import { localizeNotification } from "../../shared/notify-text.ts";
 import ImageLightbox from "../../components/chat/ImageLightbox.vue";
 import type { StageTab } from "../../kernel/stage.ts";
 import type { FileStageData } from "./state.ts";
+import { saveFileTab } from "./save.ts";
 
 const props = defineProps<{
   tab: StageTab<FileStageData>;
 }>();
 
-const { workbench, bus, plugins } = useKernel();
+const { workbench, bus, plugins, stage } = useKernel();
 
 const file = computed(() => props.tab.data);
 const markdownEnabled = computed(() => Boolean(plugins.get("markdown")?.enabled));
@@ -41,7 +43,7 @@ watch(
   },
   { immediate: true },
 );
-const saving = ref(false);
+const saving = computed(() => Boolean(file.value?.saving));
 const lastAutoSaved = ref(false);
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let fileGeneration = 0;
@@ -120,6 +122,7 @@ const previewItems = computed(() =>
 );
 const pathParts = computed(() => String(file.value?.relative ?? "").split(/[\\/]/).filter(Boolean));
 const codeInput = ref<HTMLTextAreaElement | null>(null);
+const markdownInput = ref<{ input: HTMLTextAreaElement | null } | null>(null);
 const lineNumbers = ref<HTMLElement | null>(null);
 
 function notify(error: any): void {
@@ -144,6 +147,8 @@ async function attachToChat(): Promise<void> {
 
 async function reload(): Promise<void> {
   if (!file.value?.relative) return;
+  if (saving.value) return;
+  if (props.tab.dirty && !window.confirm("重新读取会丢弃当前草稿。确定放弃未保存修改吗？")) return;
   const generation = ++fileGeneration;
   clearAutoSaveTimer();
   file.value.loading = true;
@@ -153,6 +158,8 @@ async function reload(): Promise<void> {
     if (generation !== fileGeneration || file.value?.relative !== detail.relative) return;
     file.value.content = detail.content;
     file.value.savedContent = detail.content;
+    file.value.revision = detail.revision;
+    file.value.saveError = "";
     file.value.draft = detail.content;
     file.value.size = detail.size;
     file.value.preview = detail.preview;
@@ -166,44 +173,17 @@ async function reload(): Promise<void> {
   }
 }
 
-async function save(options?: { auto?: boolean; generation?: number }): Promise<void> {
+async function save(options?: { auto?: boolean }): Promise<void> {
   clearAutoSaveTimer();
-  const targetFile = file.value;
-  if (!targetFile || targetFile.binary || targetFile.loading || targetFile.error || saving.value) return;
-  if (isLargeText.value) return;
-  if (!props.tab.dirty) return;
-  const contentToSave = targetFile.draft ?? targetFile.content ?? "";
-  const targetRelative = targetFile.relative;
-  const generation = options?.generation ?? fileGeneration;
-  saving.value = true;
+  const target = props.tab;
+  if (!target.dirty || isLargeText.value) return;
   try {
-    const saved = await workbench.writeFile(targetRelative, contentToSave);
-    if (generation !== fileGeneration || file.value !== targetFile || targetFile.relative !== targetRelative) return;
-    targetFile.content = saved.content;
-    targetFile.savedContent = saved.content;
-    targetFile.size = saved.size;
-    if (targetFile.draft === contentToSave) {
-      targetFile.draft = saved.content;
-      props.tab.dirty = false;
-    } else {
-      props.tab.dirty = targetFile.draft !== saved.content;
-      if (props.tab.dirty && appSettings.autoSave === "afterDelay") {
-        scheduleAutoSave();
-      }
-    }
-    if (options?.auto) {
-      lastAutoSaved.value = true;
-    } else {
-      lastAutoSaved.value = false;
-      bus.emit("notify", { level: "info", text: `已保存 ${targetFile.name}` });
-    }
-  } catch (error) {
-    notify(error);
-  } finally {
-    saving.value = false;
-  }
+    await saveFileTab(workbench, target);
+    lastAutoSaved.value = Boolean(options?.auto);
+    if (!options?.auto) bus.emit("notify", { level: "info", text: `已保存 ${target.title}` });
+    if (target.dirty && appSettings.autoSave === "afterDelay") scheduleAutoSave();
+  } catch (error) { notify(error); }
 }
-
 function onEditorBlur(): void {
   if (appSettings.autoSave === "onFocusChange" && props.tab.dirty) {
     void save({ auto: true });
@@ -229,7 +209,7 @@ function onKeydown(event: KeyboardEvent): void {
     return;
   }
   if (event.key === "Tab") {
-    const el = codeInput.value;
+    const el = markdownInput.value?.input || codeInput.value;
     if (!el) return;
     event.preventDefault();
     const start = el.selectionStart ?? 0;
@@ -277,13 +257,11 @@ onBeforeUnmount(() => {
   window.removeEventListener("blur", onWindowBlur);
   document.removeEventListener("visibilitychange", onVisibilityChange);
   clearAutoSaveTimer();
-  const unmountGeneration = fileGeneration;
   fileGeneration += 1;
-  if (props.tab.dirty && appSettings.autoSave !== "off") {
-    // The captured generation prevents a late save from mutating a replacement path.
-    void save({ auto: true, generation: unmountGeneration });
-  }
-});
+  if (stage.allTabs.value.includes(props.tab) && props.tab.dirty && appSettings.autoSave !== "off") {
+    // 保存服务持有原 tab/cwd；即使切换了项目，也不会把同名文件写到新项目。
+    void saveFileTab(workbench, props.tab).catch(notify);
+  }});
 </script>
 
 <template>
@@ -333,6 +311,7 @@ onBeforeUnmount(() => {
       <button type="button" class="icon-btn small" title="使用系统程序打开" @click="openExternal" v-html="icons.reveal" />
     </div>
 
+    <div v-if="file?.saveError" class="file-editor-state error">{{ localizeNotification(file.saveError, "error") }}（草稿仍保留）</div>
     <div v-if="file?.loading" class="file-editor-state"><span class="mini-spinner" />正在打开文件…</div>
     <div v-else-if="file?.error" class="file-editor-state error">{{ file.error }}</div>
     <div v-else-if="isBinary" class="file-editor-binary">
@@ -365,6 +344,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <MarkdownPreview v-else-if="showPreview && file" :file="file" />
+    <MarkdownHighlightEditor
+      v-else-if="isMarkdown && markdownEnabled"
+      ref="markdownInput"
+      v-model="draft"
+      style="flex: 1"
+      @blur="onEditorBlur"
+      @keydown="onKeydown"
+    />
     <div v-else class="file-editor-body">
       <div ref="lineNumbers" class="file-editor-numbers" aria-hidden="true">
         <span v-for="(_, index) in lines" :key="index">{{ index + 1 }}</span>

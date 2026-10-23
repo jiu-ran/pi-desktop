@@ -1,9 +1,17 @@
 import { app, BrowserWindow } from "electron";
 import { checkTerminalInElectron } from "./terminal.smoke.mjs";
+import { checkNetworkInElectron } from "./network.electron.mjs";
+import { checkEditorInElectron } from "./editor.electron.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
 process.env.PI_DESKTOP_PROFILE ||= "Pi Desktop Smoke";
+// 自动化窗口常被宿主工具遮挡；禁用 native occlusion，否则新版 Chromium
+// 会暂停 xterm 的 IntersectionObserver 绘制，造成假阴性。
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.disableHardwareAcceleration();
 
 const errors = [];
 let win;
@@ -58,6 +66,10 @@ app.whenReady().then(async () => {
     app.exit(1);
     return;
   }
+  // Electron 新版会节流被其他窗口遮挡的渲染；冒烟必须实际绘制 DOM。
+  win.show();
+  win.focus();
+  win.webContents.setBackgroundThrottling(false);
   win.webContents.on("console-message", (event) => {
     const level = event.level ?? "";
     const message = event.message ?? "";
@@ -65,6 +77,7 @@ app.whenReady().then(async () => {
   });
   win.webContents.on("render-process-gone", (_e, d) => errors.push(`render gone: ${d.reason}`));
   await new Promise((r) => setTimeout(r, 2500));
+  await checkNetworkInElectron();
   console.log("[smoke] probing");
   await probe("boot");
   console.log("[smoke] probed");
@@ -85,6 +98,7 @@ app.whenReady().then(async () => {
   if (ready.ws?.status === "ready") {
     try {
       await checkTerminalInElectron(win);
+      await checkEditorInElectron(win);
     } catch (error) {
       errors.push(`terminal: ${error.message || String(error)}`);
     }

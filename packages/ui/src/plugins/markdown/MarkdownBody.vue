@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import MarkdownRender, { setCustomComponents } from "markstream-vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import MarkdownRender, { removeCustomComponents, setCustomComponents } from "markstream-vue";
 import "markstream-vue/index.css";
-import CursorMermaid from "./CursorMermaid.vue";
+const CursorMermaid = defineAsyncComponent(() => import("./CursorMermaid.vue"));
 import MarkdownCodeBlock from "./MarkdownCodeBlock.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
@@ -193,6 +193,7 @@ watch([() => props.content, () => props.query, () => props.streaming], () => {
 });
 onMounted(() => void nextTick(highlightQuery));
 onBeforeUnmount(() => {
+  removeCustomComponents(mermaidCustomId);
   stopFit?.();
   stopExport?.();
 });
@@ -205,6 +206,7 @@ onBeforeUnmount(() => {
       class="md"
       :mode="mode"
       :content="themedContent"
+      html-policy="safe"
       :final="!streaming"
       :is-dark="isDark"
       :viewport-priority="false"

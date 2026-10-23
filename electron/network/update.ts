@@ -1,6 +1,8 @@
 import { app, shell } from "electron";
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat, chmod } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { downloadFileStream, normalizeNetworkError } from "./http.ts";
 import {
@@ -46,6 +48,7 @@ export class AppUpdateManager {
   private readonly preparedUpdates: Map<string, PreparedAppUpdate> = new Map();
   private downloadInProgress: boolean = false;
   private downloadController: AbortController | null = null;
+  private installing = false;
 
   constructor(owner: string, repo: string) {
     this.owner = owner;
@@ -140,7 +143,20 @@ export class AppUpdateManager {
       const filePath = path.join(updateDir, path.basename(asset.name));
 
       // 提取 SHA-256
-      const sha256 = extractSha256FromDigest(asset.digest);
+      let sha256 = extractSha256FromDigest(asset.digest);
+      if (!sha256) {
+        const checksums = release.assets?.find(item => item.name === "SHA256SUMS.txt");
+        if (checksums?.browser_download_url) {
+          const response = await (await import("electron")).net.fetch(checksums.browser_download_url, { signal: AbortSignal.timeout(15000) });
+          if (!response.ok) throw new Error("无法读取更新校验文件");
+          const text = await response.text();
+          for (const line of text.split(/\r?\n/)) {
+            const match = /^([a-f0-9]{64})\s+\*?(.+)$/i.exec(line.trim());
+            if (match?.[2] === asset.name) { sha256 = match[1]; break; }
+          }
+        }
+      }
+      if (!sha256) throw new Error("安装包缺少 SHA-256 校验值，请从发布页手动下载");
 
       // 下载文件
       await downloadFileStream(asset.browser_download_url, filePath, {
@@ -188,6 +204,16 @@ export class AppUpdateManager {
       throw new Error("请先下载并准备更新");
     }
 
+    if (this.installing) throw new Error("更新安装程序已经启动");
+    const info = await stat(prepared.filePath);
+    if (!info.isFile() || !prepared.sha256) throw new Error("更新安装包失效，请重新下载");
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(prepared.filePath)) hash.update(chunk);
+    const actual = hash.digest("hex");
+    if (actual !== prepared.sha256) throw new Error("安装包在下载后被修改，已阻止执行，请重新下载");
+    this.installing = true;
+    try {
+    if (process.platform === "linux" && /\.AppImage$/i.test(prepared.filePath)) await chmod(prepared.filePath, 0o700);
     if (process.platform === "win32" && /\.exe$/i.test(prepared.filePath)) {
       // Windows NSIS 安装器需要 --updated 才会启用 keep-shortcuts：
       // 否则旧卸载器会删掉桌面快捷方式，再由新安装器重新创建。
@@ -215,6 +241,11 @@ export class AppUpdateManager {
       }
     }
 
+    } catch (error) {
+      this.installing = false;
+      throw error;
+    }
+
     // 300ms 后退出应用，给系统时间启动安装程序
     setTimeout(() => app.quit(), 300);
   }
@@ -234,6 +265,9 @@ export class AppUpdateManager {
    * 清理所有已准备的更新（临时文件）
    */
   async cleanup(): Promise<void> {
+    this.cancelDownload();
+    // 已交给系统的安装包不能在退出时删除（macOS 挂载 dmg / Linux 执行 AppImage）。
+    if (this.installing) return;
     const { unlink } = await import("node:fs/promises");
 
     for (const prepared of this.preparedUpdates.values()) {

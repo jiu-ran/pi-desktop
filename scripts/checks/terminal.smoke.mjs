@@ -11,11 +11,13 @@ export async function checkTerminalInElectron(win) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const detail = await evaluate(`JSON.stringify({
-      screens: [...document.querySelectorAll('.terminal-xterm')].map(el => ({id:el.dataset.taskId, ready:el.dataset.terminalReady,cols:el.dataset.cols,rows:el.dataset.rows,text:el.innerText.slice(0,500),display:getComputedStyle(el).display})),
+      screens: [...document.querySelectorAll('.terminal-xterm')].map(el => ({id:el.dataset.taskId, ready:el.dataset.terminalReady,cols:el.dataset.cols,rows:el.dataset.rows,text:el.textContent.slice(-500),display:getComputedStyle(el).display,rect:el.getBoundingClientRect().toJSON(),visibility:document.visibilityState,rows:el.querySelector('.xterm-rows')?.innerHTML.slice(0,200)})),
       tasks: window.__piDesktop.terminal.state.tasks.map(t => ({id:t.id,status:t.status,output:t.output.slice(-700)})),
       open:window.__piDesktop.terminal.state.open,enabled:window.__piDesktop.terminal.state.enabled
     })`);
     console.log("[terminal diagnostic]", detail);
+    const shot = await win.webContents.capturePage();
+    await (await import('node:fs/promises')).writeFile((await import('node:path')).join((await import('node:os')).tmpdir(), 'pi-smoke-terminal-failure.png'), shot.toPNG());
     throw new Error(`终端冒烟超时：${label}`);
   };
   const write = (id, text) => evaluate(`window.__piDesktop.terminal.writePty(${JSON.stringify(id)}, ${JSON.stringify(text)})`);
@@ -49,7 +51,7 @@ export async function checkTerminalInElectron(win) {
     const command = `node "${fixture}"`;
     await write(first, `${command}\r`);
     await poll(`${task(first)}?.output.includes('PTY-PROBE-READY')`, "全屏程序启动");
-    await poll(`document.querySelector(${JSON.stringify(selector(first))})?.innerText.includes('PTY-PROBE-READY')`, "xterm 全屏渲染");
+    await poll(`document.querySelector(${JSON.stringify(selector(first))})?.textContent.includes('PTY-PROBE-READY')`, "xterm 全屏渲染");
     await evaluate(`document.querySelector(${JSON.stringify(`${selector(first)} textarea`)})?.focus(); true`);
     await new Promise((resolve) => setTimeout(resolve, 200));
     await key("Up");

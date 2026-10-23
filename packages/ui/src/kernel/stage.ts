@@ -33,6 +33,24 @@ export function createStage() {
     activeKey: "",
   });
 
+  const workspaces = new Map<string, { tabs: StageTab[]; activeKey: string }>();
+  let workspace = "";
+  const allTabs = computed(() => [...new Set([...state.tabs, ...[...workspaces.values()].flatMap((saved) => saved.tabs)])]);
+  function switchWorkspace(cwd: string): void {
+    if (cwd === workspace) return;
+    workspaces.set(workspace, { tabs: [...state.tabs], activeKey: state.activeKey });
+    workspace = cwd;
+    const saved = workspaces.get(cwd);
+    state.tabs.splice(0, state.tabs.length, ...(saved?.tabs ?? []));
+    state.activeKey = saved?.activeKey ?? "";
+    workspaces.delete(cwd);
+  }
+
+  function removeWorkspace(cwd: string): void {
+    workspaces.delete(cwd);
+    if (workspace === cwd) clear();
+  }
+
   const activeKey = computed(() => state.activeKey);
 
   const activeTab = computed<StageTab | null>(
@@ -97,6 +115,10 @@ export function createStage() {
   }
 
   function closeByPlugin(pluginId: string): void {
+    for (const saved of workspaces.values()) {
+      saved.tabs = saved.tabs.filter((tab) => tab.pluginId !== pluginId);
+      if (!saved.tabs.some((tab) => tab.key === saved.activeKey)) saved.activeKey = saved.tabs[0]?.key ?? "";
+    }
     const next = state.tabs.filter((item) => item.pluginId !== pluginId);
     state.tabs.splice(0, state.tabs.length, ...next);
     if (!state.tabs.some((item) => item.key === state.activeKey)) {
@@ -111,6 +133,9 @@ export function createStage() {
 
   return {
     state,
+    allTabs,
+    switchWorkspace,
+    removeWorkspace,
     get tabs() {
       return state.tabs;
     },

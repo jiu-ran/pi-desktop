@@ -20,7 +20,15 @@ async function boot(): Promise<void> {
   };
   app.mount("#app");
   window.__piDesktop = kernel;
+  window.addEventListener("beforeunload", (event) => {
+    if (!kernel.stage.allTabs.value.some(tab => tab.dirty || (tab.data as any)?.saving)) return;
+    event.preventDefault();
+    event.returnValue = "存在未保存的文件修改";
+  });
   await kernel.workbench.init();
 }
 
-boot();
+void boot().catch((error) => {
+  console.error("[boot]", error);
+  kernel.bus.emit("notify", { level: "error", text: `启动失败：${localizeNotification(error, "error")}` });
+});

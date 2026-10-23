@@ -1,5 +1,6 @@
 import { computed, reactive, shallowReactive, toRaw } from "vue";
 import { displayProjectName, projectPathKey } from "../shared/util.ts";
+import { readStorage, writeStorage } from "../shared/storage.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -99,7 +100,7 @@ function normalizeThreadKey(file = ""): string {
 }
 
 function savedWidth(key: string, min: number, max: number, fallback: number): number {
-  const raw = localStorage.getItem(key);
+  const raw = readStorage(key);
   if (raw === null || raw === "") return fallback;
   const value = Number(raw);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
@@ -134,7 +135,7 @@ export function emptyGitOverview(): GitOverview {
   };
 }
 
-export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
+export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () => true }: { host: any; bus: EventBus; beforeRemoveWorkspace?: (cwd: string) => Promise<boolean> }) {
   const state = reactive({
     pi: {
       found: false,
@@ -159,7 +160,7 @@ export function createWorkbench({ host, bus }: { host: any; bus: EventBus }) {
     },
     recent: [] as string[],
     activeCwd: "",
-    theme: localStorage.getItem(THEME_KEY) || "dark",
+    theme: readStorage(THEME_KEY) === "light" ? "light" : "dark",
     sidebarOpen: true,
     sidebarWidth: savedSidebarWidth(),
     panelWidth: savedWidth(PANEL_WIDTH_KEY, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, 320),
@@ -599,10 +600,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.readWorkspaceFile(ws.cwd, relative);
   }
 
-  async function writeWorkspaceFile(relative: string, content: string): Promise<WorkspaceFileData> {
-    const ws = active.value;
-    if (!ws) throw new Error("没有打开的工作区");
-    return host.writeWorkspaceFile(ws.cwd, relative, content);
+  async function writeWorkspaceFile(relative: string, content: string, revision?: string, cwd?: string): Promise<WorkspaceFileData> {
+    const target = cwd || active.value?.cwd;
+    if (!target) throw new Error("没有打开的工作区");
+    return host.writeWorkspaceFile(target, relative, content, revision);
   }
 
   async function openWorkspacePath(relative: string): Promise<void> {
@@ -642,10 +643,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.gitInspect(ws.cwd, kind, target);
   }
 
-  async function gitAction(action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
-    const ws = active.value;
-    if (!ws || !host?.gitAction) throw new Error("没有打开的工作区");
-    return host.gitAction(ws.cwd, action, payload);
+  async function gitAction(action: GitActionName, payload: GitActionPayload = {}, cwd?: string): Promise<GitActionResult> {
+    const target = cwd || active.value?.cwd;
+    if (!target || !host?.gitAction) throw new Error("没有打开的工作区");
+    return host.gitAction(target, action, payload);
   }
 
   async function gitWorktrees(): Promise<GitWorktree[]> {
@@ -677,14 +678,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function addFiles(paths: string[] = []): Promise<void> {
     const ws = active.value;
     if (!ws || !paths.length) return;
-    const known = new Set(ws.attachments.map((item: any) => item.path));
+    const thread = ws.activeThread;
+    const known = new Set(thread.attachments.map((item: any) => item.path));
     const seen = new Set<string>();
     const fresh = paths.filter((path) => {
       if (!path || known.has(path) || seen.has(path)) return false;
       seen.add(path);
       return true;
     });
-    const room = Math.max(0, MAX_ATTACHMENTS - ws.attachments.length);
+    const room = Math.max(0, MAX_ATTACHMENTS - thread.attachments.length);
     const accepted = fresh.slice(0, room);
     if (accepted.length < fresh.length) {
       bus.emit("notify", {
@@ -695,9 +697,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (!accepted.length) return;
     const prepared = await host.prepareAttachments(ws.cwd, accepted, accepted);
     for (const item of prepared.items ?? []) {
-      if (!item?.path || known.has(item.path)) continue;
-      known.add(item.path);
-      ws.attachments.push(item);
+      if (!item?.path || thread.attachments.some(existing => existing.path === item.path)) continue;
+      if (thread.attachments.length >= MAX_ATTACHMENTS) break;
+      thread.attachments.push(item);
     }
   }
 
@@ -706,9 +708,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws) throw new Error("没有打开的工作区");
     if (!host?.savePastedImage) throw new Error("当前环境不支持粘贴图片");
+    const thread = ws.activeThread;
     const file = await host.savePastedImage(payload);
     if (!file) throw new Error("剪贴板图片保存失败");
-    await addFiles([file]);
+    const prepared = await host.prepareAttachments(ws.cwd, [file], [file]);
+    for (const item of prepared.items ?? []) {
+      if (thread.attachments.length >= MAX_ATTACHMENTS) break;
+      if (!thread.attachments.some(existing => existing.path === item.path)) thread.attachments.push(item);
+    }
   }
 
   function extractDroppedPaths(dataTransfer: DataTransfer | null): string[] {
@@ -765,6 +772,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
     if (ws?.hasAnyRunning) throw new Error("该项目有任务正在运行，请先停止");
+    if (!(await beforeRemoveWorkspace(target))) throw new Error("已取消移除项目，未保存草稿仍保留");
     const result = await host.removeProject(target, { deleteSessions });
     workspaces.delete(target);
     state.recent = result.recent;
@@ -820,7 +828,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.sidebarWidth;
     state.sidebarWidth = Math.round(width);
-    if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
+    if (persist) writeStorage(SIDEBAR_WIDTH_KEY, String(state.sidebarWidth));
     return state.sidebarWidth;
   }
 
@@ -828,7 +836,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.panelWidth;
     state.panelWidth = Math.round(width);
-    if (persist) localStorage.setItem(PANEL_WIDTH_KEY, String(state.panelWidth));
+    if (persist) writeStorage(PANEL_WIDTH_KEY, String(state.panelWidth));
     return state.panelWidth;
   }
 
@@ -836,7 +844,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const width = Math.min(EDITOR_MAX_WIDTH, Math.max(EDITOR_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.stageWidth;
     state.stageWidth = Math.round(width);
-    if (persist) localStorage.setItem(EDITOR_WIDTH_KEY, String(state.stageWidth));
+    if (persist) writeStorage(EDITOR_WIDTH_KEY, String(state.stageWidth));
     return state.stageWidth;
   }
 
@@ -1003,7 +1011,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         thread.loaded = true;
       }
       const prompt = [prepared.text, message].filter(Boolean).join("\n");
-      thread.attachments = [];
+      // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
+      const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
+      thread.attachments = thread.attachments.filter(item => !sentPaths.has(item.path));
       const disposition = await rpc(ws.cwd, "prompt", [prompt, prepared.images, behavior], targetSessionFile);
       accepted = true;
       if (disposition === "handled") {
@@ -1013,11 +1023,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       await refreshSessions(ws);
       return true;
     } catch (error: any) {
-      thread.streaming = false;
+      if (!accepted && !behavior) thread.streaming = false;
       if (!accepted) {
         // 未送达：撤回乐观消息并恢复附件，让用户可以改完再发
         if (optimisticId) thread.transcript.removeBlock(optimisticId);
-        thread.attachments = attachmentSnapshot;
+        thread.attachments = [...attachmentSnapshot, ...thread.attachments.filter(item => !attachmentSnapshot.some(sent => sent.path === item.path))].slice(0, MAX_ATTACHMENTS);
       }
       bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       return accepted;
@@ -1208,7 +1218,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   function setTheme(id: string): void {
     state.theme = id;
-    localStorage.setItem(THEME_KEY, id);
+    writeStorage(THEME_KEY, id);
   }
 
   /**

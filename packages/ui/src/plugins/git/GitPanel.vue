@@ -61,10 +61,10 @@ function readDraft(): string {
   }
 }
 
-function writeDraft(value: string): void {
+function writeDraft(value: string, key = draftKey.value): void {
   try {
-    if (value) localStorage.setItem(draftKey.value, value);
-    else localStorage.removeItem(draftKey.value);
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } catch {
     /* 隐私模式下忽略 */
   }
@@ -72,6 +72,8 @@ function writeDraft(value: string): void {
 
 async function load(): Promise<void> {
   if (!ws.value?.cwd) {
+    request += 1;
+    loading.value = false;
     overview.value = null;
     overviewState.value = null;
     return;
@@ -124,10 +126,15 @@ async function loadWorktrees(): Promise<void> {
     worktrees.value = [];
     return;
   }
+  const cwd = ws.value.cwd;
+  const current = request;
   try {
-    worktrees.value = await workbench.gitWorktrees();
+    const result = await workbench.gitWorktrees();
+    if (ws.value?.cwd !== cwd || current !== request) return;
+    worktrees.value = result;
     worktreeError.value = "";
   } catch (err: any) {
+    if (ws.value?.cwd !== cwd || current !== request) return;
     worktrees.value = [];
     worktreeError.value = err?.message ?? String(err);
   }
@@ -233,6 +240,7 @@ onMounted(() => {
   if (!overview.value) void load();
 });
 onBeforeUnmount(() => {
+  request += 1;
   stopEvents();
   stopFiles();
   if (refreshTimer) clearTimeout(refreshTimer);
@@ -309,11 +317,18 @@ function rowState(row: PanelRow): "off" | "partial" | "on" {
 }
 
 async function run(action: GitActionName, payload: GitActionPayload = {}): Promise<boolean> {
-  if (busy.value) return false;
+  if (busy.value || !ws.value) return false;
+  const cwd = ws.value.cwd;
+  const savedDraftKey = draftKey.value;
   busy.value = action;
   error.value = "";
   try {
-    const result = await workbench.gitAction(action, payload);
+    const result = await workbench.gitAction(action, payload, cwd);
+    if (ws.value?.cwd !== cwd) {
+      if (action === "commit") writeDraft("", savedDraftKey);
+      bus.emit("notify", { level: "info", text: result.message });
+      return true;
+    }
     overview.value = result.overview;
     overviewState.value = result.overview;
     if (action === "commit") {
@@ -341,18 +356,24 @@ function commit(): void {
 async function commitAndPush(): Promise<void> {
   if (!canCommit.value) return;
   const message = commitMessage.value.trim();
+  const cwd = ws.value!.cwd;
+  const savedDraftKey = draftKey.value;
   busy.value = "commit";
   error.value = "";
   try {
-    const committed = await workbench.gitAction("commit", { message });
-    overview.value = committed.overview;
-    overviewState.value = committed.overview;
-    commitMessage.value = "";
-    writeDraft("");
+    const committed = await workbench.gitAction("commit", { message }, cwd);
+    if (ws.value?.cwd === cwd) {
+      overview.value = committed.overview;
+      overviewState.value = committed.overview;
+      commitMessage.value = "";
+    }
+    writeDraft("", savedDraftKey);
     busy.value = "push";
-    const pushed = await workbench.gitAction("push", {});
-    overview.value = pushed.overview;
-    overviewState.value = pushed.overview;
+    const pushed = await workbench.gitAction("push", {}, cwd);
+    if (ws.value?.cwd === cwd) {
+      overview.value = pushed.overview;
+      overviewState.value = pushed.overview;
+    }
     bus.emit("notify", { level: "info", text: `${committed.message}，${pushed.message}` });
   } catch (err: any) {
     const text = err?.message ?? String(err);
