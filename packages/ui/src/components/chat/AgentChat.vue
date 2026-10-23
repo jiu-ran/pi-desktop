@@ -721,7 +721,7 @@ watch(searchMatches, () => {
       </div>
 
       <div v-if="changedFiles.length" class="changes-bar">
-        <button class="changes-bar-main" @click="openChangesPanel">
+        <button class="changes-bar-main" :aria-label="`${changedFiles.length} 个文件已变更，查看改动`" :title="`${changedFiles.length} 个文件已变更，点击查看改动`" @click="openChangesPanel">
           <span class="changes-bar-icon" v-html="icons.diff" />
           <strong>{{ changedFiles.length }} 个文件已变更</strong>
           <span v-if="changedDiff" class="diff-stat">

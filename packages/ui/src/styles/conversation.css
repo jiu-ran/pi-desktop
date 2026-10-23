@@ -133,14 +133,19 @@
   width: 100%;
   height: 30px;
   padding: 0 10px;
+  overflow: hidden;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
   background: var(--bg-1);
   color: var(--fg);
   font-size: 12px;
+  white-space: nowrap;
 }
+/* 舞台变窄时优先保住「N 个文件已变更」和增删统计，文件名 chip 与右侧提示依次让位。 */
+.changes-bar-main > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.changes-bar-main .diff-stat { flex: none; }
 .changes-bar-main:hover { border-color: var(--accent); background: var(--bg-2); }
-.changes-bar-icon { display: grid; color: var(--accent); }
+.changes-bar-icon { display: grid; flex: none; color: var(--accent); }
 .changes-bar-files { display: flex; flex: 1; gap: 4px; min-width: 0; overflow: hidden; }
 .changes-chip {
   padding: 1px 6px;
@@ -150,7 +155,18 @@
   font: 11px var(--mono);
   white-space: nowrap;
 }
-.changes-bar-more { margin-left: auto; color: var(--accent); font-size: 11.5px; white-space: nowrap; }
+.changes-bar-more { flex: none; margin-left: auto; color: var(--accent); font-size: 11.5px; white-space: nowrap; }
+@container (max-width: 560px) {
+  .changes-chip { display: none; }
+}
+@container (max-width: 470px) {
+  .changes-bar-main { gap: 6px; padding: 0 8px; }
+  .changes-bar-more { display: none; }
+}
+@container (max-width: 300px) {
+  .changes-bar-main { gap: 5px; font-size: 11px; }
+  .changes-bar-main .diff-stat { gap: 4px; font-size: 10px; }
+}
 .diff-stat { display: inline-flex; gap: 6px; font: 11.5px var(--mono); }
 .diff-stat .add { color: var(--add-fg); font-weight: 500; }
 .diff-stat .del { color: var(--del-fg); font-weight: 500; }
@@ -741,6 +757,7 @@
   gap: 6px;
   width: 100%;
   min-height: 26px;
+  overflow: hidden;
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -756,7 +773,7 @@
 .activity-caret.open { transform: rotate(90deg); }
 .activity-icon { display: grid; flex: none; color: var(--accent); }
 .activity-title { flex: none; color: var(--fg-2); font-weight: 500; }
-.activity-count { flex: none; color: var(--fg-3); font: 11px var(--mono); }
+.activity-count { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fg-3); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .activity-summary {
   flex: 1;
   min-width: 0;
@@ -776,6 +793,9 @@
   font-size: 10.5px;
 }
 .activity-live { flex: none; color: var(--accent); }
+@container (max-width: 360px) {
+  .activity-summary { display: none; }
+}
 .activity-body {
   display: flex;
   flex-direction: column;
@@ -1022,6 +1042,10 @@
 }
 .composer textarea::-webkit-scrollbar:horizontal { display: none; height: 0; }
 .composer textarea::placeholder { color: var(--fg-3); }
+/* 占位文案在窄舞台会换成两行；为它保留空间，不让末行被工具栏裁掉。 */
+@container (max-width: 360px) {
+  .composer textarea:placeholder-shown { min-height: 64px; }
+}
 .composer-bar {
   display: flex;
   flex-wrap: wrap;

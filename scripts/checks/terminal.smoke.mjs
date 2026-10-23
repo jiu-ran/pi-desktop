@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { checkTerminalUiInElectron } from "./terminal-ui.smoke.mjs";
 
 /** Electron 真机终端检查，复用不调用模型的全屏 fixture。 */
 export async function checkTerminalInElectron(win) {
@@ -75,8 +76,14 @@ export async function checkTerminalInElectron(win) {
     await evaluate("window.__piDesktop.terminal.show(); true");
     await poll(`document.querySelector(${JSON.stringify(selector(first))}) === window.__ptySmokeScreen`, "收起展开不重建屏幕");
 
-    await evaluate("window.__piDesktop.terminal.startPty(80, 24).then(() => true)");
+    // 通过自绘 shell 菜单真实新建第二个会话，临时选择不能改默认配置。
+    const defaultProfile = await evaluate("window.__piDesktop.settings.settings.terminalProfile");
+    await evaluate("document.querySelector('.terminal-profile-picker .terminal-select-btn').click(); true");
+    await poll("document.querySelector('.terminal-select-item[data-value=\"system\"]')", "系统 shell 菜单项");
+    await evaluate("document.querySelector('.terminal-select-item[data-value=\"system\"]').click(); true");
+    await poll(`window.__piDesktop.terminal.activeTask.value?.id !== ${JSON.stringify(first)} && !document.querySelector('.terminal-select-menu')`, "选择 shell 新建独立会话并关闭菜单");
     const second = await evaluate("window.__piDesktop.terminal.activeTask.value.id");
+    if (await evaluate("window.__piDesktop.settings.settings.terminalProfile") !== defaultProfile) throw new Error("临时选择 shell 改写了默认配置");
     await poll(dimsMatch(second), "第二个终端尺寸同步");
     await write(first, "\u001b[B");
     await poll(`${task(first)}?.output.includes('PTY-HEX:1b5b42')`, "隐藏会话继续接收独立输出");
@@ -113,6 +120,7 @@ export async function checkTerminalInElectron(win) {
     })()`, "终端打开时运行一次性后台命令");
     const keptView = await evaluate(`window.__piDesktop.terminal.activeTask.value.id === ${JSON.stringify(first)} && window.__piDesktop.terminal.state.input === ''`);
     if (!keptView) throw new Error("后台命令抢走了终端视图或未清空输入");
+    await checkTerminalUiInElectron(win);
     const onceTask = await evaluate(`window.__piDesktop.terminal.state.tasks.find(t => !t.pty && t.command.includes('BG-ONCE-OK'))?.id`);
     await evaluate(`window.__piDesktop.terminal.select(${JSON.stringify(onceTask)}); true`);
     await poll(`document.querySelector('.terminal-input') !== null`, "后台命令也保留命令输入框");

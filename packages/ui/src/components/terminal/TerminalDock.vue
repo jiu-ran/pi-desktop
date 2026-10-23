@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from "vue";
 import PtyTerminal from "./PtyTerminal.vue";
+import TerminalSelect from "./TerminalSelect.vue";
+import type { TerminalSelectItem } from "./TerminalSelect.vue";
 import "../../styles/terminal.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { TERMINAL_STATUS_LABEL, formatTerminalDuration, type TerminalTask } from "../../services/terminal.ts";
 import { renderTerminalHtml, stripTerminalAnsi, terminalPlainText } from "../../shared/terminal-text.ts";
-import { appSettings, openSettingsModal } from "../../services/settings.ts";
+import { appSettings, openSettingsModal, settingsModalState } from "../../services/settings.ts";
 import { displayProjectName, icons } from "../../shared/util.ts";
 
 const { workbench, terminal } = useKernel();
@@ -27,8 +29,8 @@ const resizing = ref(false);
 const copied = ref(false);
 const wrap = ref(loadWrap());
 const secret = ref(false);
-const shellChoice = ref("");
 const backgroundNote = ref("");
+const menusActive = computed(() => state.open && state.enabled && !settingsModalState.open);
 
 const cwd = computed(() => workbench.state.activeCwd);
 // 一次性命令实际在当前项目启动，不继承 PTY 内的 cd 或另一项目会话的目录。
@@ -44,6 +46,26 @@ const taskGroups = computed(() => [
   { key: "pty", label: "交互终端", items: ptyTasks.value },
   { key: "command", label: "后台命令", items: tasks.value.filter((item) => !item.pty) },
 ]);
+const shellItems = computed<TerminalSelectItem[]>(() => [
+  ...state.profiles.map((profile) => ({ value: profile.id, label: profile.label })),
+  ...(appSettings.terminalCustomPath ? [{ value: "custom", label: "自定义终端" }] : []),
+  { value: "settings", label: "终端设置…", group: "更多", action: true },
+]);
+const historyItems = computed<TerminalSelectItem[]>(() =>
+  state.history.map((command) => ({ value: command, label: command })),
+);
+const taskItems = computed<TerminalSelectItem[]>(() =>
+  taskGroups.value
+    .filter((group) => group.items.length)
+    .flatMap((group) =>
+      group.items.map((item) => ({
+        value: item.id,
+        label: taskLabel(item),
+        hint: TERMINAL_STATUS_LABEL[item.status],
+        group: group.label,
+      })),
+    ),
+);
 const legacyInteractive = computed(() => interactive.value && !pty.value);
 const ptyRunning = computed(() => pty.value && isRunning.value);
 const interactiveRunning = computed(() => interactive.value && isRunning.value);
@@ -201,10 +223,7 @@ function onTabsWheel(event: WheelEvent): void {
   if (el.scrollLeft !== before) event.preventDefault();
 }
 
-function fillHistory(event: Event): void {
-  const select = event.target as HTMLSelectElement;
-  const command = select.value;
-  select.value = "";
+function fillHistory(command: string): void {
   if (command && !secret.value) useExample(command);
 }
 
@@ -334,10 +353,7 @@ function flashBackgroundNote(text: string): void {
   }, 2800);
 }
 
-async function chooseShell(event: Event): Promise<void> {
-  const id = (event.target as HTMLSelectElement).value;
-  shellChoice.value = "";
-  (event.target as HTMLSelectElement).value = "";
+async function chooseShell(id: string): Promise<void> {
   if (id === "settings") { openSettingsModal("terminal"); return; }
   if (id) {
     await terminal.startPty(ptySize.value.cols, ptySize.value.rows, id);
@@ -435,8 +451,8 @@ function selectTask(id: string): void {
   });
 }
 
-function onTaskSelect(event: Event): void {
-  selectTask((event.target as HTMLSelectElement).value);
+function onTaskSelect(id: string): void {
+  selectTask(id);
 }
 
 function rerun(item: TerminalTask): void {
@@ -615,23 +631,21 @@ onMounted(() => {
             <span aria-hidden="true" v-html="icons.plus" />
             <span class="terminal-create-label">新建终端</span>
           </button>
-          <div v-if="terminal.supportsPty" class="terminal-profile-picker">
-            <span aria-hidden="true" v-html="icons.chevronDown" />
-            <select
-              class="terminal-profile-select"
-              :value="shellChoice"
-              :disabled="state.starting || !cwd"
-              aria-label="选择 shell 新建终端"
-              title="选择其他 shell 新建终端，不修改默认配置"
-              @pointerdown="terminal.refreshProfiles()"
-              @change="chooseShell"
-            >
-              <option value="" disabled>选择 shell 新建终端</option>
-              <option v-for="profile in state.profiles" :key="profile.id" :value="profile.id">{{ profile.label }}</option>
-              <option v-if="appSettings.terminalCustomPath" value="custom">自定义终端</option>
-              <option value="settings">终端设置…</option>
-            </select>
-          </div>
+          <TerminalSelect
+            v-if="terminal.supportsPty"
+            class="terminal-profile-picker"
+            variant="chevron"
+            :items="shellItems"
+            :value="appSettings.terminalProfile"
+            :active="menusActive"
+            :disabled="state.starting || !cwd"
+            aria-label="选择 shell 新建终端"
+            title="选择其他 shell 新建终端，不修改默认配置"
+            side="down"
+            align="right"
+            @open="terminal.refreshProfiles()"
+            @pick="chooseShell"
+          />
         </div>
         <button
           v-if="finishedCount"
@@ -684,15 +698,21 @@ onMounted(() => {
           </div>
         </template>
       </div>
-      <div v-if="tabsOverflow" class="terminal-all-tasks" title="任务过多，打开下拉列表切换">
-        <span aria-hidden="true" v-html="icons.chevronDown" />
-        <span>全部</span>
-        <select class="terminal-task-select" :value="task?.id ?? ''" aria-label="从全部任务中切换" @change="onTaskSelect">
-          <optgroup v-for="group in taskGroups.filter(g => g.items.length)" :key="group.key" :label="group.label">
-            <option v-for="item in group.items" :key="item.id" :value="item.id">{{ taskLabel(item) }} · {{ TERMINAL_STATUS_LABEL[item.status] }}</option>
-          </optgroup>
-        </select>
-      </div>
+      <TerminalSelect
+        v-if="tabsOverflow"
+        class="terminal-all-tasks"
+        :items="taskItems"
+        :active="menusActive"
+        :value="task?.id ?? ''"
+        label="全部"
+        :icon="icons.chevronDown"
+        :caret="false"
+        aria-label="从全部任务中切换"
+        title="任务过多，打开下拉列表切换"
+        side="down"
+        align="right"
+        @pick="onTaskSelect"
+      />
     </nav>
 
     <div class="terminal-body">
@@ -791,10 +811,18 @@ onMounted(() => {
         <span class="terminal-input-mode" :title="legacyInteractive ? '输入发送到当前交互会话' : '在当前项目启动独立后台任务，不发送到 PTY'">{{ legacyInteractive ? '会话输入' : '后台命令' }}</span>
         <span class="terminal-prompt" aria-hidden="true">$</span>
         <input ref="inputEl" v-model="state.input" class="terminal-input" :type="secret && !pty ? 'password' : 'text'" spellcheck="false" autocomplete="off" autocapitalize="off" :placeholder="inputPlaceholder" :aria-label="pty ? '后台命令' : secret ? '密码输入' : '终端命令'" :disabled="!terminal.available" @keydown="onInputKey" />
-        <select v-if="state.history.length && !secret && !legacyInteractive" class="terminal-history-select" value="" aria-label="填入最近后台命令" title="最近后台命令（选择后填入，不直接执行）" @change="fillHistory">
-          <option value="" disabled>历史</option>
-          <option v-for="command in state.history" :key="command" :value="command">{{ command }}</option>
-        </select>
+        <TerminalSelect
+          v-if="state.history.length && !secret && !legacyInteractive"
+          class="terminal-history-picker"
+          :items="historyItems"
+          :active="menusActive"
+          label="历史"
+          aria-label="填入最近后台命令"
+          title="最近后台命令（选择后填入，不直接执行）"
+          side="up"
+          align="left"
+          @pick="fillHistory"
+        />
         <button v-if="interactiveRunning && !pty" class="icon-btn small terminal-secret" :class="{ 'is-on': secret }" type="button" :title="secret ? '显示输入' : '隐藏输入（用于密码）'" :aria-pressed="secret" @click="secret = !secret" v-html="secret ? icons.eyeOff : icons.eye" />
         <button class="terminal-run-btn" type="button" :disabled="!terminal.available || !cwd || state.starting || (!(shellEnded && !pty) && !state.input.trim())" @click="submit">
           {{ state.starting ? '启动中…' : runLabel }}

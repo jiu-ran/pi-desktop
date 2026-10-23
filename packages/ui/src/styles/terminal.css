@@ -44,10 +44,9 @@
 .terminal-create-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--fg); font-size: 11px; }
 .terminal-create-btn:hover:not(:disabled) { background: var(--hover); color: var(--accent); }
 .terminal-create-btn svg { width: 13px; height: 13px; }
-.terminal-profile-picker { position: relative; display: grid; place-items: center; width: 26px; border-left: 1px solid var(--line); color: var(--fg-2); }
-.terminal-profile-picker:hover { background: var(--hover); }
-.terminal-profile-picker > span { pointer-events: none; }
-.terminal-profile-select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.terminal-profile-picker { display: grid; flex: none; place-items: center; width: 26px; border-left: 1px solid var(--line); color: var(--fg-2); }
+.terminal-profile-picker .terminal-select-btn { height: 24px; padding: 0; border: 0; background: transparent; color: inherit; }
+.terminal-profile-picker .terminal-select-btn:hover { background: var(--hover); color: var(--accent); }
 .terminal-profile-picker:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* 第二层：类型分组的横向标签；始终保留全部任务入口。 */
@@ -78,11 +77,9 @@
 .terminal-tab.active .terminal-tab-icon { color: var(--accent); }
 .terminal-tab-icon svg { width: 13px; height: 13px; }
 .terminal-tab-label { min-width: 0; overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.terminal-task-select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.terminal-all-tasks { position: relative; display: flex; flex: none; align-items: center; gap: 4px; height: 24px; padding: 0 7px; overflow: hidden; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 10px; white-space: nowrap; }
-.terminal-all-tasks:hover { border-color: var(--accent); color: var(--accent); }
-.terminal-all-tasks:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
-.terminal-all-tasks svg { width: 12px; height: 12px; }
+.terminal-all-tasks { flex: none; }
+.terminal-all-tasks .terminal-select-btn { height: 24px; padding: 0 7px; gap: 4px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 10px; }
+.terminal-all-tasks .terminal-select-btn:hover { border-color: var(--accent); color: var(--accent); }
 .terminal-status-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--fg-3); }
 .terminal-status-dot[data-status="running"] { background: var(--accent); }
 .terminal-status-dot[data-status="stopping"] { background: var(--warn); }
@@ -174,7 +171,9 @@
 .terminal-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--fg); font-family: var(--mono); font-size: 12px; }
 .terminal-input::placeholder { color: var(--fg-3); }
 .terminal-input[type="password"] { letter-spacing: 1.5px; }
-.terminal-history-select { flex: none; width: 52px; height: 24px; padding: 0 2px; border: 0; background: transparent; color: var(--fg-3); font-size: 10px; }
+.terminal-history-picker { flex: none; }
+.terminal-history-picker .terminal-select-btn { height: 24px; padding: 0 2px; gap: 3px; border: 0; background: transparent; color: var(--fg-3); font-size: 10px; }
+.terminal-history-picker .terminal-select-btn:hover { color: var(--fg); }
 .terminal-run-btn { display: flex; flex: none; align-items: center; gap: 10px; height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 500; }
 .terminal-run-btn:hover:not(:disabled) { filter: brightness(1.1); }
 .terminal-run-key { opacity: 0.7; }
@@ -236,7 +235,7 @@
   .terminal-composer { padding-right: 8px; padding-left: 8px; }
   .terminal-input-mode { padding-right: 6px; font-size: 9px; }
   .terminal-input-row { gap: 6px; }
-  .terminal-history-select { width: 42px; }
+  .terminal-history-picker .terminal-select-btn { padding: 0; }
   .terminal-footer-hint { font-size: 9px; }
 }
 @media (max-height: 450px) {
@@ -247,3 +246,24 @@
 @media (prefers-reduced-motion: reduce) {
   .terminal-cursor { animation: none; }
 }
+
+/* 自绘下拉：原生 select 的弹出层由系统绘制，深色主题下会变成浅色系统菜单。 */
+.terminal-select { position: relative; display: flex; min-width: 0; }
+.terminal-select-btn { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 11px; }
+.terminal-select-btn:hover:not(:disabled), .terminal-select.open .terminal-select-btn { border-color: var(--accent); color: var(--accent); }
+.terminal-select.is-chevron .terminal-select-btn { width: 100%; justify-content: center; border: 0; background: transparent; color: inherit; }
+.terminal-select-icon, .terminal-select-caret { display: grid; flex: none; place-items: center; }
+.terminal-select-icon svg, .terminal-select-caret svg { width: 12px; height: 12px; }
+.terminal-select-caret { opacity: 0.7; }
+.terminal-select-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 浮层传送到 body 并用 fixed 定位，既跟随主题又不会被终端面板的 overflow 裁掉。 */
+.terminal-select-menu { position: fixed; z-index: 80; display: flex; flex-direction: column; padding: 4px; overflow-y: auto; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-1); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3); }
+.terminal-select-group { flex: none; margin: 4px 8px 2px; color: var(--fg-3); font-size: 9.5px; letter-spacing: 0.04em; }
+.terminal-select-item { display: flex; flex: none; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--fg-2); font-size: 11.5px; text-align: left; }
+.terminal-select-item:hover, .terminal-select-item:focus-visible { outline: none; background: var(--hover); color: var(--fg); }
+.terminal-select-item.active { color: var(--fg); }
+.terminal-select-item.action { color: var(--accent); }
+.terminal-select-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-select-item small { flex: none; color: var(--fg-3); font-size: 10px; }
+.terminal-select-check { display: grid; flex: none; color: var(--accent); }
+.terminal-select-check svg { width: 12px; height: 12px; }
