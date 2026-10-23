@@ -454,30 +454,34 @@ export function createTerminalService({
     state.input = state.history[next] || "";
   }
 
-  async function run(raw?: string): Promise<void> {
-    if (!state.enabled || state.starting) return;
+  /** 启动一次性后台命令；background 时不抢走当前终端视图。 */
+  async function run(raw?: string, options: { background?: boolean } = {}): Promise<boolean> {
+    if (!state.enabled || state.starting) return false;
     const command = String(raw ?? state.input ?? "").trim();
-    if (!command) return;
+    if (!command) return false;
     if (!available) {
       report(new Error("终端功能仅在桌面端可用"));
-      return;
+      return false;
     }
     const cwd = getCwd();
     if (!cwd) {
       notify("请先打开一个项目目录", "warning");
-      return;
+      return false;
     }
     state.starting = true;
     try {
       const info = (await host.startTerminal(cwd, command, getProfileOptions())) as TerminalTaskInfo;
       const task = upsert(info);
-      state.activeId = task.id;
+      // 后台执行时保持当前终端可见：全屏 TUI 不应因为顺手跑一条命令而被切走。
+      if (!options.background || !activeTask.value?.pty) state.activeId = task.id;
       state.open = state.enabled;
       state.input = "";
       state.historyIndex = -1;
       remember(command);
+      return true;
     } catch (error) {
       report(error);
+      return false;
     } finally {
       state.starting = false;
     }

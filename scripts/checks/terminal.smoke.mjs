@@ -96,6 +96,31 @@ export async function checkTerminalInElectron(win) {
     await poll(`${task(first)}?.output.includes('PTY-RESIZE:')`, "全屏程序收到 resize");
     await evaluate(`document.querySelector(${JSON.stringify(`${selector(first)} textarea`)})?.focus(); true`);
     await new Promise((resolve) => setTimeout(resolve, 200));
+    // 终端打开时，底部输入框仍可运行一次性后台命令；不能抢走终端视图，也不能发进 PTY。
+    const backgroundCommand = "echo BG-ONCE-OK";
+    await evaluate(`(() => {
+      const input = document.querySelector('.terminal-input');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(backgroundCommand)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return true;
+    })()`);
+    await poll(`(() => {
+      const t = window.__piDesktop.terminal.state.tasks.find(t => !t.pty && t.command.includes('BG-ONCE-OK'));
+      return t && t.status !== 'running' && t.status !== 'stopping' && t.output.includes('BG-ONCE-OK');
+    })()`, "终端打开时运行一次性后台命令");
+    const keptView = await evaluate(`window.__piDesktop.terminal.activeTask.value.id === ${JSON.stringify(first)} && window.__piDesktop.terminal.state.input === ''`);
+    if (!keptView) throw new Error("后台命令抢走了终端视图或未清空输入");
+    const onceTask = await evaluate(`window.__piDesktop.terminal.state.tasks.find(t => !t.pty && t.command.includes('BG-ONCE-OK'))?.id`);
+    await evaluate(`window.__piDesktop.terminal.select(${JSON.stringify(onceTask)}); true`);
+    await poll(`document.querySelector('.terminal-input') !== null`, "后台命令也保留命令输入框");
+    await evaluate(`window.__piDesktop.terminal.select(${JSON.stringify(first)}); true`);
+    await poll(`window.__ptySmokeScreen?.getBoundingClientRect().width > 0`, "回到终端视图");
+    await evaluate(`document.querySelector(${JSON.stringify(`${selector(first)} textarea`)})?.focus(); true`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
     await key("C", ["control"]);
     await poll(`${task(first)}?.output.includes('PTY-CTRL-C')`, "Ctrl+C 中断全屏程序");
     if (!await evaluate(`${task(first)}?.status === 'running'`)) throw new Error("Ctrl+C 错误地结束了外层 shell");
@@ -103,7 +128,7 @@ export async function checkTerminalInElectron(win) {
     if (!await evaluate(`${task(first)}?.status === 'running'`)) throw new Error("插件停用不应强制结束已有终端");
     await evaluate("window.__piDesktop.plugins.setEnabled('terminal', true).then(() => true)");
     await poll(`document.querySelector(${JSON.stringify(selector(first))}) === window.__ptySmokeScreen`, "插件重新启用保留屏幕");
-    console.log("[terminal] PASS 可选插件 / PTY / 全屏渲染 / 方向键与滚轮区分 / Tab / Ctrl+W / 多会话 / resize / Ctrl+C");
+    console.log("[terminal] PASS 可选插件 / PTY / 全屏渲染 / 方向键与滚轮区分 / Tab / Ctrl+W / 多会话 / resize / 后台命令 / Ctrl+C");
   } finally {
     await evaluate(`(async () => {
       const api = window.__piDesktop.terminal;

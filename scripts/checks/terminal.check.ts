@@ -250,6 +250,17 @@ try {
   assert(service.state.input === "echo mock", "历史回溯失败");
   service.historyDown();
   assert(service.state.input === "", "历史前进失败");
+
+  // 终端打开时的一次性命令：不切换当前视图，也不能把命令发进 PTY。
+  service.state.tasks.push({
+    id: "pty-1", command: "powershell", cwd: "C:/mock", shell: "powershell",
+    startedAt: Date.now(), status: "running", pty: true, interactive: true,
+  } as any);
+  service.state.activeId = "pty-1";
+  assert(await service.run("echo background", { background: true }), "后台命令应启动成功");
+  assert(service.state.activeId === "pty-1", "后台命令不应切换当前终端视图");
+  assert(service.state.tasks.find((item) => item.command === "echo background")?.status === "exited", "后台命令应正常执行");
+  assert(service.state.input === "", "后台命令执行后应清空输入");
 } finally {
   service.dispose();
 }

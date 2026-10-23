@@ -24,6 +24,7 @@ const selection = ref("");
 const wrap = ref(loadWrap());
 const secret = ref(false);
 const shellChoice = ref("");
+const backgroundNote = ref("");
 
 const cwd = computed(() => workbench.state.activeCwd);
 const composerCwd = computed(() => (interactive.value && task.value ? task.value.cwd : cwd.value));
@@ -33,6 +34,16 @@ const isRunning = computed(() => task.value?.status === "running" || task.value?
 const interactive = computed(() => Boolean(task.value?.interactive));
 const pty = computed(() => Boolean(task.value?.pty));
 const ptyTasks = computed(() => state.tasks.filter((item) => item.pty));
+const terminalTasks = computed(() => tasks.value.filter((item) => item.pty));
+const commandTasks = computed(() => tasks.value.filter((item) => !item.pty));
+// 同时存在长驻终端和一次性命令时分组显示，避免两类型任务混在一起。
+const taskGroups = computed(() => {
+  const grouped = terminalTasks.value.length > 0 && commandTasks.value.length > 0;
+  return [
+    { key: "pty", label: grouped ? "终端" : "", items: terminalTasks.value },
+    { key: "command", label: grouped ? "后台命令" : "", items: commandTasks.value },
+  ];
+});
 const legacyInteractive = computed(() => interactive.value && !pty.value);
 const ptyRunning = computed(() => pty.value && isRunning.value);
 const interactiveRunning = computed(() => interactive.value && isRunning.value);
@@ -42,13 +53,28 @@ const startLabel = computed(() => (terminal.supportsPty ? "新建终端" : "新�
 const finishedCount = computed(() => state.tasks.filter((item) => item.status !== "running" && item.status !== "stopping").length);
 const outputHtml = computed(() => (task.value && !task.value.pty ? renderTerminalHtml(task.value.output) : ""));
 const inputPlaceholder = computed(() => {
+  if (pty.value) return "在后台运行一次性命令，Enter 运行；不会发送到当前终端";
   if (shellEnded.value) return "会话已结束，点击“新建会话”继续";
   if (secret.value) return "输入密码，Enter 发送";
   if (interactiveRunning.value) return "输入命令或 SQL，Enter 发送；Ctrl+Enter 后台运行";
   return "输入命令，Enter 运行；↑ ↓ 查看历史";
 });
-const runLabel = computed(() => (shellEnded.value ? "新建会话" : interactiveRunning.value ? "发送" : "运行"));
+const runLabel = computed(() => {
+  if (pty.value) return "后台运行";
+  if (shellEnded.value) return "新建会话";
+  return interactiveRunning.value ? "发送" : "运行";
+});
 const stopLabel = computed(() => (interactive.value ? "结束" : "停止"));
+const footerHint = computed(() => {
+  if (backgroundNote.value) return backgroundNote.value;
+  if (pty.value) {
+    return ptyRunning.value
+      ? "上方终端直接输入 · 下方 Enter 后台运行 · ↑↓ 历史"
+      : "终端已结束 · 下方 Enter 后台运行 · ↑↓ 历史";
+  }
+  if (interactiveRunning.value) return "交互会话 · Enter 发送 · Ctrl+Enter 后台运行 · Ctrl+L 清屏";
+  return "Enter 运行 · ↑↓ 历史 · Ctrl+C 停止 · Ctrl+L 清屏 · Ctrl/Cmd+` 收起";
+});
 
 const examples = [
   { command: "npm run dev", label: "启动开发服务器", recent: false },
@@ -187,7 +213,10 @@ function pasteTerminal(): void {
 }
 
 function submit(): void {
-  if (pty.value) return;
+  if (pty.value) {
+    void submitBackground();
+    return;
+  }
   if (shellEnded.value) {
     void startTerminal();
     return;
@@ -208,13 +237,27 @@ function submit(): void {
   void terminal.run(text);
 }
 
-/** 交互会话中 Ctrl+Enter 仍可把当前输入作为一次性后台任务启动。 */
-function submitBackground(): void {
-  if (pty.value) return;
+/** 把当前输入作为一次性后台任务启动；终端打开时也不抢走终端视图。 */
+async function submitBackground(): Promise<void> {
   const command = state.input.trim();
   if (!command || state.starting || secret.value) return;
+  if (pty.value) {
+    const ok = await terminal.run(command, { background: true });
+    if (ok) flashBackgroundNote(`已提交后台任务：${command}`);
+    return;
+  }
   scrollToLatestNow();
   void terminal.run(command);
+}
+
+let noteTimer: ReturnType<typeof setTimeout> | null = null;
+function flashBackgroundNote(text: string): void {
+  backgroundNote.value = text;
+  if (noteTimer) clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => {
+    backgroundNote.value = "";
+    noteTimer = null;
+  }, 2800);
 }
 
 async function chooseShell(event: Event): Promise<void> {
@@ -266,7 +309,8 @@ function onInputKey(event: KeyboardEvent): void {
       state.input = "";
       return;
     }
-    if (isRunning.value && task.value) void terminal.stop(task.value.id);
+    // 后台命令输入框里的 Ctrl+C 只清空草稿；结束终端用终端自己的 Ctrl+C。
+    if (isRunning.value && task.value && !pty.value) void terminal.stop(task.value.id);
     return;
   }
   if (mod && event.key.toLowerCase() === "u") {
@@ -396,6 +440,7 @@ watch(
     secret.value = false;
     selection.value = "";
     copied.value = false;
+    backgroundNote.value = "";
     stick.value = true;
     void nextTick(() => {
       if (!pty.value) {
@@ -425,6 +470,7 @@ onDeactivated(stopResize);
 onBeforeUnmount(() => {
   stopResize();
   if (copyTimer) clearTimeout(copyTimer);
+  if (noteTimer) clearTimeout(noteTimer);
 });
 onMounted(() => {
   if (state.open) focusTerminal();
@@ -497,7 +543,7 @@ onMounted(() => {
           @pointerdown="terminal.refreshProfiles()"
           @change="chooseShell"
         >
-          <option value="" disabled>选择 shell…</option>
+          <option value="" disabled>其他 shell…</option>
           <option v-for="profile in state.profiles" :key="profile.id" :value="profile.id">{{ profile.label }}</option>
           <option v-if="appSettings.terminalCustomPath" value="custom">自定义终端</option>
           <option value="settings">终端设置…</option>
@@ -523,30 +569,37 @@ onMounted(() => {
           <span class="terminal-tasks-count">{{ tasks.length }}</span>
         </div>
         <div class="terminal-task-list">
-          <button
-            v-for="item in tasks"
-            :key="item.id"
-            class="terminal-task"
-            :class="{ active: item.id === task?.id }"
-            :aria-pressed="item.id === task?.id"
-            type="button"
-            :title="`${item.command}\n${item.cwd}`"
-            @click="selectTask(item.id)"
-          >
-            <span class="terminal-task-dot" :data-status="statusClass(item)" />
-            <span class="terminal-task-main">
-              <span class="terminal-task-command">
-                <span v-if="item.interactive" class="terminal-task-kind">{{ item.pty ? "终端" : "会话" }}</span>
-                {{ item.command }}
+          <template v-for="group in taskGroups" :key="group.key">
+            <div v-if="group.label" class="terminal-task-group">
+              <span>{{ group.label }}</span>
+              <span>{{ group.items.length }}</span>
+            </div>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              class="terminal-task"
+              :class="{ active: item.id === task?.id }"
+              :aria-pressed="item.id === task?.id"
+              type="button"
+              :title="`${item.command}
+${item.cwd}`"
+              @click="selectTask(item.id)"
+            >
+              <span class="terminal-task-dot" :data-status="statusClass(item)" />
+              <span class="terminal-task-main">
+                <span class="terminal-task-command">
+                  <span v-if="item.interactive" class="terminal-task-kind">{{ item.pty ? "终端" : "会话" }}</span>
+                  {{ item.command }}
+                </span>
+                <span class="terminal-task-meta">
+                  <span>{{ TERMINAL_STATUS_LABEL[item.status] }}</span>
+                  <span>·</span>
+                  <span>{{ elapsed(item) }}</span>
+                  <span v-if="item.cwd !== cwd" class="terminal-task-cwd">· {{ taskCwd(item) }}</span>
+                </span>
               </span>
-              <span class="terminal-task-meta">
-                <span>{{ TERMINAL_STATUS_LABEL[item.status] }}</span>
-                <span>·</span>
-                <span>{{ elapsed(item) }}</span>
-                <span v-if="item.cwd !== cwd" class="terminal-task-cwd">· {{ taskCwd(item) }}</span>
-              </span>
-            </span>
-          </button>
+            </button>
+          </template>
         </div>
       </aside>
 
@@ -557,7 +610,7 @@ onMounted(() => {
               <span class="terminal-status-dot" :data-status="task.status" />
               <span class="terminal-output-state">{{ statusLabel }}</span>
               <span class="terminal-output-elapsed">{{ elapsed(task) }}</span>
-              <span v-if="task.exitCode != null" class="terminal-output-exit" :data-ok="task.exitCode === 0">
+              <span v-if="task.exitCode != null && task.status !== 'stopped'" class="terminal-output-exit" :data-ok="task.exitCode === 0">
                 退出 {{ task.exitCode }}
               </span>
             </div>
@@ -670,115 +723,87 @@ onMounted(() => {
         </template>
 
         <div v-else class="terminal-empty">
-          <div class="terminal-empty-top">
-            <span class="terminal-empty-mark" aria-hidden="true">
-              <span>❯</span>
-              <i>_</i>
-            </span>
-            <div class="terminal-empty-copy">
-              <strong>后台终端</strong>
-              <p v-if="terminal.available">
-                一次性命令在后台运行；新建终端后可使用 Claude Code、Codex、Pi、vim 等全屏交互程序。
-              </p>
-              <p v-else>终端功能仅在桌面端可用。</p>
-            </div>
-            <div v-if="terminal.available" class="terminal-empty-actions">
-              <span class="terminal-empty-badge">本地运行</span>
-              <button
-                v-if="canStartTerminal"
-                class="terminal-empty-start"
-                type="button"
-                :disabled="state.starting"
-                @click="startTerminal"
-              >
-                <span v-html="icons.terminal" />
-                {{ startLabel }}
-              </button>
-            </div>
-          </div>
-          <div class="terminal-quick">
-            <div class="terminal-quick-head">
-              <span>{{ state.history.length ? "最近命令" : "快速开始" }}</span>
-              <span>点击填入命令</span>
-            </div>
-            <div class="terminal-quick-grid">
-              <button
-                v-for="item in quickCommands"
-                :key="item.command"
-                class="terminal-quick-item"
-                type="button"
-                :title="item.command"
-                @click="useExample(item.command)"
-              >
-                <span class="terminal-quick-icon" v-html="item.recent ? icons.history : icons.terminal" />
-                <span class="terminal-quick-copy">
-                  <code>{{ item.command }}</code>
-                  <small>{{ item.label }}</small>
+          <div class="terminal-empty-inner">
+          <div class="terminal-empty-main">
+              <div class="terminal-empty-top">
+                <span class="terminal-empty-mark" aria-hidden="true">
+                  <span>❯</span>
+                  <i>_</i>
                 </span>
-              </button>
+                <div class="terminal-empty-copy">
+                  <strong>在项目目录中运行命令</strong>
+                  <p v-if="terminal.available">
+                    下方输入框运行一次性后台命令；需要 Claude Code、Codex、Pi、vim 等全屏程序时新建终端。
+                  </p>
+                  <p v-else>终端功能仅在桌面端可用。</p>
+                </div>
+                <div v-if="terminal.available" class="terminal-empty-actions">
+                  <span v-if="terminal.supportsPty" class="terminal-empty-badge">{{ terminal.defaultProfile.value }}</span>
+                  <button
+                    v-if="canStartTerminal"
+                    class="terminal-empty-start"
+                    type="button"
+                    :disabled="state.starting"
+                    @click="startTerminal"
+                  >
+                    <span v-html="icons.terminal" />
+                    {{ startLabel }}
+                  </button>
+                </div>
+              </div>
+              <div class="terminal-quick">
+                <div class="terminal-quick-head">
+                  <span>{{ state.history.length ? "最近命令" : "快速开始" }}</span>
+                  <span>点击填入命令</span>
+                </div>
+                <div class="terminal-quick-grid">
+                  <button
+                    v-for="item in quickCommands"
+                    :key="item.command"
+                    class="terminal-quick-item"
+                    type="button"
+                    :title="item.command"
+                    @click="useExample(item.command)"
+                  >
+                    <span class="terminal-quick-icon" v-html="item.recent ? icons.history : icons.terminal" />
+                    <span class="terminal-quick-copy">
+                      <code>{{ item.command }}</code>
+                      <small>{{ item.label }}</small>
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="terminal-empty-foot">
+            <div class="terminal-empty-foot">
             <span><kbd>Enter</kbd> 运行</span>
             <span><kbd>Ctrl C</kbd> 停止</span>
             <span><kbd>Ctrl L</kbd> 清屏</span>
+            <span><kbd>Ctrl `</kbd> 收起</span>
             <span class="terminal-empty-foot-note">命令在项目目录中执行，不阻塞对话。</span>
+          </div>
           </div>
         </div>
       </section>
     </div>
 
-    <footer v-if="pty" class="terminal-pty-footer">
-      <div class="terminal-pty-meta" :title="task?.shellPath">
-        <span class="terminal-pty-shell">{{ task?.shell }}</span>
-        <span class="terminal-pty-divider" aria-hidden="true">·</span>
-        <span class="terminal-status-dot" :data-status="task?.status" />
-        <span class="terminal-output-state">{{ statusLabel }}</span>
-        <span class="terminal-pty-divider" aria-hidden="true">·</span>
-        <button
-          class="terminal-cwd"
-          type="button"
-          :title="composerCwd ? `在文件管理器中打开 ${composerCwd}` : '未打开项目'"
-          @click="revealCwd(composerCwd)"
-        >
-          <span class="terminal-cwd-icon" v-html="icons.folder" />
-          {{ composerCwdLabel }}
-        </button>
-      </div>
-      <div class="terminal-pty-actions">
-        <span class="terminal-pty-hint">
-          {{ ptyRunning ? "Ctrl+C 中断 · Ctrl+Shift+C/V 复制/粘贴 · 点击终端输入" : "终端已结束" }}
-        </span>
-        <button
-          v-if="!ptyRunning"
-          class="terminal-run-btn"
-          type="button"
-          :disabled="state.starting"
-          @click="startTerminal"
-        >
-          {{ state.starting ? "启动中…" : "新建终端" }}
-        </button>
-      </div>
-    </footer>
-
-    <footer v-else class="terminal-composer">
+    <footer class="terminal-composer" :class="{ 'is-terminal': pty }">
       <div class="terminal-input-row">
         <span class="terminal-prompt" aria-hidden="true">❯</span>
         <input
           ref="inputEl"
           v-model="state.input"
           class="terminal-input"
-          :type="secret ? 'password' : 'text'"
+          :type="secret && !pty ? 'password' : 'text'"
           spellcheck="false"
           autocomplete="off"
           autocapitalize="off"
           :placeholder="inputPlaceholder"
-          :aria-label="secret ? '密码输入' : '终端命令'"
+          :aria-label="pty ? '后台命令' : secret ? '密码输入' : '终端命令'"
           :disabled="!terminal.available"
           @keydown="onInputKey"
         />
         <button
-          v-if="interactiveRunning"
+          v-if="interactiveRunning && !pty"
           class="icon-btn small terminal-secret"
           :class="{ 'is-on': secret }"
           type="button"
@@ -793,10 +818,19 @@ onMounted(() => {
           :disabled="!terminal.available || state.starting || (!shellEnded && !state.input.trim())"
           @click="submit"
         >
-          {{ state.starting ? (interactiveRunning ? "发送中…" : "启动中…") : runLabel }}
+          {{ state.starting ? (pty ? "提交中…" : interactiveRunning ? "发送中…" : "启动中…") : runLabel }}
         </button>
         <button
-          v-if="isRunning"
+          v-if="pty && !ptyRunning"
+          class="terminal-new-inline"
+          type="button"
+          :disabled="state.starting"
+          @click="startTerminal"
+        >
+          新建终端
+        </button>
+        <button
+          v-else-if="isRunning && !pty"
           class="terminal-input-stop"
           type="button"
           :disabled="task?.status === 'stopping'"
@@ -810,8 +844,7 @@ onMounted(() => {
           <span class="terminal-cwd-icon" v-html="icons.folder" />
           {{ composerCwdLabel }}
         </button>
-        <span v-if="interactiveRunning">交互会话 · Enter 发送 · Ctrl+Enter 后台运行 · Ctrl+L 清屏</span>
-        <span v-else>Enter 运行 · ↑↓ 历史 · Ctrl+C 停止 · Ctrl+L 清屏 · Ctrl/Cmd+` 收起</span>
+        <span class="terminal-footer-hint" :class="{ 'is-note': backgroundNote }" :title="footerHint">{{ footerHint }}</span>
       </div>
     </footer>
   </section>
