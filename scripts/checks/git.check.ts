@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -22,6 +22,7 @@ const expectReject = async (run: () => Promise<unknown>, message: string) => {
 try {
   await writeFile(path.join(root, "a.txt"), "one\n");
 
+  assert((await host.gitBranches(root)).length === 0, "非 Git 目录应返回空分支列表");
   const before = await host.gitOverview(root);
   assert(!before.isRepo, "未初始化的目录不应识别为 Git 仓库");
   assert(before.status.length === 0 && before.commits.length === 0, "非仓库不应返回状态或提交");
@@ -40,6 +41,7 @@ try {
   assert(configured.userName === "Pi Check" && configured.userEmail === "check@example.com", "应读取仓库用户配置");
 
   await expectReject(() => host.gitAction(root, "init"), "重复初始化应被拒绝");
+  await expectReject(() => host.gitAction(root, "createBranch", { branch: "empty" }), "尚无 HEAD 时不应新建分支");
 
   const staged = await host.gitAction(root, "stage", { paths: ["a.txt"] });
   const stagedFile = staged.overview.status.find((file) => file.path === "a.txt");
@@ -54,6 +56,66 @@ try {
   assert(commit.overview.hasCommits, "提交后 hasCommits 应为 true");
   assert(commit.overview.status.length === 0, "提交后工作区应干净");
   assert(commit.message.includes("已提交"), "提交结果应带提示文案");
+
+  // 分支管理：完整 ref 区分本地和远程，脏工作区不直接切换，也不接受选项 / 表达式。
+  const baseBranch = commit.overview.branch;
+  const baseRef = `refs/heads/${baseBranch}`;
+  await execFileAsync("git", ["switch", "--detach"], { cwd: root });
+  assert((await host.gitOverview(root)).detached, "游离 HEAD 应正确标记");
+  await host.gitAction(root, "createBranch", { branch: "rescue/head" });
+  assert((await host.gitOverview(root)).branch === "rescue/head", "游离 HEAD 可以新建分支保存当前提交");
+  await host.gitAction(root, "switchBranch", { branch: baseRef });
+  assert((await host.gitBranches(root)).some(branch => branch.current && branch.ref === baseRef), "列表应标记当前分支");
+  const feature = await host.gitAction(root, "createBranch", { branch: "feature/login" });
+  assert(feature.overview.branch === "feature/login", "新建分支后应立即切换");
+  await expectReject(() => host.gitAction(root, "createBranch", { branch: "feature/login" }), "重复分支名应被拒绝");
+  for (const branch of ["--help", "../escape", "HEAD", "@{-1}", "bad name", "bad\nname", "a:b", "x.lock"]) {
+    await expectReject(() => host.gitAction(root, "createBranch", { branch }), `应拒绝无效分支名 ${branch}`);
+  }
+  await expectReject(() => host.gitAction(root, "switchBranch", { branch: "--force" }), "分支参数不得注入选项");
+  await host.gitAction(root, "switchBranch", { branch: baseRef });
+  await writeFile(path.join(root, "a.txt"), "staged\n");
+  await host.gitAction(root, "stage", { paths: ["a.txt"] });
+  await writeFile(path.join(root, "a.txt"), "unstaged\n");
+  const stagedDiff = await host.gitInspect(root, "staged", "a.txt");
+  const unstagedDiff = await host.gitInspect(root, "unstaged", "a.txt");
+  assert(stagedDiff.diff.includes("+staged") && !stagedDiff.diff.includes("+unstaged"), "已暂存详情只能显示索引相对 HEAD 的 diff");
+  assert(unstagedDiff.diff.includes("+unstaged") && unstagedDiff.diff.includes("-staged"), "未暂存详情应比较工作树与索引");
+  await expectReject(() => host.gitAction(root, "switchBranch", { branch: "refs/heads/feature/login" }), "已暂存或未暂存改动应阻止切换");
+  assert(await readFile(path.join(root, "a.txt"), "utf8") === "unstaged\n", "切换失败不得丢失改动");
+  await execFileAsync("git", ["reset", "--hard", "HEAD"], { cwd: root });
+  assert(!(await host.gitInspect(root, "working", "a.txt")).diff, "已跟踪的干净文件不能合成新增 diff");
+  await writeFile(path.join(root, "中文 空格.txt"), "keep\n");
+  assert((await host.gitOverview(root)).status.some(file => file.path === "中文 空格.txt"), "中文和空格路径应原样解析");
+  await expectReject(() => host.gitAction(root, "switchBranch", { branch: "refs/heads/feature/login" }), "未跟踪文件也应阻止切换");
+  const withChanges = await host.gitAction(root, "createBranch", { branch: "feature/keep" });
+  assert(withChanges.overview.branch === "feature/keep" && withChanges.overview.status.length > 0, "当前 HEAD 上新建分支允许保留磁盘改动");
+  await rm(path.join(root, "中文 空格.txt"));
+  await host.gitAction(root, "switchBranch", { branch: baseRef });
+  const subdir = path.join(root, "subdir");
+  await mkdir(subdir);
+  assert(!(await host.gitOverview(subdir)).canWrite, "子目录只能只读浏览仓库");
+  await expectReject(() => host.gitAction(subdir, "switchBranch", { branch: "refs/heads/feature/login" }), "子目录禁止切换分支");
+
+  // 不访问网络：用本地裸仓库模拟远程分支及跟踪切换。
+  const remote = path.join(worktreeRoot, "remote.git");
+  await execFileAsync("git", ["clone", "--bare", root, remote]);
+  await execFileAsync("git", ["remote", "add", "origin", remote], { cwd: root });
+  await host.gitAction(root, "fetch");
+  await execFileAsync("git", ["remote", "set-head", "origin", baseBranch], { cwd: root });
+  assert(!(await host.gitBranches(root)).some(branch => branch.name === "origin/HEAD"), "远程符号 HEAD 不应作为可切换分支");
+  const remoteRef = "refs/remotes/origin/feature/login";
+  assert((await host.gitBranches(root)).some(branch => branch.remote && branch.ref === remoteRef), "远程分支应独立列出");
+  await expectReject(() => host.gitAction(root, "switchBranch", { branch: remoteRef, localName: baseBranch }), "远程跟踪不能覆盖已有本地分支");
+  const tracked = await host.gitAction(root, "switchBranch", { branch: remoteRef, localName: "review/login" });
+  assert(tracked.overview.branch === "review/login" && tracked.overview.upstream === "origin/feature/login", "远程切换应创建本地跟踪分支");
+  await host.gitAction(root, "switchBranch", { branch: baseRef });
+  await execFileAsync("git", ["remote", "remove", "origin"], { cwd: root });
+  await Promise.all([
+    host.gitAction(root, "switchBranch", { branch: "refs/heads/feature/login" }),
+    host.gitAction(root, "switchBranch", { branch: baseRef }),
+  ]);
+  assert((await host.gitOverview(root)).branch === baseBranch, "同仓库并发写操作应串行且按序完成");
 
   await writeFile(path.join(root, "b.txt"), "two\n");
   const dirty = await host.gitOverview(root);
@@ -83,6 +145,9 @@ try {
   assert(created.ok && created.worktree.branch.startsWith("pi/"), "应创建 pi/ 分支");
   assert(created.worktree.managed && !created.worktree.primary, "新工作区应标记为 Pi 托管");
   assert(existsSync(created.worktree.path), "隔离工作区目录应存在");
+  const occupied = (await host.gitBranches(root)).find(branch => branch.name === created.worktree.branch);
+  assert(Boolean(occupied?.worktreePath), "列表应标明 worktree 占用的分支");
+  await expectReject(() => host.gitAction(root, "switchBranch", { branch: occupied!.ref }), "不能切换到另一个 worktree 使用的分支");
   const worktrees = await host.gitWorktrees(root);
   assert(worktrees.some((item) => item.primary), "列表应包含主工作区");
   assert(

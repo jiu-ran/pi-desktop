@@ -1,6 +1,8 @@
 <!-- 工作区与变更展示参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。 -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import GitBranches from "./GitBranches.vue";
+import "../../styles/git.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import { askConfirm, askPrompt } from "../../components/sidebar/ui.ts";
@@ -10,6 +12,7 @@ import {
   badgeKind,
   isSessionOnly,
   isStaged,
+  isUnstaged,
   mergeRepoChanges,
   pathKey,
   type RepoChange,
@@ -18,19 +21,14 @@ import { buildChangeTree, flattenChangeTree, type ChangeTreeRow } from "../../sh
 import type { GitActionName, GitActionPayload, GitCommitNode, GitOverview, GitWorktree } from "../../env.d.ts";
 import { overviewState, type GitDiffSource, type GitStageData } from "./state.ts";
 
-interface PanelRow extends ChangeTreeRow {
-  /** 文件夹下的文件总数 / 已暂存数 */
-  total?: number;
-  stagedCount?: number;
-}
+type PanelRow = ChangeTreeRow;
 
 interface PanelSection {
-  id: "changes" | "untracked" | "committed";
+  id: "staged" | "changes" | "untracked" | "committed";
   label: string;
   items: RepoChange[];
   rows: PanelRow[];
   total: number;
-  staged: number;
   collapsed: boolean;
 }
 
@@ -41,8 +39,11 @@ const overview = ref<GitOverview | null>(null);
 const loading = ref(false);
 const error = ref("");
 const busy = ref<GitActionName | "">("");
-const history = ref(false);
-const worktreesOpen = ref(false);
+const view = ref("changes");
+const history = computed({ get: () => view.value === "history", set: (value: boolean) => { view.value = value ? "history" : "changes"; } });
+const worktreesOpen = computed({ get: () => view.value === "worktrees", set: (value: boolean) => { view.value = value ? "worktrees" : "changes"; } });
+const filter = ref("");
+const sessionOnly = ref(false);
 const worktrees = ref<GitWorktree[]>([]);
 const worktreeBusy = ref("");
 const worktreeError = ref("");
@@ -71,6 +72,7 @@ function writeDraft(value: string, key = draftKey.value): void {
 }
 
 async function load(): Promise<void> {
+  if (busy.value || worktreeBusy.value) { scheduleRefresh(); return; }
   if (!ws.value?.cwd) {
     request += 1;
     loading.value = false;
@@ -99,11 +101,14 @@ watch(
   () => ws.value?.cwd,
   () => {
     commitMessage.value = readDraft();
-    history.value = false;
-    worktreesOpen.value = false;
+    view.value = "changes";
+    filter.value = "";
+    sessionOnly.value = false;
     worktrees.value = [];
     worktreeError.value = "";
     collapsedFolders.clear();
+    collapsedGroups.clear();
+    overview.value = null;
     void load();
   },
   { immediate: true },
@@ -140,23 +145,10 @@ async function loadWorktrees(): Promise<void> {
   }
 }
 
-async function toggleWorktrees(): Promise<void> {
-  worktreesOpen.value = !worktreesOpen.value;
-  if (worktreesOpen.value) {
-    history.value = false;
-    await loadWorktrees();
-  }
-}
-
-function toggleHistory(): void {
-  history.value = !history.value;
-  if (history.value) worktreesOpen.value = false;
-}
-
 const isolatedCount = computed(() => worktrees.value.filter((worktree) => !worktree.primary).length);
 
 const canCreateWorktree = computed(
-  () => Boolean(overview.value?.isRepo && overview.value?.canWrite && overview.value?.hasCommits && !worktreeBusy.value),
+  () => Boolean(overview.value?.isRepo && overview.value?.canWrite && overview.value?.hasCommits && !worktreeBusy.value && !busy.value),
 );
 
 function isWorktreeActive(worktree: GitWorktree): boolean {
@@ -172,7 +164,7 @@ async function createWorktree(): Promise<void> {
     placeholder: "例如 fix-login",
     confirmLabel: "创建",
   });
-  if (!name) return;
+  if (!name || !canCreateWorktree.value) return;
   worktreeBusy.value = "create";
   worktreeError.value = "";
   try {
@@ -235,6 +227,7 @@ const stopEvents = bus.on("pi:event", ({ event }: { event: any }) => {
   if (type === "agent_settled" || type === "tool_execution_end" || type === "message_end") scheduleRefresh();
 });
 const stopFiles = bus.on("files:changed", scheduleRefresh);
+watch(view, value => { if (value === "worktrees") void loadWorktrees(); });
 
 onMounted(() => {
   if (!overview.value) void load();
@@ -260,65 +253,42 @@ const changes = computed(() =>
 
 const hasRepo = computed(() => Boolean(overview.value?.isRepo));
 const stagedCount = computed(() => changes.value.filter(isStaged).length);
-const canOperate = computed(() => Boolean(overview.value?.isRepo && overview.value?.canWrite && !busy.value));
+const canOperate = computed(() => Boolean(overview.value?.isRepo && overview.value?.canWrite && !busy.value && !worktreeBusy.value));
 const canCommit = computed(
-  () => canOperate.value && stagedCount.value > 0 && Boolean(commitMessage.value.trim()),
+  () => canOperate.value && stagedCount.value > 0 && Boolean(commitMessage.value.trim()) && commitMessage.value.trim().length <= 5000,
 );
 
 const sections = computed<PanelSection[]>(() => {
-  const list = changes.value;
-  const defs = [
-    { id: "changes" as const, label: "更改", items: list.filter((item) => !item.untracked && !isSessionOnly(item)) },
-    { id: "untracked" as const, label: "未进行版本管理的文件", items: list.filter((item) => item.untracked) },
-    {
-      id: "committed" as const,
-      label: hasRepo.value ? "已提交（本会话）" : "本会话改动",
-      items: list.filter(isSessionOnly),
-    },
+  const list = changes.value.filter(item => (!sessionOnly.value || item.agentTouched)
+    && item.path.toLowerCase().includes(filter.value.trim().toLowerCase()));
+  const defs = view.value === "session" ? [
+    { id: "committed" as const, label: "会话快照（非实时状态）", items: list.filter(item => item.session) },
+  ] : hasRepo.value ? [
+    { id: "staged" as const, label: "已暂存", items: list.filter(isStaged) },
+    { id: "changes" as const, label: "未暂存", items: list.filter(isUnstaged) },
+    { id: "untracked" as const, label: "未跟踪", items: list.filter(item => item.untracked) },
+  ] : [
+    { id: "committed" as const, label: "本会话改动", items: list },
   ];
   return defs
     .filter((definition) => definition.items.length)
     .map((definition) => {
-      const rows = flattenChangeTree(buildChangeTree(definition.items), collapsedFolders).map(
-        (row): PanelRow => {
-          if (row.kind !== "folder") return row;
-          const under = definition.items.filter(
-            (item) => item.path === row.path || item.path.startsWith(`${row.path}/`),
-          );
-          return { ...row, total: under.length, stagedCount: under.filter(isStaged).length };
-        },
-      );
+      const collapsed = new Set([...collapsedFolders].filter(key => key.startsWith(`${definition.id}:`)).map(key => key.slice(definition.id.length + 1)));
+      const rows = flattenChangeTree(buildChangeTree(definition.items), collapsed);
       return {
         ...definition,
         rows,
         total: definition.items.length,
-        staged: definition.items.filter(isStaged).length,
         collapsed: collapsedGroups.has(definition.id),
       };
     });
 });
 
-function checkState(staged: number, total: number): "off" | "partial" | "on" {
-  if (!total || staged <= 0) return "off";
-  return staged >= total ? "on" : "partial";
-}
-
-function rowStaged(row: PanelRow): number {
-  if (row.kind === "folder") return row.stagedCount ?? 0;
-  return row.change && isStaged(row.change) ? 1 : 0;
-}
-
-function rowTotal(row: PanelRow): number {
-  return row.kind === "folder" ? row.total ?? 0 : 1;
-}
-
-function rowState(row: PanelRow): "off" | "partial" | "on" {
-  return checkState(rowStaged(row), rowTotal(row));
-}
-
 async function run(action: GitActionName, payload: GitActionPayload = {}): Promise<boolean> {
-  if (busy.value || !ws.value) return false;
+  if (busy.value || worktreeBusy.value || !ws.value) return false;
   const cwd = ws.value.cwd;
+  request += 1;
+  loading.value = false;
   const savedDraftKey = draftKey.value;
   busy.value = action;
   error.value = "";
@@ -329,8 +299,11 @@ async function run(action: GitActionName, payload: GitActionPayload = {}): Promi
       bus.emit("notify", { level: "info", text: result.message });
       return true;
     }
+    request += 1;
+    loading.value = false;
     overview.value = result.overview;
     overviewState.value = result.overview;
+    void loadWorktrees();
     if (action === "commit") {
       commitMessage.value = "";
       writeDraft("");
@@ -339,7 +312,7 @@ async function run(action: GitActionName, payload: GitActionPayload = {}): Promi
     return true;
   } catch (err: any) {
     const text = err?.message ?? String(err);
-    error.value = text;
+    if (ws.value?.cwd === cwd) error.value = text;
     bus.emit("notify", { level: "error", text });
     return false;
   } finally {
@@ -359,6 +332,8 @@ async function commitAndPush(): Promise<void> {
   const cwd = ws.value!.cwd;
   const savedDraftKey = draftKey.value;
   busy.value = "commit";
+  request += 1;
+  loading.value = false;
   error.value = "";
   try {
     const committed = await workbench.gitAction("commit", { message }, cwd);
@@ -377,7 +352,7 @@ async function commitAndPush(): Promise<void> {
     bus.emit("notify", { level: "info", text: `${committed.message}，${pushed.message}` });
   } catch (err: any) {
     const text = err?.message ?? String(err);
-    error.value = text;
+    if (ws.value?.cwd === cwd) error.value = text;
     bus.emit("notify", { level: "error", text });
   } finally {
     busy.value = "";
@@ -388,25 +363,15 @@ function itemsUnder(section: PanelSection, folder: string): RepoChange[] {
   return section.items.filter((item) => item.path === folder || item.path.startsWith(`${folder}/`));
 }
 
-function toggleFile(change: RepoChange): void {
-  if (!canOperate.value) return;
-  if (isStaged(change)) void run("unstage", { paths: [change.path] });
-  else void run("stage", { paths: [change.path] });
-}
-
-function toggleFolder(section: PanelSection, row: PanelRow): void {
-  if (!canOperate.value || section.id === "committed") return;
-  const under = itemsUnder(section, row.path);
-  const pending = under.filter((item) => !isStaged(item));
-  if (pending.length) void run("stage", { paths: pending.map((item) => item.path) });
-  else void run("unstage", { paths: under.map((item) => item.path) });
-}
-
 function toggleSection(section: PanelSection): void {
   if (!canOperate.value || section.id === "committed") return;
-  const pending = section.items.filter((item) => !isStaged(item));
-  if (pending.length) void run("stage", { paths: pending.map((item) => item.path) });
-  else void run("unstage", { paths: section.items.map((item) => item.path) });
+  void run(section.id === "staged" ? "unstage" : "stage", { paths: section.items.map(item => item.path) });
+}
+
+function stageRow(section: PanelSection, row: PanelRow): void {
+  const items = row.kind === "folder" ? itemsUnder(section, row.path) : row.change ? [row.change] : [];
+  if (!items.length || !canOperate.value || section.id === "committed") return;
+  void run(section.id === "staged" ? "unstage" : "stage", { paths: items.map(item => item.path) });
 }
 
 function toggleGroupCollapse(section: PanelSection): void {
@@ -414,25 +379,18 @@ function toggleGroupCollapse(section: PanelSection): void {
   else collapsedGroups.add(section.id);
 }
 
-function toggleFolderCollapse(path: string): void {
-  if (collapsedFolders.has(path)) collapsedFolders.delete(path);
-  else collapsedFolders.add(path);
+function toggleFolderCollapse(section: PanelSection, path: string): void {
+  const key = `${section.id}:${path}`;
+  if (collapsedFolders.has(key)) collapsedFolders.delete(key);
+  else collapsedFolders.add(key);
 }
 
-function onRowClick(row: PanelRow): void {
+function openRow(section: PanelSection, row: PanelRow): void {
   if (row.kind === "folder") {
-    toggleFolderCollapse(row.path);
+    toggleFolderCollapse(section, row.path);
     return;
   }
-  if (row.change) openChange(row.change);
-}
-
-function onRowCheck(section: PanelSection, row: PanelRow): void {
-  if (row.kind === "folder") {
-    toggleFolder(section, row);
-    return;
-  }
-  if (row.change) toggleFile(row.change);
+  if (row.change) openChange(row.change, section.id === "committed", section.id === "staged" ? "staged" : "unstaged");
 }
 
 function onRowOpen(row: PanelRow): void {
@@ -443,8 +401,8 @@ function onRowReveal(row: PanelRow): void {
   if (row.change) reveal(row.change);
 }
 
-function isActive(change: RepoChange): boolean {
-  return stage.activeTab.value?.pluginId === "git" && stage.activeTab.value?.tabId === `working:${change.path}`;
+function isActive(change: RepoChange, section: PanelSection): boolean {
+  return stage.activeTab.value?.pluginId === "git" && stage.activeTab.value?.tabId === `${section.id === "committed" ? "snapshot" : section.id === "staged" ? "staged" : "unstaged"}:${change.path}`;
 }
 
 function isCommitActive(commit: GitCommitNode): boolean {
@@ -452,12 +410,13 @@ function isCommitActive(commit: GitCommitNode): boolean {
 }
 
 /** 打开变更详情：有 Git 状态时默认看实时 diff，只有会话快照时看快照 */
-function openChange(change: RepoChange): void {
-  const hasLive = !isSessionOnly(change);
+function openChange(change: RepoChange, snapshot = false, area: "staged" | "unstaged" = "unstaged"): void {
+  const hasLive = !snapshot && !isSessionOnly(change);
   const source: GitDiffSource = hasLive ? "live" : "snapshot";
   const data: GitStageData = {
     kind: hasLive ? "working" : "session",
     target: change.path,
+    area,
     source,
     loading: hasLive,
     error: "",
@@ -467,7 +426,7 @@ function openChange(change: RepoChange): void {
   };
   const tab = stage.open<GitStageData>({
     pluginId: "git",
-    tabId: `working:${change.path}`,
+    tabId: `${hasLive ? area : 'snapshot'}:${change.path}`,
     title: change.name,
     subtitle: change.path,
     data,
@@ -482,12 +441,15 @@ async function loadLive(
   tab: { title: string; subtitle?: string; data: GitStageData },
   change: RepoChange,
 ): Promise<void> {
+  const origin = ws.value?.cwd;
   try {
-    const detail = await workbench.gitInspect("working", change.path);
+    const detail = await workbench.gitInspect(tab.data.area || "working", change.path);
+    if (ws.value?.cwd !== origin || !stage.allTabs.value.includes(tab as any)) return;
     tab.title = `${change.name} · Git`;
     tab.subtitle = detail.subtitle || change.path;
     tab.data = { ...tab.data, loading: false, error: "", detail, source: "live" };
   } catch (err: any) {
+    if (ws.value?.cwd !== origin) return;
     tab.data = { ...tab.data, loading: false, error: err?.message ?? String(err) };
     bus.emit("notify", { level: "error", text: tab.data.error });
   }
@@ -537,42 +499,29 @@ function reveal(change: RepoChange): void {
 <template>
   <div class="git-panel">
     <div class="git-sc-toolbar">
-      <span class="git-sc-branch" :title="overview?.root || 'Git'">
+      <button class="git-sc-branch git-branch-trigger" type="button" :title="`${overview?.root || 'Git'}；点击管理分支`" aria-label="打开分支管理" @click="view = 'branches'">
         <span class="git-sc-branch-icon" v-html="icons.branch" />
         <strong>{{ hasRepo ? overview?.branch || "HEAD" : "Git" }}</strong>
         <span v-if="overview?.detached" class="git-sc-note">游离</span>
         <span v-if="overview?.ahead" class="git-sc-count" title="本地领先远程的提交数">↑{{ overview.ahead }}</span>
         <span v-if="overview?.behind" class="git-sc-count" title="远程领先本地的提交数">↓{{ overview.behind }}</span>
-      </span>
+        <span v-html="icons.chevronDown" />
+      </button>
       <span class="git-sc-spacer" />
       <button
         type="button"
         class="icon-btn small"
         title="刷新"
-        :disabled="loading"
+        :disabled="loading || Boolean(busy)"
         @click="load"
         v-html="icons.refresh"
       />
-      <button
-        type="button"
-        class="icon-btn small"
-        title="暂存所有更改"
-        :disabled="!canOperate || !changes.some((item) => !isStaged(item) && !isSessionOnly(item))"
-        @click="run('stage', { all: true })"
-        v-html="icons.check"
-      />
-      <button
-        type="button"
-        class="icon-btn small"
-        title="取消所有暂存"
-        :disabled="!canOperate || stagedCount === 0"
-        @click="run('unstage', { all: true })"
-        v-html="icons.minus"
-      />
+
       <button
         type="button"
         class="icon-btn small"
         title="获取（fetch）"
+        aria-label="获取远程更新"
         :disabled="!canOperate || !overview?.hasRemote"
         @click="run('fetch')"
         v-html="icons.download"
@@ -581,6 +530,7 @@ function reveal(change: RepoChange): void {
         type="button"
         class="icon-btn small"
         title="拉取（pull）"
+        aria-label="拉取远程更新"
         :disabled="!canOperate || !overview?.upstream"
         @click="run('pull')"
         v-html="icons.pull"
@@ -589,31 +539,18 @@ function reveal(change: RepoChange): void {
         type="button"
         class="icon-btn small"
         title="推送（push）"
+        aria-label="推送到远程"
         :disabled="!canOperate || !overview?.hasRemote"
         @click="run('push')"
         v-html="icons.upload"
       />
-      <button
-        type="button"
-        class="icon-btn small git-worktree-toggle"
-        :class="{ active: worktreesOpen }"
-        :title="isolatedCount ? `隔离工作区（${isolatedCount}）` : '隔离工作区'"
-        :disabled="!hasRepo"
-        @click="toggleWorktrees"
-      >
-        <span v-html="icons.branch" />
-        <span v-if="isolatedCount" class="git-worktree-badge">{{ isolatedCount }}</span>
-      </button>
-      <button
-        type="button"
-        class="icon-btn small"
-        :class="{ active: history }"
-        title="提交历史"
-        :disabled="!hasRepo"
-        @click="toggleHistory"
-        v-html="icons.history"
-      />
     </div>
+    <div v-if="hasRepo" class="git-repo-context" :title="overview?.root"><span>{{ overview?.upstream || '未设置上游分支' }}</span><span>{{ overview?.canWrite ? '当前仓库' : '只读 · 非仓库根目录' }}</span></div>
+    <nav class="git-view-tabs" aria-label="版本控制视图">
+      <button v-for="tab in [{ id: 'changes', label: '更改' }, { id: 'branches', label: '分支' }, { id: 'history', label: '历史' }, { id: 'worktrees', label: '工作区' }, { id: 'session', label: '快照' }]" :key="tab.id" type="button" :class="{ active: view === tab.id }" :aria-pressed="view === tab.id" @click="view = tab.id">
+        {{ tab.label }}<small v-if="tab.id === 'changes' && overview?.status.length">{{ overview.status.length }}</small>
+      </button>
+    </nav>
 
     <div v-if="loading && !overview" class="files-state"><span class="mini-spinner" />正在读取 Git 仓库…</div>
     <div v-else-if="!ws" class="files-state">请先打开一个项目目录</div>
@@ -631,7 +568,8 @@ function reveal(change: RepoChange): void {
         </button>
       </div>
 
-      <div v-if="worktreesOpen" class="git-history git-worktrees">
+      <GitBranches v-if="view === 'branches'" :overview="overview" :busy="Boolean(busy) || Boolean(worktreeBusy)" @action="run" />
+      <div v-else-if="worktreesOpen" class="git-history git-worktrees">
         <div class="git-history-head">
           <button type="button" class="icon-btn small" title="返回更改" @click="worktreesOpen = false" v-html="icons.chevronLeft" />
           <strong>隔离工作区</strong>
@@ -738,30 +676,24 @@ function reveal(change: RepoChange): void {
       </div>
 
       <template v-else>
+        <div class="git-changes-filter">
+          <input v-model="filter" aria-label="筛选变更文件" placeholder="筛选文件路径…" />
+          <button type="button" :class="{ active: sessionOnly }" :aria-pressed="sessionOnly" title="只显示本会话 Agent 修改过的文件" @click="sessionOnly = !sessionOnly">Agent</button>
+        </div>
+        <p v-if="view === 'session'" class="git-view-hint">会话工具记录的快照，不代表当前 Git 状态，也不表示这些文件一定已提交。点击文件查看当时的 Diff。</p>
         <div class="git-tree">
           <p v-if="!sections.length" class="list-empty">
-            {{ hasRepo ? "工作区干净，没有未提交的更改" : "本会话还没有修改文件" }}
+            {{ filter || sessionOnly ? '没有匹配的文件' : view === 'session' ? '本会话暂无文件快照' : hasRepo ? '工作区干净，没有未提交的更改' : '本会话还没有修改文件' }}
           </p>
 
           <section v-for="section in sections" :key="section.id" class="git-group">
-            <div class="git-group-head" role="button" tabindex="0" @click="toggleGroupCollapse(section)">
-              <span class="git-caret" :class="{ open: !section.collapsed }" v-html="icons.chevronRight" />
-              <span
-                v-if="section.id !== 'committed'"
-                class="git-check"
-                role="checkbox"
-                :aria-checked="checkState(section.staged, section.total) === 'on'"
-                :data-state="checkState(section.staged, section.total)"
-                :title="section.staged ? '取消暂存全部' : '暂存全部'"
-                @click.stop="toggleSection(section)"
-              >
-                <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path v-if="checkState(section.staged, section.total) === 'on'" d="m2.4 6.3 2.2 2.2 4.9-5.1" />
-                  <path v-else-if="checkState(section.staged, section.total) === 'partial'" d="M2.6 6h6.8" />
-                </svg>
-              </span>
-              <span class="git-group-name">{{ section.label }}</span>
-              <span class="git-group-count">{{ section.total }} 个文件</span>
+            <div class="git-group-head">
+              <button class="git-group-toggle" type="button" :aria-expanded="!section.collapsed" @click="toggleGroupCollapse(section)">
+                <span class="git-caret" :class="{ open: !section.collapsed }" v-html="icons.chevronRight" />
+                <span class="git-group-name">{{ section.label }}</span>
+                <span class="git-group-count">{{ section.total }}</span>
+              </button>
+              <button v-if="section.id !== 'committed'" class="git-section-action" type="button" :disabled="!canOperate" @click="toggleSection(section)">{{ section.id === 'staged' ? '取消暂存' : '全部暂存' }}</button>
             </div>
 
             <template v-if="!section.collapsed">
@@ -769,36 +701,27 @@ function reveal(change: RepoChange): void {
                 v-for="row in section.rows"
                 :key="row.id"
                 class="git-tree-row"
-                :class="{ folder: row.kind === 'folder', active: row.change && isActive(row.change) }"
+                :class="{ folder: row.kind === 'folder', active: row.change && isActive(row.change, section) }"
                 :style="{ paddingLeft: `${row.depth * 12 + 6}px` }"
                 role="button"
                 tabindex="0"
                 :title="row.path"
-                @click="onRowClick(row)"
+                @click="openRow(section, row)"
+                @keydown.enter.prevent="openRow(section, row)"
+                @keydown.space.prevent="openRow(section, row)"
               >
-                <span v-if="row.kind === 'folder'" class="git-caret" :class="{ open: !collapsedFolders.has(row.path) }" v-html="icons.chevronRight" />
+                <span v-if="row.kind === 'folder'" class="git-caret" :class="{ open: !collapsedFolders.has(`${section.id}:${row.path}`) }" v-html="icons.chevronRight" />
                 <span v-else class="git-caret" />
-                <span
-                  v-if="section.id !== 'committed'"
-                  class="git-check"
-                  role="checkbox"
-                  :aria-checked="rowState(row) === 'on'"
-                  :data-state="rowState(row)"
-                  @click.stop="onRowCheck(section, row)"
-                >
-                  <svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path v-if="rowState(row) === 'on'" d="m2.4 6.3 2.2 2.2 4.9-5.1" />
-                    <path v-else-if="rowState(row) === 'partial'" d="M2.6 6h6.8" />
-                  </svg>
-                </span>
+                <span class="git-file-icon" aria-hidden="true" v-html="row.kind === 'folder' ? icons.folder : icons.file" />
                 <span class="git-tree-name">{{ row.name }}</span>
                 <template v-if="row.kind === 'folder'">
                   <span class="git-group-count">{{ row.count }} 个文件</span>
                 </template>
                 <template v-else-if="row.change">
                   <span v-if="row.change.agentTouched" class="git-agent-dot" title="本会话中 Agent 修改过" />
-                  <span class="git-tree-badge" :data-kind="badgeKind(row.change)">{{ badgeCode(row.change) }}</span>
-                  <span class="git-row-actions">
+                  <span class="git-tree-badge" :data-kind="badgeKind(row.change)">{{ section.id === 'committed' ? '快照' : section.id === 'staged' ? row.change.index : badgeCode(row.change) }}</span>
+                  <span class="git-row-actions" @keydown.stop>
+                    <button v-if="section.id !== 'committed'" type="button" class="icon-btn small" :title="section.id === 'staged' ? '取消暂存此文件' : '暂存此文件'" :disabled="!canOperate" @click.stop="stageRow(section, row)" v-html="section.id === 'staged' ? icons.minus : icons.plus" />
                     <button type="button" class="icon-btn small" title="在代码编辑器中打开源码" @click.stop="onRowOpen(row)" v-html="icons.code" />
                     <button type="button" class="icon-btn small" title="在资源管理器中显示" @click.stop="onRowReveal(row)" v-html="icons.reveal" />
                   </span>
@@ -808,14 +731,17 @@ function reveal(change: RepoChange): void {
           </section>
         </div>
 
-        <div v-if="hasRepo" class="git-sc-commit">
+        <div v-if="hasRepo && view === 'changes'" class="git-sc-commit">
+          <div class="git-commit-summary"><strong>提交到 {{ overview?.branch }}</strong><span>{{ stagedCount }} 个文件已暂存</span></div>
           <template v-if="overview?.canWrite">
             <textarea
               v-model="commitMessage"
               class="git-commit-input"
-              rows="4"
+              rows="2"
               spellcheck="false"
-              placeholder="提交消息"
+              maxlength="5000"
+              aria-label="提交消息"
+              placeholder="提交消息（Ctrl/Cmd+Enter 提交）"
               @keydown.ctrl.enter.prevent="commit"
               @keydown.meta.enter.prevent="commit"
             />

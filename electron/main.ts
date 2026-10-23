@@ -359,7 +359,7 @@ const workspaceChannels = new Set([
   "pi:forget", "pi:snapshot", "pi:prepare-attachments", "pi:list-directory",
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
-  "pi:git-overview", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:complete-paths", "pi:restart", "pi:sessions",
+  "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:complete-paths", "pi:restart", "pi:sessions",
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
@@ -488,6 +488,7 @@ app.whenReady().then(() => {
   handle("pi:rename-workspace-entry", (cwd: string, relative: string, name: string) => host.renameWorkspaceEntry(cwd, relative, name));
   handle("pi:delete-workspace-entry", (cwd: string, relative: string) => host.deleteWorkspaceEntry(cwd, relative));
   handle("pi:git-overview", (cwd: string) => host.gitOverview(cwd));
+  handle("pi:git-branches", (cwd: string) => host.gitBranches(cwd));
   handle("pi:git-action", (cwd: string, action: any, payload: any) => host.gitAction(cwd, action, payload));
   handle("pi:git-worktrees", (cwd: string) => host.gitWorktrees(cwd));
   handle("pi:git-worktree-create", (cwd: string, name: string) => host.gitWorktreeCreate(cwd, name));
@@ -496,7 +497,7 @@ app.whenReady().then(() => {
     await forgetRecent(recentFile(), path.resolve(target));
     return result;
   });
-  handle("pi:git-inspect", (cwd: string, kind: "commit" | "working", target: string) => host.gitInspect(cwd, kind, target));
+  handle("pi:git-inspect", (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => host.gitInspect(cwd, kind, target));
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));
   handle("pi:sessions", (cwd: string) => host.sessions(cwd));

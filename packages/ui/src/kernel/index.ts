@@ -26,6 +26,9 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
   const workbench = createWorkbench({
     host,
     bus,
+    async beforeGitBranchChange(cwd: string) {
+      return !stage.allTabs.value.some(tab => tab.pluginId === "files" && tab.dirty && tabCwd(tab) === cwd);
+    },
     async beforeRemoveWorkspace(cwd: string) {
       // 移除项目会卸载舞台，先兜住该项目未保存的草稿：能自动保存就直接保存，
       // 关掉自动保存时必须由用户确认放弃。
@@ -71,6 +74,11 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
   }));
   disposers.push(bus.on("workspace:removed", ({ cwd }: { cwd: string }) => {
     stage.removeWorkspace(cwd);
+  }));
+
+  // 切换分支后磁盘基线变了：关闭已保存的源码和实时 Diff，防止旧内容被再次保存。
+  disposers.push(bus.on("git:branch-changed", ({ cwd }: { cwd: string }) => {
+    stage.closeWorkspaceTabs(cwd, tab => !tab.dirty && (tab.pluginId === "files" || (tab.pluginId === "git" && tab.data?.kind !== "commit")));
   }));
 
   // 注册主程序内置全局命令（1 区域 & 全局）
@@ -179,7 +187,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
         writeFile: (relative: string, content: string) => workbench.writeWorkspaceFile(relative, content),
         openExternal: (relative: string) => workbench.openWorkspacePath(relative),
         gitOverview: () => workbench.gitOverview(),
-        gitInspect: (kind: "commit" | "working", target: string) => workbench.gitInspect(kind, target),
+        gitInspect: (kind: "commit" | "working" | "staged" | "unstaged", target: string) => workbench.gitInspect(kind, target),
         gitAction: (action, payload) => workbench.gitAction(action, payload),
       },
     });

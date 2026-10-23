@@ -43,7 +43,7 @@ export interface PluginContext {
     writeFile: (relative: string, content: string) => Promise<WorkspaceFileData>;
     openExternal: (relative: string) => Promise<void>;
     gitOverview: () => Promise<GitOverview>;
-    gitInspect: (kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+    gitInspect: (kind: "commit" | "working" | "staged" | "unstaged", target: string) => Promise<GitInspectResult>;
     gitAction: (action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   };
 }

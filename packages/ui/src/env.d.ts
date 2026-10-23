@@ -110,12 +110,27 @@ export interface GitOverview {
   userEmail: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+export interface GitBranch {
+  ref: string;
+  name: string;
+  remote: boolean;
+  current: boolean;
+  hash: string;
+  subject: string;
+  upstream: string;
+  tracking: string;
+  worktreePath: string;
+}
+
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
 
 export interface GitActionPayload {
   paths?: string[];
   all?: boolean;
   message?: string;
+  branch?: string;
+  localName?: string;
+  startPoint?: string;
 }
 
 export interface GitActionResult {
@@ -125,7 +140,7 @@ export interface GitActionResult {
 }
 
 export interface GitInspectResult {
-  kind: "commit" | "working";
+  kind: "commit" | "working" | "staged" | "unstaged";
   target: string;
   title: string;
   subtitle: string;
@@ -382,7 +397,8 @@ export interface PiDesktopBridge {
   renameWorkspaceEntry: (cwd: string, relative: string, name: string) => Promise<WorkspaceEntry>;
   deleteWorkspaceEntry: (cwd: string, relative: string) => Promise<void>;
   gitOverview: (cwd: string) => Promise<GitOverview>;
-  gitInspect: (cwd: string, kind: "commit" | "working", target: string) => Promise<GitInspectResult>;
+  gitBranches: (cwd: string) => Promise<GitBranch[]>;
+  gitInspect: (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => Promise<GitInspectResult>;
   gitAction: (cwd: string, action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   gitWorktrees: (cwd: string) => Promise<GitWorktree[]>;
   gitWorktreeCreate: (cwd: string, name: string) => Promise<GitWorktreeCreateResult>;

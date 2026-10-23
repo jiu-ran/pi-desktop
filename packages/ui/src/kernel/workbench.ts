@@ -9,6 +9,7 @@ import type {
   GitActionPayload,
   GitInspectResult,
   GitOverview,
+  GitBranch,
   GitWorktree,
   GitWorktreeCreateResult,
   GitWorktreeRemoveResult,
@@ -135,7 +136,7 @@ export function emptyGitOverview(): GitOverview {
   };
 }
 
-export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () => true }: { host: any; bus: EventBus; beforeRemoveWorkspace?: (cwd: string) => Promise<boolean> }) {
+export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () => true, beforeGitBranchChange = async () => true }: { host: any; bus: EventBus; beforeRemoveWorkspace?: (cwd: string) => Promise<boolean>; beforeGitBranchChange?: (cwd: string) => Promise<boolean> }) {
   const state = reactive({
     pi: {
       found: false,
@@ -639,16 +640,32 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.gitOverview(ws.cwd);
   }
 
-  async function gitInspect(kind: "commit" | "working", target: string): Promise<GitInspectResult> {
+  async function gitInspect(kind: "commit" | "working" | "staged" | "unstaged", target: string): Promise<GitInspectResult> {
     const ws = active.value;
     if (!ws || !host?.gitInspect) throw new Error("没有打开的工作区");
     return host.gitInspect(ws.cwd, kind, target);
   }
 
+  async function gitBranches(): Promise<GitBranch[]> {
+    const ws = active.value;
+    return ws && host?.gitBranches ? host.gitBranches(ws.cwd) : [];
+  }
+
   async function gitAction(action: GitActionName, payload: GitActionPayload = {}, cwd?: string): Promise<GitActionResult> {
     const target = cwd || active.value?.cwd;
     if (!target || !host?.gitAction) throw new Error("没有打开的工作区");
-    return host.gitAction(target, action, payload);
+    const branchChange = action === "switchBranch" || action === "createBranch";
+    if (branchChange) {
+      const ws = findWorkspace(target);
+      if (ws?.hasAnyRunning) throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换或新建分支");
+      if (!await beforeGitBranchChange(target)) throw new Error("请先保存或关闭未保存的文件，再切换或新建分支");
+    }
+    const result = await host.gitAction(target, action, payload);
+    const ws = findWorkspace(target);
+    if (ws) ws.branch = result.overview.branch;
+    if (branchChange) bus.emit("git:branch-changed", { cwd: target });
+    if (state.activeCwd === target) bus.emit("files:changed", { directory: "" });
+    return result;
   }
 
   async function gitWorktrees(): Promise<GitWorktree[]> {
@@ -1675,6 +1692,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     renameEntry,
     deleteEntry,
     gitOverview,
+    gitBranches,
     gitInspect,
     gitAction,
     gitWorktrees,

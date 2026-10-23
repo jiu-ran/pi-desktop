@@ -64,7 +64,7 @@ async function switchSource(next: GitDiffSource): Promise<void> {
   }
   props.tab.data = { ...current, source: "live", loading: true, error: "" };
   try {
-    const nextDetail = await workbench.gitInspect("working", current.target);
+    const nextDetail = await workbench.gitInspect(current.area || "working", current.target);
     props.tab.data = { ...props.tab.data, detail: nextDetail, loading: false, error: "" };
   } catch (err: any) {
     props.tab.data = { ...props.tab.data, loading: false, error: err?.message ?? String(err) };

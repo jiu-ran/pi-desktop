@@ -126,6 +126,13 @@ export function createStage() {
     }
   }
 
+  function closeWorkspaceTabs(cwd: string, predicate: (tab: StageTab) => boolean): void {
+    const saved = cwd === workspace ? state : workspaces.get(cwd);
+    if (!saved) return;
+    saved.tabs.splice(0, saved.tabs.length, ...saved.tabs.filter(tab => !predicate(tab)));
+    if (!saved.tabs.some(tab => tab.key === saved.activeKey)) saved.activeKey = saved.tabs[0]?.key ?? "";
+  }
+
   function clear(): void {
     state.tabs.splice(0, state.tabs.length);
     state.activeKey = "";
@@ -147,6 +154,7 @@ export function createStage() {
     activate,
     close,
     closeByPlugin,
+    closeWorkspaceTabs,
     clear,
   };
 }

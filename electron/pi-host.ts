@@ -12,6 +12,7 @@ import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
 import { firstUserTitle, sessionTitleFromText } from "./session-title.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
+import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -109,7 +110,7 @@ export interface GitOverview {
   userEmail: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push";
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
 
 export interface GitActionPayload {
   /** 仓库内相对路径列表 */
@@ -118,6 +119,9 @@ export interface GitActionPayload {
   all?: boolean;
   /** 提交信息 */
   message?: string;
+  branch?: string;
+  localName?: string;
+  startPoint?: string;
 }
 
 export interface GitActionResult {
@@ -127,7 +131,7 @@ export interface GitActionResult {
 }
 
 export interface GitInspectResult {
-  kind: "commit" | "working";
+  kind: "commit" | "working" | "staged" | "unstaged";
   target: string;
   title: string;
   subtitle: string;
@@ -669,15 +673,15 @@ function parseWorktreeList(stdout: string): Array<Omit<GitWorktree, "primary" | 
 /** 解析 `git status --porcelain=v1` 输出。 */
 function parseGitStatus(stdout: string): GitStatusFile[] {
   const files: GitStatusFile[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
+  const entries = stdout.split("\0");
+  for (let n = 0; n < entries.length; n++) {
+    const line = entries[n];
+    if (!line) continue;
     const index = line[0] ?? " ";
     const worktree = line[1] ?? " ";
-    let target = line.slice(3).trim();
-    // 重命名/复制："R  old -> new"，取新路径
-    const arrow = target.indexOf(" -> ");
-    if (arrow >= 0) target = target.slice(arrow + 4);
-    target = target.replace(/^"(.*)"$/, "$1");
+    const target = line.slice(3);
+    // -z 模式不引用 / 转义路径，重命名先输出新路径，再输出旧路径。
+    if (index === "R" || index === "C" || worktree === "R" || worktree === "C") n++;
     if (!target) continue;
     files.push({
       code: `${index}${worktree}`.trim() || "M",
@@ -1229,7 +1233,7 @@ export class PiHost {
     }
 
     const [statusOut, logOut, headOut, symbolicOut, upstreamOut, remoteOut, userName, userEmail] = await Promise.all([
-      gitProbe(root, ["status", "--porcelain=v1", "-uall"]),
+      gitProbe(root, ["status", "--porcelain=v1", "-z", "-uall"]),
       gitProbe(root, [
         "log",
         "--graph",
@@ -1299,11 +1303,23 @@ export class PiHost {
     };
   }
 
+  async gitBranches(cwd: string): Promise<GitBranch[]> {
+    const workspace = path.resolve(cwd);
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    return root ? listGitBranches(root) : [];
+  }
+
   /**
    * 执行 Git 写操作。所有路径参数都会被重新校验为仓库内相对路径，
    * 且只有仓库根目录就是当前项目目录时才允许写入。
    */
   async gitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
+    // 同一工作区的 Git 写入串行，避免切换 / 暂存 / 提交竞争索引锁。
+    return withFileWrite(path.join(path.resolve(cwd), ".git-pi-operation"), () => this.performGitAction(cwd, action, payload));
+  }
+
+  private async performGitAction(cwd: string, action: GitActionName, payload: GitActionPayload = {}): Promise<GitActionResult> {
     const workspace = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, workspace);
     const name = String(action ?? "") as GitActionName;
@@ -1329,6 +1345,16 @@ export class PiHost {
     let message = "";
 
     switch (name) {
+      case "switchBranch":
+      case "createBranch": {
+        const pool = this.clients.get(workspace);
+        if (pool && [...pool.workers.values()].some(slot => slot.streaming || slot.compacting)) {
+          throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换或新建分支");
+        }
+        message = await changeGitBranch(root, name, payload);
+        completionCache.delete(completionKey(workspace));
+        break;
+      }
       case "stage": {
         const paths = payload.all ? [] : gitOperationPaths(root, payload.paths);
         await gitRun(root, payload.all ? ["add", "-A"] : ["add", "--", ...paths]);
@@ -1399,7 +1425,7 @@ export class PiHost {
     return { ok: true, message, overview: await this.gitOverview(cwd) };
   }
 
-  async gitInspect(cwd: string, kind: "commit" | "working", target: string): Promise<GitInspectResult> {
+  async gitInspect(cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string): Promise<GitInspectResult> {
     const root = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, root);
     if (kind === "commit") {
@@ -1435,14 +1461,17 @@ export class PiHost {
     const { root: safeRoot, target: safeTarget } = workspacePath(root, target);
     await assertRealWorkspacePath(root, safeTarget, true);
     const relative = path.relative(safeRoot, safeTarget).replace(/\\/g, "/");
+    const area = kind === "staged" ? ["--cached"] : kind === "unstaged" ? [] : ["HEAD"];
     const { stdout } = await execFileAsync(
       "git",
-      ["diff", "HEAD", "--unified=3", "--", relative],
+      ["diff", ...area, "--unified=3", "--", relative],
       { cwd: safeRoot, maxBuffer: 4 * 1024 * 1024 },
     ).catch(() => ({ stdout: "" }));
 
     let diff = stdout;
-    if (!diff.trim()) {
+    // 只有未跟踪文件才合成新增 Diff；无改动的已跟踪文件不能被误显示为新增。
+    const untracked = (await gitProbe(safeRoot, ["ls-files", "--others", "--exclude-standard", "--", relative])).trim();
+    if (!diff.trim() && kind !== "staged" && untracked) {
       const content = await readFile(safeTarget, "utf8").catch(() => "");
       if (content) {
         const addedLines = content.split(/\r?\n/).map((l) => `+${l}`).join("\n");
@@ -1451,11 +1480,11 @@ export class PiHost {
     }
 
     return {
-      kind: "working",
+      kind,
       target: relative,
       title: path.basename(relative),
       subtitle: relative,
-      meta: "工作区未提交变更",
+      meta: kind === "staged" ? "暂存区变更" : kind === "unstaged" ? "未暂存变更" : "工作区未提交变更",
       diff,
     };
   }

@@ -39,6 +39,20 @@ stage.open({ pluginId: "git", tabId: "def", title: "Commit def", data: null });
 stage.clear();
 if (Number(stage.tabs.length) !== 0 || stage.activeKey.value !== "") throw new Error("stage clear should remove tabs and active key");
 
+// 后台项目分支切换完成时，只清除那个项目的已保存标签，不影响当前项目。
+stage.switchWorkspace("branch-old");
+stage.open({ pluginId: "files", tabId: "old.txt", title: "old", data: { cwd: "branch-old" } });
+stage.open({ pluginId: "files", tabId: "draft.txt", title: "draft", dirty: true, data: { cwd: "branch-old" } });
+stage.switchWorkspace("branch-active");
+stage.open({ pluginId: "files", tabId: "active.txt", title: "active", data: {} });
+stage.closeWorkspaceTabs("branch-old", tab => !tab.dirty);
+if (stage.activeTab.value?.tabId !== "active.txt") throw new Error("清理后台项目不应影响当前标签");
+stage.switchWorkspace("branch-old");
+if (Number(stage.tabs.length) !== 1 || !stage.tabs[0]?.dirty) throw new Error("后台项目应清除旧基线并保留草稿");
+stage.clear();
+stage.removeWorkspace("branch-active");
+stage.removeWorkspace("branch-old");
+
 // 多项目隔离：切走再切回保留页签与脏标记；移除项目必须一并丢弃存档，
 // 否则同一路径重新加入项目会复活已删除项目的草稿。
 stage.switchWorkspace("C:/a");
