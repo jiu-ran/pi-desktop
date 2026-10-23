@@ -1496,11 +1496,13 @@ export class PiHost {
     const root = await gitRepoRoot(workspace);
     if (!root) return [];
     const out = await gitProbe(root, ["worktree", "list", "--porcelain"]);
-    return parseWorktreeList(out).map((item) => ({
-      ...item,
-      primary: samePath(item.path, root),
-      managed: pathWithin(this.worktreeRoot, item.path) && !samePath(item.path, root),
-      exists: existsSync(item.path),
+    const managedRoot = await realpath(this.worktreeRoot).catch(() => this.worktreeRoot);
+    return Promise.all(parseWorktreeList(out).map(async item => {
+      const canonical = await realpath(item.path).catch(() => item.path);
+      return { ...item, path: canonical,
+        primary: samePath(canonical, root),
+        managed: pathWithin(managedRoot, canonical) && !samePath(canonical, root),
+        exists: existsSync(canonical) };
     }));
   }
 
@@ -1517,7 +1519,9 @@ export class PiHost {
     const slug = worktreeSlug(name);
     if (!slug) throw new Error("任务名不能为空");
     const repoKey = createHash("sha1").update(workspace).digest("hex").slice(0, 8);
-    const baseDir = path.join(this.worktreeRoot, `${repoKey}-${slug}`);
+    await mkdir(this.worktreeRoot, { recursive: true });
+    const managedRoot = await realpath(this.worktreeRoot);
+    const baseDir = path.join(managedRoot, `${repoKey}-${slug}`);
     let branch = "";
     let target = "";
     let reserved = false;
@@ -1537,12 +1541,13 @@ export class PiHost {
 
     await mkdir(path.dirname(target), { recursive: true });
     await gitRun(root, ["worktree", "add", "-b", branch, target, head]);
-    const worktree = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    const canonicalTarget = await realpath(target);
+    const worktree = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, canonicalTarget));
     return {
       ok: true,
       message: `已创建隔离工作区（${branch}）`,
       worktree: worktree ?? {
-        path: target,
+        path: canonicalTarget,
         branch,
         head,
         detached: false,
@@ -1558,12 +1563,13 @@ export class PiHost {
 
   /** 移除由 Pi Desktop 创建的工作区；分支会保留，未合并的提交不会丢失。 */
   async gitWorktreeRemove(cwd: string, target: string): Promise<GitWorktreeRemoveResult> {
-    const workspace = path.resolve(cwd);
+    const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const root = await gitRepoRoot(workspace);
     if (!root) throw new Error("当前目录不是 Git 仓库");
     if (!samePath(root, workspace)) throw new Error("请在仓库根目录移除隔离工作区");
-    const entry = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, target));
+    const canonicalTarget = await realpath(path.resolve(target)).catch(() => path.resolve(target));
+    const entry = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, canonicalTarget));
     if (!entry) throw new Error("该目录不是当前仓库的 worktree");
     if (entry.primary) throw new Error("不能移除仓库的主工作区");
     if (!entry.managed) throw new Error("只能移除由 Pi Desktop 创建的隔离工作区");
