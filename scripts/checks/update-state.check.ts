@@ -23,5 +23,16 @@ rejectDownload?.(new Error("下载更新失败：已取消"));
 assert.equal(await download, false, "取消后下载返回失败");
 assert.equal(workbench.state.appUpdate.phase, "idle", "取消后回到可重试状态");
 assert.deepEqual(notices.at(-1), { level: "info", text: "已取消下载更新" }, "取消不应报成错误 Toast");
+
+// 移除项目时要先兜住未保存草稿：二次确认取消后不能删除任何东西。
+let hostCalls = 0;
+const removeHost = {
+  removeProject: async () => { hostCalls += 1; return { recent: [], deleted: 0, failed: 0 }; },
+};
+const guarded = createWorkbench({ host: removeHost as any, bus, beforeRemoveWorkspace: async () => false });
+const cancelled = await guarded.removeProject("/project-a");
+assert.equal(cancelled.cancelled, true, "取消后返回 cancelled 标记");
+assert.equal(hostCalls, 0, "取消时不能调用宿主移除项目");
+guarded.dispose();
 workbench.dispose();
 console.log("update-state OK");

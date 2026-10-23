@@ -181,7 +181,22 @@ async function activate(): Promise<void> {
   if (!props.active || disposed) return;
   initialize();
   fit();
+  // Chromium 在窗口被遮挡 / 最小化时会暂停 xterm 的 DOM 绘制；重新激活时强制重绘，
+  // 避免回到窗口后屏幕还停留在旧内容。
+  repaint();
   emit("selection", screen?.getSelection() || "");
+}
+
+/** 强制重绘可见区域；xterm 在后台被节流后不会自动补齐旧行。 */
+function repaint(): void {
+  if (!screen || disposed) return;
+  try { screen.refresh(0, Math.max(0, screen.rows - 1)); } catch { /* 屏幕刚销毁 */ }
+}
+
+function onVisible(): void {
+  if (document.hidden) return;
+  repaint();
+  scheduleFit();
 }
 
 function onFocus(): void {
@@ -262,11 +277,15 @@ watch(() => props.task.status, (status) => {
   if (screen) screen.options.disableStdin = status !== "running";
 });
 onMounted(() => {
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", onVisible);
   if (props.active) void activate();
 });
 onDeactivated(() => screen?.blur());
 onBeforeUnmount(() => {
   disposed = true;
+  document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("focus", onVisible);
   offData?.();
   observer?.disconnect();
   if (fitTimer) clearTimeout(fitTimer);

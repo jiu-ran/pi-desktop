@@ -240,6 +240,8 @@ async function removeProject(group: any): Promise<void> {
   if (!ok) return;
   try {
     const result = await workbench.removeProject(group.cwd, { deleteSessions: ok.checked });
+    // 用户在「未保存草稿」二次确认里取消：保持原状，不提示错误。
+    if (result?.cancelled) return;
     delete cache[group.cwd];
     delete collapsed[group.cwd];
     info(

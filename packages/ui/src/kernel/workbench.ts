@@ -667,7 +667,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws || !host?.gitWorktreeRemove) throw new Error("没有打开的工作区");
     const cwd = ws.cwd;
-    if (workspaces.has(target)) await removeProject(target);
+    if (workspaces.has(target)) {
+      // 移除工作树会删除目录：用户取消保存未保存草稿时必须中止，不能继续删。
+      const removed = await removeProject(target);
+      if (removed?.cancelled) throw new Error("已取消移除工作树：仍有未保存的文件修改");
+    }
     return host.gitWorktreeRemove(cwd, target);
   }
 
@@ -774,7 +778,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
     if (ws?.hasAnyRunning) throw new Error("该项目有任务正在运行，请先停止");
-    if (!(await beforeRemoveWorkspace(target))) throw new Error("已取消移除项目，未保存草稿仍保留");
+    if (!(await beforeRemoveWorkspace(target))) {
+      return { cancelled: true, recent: state.recent, deleted: 0, failed: 0 };
+    }
     const result = await host.removeProject(target, { deleteSessions });
     workspaces.delete(target);
     state.recent = result.recent;
