@@ -91,9 +91,9 @@ export function relativeTime(timestamp?: number): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-const THINKING_LABELS: Record<string, string> = { off: "关闭", minimal: "极简", low: "低", medium: "中", high: "高", xhigh: "极高" };
+const THINKING_LABELS: Record<string, string> = { off: "关闭", minimal: "极简", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高" };
 
-/** 思考等级的中文名（Pi 的取值是 off / minimal / low / medium / high / xhigh） */
+/** 思考等级的中文名；未知等级保留原值，不改变传给 Pi 的协议值。 */
 export function thinkingLabel(level: string): string {
   return THINKING_LABELS[level] ?? level;
 }
