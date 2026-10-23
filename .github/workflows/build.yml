@@ -42,13 +42,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.0
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.1.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -80,6 +80,7 @@ jobs:
 
       - name: Run Electron smoke checks
         if: runner.os == 'Windows'
+        shell: bash
         run: npx --no-install electron scripts/checks/smoke.electron.mjs
 
       - name: Package app
@@ -90,7 +91,7 @@ jobs:
         run: npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.0
         with:
           name: ${{ matrix.platform }}-artifacts
           if-no-files-found: error
@@ -113,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release notes
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.0
         with:
           ref: ${{ inputs.release_tag || github.ref }}
 
@@ -126,7 +127,7 @@ jobs:
           node scripts/release-notes.mjs "$version" release-notes.md
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.9
         with:
           path: artifacts
           merge-multiple: true
