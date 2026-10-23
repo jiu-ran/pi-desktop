@@ -686,6 +686,16 @@ export function createTerminalService({
     chooseActive();
   }
 
+  /** 关闭单个任务：运行中先结束进程树，再从列表移除，避免留下孤儿进程。 */
+  async function close(id: string): Promise<void> {
+    const task = state.tasks.find((item) => item.id === id);
+    if (!task) return;
+    if (task.status === "running" || task.status === "stopping") await stop(id);
+    if (!state.tasks.some((item) => item.id === id)) return;
+    state.tasks = state.tasks.filter((item) => item.id !== id);
+    chooseActive();
+  }
+
   function select(id: string): void {
     const task = state.tasks.find((item) => item.id === id);
     if (!task) return;
@@ -740,6 +750,7 @@ export function createTerminalService({
     stop,
     clearOutput,
     clearFinished,
+    close,
     select,
     show,
     hide,

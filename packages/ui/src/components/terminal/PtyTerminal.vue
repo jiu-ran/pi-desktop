@@ -8,6 +8,7 @@ import type { TerminalTask } from "../../services/terminal.ts";
 import { pushToast } from "../../services/extension-ui.ts";
 import { appSettings } from "../../services/settings.ts";
 import { createTerminalWheelHandler } from "../../shared/terminal-wheel.ts";
+import { resolveClipboardAction } from "../../shared/terminal-keys.ts";
 
 /**
  * 一个 PTY 会话对应一个独立 xterm 屏幕。
@@ -71,6 +72,8 @@ function initialize(): void {
     rows: props.task.rows || 30,
     cursorBlink: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     cursorStyle: "bar",
+    // 失焦时 xterm 默认画空心矩形，和聚焦时的竖线不一致；统一成竖线更连贯。
+    cursorInactiveStyle: "bar",
     fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace',
     fontSize: appSettings.codeFontSize,
     lineHeight: 1.25,
@@ -230,7 +233,10 @@ async function paste(): Promise<void> {
   if (props.task.status !== "running" || !props.active || restoring) return;
   const target = screen;
   try {
-    const text = await navigator.clipboard.readText();
+    // 优先走主进程读取：渲染进程的剪贴板读权限在不同平台上不一致。
+    const text = window.piDesktop?.readClipboard
+      ? await window.piDesktop.readClipboard()
+      : await navigator.clipboard.readText();
     // 读取剪贴板期间可能已经切换任务，不能把内容粘到离开的会话。
     if (text && !disposed && props.active && screen === target && props.task.status === "running") {
       target?.paste(text);
@@ -243,18 +249,24 @@ async function paste(): Promise<void> {
 
 function onKey(event: KeyboardEvent): boolean {
   if (event.type !== "keydown") return true;
-  const key = event.key.toLowerCase();
-  const mod = event.ctrlKey || event.metaKey;
-  const copy = (mod && event.shiftKey && key === "c") || (event.metaKey && key === "c")
-    || (event.ctrlKey && event.key === "Insert");
-  const clipboardPaste = (mod && event.shiftKey && key === "v") || (event.metaKey && key === "v")
-    || (event.ctrlKey && !event.shiftKey && key === "v" && window.piDesktop?.platform === "win32")
-    || (event.shiftKey && event.key === "Insert");
-  if (!copy && !clipboardPaste) return true;
+  const action = resolveClipboardAction(
+    event,
+    window.piDesktop?.platform || "win32",
+    Boolean(screen?.hasSelection()),
+  );
+  if (!action) return true;
   event.preventDefault();
   event.stopPropagation();
-  if (copy) void copySelection();
-  else void paste();
+  if (action === "copy") {
+    // 复制成功后清掉选区，避免下一次 Ctrl+C 仍被当成复制而无法中断程序。
+    void copySelection().then((ok) => {
+      if (!ok) return;
+      screen?.clearSelection();
+      emit("selection", "");
+    });
+  } else {
+    void paste();
+  }
   return false;
 }
 

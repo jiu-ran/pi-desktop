@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { listTerminalProfiles, resolveTerminalProfile, systemShellCandidate } from "../../electron/terminal-profiles.ts";
 import { TerminalHost, resolveInteractiveShell, resolvePtyShell, resolveTerminalShell, stripTerminalAnsi } from "../../electron/terminal-host.ts";
 import { formatTerminalDuration, createTerminalService } from "../../packages/ui/src/services/terminal.ts";
+import { resolveClipboardAction } from "../../packages/ui/src/shared/terminal-keys.ts";
+import type { ClipboardKeyEvent } from "../../packages/ui/src/shared/terminal-keys.ts";
 
 function assert(condition: unknown, message: string): void {
   if (!condition) throw new Error(message);
@@ -21,8 +23,24 @@ async function waitFor<T>(read: () => T | undefined, timeout = 12_000): Promise<
   throw new Error("等待终端任务超时");
 }
 
-const stripped = stripTerminalAnsi("\u001B[31m红色\u001B[0m \u001B]0;标题\u0007正常");
-assert(stripped === "红色 正常", `ANSI 清理失败：${JSON.stringify(stripped)}`);
+const stripped = stripTerminalAnsi("\u001B[31m红色\u001B[0m \u001B]0;标题\u0007正常");assert(stripped === "红色 正常", `ANSI 清理失败：${JSON.stringify(stripped)}`);
+
+// 终端内的复制 / 粘贴快捷键：Windows 选中时 Ctrl+C 复制，无选中时仍把 ^C 交给程序。
+const keyEvent = (patch: Partial<ClipboardKeyEvent>) => ({
+  key: "", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...patch,
+});
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "c" }), "win32", true) === "copy", "Windows 选中后 Ctrl+C 应复制");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "c" }), "win32", false) === null, "Windows 无选中 Ctrl+C 应交给终端中断");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "v" }), "win32", false) === "paste", "Windows Ctrl+V 应粘贴");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, shiftKey: true, key: "v" }), "win32", false) === "paste", "Ctrl+Shift+V 应粘贴");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, shiftKey: true, key: "c" }), "linux", false) === "copy", "Ctrl+Shift+C 应复制");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "v" }), "linux", false) === null, "Unix 终端 Ctrl+V 应保留字面输入");
+assert(resolveClipboardAction(keyEvent({ metaKey: true, key: "c" }), "darwin", false) === "copy", "macOS Cmd+C 应复制");
+assert(resolveClipboardAction(keyEvent({ metaKey: true, key: "v" }), "darwin", false) === "paste", "macOS Cmd+V 应粘贴");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "c" }), "darwin", true) === null, "macOS Ctrl+C 必须保持中断");
+assert(resolveClipboardAction(keyEvent({ ctrlKey: true, key: "Insert" }), "win32", false) === "copy", "Ctrl+Insert 应复制");
+assert(resolveClipboardAction(keyEvent({ shiftKey: true, key: "Insert" }), "linux", false) === "paste", "Shift+Insert 应粘贴");
+assert(resolveClipboardAction(keyEvent({ key: "Enter" }), "win32", true) === null, "普通按键不应被剪贴板处理拦截");
 
 const windowsShell = resolveTerminalShell("echo ok", "win32");
 assert(windowsShell.label === "PowerShell", "Windows 应使用 PowerShell");
@@ -261,6 +279,14 @@ try {
   assert(service.state.activeId === "pty-1", "后台命令不应切换当前终端视图");
   assert(service.state.tasks.find((item) => item.command === "echo background")?.status === "exited", "后台命令应正常执行");
   assert(service.state.input === "", "后台命令执行后应清空输入");
+
+  // 关闭标签：已结束的任务直接移除；运行中的任务先结束进程树再移除。
+  await service.close("mock-1");
+  assert(!service.state.tasks.some((item) => item.id === "mock-1"), "关闭已结束任务后应从列表移除");
+  await service.close("pty-1");
+  assert(!service.state.tasks.some((item) => item.id === "pty-1"), "关闭运行中终端后应从列表移除");
+  for (const task of [...service.state.tasks]) await service.close(task.id);
+  assert(service.state.tasks.length === 0 && service.state.activeId === "", "关闭全部任务后不应残留活动任务");
 } finally {
   service.dispose();
 }

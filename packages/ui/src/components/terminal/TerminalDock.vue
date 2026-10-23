@@ -20,12 +20,11 @@ const tabsOverflow = ref(false);
 const tabsAtEnd = ref(false);
 const tabsAtStart = ref(true);
 const ptySize = ref({ cols: 100, rows: 30 });
-interface PtyScreen { focus: () => void; copySelection: () => Promise<boolean>; paste: () => Promise<void> }
+interface PtyScreen { focus: () => void }
 const ptyScreens = new Map<string, PtyScreen>();
 const stick = ref(true);
 const resizing = ref(false);
 const copied = ref(false);
-const selection = ref("");
 const wrap = ref(loadWrap());
 const secret = ref(false);
 const shellChoice = ref("");
@@ -70,7 +69,7 @@ const footerHint = computed(() => {
   if (backgroundNote.value) return backgroundNote.value;
   if (pty.value) {
     return ptyRunning.value
-      ? "终端内 Ctrl+C 中断 · 此处 Enter 后台运行"
+      ? "选中 Ctrl+C 复制 · Ctrl+V 粘贴 · 无选中 Ctrl+C 中断"
       : "终端已结束 · 此处仍可运行后台命令";
   }
   if (interactiveRunning.value) return "交互会话 · Enter 发送 · Ctrl+Enter 后台运行 · Ctrl+L 清屏";
@@ -171,7 +170,7 @@ function onTabsScroll(): void {
 
 /** 标签导航只接管自身的方向键，不影响 xterm 按键与滚轮。 */
 function onTabKey(event: KeyboardEvent): void {
-  const buttons = [...(tabsEl.value?.querySelectorAll<HTMLButtonElement>(".terminal-tab") || [])];
+  const buttons = [...(tabsEl.value?.querySelectorAll<HTMLButtonElement>(".terminal-tab-main") || [])];
   const at = buttons.indexOf(event.target as HTMLButtonElement);
   if (at < 0 || event.ctrlKey || event.metaKey || event.altKey) return;
   let next = at;
@@ -258,10 +257,6 @@ function setPtyScreen(id: string, screen: any): void {
   else ptyScreens.delete(id);
 }
 
-function onPtySelection(id: string, text: string): void {
-  if (id === task.value?.id) selection.value = text;
-}
-
 function focusTerminal(): void {
   if (!pty.value) {
     focusInput();
@@ -281,12 +276,14 @@ function markCopied(): void {
   }, 1200);
 }
 
-async function copySelection(): Promise<void> {
-  await ptyScreens.get(task.value?.id || "")?.copySelection();
+/** 关闭标签：运行中的任务先结束进程树再移除，已结束的直接移除。 */
+async function closeTask(item: TerminalTask): Promise<void> {
+  await terminal.close(item.id);
 }
 
-function pasteTerminal(): void {
-  void ptyScreens.get(task.value?.id || "")?.paste();
+function closeTitle(item: TerminalTask): string {
+  if (item.status === "running" || item.status === "stopping") return "结束并关闭（终止该窗格的进程树；仅中断当前程序请按 Ctrl+C）";
+  return "关闭此任务";
 }
 
 function submit(): void {
@@ -519,7 +516,6 @@ watch(
   () => {
     if (secret.value) state.input = "";
     secret.value = false;
-    selection.value = "";
     copied.value = false;
     backgroundNote.value = "";
     stick.value = true;
@@ -657,22 +653,34 @@ onMounted(() => {
         <template v-for="group in taskGroups" :key="group.key">
           <div v-if="group.items.length" class="terminal-tab-group">
             <span class="terminal-tab-group-label">{{ group.label }} <small>{{ group.items.length }}</small></span>
-            <button
+            <div
               v-for="item in group.items"
               :key="item.id"
               class="terminal-tab"
               :class="{ active: item.id === task?.id }"
-              :data-task-id="item.id"
-              role="tab"
-              :aria-selected="item.id === task?.id"
-              :title="taskTitle(item)"
-              type="button"
-              @click="selectTask(item.id)"
             >
-              <span class="terminal-tab-icon" aria-hidden="true" v-html="item.pty ? icons.terminal : icons.code" />
-              <span class="terminal-tab-label">{{ taskLabel(item) }}</span>
-              <span class="terminal-status-dot" :data-status="item.status" />
-            </button>
+              <button
+                class="terminal-tab-main"
+                :data-task-id="item.id"
+                role="tab"
+                type="button"
+                :aria-selected="item.id === task?.id"
+                :title="taskTitle(item)"
+                @click="selectTask(item.id)"
+              >
+                <span class="terminal-tab-icon" aria-hidden="true" v-html="item.pty ? icons.terminal : icons.code" />
+                <span class="terminal-tab-label">{{ taskLabel(item) }}</span>
+                <span class="terminal-status-dot" :data-status="item.status" />
+              </button>
+              <button
+                class="terminal-tab-close"
+                type="button"
+                :title="closeTitle(item)"
+                :aria-label="`${item.status === 'running' || item.status === 'stopping' ? '结束并关闭' : '关闭'} ${taskLabel(item)}`"
+                @click.stop="closeTask(item)"
+                v-html="icons.close"
+              />
+            </div>
           </div>
         </template>
       </div>
@@ -698,18 +706,14 @@ onMounted(() => {
               <span v-if="task.exitCode != null && task.status !== 'stopped'" class="terminal-output-exit" :data-ok="task.exitCode === 0">退出码 {{ task.exitCode }}</span>
             </div>
             <div class="terminal-output-actions">
-              <template v-if="pty">
-                <button class="icon-btn small" type="button" :title="copied ? '已复制' : '复制选中内容 (Ctrl+Shift+C)'" aria-label="复制选中内容" :disabled="!selection" @click="copySelection" v-html="copied ? icons.check : icons.copy" />
-                <button class="terminal-tool-btn" type="button" title="粘贴到终端 (Ctrl+Shift+V)" :disabled="!ptyRunning" @click="pasteTerminal">粘贴</button>
-              </template>
-              <template v-else>
+              <template v-if="!pty">
                 <button class="icon-btn small" :class="{ 'is-on': wrap }" type="button" :title="wrap ? '关闭自动换行' : '自动换行'" aria-label="自动换行" :aria-pressed="wrap" @click="toggleWrap" v-html="icons.wrap" />
                 <button class="icon-btn small" type="button" :title="copied ? '已复制' : '复制全部输出'" aria-label="复制全部输出" :disabled="!task.output" @click="copyOutput" v-html="copied ? icons.check : icons.copy" />
                 <button class="icon-btn small" type="button" title="清空输出 (Ctrl/Cmd+L)" aria-label="清空输出" :disabled="!task.output" @click="clearActiveOutput" v-html="icons.trash" />
                 <button v-if="!interactive" class="icon-btn small" type="button" title="重新填入命令" aria-label="重新填入命令" @click="rerun(task)" v-html="icons.refresh" />
               </template>
               <button class="icon-btn small terminal-reveal-task" type="button" title="在文件管理器中打开任务目录" aria-label="打开任务目录" @click="revealCwd(task.cwd)" v-html="icons.reveal" />
-              <button v-if="isRunning" class="terminal-stop-btn" type="button" :disabled="task.status === 'stopping'" :title="pty ? '结束整个终端进程树；中断当前程序请在终端内按 Ctrl+C' : '停止此后台任务的进程树'" @click="terminal.stop(task.id)">
+              <button v-if="isRunning && !pty" class="terminal-stop-btn" type="button" :disabled="task.status === 'stopping'" title="停止此后台任务的进程树" @click="terminal.stop(task.id)">
                 <span aria-hidden="true" v-html="icons.stop" />
                 {{ task.status === 'stopping' ? '停止中' : stopLabel }}
               </button>
@@ -724,7 +728,6 @@ onMounted(() => {
                 :ref="(screen) => setPtyScreen(item.id, screen)"
                 :task="item"
                 :active="state.enabled && state.open && item.id === task.id"
-                @selection="onPtySelection(item.id, $event)"
                 @copied="markCopied"
                 @size="ptySize = $event"
               />

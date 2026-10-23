@@ -190,7 +190,7 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
       <div class="files-actions">
         <button
           type="button"
-          class="icon-btn small"
+          class="icon-btn small files-changes-btn"
           :class="{ active: showChanges }"
           :title="showChanges ? '显示全部文件' : `只看变更（${changes.length}）`"
           :disabled="!ws"

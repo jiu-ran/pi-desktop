@@ -128,7 +128,17 @@ export async function checkTerminalInElectron(win) {
     if (!await evaluate(`${task(first)}?.status === 'running'`)) throw new Error("插件停用不应强制结束已有终端");
     await evaluate("window.__piDesktop.plugins.setEnabled('terminal', true).then(() => true)");
     await poll(`document.querySelector(${JSON.stringify(selector(first))}) === window.__ptySmokeScreen`, "插件重新启用保留屏幕");
-    console.log("[terminal] PASS 可选插件 / PTY / 全屏渲染 / 方向键与滚轮区分 / Tab / Ctrl+W / 多会话 / resize / 后台命令 / Ctrl+C");
+    // 关闭标签：已经结束的任务直接移除，运行中的先结束进程树。
+    const extra = await evaluate("window.__piDesktop.terminal.startPty(80, 24).then(() => window.__piDesktop.terminal.activeTask.value.id)");
+    await poll(`window.__piDesktop.terminal.state.tasks.some(t => t.id === ${JSON.stringify(extra)})`, "额外终端已创建");
+    await evaluate(`window.__piDesktop.terminal.close(${JSON.stringify(extra)}).then(() => true)`);
+    await poll(`!window.__piDesktop.terminal.state.tasks.some(t => t.id === ${JSON.stringify(extra)})`, "关闭运行中终端后移除任务");
+    const closable = await evaluate("window.__piDesktop.terminal.state.tasks.find(t => t.status !== 'running' && t.status !== 'stopping')?.id || ''");
+    if (closable) {
+      await evaluate(`window.__piDesktop.terminal.close(${JSON.stringify(closable)}).then(() => true)`);
+      await poll(`!window.__piDesktop.terminal.state.tasks.some(t => t.id === ${JSON.stringify(closable)})`, "关闭已结束任务后移除标签");
+    }
+    console.log("[terminal] PASS 可选插件 / PTY / 全屏渲染 / 方向键与滚轮区分 / Tab / Ctrl+W / 多会话 / resize / 后台命令 / 关闭标签 / Ctrl+C");
   } finally {
     await evaluate(`(async () => {
       const api = window.__piDesktop.terminal;

@@ -359,6 +359,8 @@ export interface PiDesktopBridge {
   checkAppUpdate: () => Promise<AppUpdateCheck>;
   downloadAppUpdate: () => Promise<PreparedAppUpdate>;
   cancelAppUpdate: () => boolean;
+  /** 读取系统剪贴板文本（终端 Ctrl+V 粘贴用，主进程读取避免渲染进程权限差异）。 */
+  readClipboard: () => Promise<string>;
   installAppUpdate: (version: string) => Promise<void>;
   openAppUpdate: (url: string) => Promise<boolean>;
   /** scope: self = pi update（默认）；all = pi update --all */

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
@@ -390,6 +390,8 @@ app.whenReady().then(() => {
   handle("app:check-update", () => appUpdateManager.check());
   handle("app:download-update", () => appUpdateManager.download());
   handle("app:cancel-update", () => appUpdateManager.cancelDownload());
+  // 终端 Ctrl+V 读取系统剪贴板；渲染进程的 navigator.clipboard.readText 在部分平台上需要额外权限。
+  handle("app:read-clipboard", () => clipboard.readText());
   handle("app:install-update", (version = "") => appUpdateManager.install(version));
   handle("app:open-update", (url = "") => {
     if (!isAllowedExternalUrl(url)) return false;
