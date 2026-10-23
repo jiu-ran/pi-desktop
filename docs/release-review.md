@@ -1,6 +1,6 @@
 # 发布前检查清单
 
-本清单用于把 `thinkrail` 分支的改动整理成可分发版本前的自检。这里的命令都在仓库根目录执行，Windows PowerShell / Git Bash、macOS、Linux 通用（路径分隔符按本机调整）。
+本清单用于主分支发布前的自检；`thinkrail` 工作台改动已在 v0.2.0 合并。这里的命令都在仓库根目录执行，Windows PowerShell / Git Bash、macOS、Linux 通用（路径分隔符按本机调整）。
 
 ## 1. 版本与依赖
 
@@ -35,8 +35,10 @@ npm run check:smoke
 | 网络层 | 超时、取消、下载校验、原子替换、架构选择 |
 | 终端 | 可选插件启停、真实 PTY、全屏备用屏幕、方向键与滚轮区分、Tab、Ctrl+W 放行、多会话、resize、Ctrl+C |
 | 编辑器 | 保存、外部修改冲突、切换项目保留草稿、Markdown 高亮、Mermaid 时序图、不可信 HTML 被拦截 |
+| 版本控制 | 本地分支切换、新建、草稿 / 运行任务保护、暂存分区与真实 Diff、中文路径、窄面板 |
+| 终端界面 | 深浅主题下拉、键盘导航、历史只填入、浮层生命周期、窄对话布局 |
 
-- [ ] 输出包含 `[result] PASS`，且没有 `[errors]` 行。
+- [ ] 输出包含 `[result] PASS` 和 `[errors] none`。CI 的 Windows job 在打包前执行同一套冒烟。
 - [ ] 自动化窗口被其它窗口遮挡时，xterm DOM 渲染会被 Chromium 节流；`scripts/checks/smoke.electron.mjs` 已关闭 native occlusion / 后台节流，若未来删除这些开关，终端冒烟会出现假阴性。
 
 ## 4. 打包产物
@@ -47,7 +49,7 @@ npx --no-install electron-builder --dir
 ```
 
 - [ ] `dist/win-unpacked`（或对应平台目录）能启动，界面正常渲染，标题栏、侧边栏、欢迎页没有缺失。
-- [ ] 打包版加载 `app.asar` 内的 `dist-electron/terminal-host.js` 后能启动 PTY 并正常退出（可用 `packaged-pty-probe.mjs` 一类脚本验证，注意把 asar 路径改成本机 `dist/`）。
+- [ ] 打包版加载 `app.asar` 内的 `dist-electron/terminal-host.js` 后能启动 PTY 并正常退出：`npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar`（Windows CI 同样执行）。
 - [ ] `dist/` 中的安装包文件名、图标、版本号正确。
 - [ ] `CSP` 生效但未拦截自身资源：渲染进程控制台没有 `Refused to ...` 或 `Content Security Policy` 报错。
 
@@ -94,7 +96,7 @@ npx --no-install electron-builder --dir
 - [ ] `.github/workflows/build.yml` 的 `build` job 只有 `contents: read`，`release` job 才提升为 `write`。
 - [ ] CI 在 Linux 安装 `build-essential python3`（`node-pty`），并缓存两份 lockfile。
 - [ ] 打 tag（`v*`）后三个平台都产出产物，`SHA256SUMS.txt` 覆盖全部安装包。
-- [ ] Release 说明用中文，列出新增功能、修复、已知限制与校验方式。
+- [ ] Release 说明用中文，列出新增功能、修复、已知限制与校验方式；优先维护 `docs/releases/v<版本>.md`，CI 使用 `scripts/release-notes.mjs` 生成说明，不再自动生成英文提交列表。
 
 ## 7. 已知限制（随 Release 说明）
 

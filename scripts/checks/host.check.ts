@@ -1,7 +1,14 @@
-import { PiHost } from "../../electron/pi-host.ts";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
+// CI 与本机均使用隔离工作区 / Agent 数据，不依赖开发者目录，也不污染真实会话。
+const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-host-"));
+process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
+const cwd = path.join(root, "project");
+await mkdir(cwd);
+const { PiHost } = await import("../../electron/pi-host.ts");
 const host = new PiHost({ emit: () => {} });
-const cwd = "C:\\Users\\jiuran\\Desktop\\chat";
 try {
   const authorizedCwd = await host.authorizeWorkspace(cwd);
   const [a, b] = await Promise.all([host.open(authorizedCwd), host.open(authorizedCwd)]);
@@ -30,4 +37,5 @@ try {
   console.log("parallel workers", pool.workers.size, "OK");
 } finally {
   await host.stopAll();
+  await rm(root, { recursive: true, force: true });
 }
