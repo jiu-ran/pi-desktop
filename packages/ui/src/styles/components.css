@@ -347,6 +347,17 @@
 .file-editor-input::selection { background: var(--accent-soft); }
 .file-editor-state { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--fg-2); font-size: 12.5px; }
 .file-editor-state.error { color: var(--err); }
+.file-editor-state.conflict {
+  flex: none;
+  flex-wrap: wrap;
+  height: auto;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+}
+.file-editor-state.conflict span { flex: 1; min-width: 220px; text-align: left; line-height: 1.5; }
 .file-view-toggle { flex: none; }
 .md-preview {
   flex: 1;

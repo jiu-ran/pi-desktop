@@ -33,6 +33,13 @@ export async function checkEditorInElectron(win) {
     await poll("Boolean(window.__piDesktop.stage.activeTab.value?.data.saveError)", "外部修改冲突");
     assert.equal(await readFile(file, "utf8"), "changed-outside");
     assert.equal(await evaluate("document.querySelector('.file-editor-input').value"), "keep-draft");
+    // 冲突后用户明确选择覆盖：不再阻塞在无法保存的状态。
+    await evaluate("(()=>{const b=[...document.querySelectorAll('.file-editor-state.conflict button')].find(x=>x.textContent.includes('覆盖保存'));b.click();return true})()");
+    await poll("Boolean(document.querySelector('.modal.confirm'))", "覆盖保存确认");
+    await evaluate("(()=>{const b=[...document.querySelectorAll('.modal.confirm .modal-actions button')].find(x=>x.textContent.includes('用草稿覆盖'));b.click();return true})()");
+    await poll("window.__piDesktop.stage.activeTab.value?.dirty === false && !window.__piDesktop.stage.activeTab.value?.data.saving", "覆盖保存完成");
+    assert.equal(await readFile(file, "utf8"), "keep-draft");
+    console.log("[editor] 冲突后覆盖保存 ok");
     await evaluate("window.__piDesktop.stage.switchWorkspace('test-other-project'); true");
     await evaluate("window.__piDesktop.stage.switchWorkspace(window.__piDesktop.workbench.state.activeCwd); true");
     await poll("document.querySelector('.file-editor-input')?.value === 'keep-draft'", "切换项目保留草稿");

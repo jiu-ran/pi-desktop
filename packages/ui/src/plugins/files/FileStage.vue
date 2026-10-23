@@ -9,6 +9,7 @@ import { icons } from "../../shared/util.ts";
 import { formatBytes } from "../../shared/attachments.ts";
 import { localizeNotification } from "../../shared/notify-text.ts";
 import ImageLightbox from "../../components/chat/ImageLightbox.vue";
+import { askConfirm } from "../../components/sidebar/ui";
 import type { StageTab } from "../../kernel/stage.ts";
 import type { FileStageData } from "./state.ts";
 import { saveFileTab } from "./save.ts";
@@ -148,7 +149,15 @@ async function attachToChat(): Promise<void> {
 async function reload(): Promise<void> {
   if (!file.value?.relative) return;
   if (saving.value) return;
-  if (props.tab.dirty && !window.confirm("重新读取会丢弃当前草稿。确定放弃未保存修改吗？")) return;
+  if (props.tab.dirty) {
+    const ok = await askConfirm({
+      title: "重新读取会丢弃当前草稿",
+      message: `确定放弃「${file.value.name}」中未保存的修改吗？`,
+      confirmLabel: "放弃草稿并重新读取",
+      danger: true,
+    });
+    if (!ok) return;
+  }
   const generation = ++fileGeneration;
   clearAutoSaveTimer();
   file.value.loading = true;
@@ -182,6 +191,26 @@ async function save(options?: { auto?: boolean }): Promise<void> {
     lastAutoSaved.value = Boolean(options?.auto);
     if (!options?.auto) bus.emit("notify", { level: "info", text: `已保存 ${target.title}` });
     if (target.dirty && appSettings.autoSave === "afterDelay") scheduleAutoSave();
+  } catch (error) {
+    // 手动保存失败时编辑器顶部的常驻提示已经说明原因与可选项，不再弹重复 Toast。
+    if (options?.auto) notify(error);
+  }
+}
+
+/** 冲突后由用户明确选择用当前草稿覆盖磁盘内容。 */
+async function forceSave(): Promise<void> {
+  if (!file.value || saving.value) return;
+  const ok = await askConfirm({
+    title: "用草稿覆盖外部修改？",
+    message: `「${file.value.name}」已被外部程序或 Agent 修改，覆盖会丢失这些修改。`,
+    confirmLabel: "用草稿覆盖",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await saveFileTab(workbench, props.tab, { force: true });
+    lastAutoSaved.value = false;
+    bus.emit("notify", { level: "info", text: `已覆盖保存 ${props.tab.title}` });
   } catch (error) { notify(error); }
 }
 function onEditorBlur(): void {
@@ -311,7 +340,11 @@ onBeforeUnmount(() => {
       <button type="button" class="icon-btn small" title="使用系统程序打开" @click="openExternal" v-html="icons.reveal" />
     </div>
 
-    <div v-if="file?.saveError" class="file-editor-state error">{{ localizeNotification(file.saveError, "error") }}（草稿仍保留）</div>
+    <div v-if="file?.saveError" class="file-editor-state error conflict">
+      <span>{{ localizeNotification(file.saveError, "error") }}（草稿仍保留）</span>
+      <button type="button" class="btn small" :disabled="saving" @click="reload">重新读取</button>
+      <button type="button" class="btn small danger-solid" :disabled="saving" @click="forceSave">覆盖保存</button>
+    </div>
     <div v-if="file?.loading" class="file-editor-state"><span class="mini-spinner" />正在打开文件…</div>
     <div v-else-if="file?.error" class="file-editor-state error">{{ file.error }}</div>
     <div v-else-if="isBinary" class="file-editor-binary">
