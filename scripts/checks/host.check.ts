@@ -23,7 +23,7 @@ try {
   firstSlot.streaming = true;
 
   const created = await host.call(authorizedCwd, "newSession", []);
-  const secondSnap = await host.snapshot(cwd, created?.sessionFile);
+  const secondSnap = await host.snapshot(authorizedCwd, created?.sessionFile);
   const secondSession = secondSnap.state.sessionFile;
   if (!secondSession || secondSession === firstSession) throw new Error("parallel newSession should create distinct session");
   if (pool.workers.size < 2) throw new Error("parallel newSession while streaming should spawn second worker");

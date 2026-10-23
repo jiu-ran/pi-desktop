@@ -184,8 +184,11 @@ try {
   assert(defaultDone?.status === "exited" && defaultDone.output.includes("default-shell-ok 中文"), `系统默认 shell 带引号路径/UTF-8 输出错误：${defaultDone?.output}`);
   const custom = await resolveTerminalProfile({ profileId: "custom", customPath: process.execPath, customArgs: ["--version"] });
   assert(custom.args[0] === "--version", "自定义 shell 参数不应进行命令行拆分");
-  const customTask = await host.startPty(process.cwd(), 80, 24, { profileId: "custom", customPath: process.execPath, customArgs: ["--version"] });
-  await waitFor(() => host.list().find((item) => item.id === customTask.id && item.status === "exited"));
+  // 先确认输出再确认结束：失败退出必须显示诊断，而不是只轮询 exited 最终超时。
+  const customTask = await host.startPty(process.cwd(), 80, 24, { profileId: "custom", customPath: process.execPath, customArgs: ["-e", "console.log(process.version); setTimeout(() => {}, 200)"] });
+  await waitFor(() => host.list().find((item) => item.id === customTask.id && item.status !== "running"));
+  const customDone = host.list().find(item => item.id === customTask.id);
+  assert(customDone?.status === "exited", `自定义 PTY 退出失败：${JSON.stringify(customDone)}`);
   assert(host.list().find((item) => item.id === customTask.id)?.output.includes(process.version), "自定义可执行文件未按独立参数运行");
   for (const options of [{ profileId: "missing-shell" }, { profileId: "custom", customPath: "relative.exe" }, { profileId: "custom", customPath: process.execPath, customArgs: [3] as any }]) {
     const result = await Promise.allSettled([resolveTerminalProfile(options)]);
