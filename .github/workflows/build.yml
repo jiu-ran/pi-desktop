@@ -134,11 +134,17 @@ jobs:
       - name: List artifacts
         run: ls -lh artifacts
 
+      # GitHub 上传时会将文件名空格改成点；校验清单必须使用最终下载文件名。
+      - name: Normalize release filenames
+        shell: bash
+        run: |
+          node -e 'const fs = require("node:fs"); for (const file of fs.readdirSync("artifacts")) { const name = file.replace(/ /g, "."); if (name !== file) fs.renameSync("artifacts/" + file, "artifacts/" + name); }'
+
       - name: Generate checksums
         shell: bash
         run: |
           cd artifacts
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.tar.gz' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload to GitHub Release
