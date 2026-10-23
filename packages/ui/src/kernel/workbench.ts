@@ -920,19 +920,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return;
     }
     const request = host.sessions(ws.cwd).then((sessions) => {
-      if (!disposed && generation === previous.generation && workspaces.get(ws.cwd) === ws) {
-        // 合并线程名称：已命名线程优先保留，避免重命名后被列表刷新改回旧标题
-        const threadNames = new Map<string, string>();
-        for (const [, thread] of Object.entries(ws.threads as Record<string, SessionThreadState>)) {
-          if (thread.sessionFile && thread.sessionName) {
-            threadNames.set(normalizeThreadKey(thread.sessionFile), thread.sessionName);
-          }
-        }
-        ws.sessions = sessions.map(item => {
-          const threadName = threadNames.get(normalizeThreadKey(item.path));
-          return threadName && threadName !== item.title ? { ...item, title: threadName } : item;
-        });
-      }
+      // 文件中的最新名称是权威来源，不能用旧线程名称覆盖外部 CLI 的重命名。
+      if (!disposed && generation === previous.generation && workspaces.get(ws.cwd) === ws) ws.sessions = sessions;
     }).catch(() => {
       // Session refresh is advisory; the active transcript remains usable when the host is unavailable.
     }).finally(() => {
