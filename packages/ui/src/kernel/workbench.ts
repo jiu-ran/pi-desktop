@@ -1,6 +1,7 @@
 import { computed, reactive, shallowReactive, toRaw } from "vue";
 import { displayProjectName, projectPathKey } from "../shared/util.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
+import { applySessionName } from "../shared/session-title.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -903,10 +904,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   function updateSessionTitle(ws: WorkspaceState, thread: SessionThreadState): void {
-    if (!thread.sessionFile || !thread.sessionName) return;
-    const key = normalizeThreadKey(thread.sessionFile);
     // 即时更新侧栏与顶部标题，无需等待后端刷新
-    ws.sessions = ws.sessions.map(item => normalizeThreadKey(item.path) === key ? { ...item, title: thread.sessionName, empty: false } : item);
+    ws.sessions = applySessionName(ws.sessions, thread.sessionFile, thread.sessionName);
   }
 
   async function refreshSessions(ws: WorkspaceState | null = active.value): Promise<void> {

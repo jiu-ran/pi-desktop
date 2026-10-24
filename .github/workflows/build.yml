@@ -42,15 +42,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4.1.0
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -91,7 +91,7 @@ jobs:
         run: npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.platform }}-artifacts
           if-no-files-found: error
@@ -114,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release notes
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.release_tag || github.ref }}
 
@@ -127,7 +127,7 @@ jobs:
           node scripts/release-notes.mjs "$version" release-notes.md
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4.1.9
+        uses: actions/download-artifact@v8.0.2
         with:
           path: artifacts
           merge-multiple: true
@@ -149,7 +149,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           files: |
             artifacts/SHA256SUMS.txt
