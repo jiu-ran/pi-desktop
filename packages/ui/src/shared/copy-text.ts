@@ -6,44 +6,37 @@ function isLive(block: TranscriptBlock): boolean {
 }
 
 /**
- * 按"一轮用户提问"聚合回复文本，返回 key = 该轮最后一个文本块下标的复制内容。
+ * 复制按钮只出现在整段对话的最后一段回复下面。
  *
- * 只有这一轮真正结束才提供复制：
- *   - 会话级的 streaming 标记（最后一轮才参考，否则新一轮一开始就会把历史回复的
- *     复制按钮全藏起来）；
- *   - 该轮里是否还有运行中 / 待执行的工具或流式文本——标记来自事件流，时序稍一滞后
- *     就会出现「回复没结束、复制按钮已经出现」，用块自身状态兜底。
+ * 以前按「一轮用户消息」分组，每组最后一段文本都给一个复制按钮。问题是：
+ *   - 引导（steering）消息会把一轮拆成多段，按钮于是落在对话中间；
+ *   - 工具链很长时，中间那几段文本看起来也不像"可以复制的结果"。
+ * 现在只保留最后一条用户消息之后的那段回复，且必须真的结束（没有流式文本、
+ * 没有运行中 / 待执行的工具）才给。
  */
 export function buildCopyTexts(
   blocks: readonly TranscriptBlock[],
   streaming: boolean,
 ): Map<number, string> {
   const result = new Map<number, string>();
-  let parts: string[] = [];
-  let last = -1;
-  let segmentLive = false;
+  if (streaming) return result;
 
-  const finish = (isCurrentTurn: boolean) => {
-    const stillRunning = segmentLive || (isCurrentTurn && streaming);
-    if (last >= 0 && !stillRunning && !blocks[last]?.streaming) {
-      result.set(last, parts.join("\n\n"));
+  let lastUser = -1;
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (blocks[index]?.kind === "user") {
+      lastUser = index;
+      break;
     }
-    parts = [];
-    last = -1;
-    segmentLive = false;
-  };
+  }
+  const tail = blocks.slice(lastUser + 1);
+  if (!tail.length) return result;
+  if (tail.some(isLive)) return result;
 
-  blocks.forEach((block, index) => {
-    if (block.kind === "user") {
-      finish(false);
-      return;
-    }
-    if (block.kind === "text" && block.text?.trim()) {
-      parts.push(block.text);
-      last = index;
-    }
-    if (isLive(block)) segmentLive = true;
-  });
-  finish(true);
+  const texts = tail.filter((block) => block.kind === "text" && block.text?.trim());
+  const lastText = texts.at(-1);
+  if (!lastText) return result;
+  const index = blocks.lastIndexOf(lastText);
+  if (index < 0) return result;
+  result.set(index, texts.map((block) => block.text).join("\n\n"));
   return result;
 }

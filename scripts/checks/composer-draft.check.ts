@@ -15,37 +15,71 @@ const { clearComposerDraft, composerDraftKey, readComposerDraft, writeComposerDr
   "../../packages/ui/src/shared/composer-draft.ts"
 );
 
+const text = (draft: { text: string }) => draft.text;
+const paths = (draft: { attachments: Array<{ path: string }> }) => draft.attachments.map((item) => item.path);
+
 // 1. 写入后可读回：模拟应用重启后继续使用上次输入
-writeComposerDraft("C:\\Proj", "a.jsonl", "未发送的草稿");
-assert.equal(readComposerDraft("C:\\Proj", "a.jsonl"), "未发送的草稿", "重启后应能恢复草稿");
+writeComposerDraft("C:\\Proj", "a.jsonl", { text: "未发送的草稿", attachments: [] });
+assert.equal(text(readComposerDraft("C:\\Proj", "a.jsonl")), "未发送的草稿", "重启后应能恢复草稿");
 
-// 2. 会话隔离：同一项目不同会话互不影响
-writeComposerDraft("C:\\Proj", "b.jsonl", "另一个会话");
-assert.equal(readComposerDraft("C:\\Proj", "a.jsonl"), "未发送的草稿");
-assert.equal(readComposerDraft("C:\\Proj", "b.jsonl"), "另一个会话");
+// 2. 附件也要持久化：图片 / 文件 / 文件夹都只存路径与名称，恢复时再校验
+writeComposerDraft("C:\\Proj", "a.jsonl", {
+  text: "带附件的草稿",
+  attachments: [
+    { path: "C:\\Proj\\shot.png", name: "shot.png", kind: "file" },
+    { path: "C:\\Proj\\src", name: "src", kind: "folder" },
+  ],
+});
+const restored = readComposerDraft("C:\\Proj", "a.jsonl");
+assert.equal(text(restored), "带附件的草稿");
+assert.deepEqual(paths(restored), ["C:\\Proj\\shot.png", "C:\\Proj\\src"], "附件路径应随草稿保存");
+assert.equal(restored.attachments[1].kind, "folder", "文件夹类型要保留");
 
-// 3. 项目隔离
-writeComposerDraft("C:\\Other", "a.jsonl", "别的项目");
-assert.equal(readComposerDraft("C:\\Proj", "a.jsonl"), "未发送的草稿", "不同项目不能串草稿");
+// 3. 只有附件、没有正文时也要保留（用户先拖了文件还没写字）
+writeComposerDraft("C:\\Proj", "attachments-only.jsonl", {
+  text: "",
+  attachments: [{ path: "C:\\Proj\\a.txt", name: "a.txt", kind: "file" }],
+});
+assert.deepEqual(paths(readComposerDraft("C:\\Proj", "attachments-only.jsonl")), ["C:\\Proj\\a.txt"]);
 
-// 4. 空内容即删除，不留下空键
-writeComposerDraft("C:\\Proj", "a.jsonl", "");
-assert.equal(readComposerDraft("C:\\Proj", "a.jsonl"), "");
+// 4. 会话隔离：同一项目不同会话互不影响
+writeComposerDraft("C:\\Proj", "b.jsonl", { text: "另一个会话", attachments: [] });
+assert.equal(text(readComposerDraft("C:\\Proj", "a.jsonl")), "带附件的草稿");
+assert.equal(text(readComposerDraft("C:\\Proj", "b.jsonl")), "另一个会话");
+
+// 5. 项目隔离
+writeComposerDraft("C:\\Other", "a.jsonl", { text: "别的项目", attachments: [] });
+assert.equal(text(readComposerDraft("C:\\Proj", "a.jsonl")), "带附件的草稿", "不同项目不能串草稿");
+
+// 6. 空内容（正文与附件都没有）即删除，不留下空键
+writeComposerDraft("C:\\Proj", "a.jsonl", { text: "", attachments: [] });
+assert.equal(text(readComposerDraft("C:\\Proj", "a.jsonl")), "");
 assert.ok(!store.has(composerDraftKey("C:\\Proj", "a.jsonl")), "发送后应删除草稿键");
 
-// 5. 显式清理（删除会话）
-writeComposerDraft("C:\\Proj", "c.jsonl", "将被删除");
+// 7. 显式清理（删除会话）
+writeComposerDraft("C:\\Proj", "c.jsonl", { text: "将被删除", attachments: [] });
 clearComposerDraft("C:\\Proj", "c.jsonl");
-assert.equal(readComposerDraft("C:\\Proj", "c.jsonl"), "");
+assert.equal(text(readComposerDraft("C:\\Proj", "c.jsonl")), "");
 
-// 6. 没有 cwd 时不写入，避免出现无主键
-writeComposerDraft("", "x.jsonl", "无项目");
+// 8. 没有 cwd 时不写入，避免出现无主键
+writeComposerDraft("", "x.jsonl", { text: "无项目", attachments: [] });
 assert.equal([...store.keys()].filter(key => key.includes("x.jsonl")).length, 0, "缺少项目路径时不应落盘");
 
-// 7. 超过上限时裁剪旧草稿，避免 localStorage 无限增长
-for (let i = 0; i < 60; i += 1) writeComposerDraft("C:\\Proj", `s${i}.jsonl`, `草稿 ${i}`);
+// 9. 旧格式（纯文本）仍能读出来，升级后不丢草稿
+store.set(composerDraftKey("C:\\Proj", "legacy.jsonl"), "旧格式草稿");
+assert.equal(text(readComposerDraft("C:\\Proj", "legacy.jsonl")), "旧格式草稿", "旧格式草稿要兼容");
+assert.deepEqual(paths(readComposerDraft("C:\\Proj", "legacy.jsonl")), []);
+
+// 10. 坏数据不能把界面带崩
+store.set(composerDraftKey("C:\\Proj", "broken.jsonl"), "{not json");
+assert.equal(text(readComposerDraft("C:\\Proj", "broken.jsonl")), "", "坏数据应安全降级");
+
+// 11. 超过上限时裁剪旧草稿，避免 localStorage 无限增长
+for (let i = 0; i < 60; i += 1) {
+  writeComposerDraft("C:\\Proj", `s${i}.jsonl`, { text: `草稿 ${i}`, attachments: [] });
+}
 const draftKeys = [...store.keys()].filter(key => key.startsWith("pi-desktop.composer-draft:"));
 assert.ok(draftKeys.length <= 40, `草稿条数应受上限约束，实际 ${draftKeys.length}`);
-assert.ok(readComposerDraft("C:\\Proj", "s59.jsonl"), "最近写入的草稿必须保留");
+assert.ok(text(readComposerDraft("C:\\Proj", "s59.jsonl")), "最近写入的草稿必须保留");
 
-console.log("composer-draft OK");
+console.log("composer-draft OK 正文 / 附件 / 隔离 / 空清理 / 旧格式 / 上限");

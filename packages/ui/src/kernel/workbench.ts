@@ -2,7 +2,7 @@ import { computed, reactive, shallowReactive, toRaw } from "vue";
 import { displayProjectName, projectPathKey } from "../shared/util.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
 import { applySessionName } from "../shared/session-title.ts";
-import { clearComposerDraft, readComposerDraft, writeComposerDraft } from "../shared/composer-draft.ts";
+import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -197,27 +197,67 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
 
   const draftTimers = new Map<string, number>();
 
+  /** 附件只存路径与名称：恢复时重新向主进程校验，文件被删了就跳过。 */
+  function draftOf(thread: SessionThreadState): ComposerDraft {
+    const attachments = (thread.attachments ?? [])
+      .map((item: any) => ({ path: String(item?.path ?? ""), name: item?.name, kind: item?.kind }))
+      .filter((item) => item.path)
+      .slice(0, MAX_ATTACHMENTS);
+    return { text: thread.draft ?? "", attachments };
+  }
+
   /** 草稿写入防抖：连续输入只写最后一次，避免每键一次 localStorage。 */
-  function saveDraftSoon(cwd: string, sessionFile: string, text: string): void {
-    if (!cwd) return;
+  function saveDraftSoon(cwd: string, sessionFile: string, draft: ComposerDraft): void {
+    // Node 环境（脚本回归）没有 window / localStorage：草稿落盘只对界面有意义。
+    if (!cwd || typeof window === "undefined") return;
     const key = `${cwd}|${sessionFile}`;
     const timer = draftTimers.get(key);
     if (timer) window.clearTimeout(timer);
     draftTimers.set(key, window.setTimeout(() => {
       draftTimers.delete(key);
-      writeComposerDraft(cwd, sessionFile, text);
+      writeComposerDraft(cwd, sessionFile, draft);
     }, 400) as unknown as number);
   }
 
   /** 立即落盘（发送 / 切换会话前调用，避免防抖窗口内丢失）。 */
-  function flushDraft(cwd: string, sessionFile: string, text: string): void {
+  function flushDraft(cwd: string, sessionFile: string, draft: ComposerDraft): void {
+    if (typeof window === "undefined") return;
     const key = `${cwd}|${sessionFile}`;
     const timer = draftTimers.get(key);
     if (timer) {
       window.clearTimeout(timer);
       draftTimers.delete(key);
     }
-    writeComposerDraft(cwd, sessionFile, text);
+    writeComposerDraft(cwd, sessionFile, draft);
+  }
+
+  /**
+   * 恢复草稿里的附件：逐个重新校验（可能已删除、或不在工作区内），
+   * 成功多少恢复多少，失败的汇总成一条提示。
+   */
+  function restoreDraftAttachments(ws: WorkspaceState, thread: SessionThreadState, stored: ComposerDraft["attachments"]): void {
+    if (!stored.length) return;
+    void (async () => {
+      const missing: string[] = [];
+      for (const item of stored) {
+        if (thread.attachments.length >= MAX_ATTACHMENTS) break;
+        try {
+          const prepared = await host.prepareAttachments(ws.cwd, [item.path], [item.path]);
+          for (const entry of prepared.items ?? []) {
+            if (!entry?.path || thread.attachments.some((existing: any) => existing.path === entry.path)) continue;
+            thread.attachments.push(entry);
+          }
+        } catch {
+          missing.push(item.name || item.path);
+        }
+      }
+      if (missing.length) {
+        bus.emit("notify", {
+          level: "warning",
+          text: `草稿里有 ${missing.length} 个附件已不可用，已跳过：${missing.slice(0, 3).join("、")}`,
+        });
+      }
+    })();
   }
 
   function makeThread(sessionFile = ""): SessionThreadState {
@@ -248,9 +288,11 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     let thread = ws.threads[key];
     if (!thread) {
       thread = makeThread(sessionFile);
-      // 重启后恢复上次未发送的草稿。
-      thread.draft = readComposerDraft(ws.cwd, sessionFile);
+      // 重启后恢复上次未发送的草稿（正文 + 附件）。
+      const stored = readComposerDraft(ws.cwd, sessionFile);
+      thread.draft = stored.text;
       ws.threads[key] = thread;
+      restoreDraftAttachments(ws, thread, stored.attachments);
     } else if (sessionFile && !thread.sessionFile) {
       thread.sessionFile = sessionFile;
     }
@@ -338,13 +380,16 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
         const thread = this.activeThread;
         thread.draft = value;
         // 输入过程中持续落盘（防抖），重启后可以接着写。
-        saveDraftSoon(this.cwd, thread.sessionFile, value);
+        saveDraftSoon(this.cwd, thread.sessionFile, draftOf(thread));
       },
       get attachments(): any[] {
         return this.activeThread.attachments;
       },
       set attachments(value: any[]) {
-        this.activeThread.attachments = value;
+        const thread = this.activeThread;
+        thread.attachments = value;
+        // 附件变化同样落盘：草稿不只是正文。
+        saveDraftSoon(this.cwd, thread.sessionFile, draftOf(thread));
       },
       get runningSessionCount(): number {
         return Object.values(this.threads as Record<string, SessionThreadState>).filter(
@@ -771,6 +816,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       if (thread.attachments.length >= MAX_ATTACHMENTS) break;
       thread.attachments.push(item);
     }
+    // push 绕过了 ws.attachments 的 setter，这里显式落盘（附件也是草稿的一部分）。
+    saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
   }
 
   /** 粘贴剪贴板图片：主进程落盘到临时目录后作为普通附件加入 */
@@ -786,6 +833,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       if (thread.attachments.length >= MAX_ATTACHMENTS) break;
       if (!thread.attachments.some(existing => existing.path === item.path)) thread.attachments.push(item);
     }
+    saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
   }
 
   function extractDroppedPaths(dataTransfer: DataTransfer | null): string[] {
@@ -831,7 +879,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   function removeAttachment(file: string): void {
     const ws = active.value;
-    if (ws) ws.attachments = ws.attachments.filter((item: any) => item.path !== file);
+    if (ws) {
+      ws.attachments = ws.attachments.filter((item: any) => item.path !== file);
+      saveDraftSoon(ws.cwd, ws.activeThread.sessionFile, draftOf(ws.activeThread));
+    }
   }
 
   async function forget(cwd: string): Promise<void> {
@@ -1131,6 +1182,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
       const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
       thread.attachments = thread.attachments.filter(item => !sentPaths.has(item.path));
+      saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
       const disposition = await rpc(ws.cwd, "prompt", [prompt, prepared.images, behavior], targetSessionFile);
       accepted = true;
       if (disposition === "handled") {
@@ -1145,6 +1197,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         // 未送达：撤回乐观消息并恢复附件，让用户可以改完再发
         if (optimisticId) thread.transcript.removeBlock(optimisticId);
         thread.attachments = [...attachmentSnapshot, ...thread.attachments.filter(item => !attachmentSnapshot.some(sent => sent.path === item.path))].slice(0, MAX_ATTACHMENTS);
+        saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
       }
       bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       return accepted;
@@ -1216,7 +1269,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
           // 新会话的临时文件名只在内存里出现过，草稿要迁移到真实会话键上。
           if (tempThread.draft) {
             clearComposerDraft(ws.cwd, tempFile);
-            writeComposerDraft(ws.cwd, realFile, tempThread.draft);
+            writeComposerDraft(ws.cwd, realFile, draftOf(tempThread));
           }
           if (res?.state) {
             tempThread.sessionName = res.state.sessionName ?? tempThread.sessionName ?? "";

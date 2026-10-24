@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, appendFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { sessionTimestamp } from "../../electron/pi-host.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "pi-session-name-"));
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
@@ -45,3 +46,12 @@ try {
   }
   console.log("session-name OK");
 } finally { await rm(root, { recursive: true, force: true }); }
+
+// 侧栏时间：显示「最近活动」而不是建会话那天。一直在这个会话里聊，时间必须是刚刚。
+const justNow = Date.now();
+const fourDaysAgo = new Date(justNow - 4 * 24 * 60 * 60 * 1000).toISOString();
+assert.equal(sessionTimestamp(fourDaysAgo, justNow), justNow, "文件刚追加过时要取 mtime");
+assert.equal(sessionTimestamp(new Date(justNow - 60_000).toISOString(), justNow - 120_000), justNow - 60_000, "文件头更新时取文件头");
+assert.equal(sessionTimestamp(undefined, justNow), justNow, "没有文件头时间时退回 mtime");
+assert.equal(sessionTimestamp("not-a-date", justNow), justNow, "坏时间戳不能把时间算成 0");
+console.log("session timestamp OK 最近活动优先");

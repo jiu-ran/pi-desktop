@@ -50,7 +50,15 @@ async function load(): Promise<void> {
   }
   const transcript = createTranscript();
   transcript.loadMessages(messages);
-  blocks.value = transcript.blocks as TranscriptBlock[];
+  const loaded = transcript.blocks as TranscriptBlock[];
+  // 子代理的第一条「用户消息」就是它的完整任务书，通常很长：抽出来单独做成可滚动的任务块，
+  // 不要让它把整个对话挤到下面去。
+  taskText.value = "";
+  if (loaded[0]?.kind === "user") {
+    const first = loaded.shift()!;
+    taskText.value = (first.text ?? "").trim();
+  }
+  blocks.value = loaded;
   await nextTick();
   // 从开头读起：这是「进入子代理对话」，不是跳到结论。
   if (scroller.value) scroller.value.scrollTop = 0;
@@ -69,10 +77,9 @@ function metaOf(target: SubagentRow | null): string {
 }
 
 const hasSession = computed(() => Boolean(row.value?.sessionFile));
-/** 会话本身就以任务开头时不再重复显示任务条；只有回退到最终输出时才需要它。 */
-const showTask = computed(
-  () => Boolean(row.value?.task) && (fallback.value || !blocks.value.some((item) => item.kind === "user")),
-);
+/** 任务书：优先用会话里的第一条用户消息，回退到 details 里的 task。 */
+const taskText = ref("");
+const showTask = computed(() => Boolean(taskText.value || row.value?.task));
 const stateLabel = computed(() => (row.value ? subagentStateLabel(row.value.state) : ""));
 const output = computed(() => {
   const text = row.value?.finalOutput ?? "";
@@ -143,7 +150,10 @@ onBeforeUnmount(() => {
           </nav>
 
           <div ref="scroller" class="subagent-dialog-thread" data-subagent-thread>
-            <p v-if="showTask" class="subagent-dialog-task" :title="row!.task">{{ row!.task }}</p>
+            <section v-if="showTask" class="subagent-dialog-task">
+              <header class="subagent-dialog-task-head">任务</header>
+              <div class="subagent-dialog-task-body">{{ taskText || row!.task }}</div>
+            </section>
             <p v-if="loading" class="subagent-dialog-note">正在读取子代理会话…</p>
             <template v-else-if="!fallback">
               <BlockView v-for="item in blocks" :key="item.id" :block="item" />

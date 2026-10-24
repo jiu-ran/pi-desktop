@@ -738,6 +738,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+/**
+ * 侧栏显示的是「最近活动」：一直在这个会话里聊，就必须是刚刚，
+ * 而不是建会话那天的日期。文件 mtime 会随每次追加更新，取两者较大值。
+ */
+export function sessionTimestamp(headerTimestamp: unknown, mtimeMs: number): number {
+  const parsed = typeof headerTimestamp === "string" ? Date.parse(headerTimestamp) : Number.NaN;
+  const header = Number.isFinite(parsed) ? parsed : 0;
+  return Math.max(header, Math.round(mtimeMs));
+}
+
 const normalizePath = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
 
 /** 会话（含子代理会话）统一放在 <agentDir>/sessions 下。 */
@@ -804,7 +814,7 @@ export async function listSessions(cwd: string, keepFile: string | Iterable<stri
         // 有自定义名称的会话即使还没有文字内容也不能算空会话，
         // 否则切换会话时会被当作空文件清理掉。
         empty: !customTitle && !title,
-        timestamp: header.timestamp ? Date.parse(header.timestamp) : info.mtimeMs,
+        timestamp: sessionTimestamp(header.timestamp, info.mtimeMs),
       };
       sessionMetaCache.set(cacheKey, { mtimeMs: info.mtimeMs, size: info.size, summary });
       return summary;

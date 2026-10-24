@@ -85,6 +85,8 @@ try {
   const retried = await host.open(stuckAuthorized, 60_000);
   if (!retried?.state?.sessionFile) throw new Error("超时后重试应能正常启动");
   console.log("retry after timeout OK");
+
+
 } finally {
   await host.stopAll();
   await rm(root, { recursive: true, force: true });

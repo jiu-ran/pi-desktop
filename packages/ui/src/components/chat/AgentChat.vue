@@ -6,6 +6,7 @@ import { collectChanges } from "../../shared/diff.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
+import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
 import { searchableText } from "../../shared/search-text.ts";
 import ActivityGroup from "./ActivityGroup.vue";
@@ -497,15 +498,15 @@ function syncOutline(): void {
     activeOutlineId.value = "";
     return;
   }
-  const top = el.getBoundingClientRect().top + 8;
-  let active = outline.value[0]!.id;
+  const origin = el.getBoundingClientRect().top - el.scrollTop;
+  // 每一轮用户消息在滚动内容里的顶部坐标（升序）
+  const tops: number[] = [];
   for (const item of outline.value) {
     const node = el.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(item.id)}"]`);
-    if (!node) continue;
-    if (node.getBoundingClientRect().top <= top) active = item.id;
-    else break;
+    tops.push(node ? node.getBoundingClientRect().top - origin : Number.POSITIVE_INFINITY);
   }
-  activeOutlineId.value = active;
+  const index = activeOutlineIndex(tops, el.scrollTop, el.clientHeight, el.scrollHeight);
+  activeOutlineId.value = index >= 0 ? outline.value[index]!.id : "";
 }
 
 const copyTextByIndex = computed(() =>

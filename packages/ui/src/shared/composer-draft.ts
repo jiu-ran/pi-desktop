@@ -1,16 +1,30 @@
 import { readStorage, writeStorage } from "./storage.ts";
 
 /**
- * 输入框草稿持久化。
+ * 输入框草稿持久化（正文 + 附件）。
  *
  * 草稿按「项目 + 会话文件」分键保存，重启应用后可以接着写：
  * - 同一项目不同会话互不影响；
- * - 发送成功（正文清空）时删除键，不留下无主草稿；
+ * - 附件只存路径与名称，恢复时重新向主进程校验（文件被删掉就跳过并提示）；
+ * - 发送成功（正文清空、附件转交）时删除键，不留下无主草稿；
  * - 会话删除时一并清理。
  */
 const PREFIX = "pi-desktop.composer-draft:";
 /** 最多保留的草稿条数，避免 localStorage 累积过期草稿。 */
 const MAX_DRAFTS = 40;
+
+export interface StoredAttachment {
+  path: string;
+  name?: string;
+  kind?: string;
+}
+
+export interface ComposerDraft {
+  text: string;
+  attachments: StoredAttachment[];
+}
+
+const EMPTY: ComposerDraft = { text: "", attachments: [] };
 
 export function composerDraftKey(cwd: string, sessionFile: string): string {
   return `${PREFIX}${cwd}|${sessionFile}`;
@@ -45,15 +59,36 @@ function trimDrafts(keep: string): void {
   }
 }
 
-export function readComposerDraft(cwd: string, sessionFile: string): string {
-  if (!cwd) return "";
-  return readStorage(composerDraftKey(cwd, sessionFile)) ?? "";
+/** 兼容旧格式：以前只存纯文本。 */
+function parseDraft(raw: string | null): ComposerDraft {
+  if (!raw) return { ...EMPTY };
+  if (!raw.startsWith("{")) return { text: raw, attachments: [] };
+  try {
+    const parsed = JSON.parse(raw) as Partial<ComposerDraft>;
+    const text = typeof parsed.text === "string" ? parsed.text : "";
+    const attachments = Array.isArray(parsed.attachments)
+      ? parsed.attachments
+          .filter((item): item is StoredAttachment => Boolean(item && typeof item.path === "string" && item.path))
+          .slice(0, 20)
+          .map((item) => ({ path: item.path, name: item.name, kind: item.kind }))
+      : [];
+    return { text, attachments };
+  } catch {
+    return { ...EMPTY };
+  }
 }
 
-export function writeComposerDraft(cwd: string, sessionFile: string, text: string): void {
+export function readComposerDraft(cwd: string, sessionFile: string): ComposerDraft {
+  if (!cwd) return { ...EMPTY };
+  return parseDraft(readStorage(composerDraftKey(cwd, sessionFile)));
+}
+
+export function writeComposerDraft(cwd: string, sessionFile: string, draft: ComposerDraft): void {
   if (!cwd) return;
   const key = composerDraftKey(cwd, sessionFile);
-  if (!text) {
+  const text = draft.text ?? "";
+  const attachments = Array.isArray(draft.attachments) ? draft.attachments : [];
+  if (!text && !attachments.length) {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -61,7 +96,7 @@ export function writeComposerDraft(cwd: string, sessionFile: string, text: strin
     }
     return;
   }
-  writeStorage(key, text);
+  writeStorage(key, JSON.stringify({ text, attachments }));
   trimDrafts(key);
 }
 

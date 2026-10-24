@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { TranscriptBlock } from "../../kernel/transcript.ts";
-import ToolCard from "../../components/chat/tools/ToolCard.vue";
 import SearchHighlight from "../../components/chat/SearchHighlight.vue";
-import { formatDuration, subagentModeLabel, subagentStateLabel, summarizeSubagent } from "./summary.ts";
+import { formatDuration, subagentModeLabel, subagentStateLabel, summarizeSubagent, type SubagentState } from "./summary.ts";
 import SubagentDialog from "./SubagentDialog.vue";
 import "../../styles/subagent.css";
 
 /**
- * 子代理 / 并行 / 评审类工具：把 details.results 渲染成子任务清单。
- * details 缺失时退回普通文本结果（与 GenericTool 行为一致）。
+ * 子代理类工具（subagent / parallel / review / bg_wait）：单独占一行，不再折进活动组。
+ *
+ * 一行里给出「在跑什么、跑到哪、多久了」，点一下打开这个子代理自己的对话。
+ * details 缺失时退回普通工具卡片（参数 + 文本结果），与停用插件时的表现一致。
  */
 const props = defineProps<{
   block: TranscriptBlock;
@@ -18,123 +19,114 @@ const props = defineProps<{
 
 const settled = computed(() => props.block.status !== "running" && props.block.status !== "pending");
 const summary = computed(() => summarizeSubagent(props.block.details, settled.value));
+const rows = computed(() => summary.value?.rows ?? []);
 
-const agentName = computed(() => {
-  const agent = String(props.block.args?.agent ?? "").trim();
-  if (agent) return agent;
-  return summary.value?.agents[0] ?? "";
-});
-
-const verb = computed(() => (settled.value ? "子代理" : "子代理运行中"));
-
-const subtitle = computed(() => {
-  const task = String(props.block.args?.task ?? props.block.args?.prompt ?? "").replace(/\s+/g, " ").trim();
-  if (task) return task.slice(0, 160);
-  const rows = summary.value?.rows ?? [];
-  if (rows.length === 1) return rows[0].output.replace(/\s+/g, " ").slice(0, 160);
-  if (rows.length > 1) return `${rows.length} 个子任务`;
-  return agentName.value;
-});
-
-const badge = computed(() => {
-  const mode = summary.value?.mode ?? "";
-  const asyncRun = props.block.args?.async === true || props.block.args?.async === "true";
-  const parts = [mode ? subagentModeLabel(mode) : "", asyncRun ? "后台" : ""].filter(Boolean);
-  return parts.join(" · ");
-});
-
-const argsText = computed(() => {
-  const args = props.block.args ?? {};
-  const task = typeof args.task === "string" ? args.task : typeof args.prompt === "string" ? args.prompt : "";
-  const rest = Object.fromEntries(Object.entries(args).filter(([key]) => key !== "task" && key !== "prompt"));
-  const head = task ? `# 任务\n${task}` : "";
-  const tail = Object.keys(rest).length ? `# 参数\n${JSON.stringify(rest, null, 2)}` : "";
-  return [head, tail].filter(Boolean).join("\n\n");
-});
-
-const output = computed(() => {
-  const text = props.block.output ?? "";
-  return text.length > 8000 ? `${text.slice(0, 8000)}\n… 已截断，共 ${text.length} 字符` : text;
-});
-
-function metaOf(row: NonNullable<ReturnType<typeof summarizeSubagent>>["rows"][number]): string {
-  const parts: string[] = [];
-  const duration = formatDuration(row.durationMs);
-  if (duration) parts.push(duration);
-  if (row.tools !== null) parts.push(`${row.tools} 工具`);
-  if (row.turns !== null) parts.push(`${row.turns} 轮`);
-  if (row.tokens !== null) parts.push(`${row.tokens} tok`);
-  return parts.join(" · ");
-}
-
-/** 打开第 N 个子任务的对话弹窗；null 表示关闭。 */
+/** 打开第 N 个子任务的对话；null 表示关闭。 */
 const dialogIndex = ref<number | null>(null);
 
-const expanded = ref(false);
-// 有失败项时默认展开明细，方便直接定位问题。
-watch(
-  () => summary.value?.failed ?? 0,
-  (failed) => {
-    if (failed > 0) expanded.value = true;
-  },
-  { immediate: true },
+/** 运行中每秒钟刷新一次已用时长，卡住时也能看出时间在走。 */
+const now = ref(Date.now());
+let ticker = 0;
+const running = computed(() => !settled.value || rows.value.some((row) => row.state === "running"));
+onMounted(() => {
+  if (!running.value) return;
+  ticker = window.setInterval(() => { now.value = Date.now(); }, 1000);
+});
+onBeforeUnmount(() => { if (ticker) window.clearInterval(ticker); });
+
+const elapsedMs = computed(() => {
+  if (settled.value) return props.block.durationMs ?? null;
+  const started = props.block.startedAt;
+  return typeof started === "number" ? Math.max(0, now.value - started) : null;
+});
+
+const task = computed(() => {
+  const args = props.block.args ?? {};
+  const raw = String(args.task ?? args.prompt ?? rows.value[0]?.task ?? "").replace(/\s+/g, " ").trim();
+  return raw;
+});
+
+const title = computed(() => {
+  const list = rows.value;
+  if (list.length > 1) return `子代理 · ${subagentModeLabel(summary.value?.mode ?? "") || "并行"} ${list.length} 个子任务`;
+  const agent = list[0]?.agent || String(props.block.args?.agent ?? "").trim() || "子代理";
+  return `子代理 · ${agent}`;
+});
+
+/** 卡片整体状态取「最需要关注」的那个：失败 > 超时 > 停止 > 运行中 > 完成。 */
+const state = computed<SubagentState>(() => {
+  const states = rows.value.map((row) => row.state);
+  if (states.includes("failed")) return "failed";
+  if (states.includes("timeout")) return "timeout";
+  if (states.includes("stopped")) return "stopped";
+  if (states.includes("running") || !settled.value) return "running";
+  return "ok";
+});
+
+const meta = computed(() => {
+  const list = rows.value;
+  const parts: string[] = [];
+  const tools = list.reduce((sum, row) => sum + (row.tools ?? 0), 0);
+  const tokens = list.reduce((sum, row) => sum + (row.tokens ?? 0), 0);
+  if (tools) parts.push(`${tools} 工具`);
+  if (tokens) parts.push(`${tokens} tok`);
+  if (list.length > 1) {
+    const ok = list.filter((row) => row.state === "ok").length;
+    if (ok) parts.push(`${ok} 完成`);
+  }
+  const duration = formatDuration(elapsedMs.value);
+  if (duration) parts.push(duration);
+  return parts.join(" · ");
+});
+
+const errors = computed(() =>
+  rows.value
+    .filter((row) => row.error)
+    .slice(0, 2)
+    .map((row) => ({ agent: row.agent, error: row.error, state: row.state })),
 );
+
+/** 没有结构化结果时的原始输出：截断成一小块，避免整段结果把对话撑长。 */
+const rawOutput = computed(() => {
+  const text = props.block.output ?? "";
+  if (!text.trim()) return "";
+  return text.length > 1200 ? `${text.slice(0, 1200).trimEnd()}\n… 已截断，共 ${text.length} 字符` : text;
+});
+const canOpen = computed(() => rows.value.length > 0);
 </script>
 
 <template>
-  <ToolCard
-    :block="block"
-    :verb="verb"
-    :subtitle="subtitle"
-    :badge="badge"
-    :query="query"
-  >
-    <div v-if="summary?.rows.length" class="tool-section subagent-list">
-      <button type="button" class="subagent-head" @click="expanded = !expanded">
-        <span class="subagent-caret" :class="{ open: expanded }">›</span>
-        <span>{{ summary.rows.length }} 个子任务</span>
-        <span v-if="summary.ok" class="subagent-stat ok">{{ summary.ok }} 完成</span>
-        <span v-if="summary.failed" class="subagent-stat err">{{ summary.failed }} 失败</span>
-        <span v-if="summary.running" class="subagent-stat run">{{ summary.running }} 运行中</span>
-      </button>
-      <ul v-if="expanded" class="subagent-rows">
-        <li v-for="(row, index) in summary.rows" :key="`${row.agent}-${index}`">
-          <!-- 点一行就像进入那个子代理的对话：弹窗展示它自己的记录，不新建会话。 -->
-          <button
-            type="button"
-            class="subagent-row"
-            :data-state="row.state"
-            :title="`查看 ${row.agent} 的对话`"
-            :aria-label="`查看 ${row.agent} 的对话`"
-            @click="dialogIndex = index"
-          >
-            <span class="subagent-dot" aria-hidden="true" />
-            <span class="subagent-agent">{{ row.agent }}</span>
-            <span class="subagent-state">{{ subagentStateLabel(row.state) }}</span>
-            <span v-if="row.currentTool && row.state === 'running'" class="subagent-current">{{ row.currentTool }}</span>
-            <span class="subagent-meta">{{ metaOf(row) }}</span>
-            <span class="subagent-open" aria-hidden="true">›</span>
-            <span v-if="row.error" class="subagent-error" :title="row.error">{{ row.error }}</span>
-          </button>
-        </li>
-      </ul>
-    </div>
+  <section class="subagent-card" :data-state="state" :data-block-id="block.id">
+    <button
+      type="button"
+      class="subagent-card-main"
+      :aria-label="canOpen ? `查看${title}的对话` : title"
+      :title="canOpen ? (task || title) : task"
+      :disabled="!canOpen"
+      @click="canOpen && (dialogIndex = 0)"
+    >
+      <span class="subagent-dot" :data-state="state" aria-hidden="true" />
+      <span class="subagent-card-title">{{ title }}</span>
+      <span class="subagent-card-state" :data-state="state">
+        <span v-if="state === 'running'" class="mini-spinner" aria-hidden="true" />
+        {{ subagentStateLabel(state) }}
+      </span>
+      <span v-if="task && rows.length <= 1" class="subagent-card-task"><SearchHighlight :text="task" :query="query" /></span>
+      <span class="subagent-card-meta">{{ meta }}</span>
+      <span v-if="canOpen" class="subagent-card-open">查看对话 ›</span>
+    </button>
+    <p v-for="item in errors" :key="item.agent" class="subagent-card-error" :title="item.error">
+      <span class="subagent-card-error-agent">{{ item.agent }}</span>
+      <span class="subagent-card-error-text">{{ item.error }}</span>
+    </p>
+    <!-- 没有结构化结果（老版本扩展 / 还没回传进度）时，给一小块原始输出，别把整段结果铺满。 -->
+    <pre v-if="!canOpen && rawOutput" class="subagent-card-raw" :class="{ err: block.isError }"><SearchHighlight :text="rawOutput" :query="query" /></pre>
+  </section>
 
-    <div v-if="argsText" class="tool-section">
-      <span class="tool-section-label">参数</span>
-      <pre class="term-out"><SearchHighlight :text="argsText" :query="query" /></pre>
-    </div>
-
-    <div v-if="output" class="tool-section">
-      <span class="tool-section-label">结果</span>
-      <pre class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="output" :query="query" /></pre>
-    </div>
-
-    <SubagentDialog
-      v-if="dialogIndex !== null && summary?.rows.length"
-      :rows="summary.rows"
-      :initial-index="dialogIndex"
-      @close="dialogIndex = null"
-    />
-  </ToolCard>
+  <SubagentDialog
+    v-if="dialogIndex !== null && rows.length"
+    :rows="rows"
+    :initial-index="dialogIndex"
+    @close="dialogIndex = null"
+  />
 </template>

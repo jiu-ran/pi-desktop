@@ -310,6 +310,14 @@ export async function checkGitUiInElectron(win) {
     await evaluate(`window.__piDesktop.workbench.open(${JSON.stringify(previous.cwd)}).then(()=>true)`);
     await evaluate(`window.__piDesktop.workbench.state.activePanelId=${JSON.stringify(previous.panel)};window.__piDesktop.workbench.setPanelWidth(${previous.width});true`);
     await evaluate(`window.__piDesktop.workbench.removeProject(${literal}).then(()=>true)`);
-    await rm(dir, { recursive: true, force: true });
+    // Windows 上 Pi 子进程可能短暂占用目录：重试几次，清理失败不影响结论。
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        break;
+      } catch {
+        await wait(400);
+      }
+    }
   }
 }

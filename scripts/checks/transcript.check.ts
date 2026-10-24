@@ -105,16 +105,29 @@ const copyAfterToolDone = buildCopyTexts([
 ] as any, false);
 if (copyAfterToolDone.get(1) !== "我先跑一下检查") throw new Error("工具全部结束后应可复制本轮回复");
 
-// 新一轮开始流式时，历史回复的复制按钮不能跟着消失（只按该轮自己的状态判断）。
-const copyWithNewTurn = buildCopyTexts([
+// 复制按钮只出现在整段对话的最后一段回复下面：中间段落（包括引导消息拆出来的）不再给。
+const copyOnlyLast = buildCopyTexts([
   { kind: "user", id: "u1", text: "第一轮" },
   { kind: "text", id: "t1", text: "第一轮的回复" },
+  { kind: "tool", id: "c1", name: "bash", args: {}, status: "done", output: "ok" },
+  { kind: "text", id: "t2", text: "中间说明" },
   { kind: "user", id: "u2", text: "第二轮" },
-  { kind: "text", id: "t2", text: "第二轮的半截回复", streaming: true },
-] as any, true);
-if (copyWithNewTurn.get(1) !== "第一轮的回复") throw new Error("新一轮流式时历史回复仍应可复制");
-if (copyWithNewTurn.has(3)) throw new Error("正在流式的那一轮不应提供复制文本");
+  { kind: "text", id: "t3", text: "第二轮的回复" },
+] as any, false);
+if (copyOnlyLast.size !== 1) throw new Error("只有最后一段回复应有复制按钮");
+if (copyOnlyLast.get(5) !== "第二轮的回复") throw new Error("复制内容应是最后一段回复");
+if (copyOnlyLast.has(1) || copyOnlyLast.has(3)) throw new Error("中间段落不应再给复制按钮");
 
+// 引导（steering）消息会把一轮拆成多段：按钮仍然只留在最后，不落在对话中间。
+const copyAfterSteering = buildCopyTexts([
+  { kind: "user", id: "s1", text: "开始" },
+  { kind: "text", id: "s2", text: "先看看文件" },
+  { kind: "tool", id: "s3", name: "bash", args: {}, status: "done", output: "ok" },
+  { kind: "user", id: "s4", text: "顺便跑一下测试" },
+  { kind: "text", id: "s5", text: "都跑完了" },
+] as any, false);
+if (copyAfterSteering.size !== 1) throw new Error("引导消息后只应有一个复制按钮");
+if (copyAfterSteering.get(4) !== "都跑完了") throw new Error("复制按钮应落在最后一段回复");
 const replay = createTranscript();
 const snapshotMessages = [
   { role: "user", content: [{ type: "text", text: "检查状态" }] },

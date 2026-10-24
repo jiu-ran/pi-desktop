@@ -50,7 +50,19 @@ export const ACTIVITY_MIN_STEPS = 4;
 export const ACTIVITY_MAX_STEPS = 20;
 
 /** 这些工具本身是主要产物或需要用户交互，不放进折叠的活动组。 */
-const PRIMARY_TOOLS = new Set(["edit", "write", "apply_patch", "request_review", "ask_user_question"]);
+// 子代理类工具（subagent / parallel / review / bg_wait）单独成行：它们代表一次完整的
+// 子任务，折进活动组后既看不出在跑什么，也没法点开对话。
+const PRIMARY_TOOLS = new Set([
+  "edit",
+  "write",
+  "apply_patch",
+  "request_review",
+  "ask_user_question",
+  "subagent",
+  "parallel",
+  "review",
+  "bg_wait",
+]);
 
 const TOOL_VERBS: Record<string, string> = {
   read: "读取",

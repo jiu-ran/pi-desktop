@@ -41,6 +41,8 @@ export interface TranscriptBlock {
   details?: any;
   isError?: boolean;
   durationMs?: number | null;
+  /** 工具开始执行的时间戳（毫秒）；运行中用它算已用时长 */
+  startedAt?: number | null;
   level?: string;
   local?: boolean;
   usageText?: string;
@@ -117,7 +119,19 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
   function pushTool(id: string, name: string, args: any, status: TranscriptBlock["status"]): TranscriptBlock {
     let block = tools.get(id);
     if (!block) {
-      blocks.push({ kind: "tool", id, name, args: args ?? {}, status, output: "", details: null, isError: false, durationMs: null });
+      blocks.push({
+        kind: "tool",
+        id,
+        name,
+        args: args ?? {},
+        status,
+        output: "",
+        details: null,
+        isError: false,
+        durationMs: null,
+        // 运行中要能显示「已经跑了多久」：卡住时至少看得出还在走。
+        startedAt: status === "running" || status === "pending" ? Date.now() : null,
+      });
       block = blocks[blocks.length - 1];
       tools.set(id, block);
     } else {
