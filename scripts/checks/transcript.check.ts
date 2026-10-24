@@ -90,6 +90,31 @@ if (buildCopyTexts(copyBlocks, true).size !== 0) throw new Error("会话流式�
 const copyPartialBlock = buildCopyTexts([{ kind: "text", id: "t3", text: "半截", streaming: true }] as any, false);
 if (copyPartialBlock.size !== 0) throw new Error("单个文本块仍在流式时不应提供复制文本");
 
+// streaming 标记滞后（事件还没到）但后面还有工具在跑：仍然算「本轮没结束」，
+// 否则复制按钮会在对话过程中冒出来，复制到半截回复。
+const copyWhileToolRuns = buildCopyTexts([
+  { kind: "user", id: "u9", text: "看一下" },
+  { kind: "text", id: "t9", text: "我先跑一下检查" },
+  { kind: "tool", id: "c9", name: "bash", args: {}, status: "running", output: "" },
+] as any, false);
+if (copyWhileToolRuns.size !== 0) throw new Error("工具仍在运行时不应提供复制文本");
+const copyAfterToolDone = buildCopyTexts([
+  { kind: "user", id: "u9", text: "看一下" },
+  { kind: "text", id: "t9", text: "我先跑一下检查" },
+  { kind: "tool", id: "c9", name: "bash", args: {}, status: "done", output: "ok" },
+] as any, false);
+if (copyAfterToolDone.get(1) !== "我先跑一下检查") throw new Error("工具全部结束后应可复制本轮回复");
+
+// 新一轮开始流式时，历史回复的复制按钮不能跟着消失（只按该轮自己的状态判断）。
+const copyWithNewTurn = buildCopyTexts([
+  { kind: "user", id: "u1", text: "第一轮" },
+  { kind: "text", id: "t1", text: "第一轮的回复" },
+  { kind: "user", id: "u2", text: "第二轮" },
+  { kind: "text", id: "t2", text: "第二轮的半截回复", streaming: true },
+] as any, true);
+if (copyWithNewTurn.get(1) !== "第一轮的回复") throw new Error("新一轮流式时历史回复仍应可复制");
+if (copyWithNewTurn.has(3)) throw new Error("正在流式的那一轮不应提供复制文本");
+
 const replay = createTranscript();
 const snapshotMessages = [
   { role: "user", content: [{ type: "text", text: "检查状态" }] },
