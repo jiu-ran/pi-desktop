@@ -262,7 +262,7 @@ const sections = computed<PanelSection[]>(() => {
   const list = changes.value.filter(item => (!sessionOnly.value || item.agentTouched)
     && item.path.toLowerCase().includes(filter.value.trim().toLowerCase()));
   const defs = view.value === "session" ? [
-    { id: "committed" as const, label: "会话快照（非实时状态）", items: list.filter(item => item.session) },
+    { id: "committed" as const, label: "会话快照", items: list.filter(item => item.session) },
   ] : hasRepo.value ? [
     { id: "staged" as const, label: "已暂存", items: list.filter(isStaged) },
     { id: "changes" as const, label: "未暂存", items: list.filter(isUnstaged) },
@@ -710,6 +710,12 @@ function reveal(change: RepoChange): void {
                 @keydown.enter.prevent="openRow(section, row)"
                 @keydown.space.prevent="openRow(section, row)"
               >
+                <span
+                  v-for="level in row.depth"
+                  :key="`rail-${level}`"
+                  class="git-rail"
+                  :style="{ left: `calc(var(--git-tree-base, 6px) + ${level - 1} * var(--git-tree-indent, 20px) + 7px)` }"
+                />
                 <span v-if="row.kind === 'folder'" class="git-caret" :class="{ open: !collapsedFolders.has(`${section.id}:${row.path}`) }" v-html="icons.chevronRight" />
                 <span v-else class="git-caret" />
                 <span class="git-file-icon" aria-hidden="true" v-html="row.kind === 'folder' ? icons.folder : icons.file" />
@@ -718,8 +724,8 @@ function reveal(change: RepoChange): void {
                   <span class="git-group-count">{{ row.count }} 个文件</span>
                 </template>
                 <template v-else-if="row.change">
-                  <span v-if="row.change.agentTouched" class="git-agent-dot" title="本会话中 Agent 修改过" />
-                  <span class="git-tree-badge" :data-kind="badgeKind(row.change)">{{ section.id === 'committed' ? '快照' : section.id === 'staged' ? row.change.index : badgeCode(row.change) }}</span>
+                  <span v-if="row.change.agentTouched && section.id !== 'committed'" class="git-agent-dot" title="本会话中 Agent 修改过" />
+                  <span v-if="section.id !== 'committed'" class="git-tree-badge" :data-kind="badgeKind(row.change)">{{ section.id === 'staged' ? row.change.index : badgeCode(row.change) }}</span>
                   <span class="git-row-actions" @keydown.stop>
                     <button v-if="section.id !== 'committed'" type="button" class="icon-btn small" :title="section.id === 'staged' ? '取消暂存此文件' : '暂存此文件'" :disabled="!canOperate" @click.stop="stageRow(section, row)" v-html="section.id === 'staged' ? icons.minus : icons.plus" />
                     <button type="button" class="icon-btn small" title="在代码编辑器中打开源码" @click.stop="onRowOpen(row)" v-html="icons.code" />

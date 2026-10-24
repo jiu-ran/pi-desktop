@@ -119,3 +119,14 @@
     order: 10;
   }
 }
+
+/* 层级引导线：让嵌套关系在叶子行没有箭头时依然清楚。 */
+.git-panel .git-tree-row .git-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+  opacity: 0.7;
+  pointer-events: none;
+}

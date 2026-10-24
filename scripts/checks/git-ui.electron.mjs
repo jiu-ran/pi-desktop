@@ -133,6 +133,13 @@ export async function checkGitUiInElectron(win) {
       const step = byDepth.get(depths[i])[0].name - byDepth.get(depths[i - 1])[0].name;
       assert.equal(step, 20, `层级缩进应恒定 20px，实际 ${step}px（深度 ${depths[i - 1]} → ${depths[i]}）`);
     }
+    // 层级引导线：每个非根行的引导线数量应等于其深度，嵌套关系才看得出来。
+    const railCount = await evaluate("[...document.querySelectorAll('.git-tree-row')].reduce((sum, row) => sum + row.querySelectorAll('.git-rail').length, 0)");
+    assert.equal(
+      railCount,
+      treeRows.reduce((sum, row) => sum + row.depth, 0),
+      `引导线数量应等于各层深度之和，实际 ${railCount}`,
+    );
     // 分区标题必须与子行用不同颜色区分（标题是「标签」层，子行才是内容）。
     const palette = await evaluate(`(() => {
       const color = (selector) => {
@@ -180,6 +187,18 @@ export async function checkGitUiInElectron(win) {
     assert.equal(await readFile(path.join(dir, "a.txt"), "utf8"), "three\n");
     await tab("快照");
     await poll("document.querySelector('.git-view-hint')?.textContent.includes('不代表当前 Git 状态')", "快照与实时改动分离");
+    // 快照分区已由标题表明「非实时」，行内不再重复「快照」标记。
+    const snapshotMarkers = await evaluate(`(() => ({
+      name: document.querySelector('.git-group-name')?.textContent?.trim() ?? "",
+      badges: document.querySelectorAll('.git-group .git-tree-badge').length,
+      dots: document.querySelectorAll('.git-group .git-agent-dot').length,
+      rows: document.querySelectorAll('.git-tree-row').length,
+    }))()`);
+    if (snapshotMarkers.rows > 0) {
+      assert.equal(snapshotMarkers.name, "会话快照", "快照分区标题应精简为「会话快照」");
+      assert.equal(snapshotMarkers.badges, 0, "快照行不应重复各自的「快照」标记");
+      assert.equal(snapshotMarkers.dots, 0, "快照行不应再显示 Agent 圆点");
+    }
     await tab("历史");
     await poll("document.querySelectorAll('.git-commit-row').length > 0", "提交历史入口");
     assert(await evaluate("[...document.querySelectorAll('.git-view-tabs button')].length === 5"), "五个可发现的视图入口");
