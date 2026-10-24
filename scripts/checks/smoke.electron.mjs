@@ -18,6 +18,8 @@ app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.disableHardwareAcceleration();
 
 const errors = [];
+/** 单个检查的上限：正常情况下最慢的终端检查约 12s。 */
+const STEP_TIMEOUT_MS = 90_000;
 let win;
 
 setTimeout(() => {
@@ -54,6 +56,24 @@ async function probe(label) {
   })())`));
   console.log(`[${label}]`, JSON.stringify(result));
   return result;
+}
+
+/**
+ * 每个检查单独计时并设上限：卡住时能看出是哪一步，也不会一直拖到全局硬超时。
+ */
+async function runCheck(name, run) {
+  const started = Date.now();
+  console.log(`[smoke] → ${name}`);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${name} 检查超时（${STEP_TIMEOUT_MS / 1000}s）`)), STEP_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([run(), timeout]);
+  } finally {
+    clearTimeout(timer);
+    console.log(`[smoke] ← ${name} ${Date.now() - started}ms`);
+  }
 }
 
 await import("../../dist-electron/main.js");
@@ -101,12 +121,12 @@ app.whenReady().then(async () => {
   if (!ready.ws || ready.ws.status !== "ready") errors.push("workspace did not become ready");
   if (ready.ws?.status === "ready") {
     try {
-      await checkTerminalInElectron(win);
-      await checkEditorInElectron(win);
-      await checkGitUiInElectron(win);
-      await checkTooltipInElectron(win);
-      await checkComposerDraftInElectron(win);
-      await checkSubagentInElectron(win);
+      await runCheck("terminal", () => checkTerminalInElectron(win));
+      await runCheck("editor", () => checkEditorInElectron(win));
+      await runCheck("git-ui", () => checkGitUiInElectron(win));
+      await runCheck("tooltip", () => checkTooltipInElectron(win));
+      await runCheck("composer-draft", () => checkComposerDraftInElectron(win));
+      await runCheck("subagent", () => checkSubagentInElectron(win));
     } catch (error) {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }

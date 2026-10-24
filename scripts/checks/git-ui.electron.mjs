@@ -10,7 +10,8 @@ export async function checkGitUiInElectron(win) {
   const evaluate = expression => win.webContents.executeJavaScript(expression, true);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const poll = async (expression, label) => {
-    for (let i = 0; i < 80; i++) { if (await evaluate(expression)) return; await wait(100); }
+    // 分支列表与 diff 都是异步加载的；重负载时 8s 不够，放宽到 15s 减少偶发超时。
+    for (let i = 0; i < 150; i++) { if (await evaluate(expression)) return; await wait(100); }
     throw new Error(`Git 界面检查超时：${label}`);
   };
   const dir = await mkdtemp(path.join(tmpdir(), "pi-git-ui-"));
@@ -213,6 +214,12 @@ export async function checkGitUiInElectron(win) {
     await click("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[1]?.querySelector('button[title=\"暂存此文件\"]')", "单文件暂存按钮");
     await poll("document.querySelectorAll('.git-group').length === 2", "单文件暂存移入索引分区");
     await tab("分支");
+    // 分支视图可能是异步重建的：入口没出现就再点一次「分支」标签，避免偶发空列表。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await evaluate("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))")) break;
+      await tab("分支");
+      await wait(300);
+    }
     await poll("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))", "有改动时分支入口");
     await switchTo("main"); await wait(150);
     assert.equal(await evaluate("window.__piDesktop.workbench.active.value.branch"), "feature/new-ui", "脏工作区不得切换分支");
@@ -255,7 +262,8 @@ export async function checkGitUiInElectron(win) {
     })()`);
     await poll("Boolean(document.querySelector('.diff-comment-composer'))", "评论输入框出现");
     const composerGeometry = await evaluate(`(() => {
-      const view = document.querySelector('.diff-view').getBoundingClientRect();
+      const viewNode = document.querySelector('.diff-view');
+      const view = viewNode.getBoundingClientRect();
       const box = document.querySelector('.diff-comment-composer').getBoundingClientRect();
       const primary = document.querySelector('.diff-comment-actions .btn.primary').getBoundingClientRect();
       const area = document.querySelector('.diff-comment-composer textarea');
@@ -264,7 +272,8 @@ export async function checkGitUiInElectron(win) {
       area.value = ["第一行", "第二行", "第三行", "第四行"].join(String.fromCharCode(10));
       area.dispatchEvent(new Event('input', { bubbles: true }));
       return JSON.stringify({
-        viewWidth: Math.round(view.width),
+        // 用 clientWidth 对比：滚动条宽度不算在可视区域内，也不该算进评论框宽度。
+        viewWidth: Math.round(viewNode.clientWidth),
         viewRight: Math.round(view.right),
         boxWidth: Math.round(box.width),
         boxLeft: Math.round(box.left),
