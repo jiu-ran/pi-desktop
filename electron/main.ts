@@ -742,9 +742,8 @@ app.whenReady().then(() => {
     void runStartupMaintenance(app.getPath("userData")).then((result) => {
       if (!result.removedInstallers.length && !result.freedBytes) return;
       const freedMb = Math.round(result.freedBytes / (1024 * 1024));
-      console.log(
-        `[maintenance] 清理旧安装包 ${result.removedInstallers.length} 个，缓存 ${freedMb}MB`,
-      );
+      // 打包版没有终端：这类后台动作写进项目日志
+      log.info("maintenance", `清理旧安装包 ${result.removedInstallers.length} 个，缓存 ${freedMb}MB`);
     }).catch(() => {});
   }, 5000);
 

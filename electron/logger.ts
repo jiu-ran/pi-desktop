@@ -291,7 +291,7 @@ class LogStore {
 
 export const logStore = new LogStore();
 
-/** 直接设置日志目录（测试与兜底用）。 */
+/** 直接设置日志目录（测试用；应用走 useProjectLogs）。 */
 export function configureLogs(dir: string): void {
   logStore.configure(dir);
 }

@@ -99,9 +99,32 @@ export function replacePromptMessage(prompt: string, oldMessage: string, newMess
   const text = String(prompt ?? "");
   const oldText = String(oldMessage ?? "");
   const next = String(newMessage ?? "");
-  if (!oldText) return text ? `${text}\n${next}` : next;
-  if (text.endsWith(oldText)) return `${text.slice(0, text.length - oldText.length)}${next}`;
-  return next;
+  const { prefix, message } = splitPromptMessage(text);
+  const same = normalizeLine(message) === normalizeLine(oldText);
+  if (!prefix) return same || !message ? next : next;
+  // 附件 / 引用上下文原样保留，只替换后面那段用户文字
+  return `${prefix}\n${next}`;
+}
+
+function normalizeLine(value: string): string {
+  return String(value ?? "").replace(/\r\n/g, "\n").trim();
+}
+
+/**
+ * 把提示词拆成「自动附带的上下文」与「用户写的文字」。
+ *
+ * Pi 的队列里存的是完整提示词，用户编辑的是后半段；之前直接按「末尾是否相等」判断，
+ * 一旦带附件或引用（末尾对不上）就会整段丢掉上下文 —— 这里按最后一个
+ * `</file>` / `</directory>` / `</session>` 切开，保证上下文永远保留。
+ */
+export function splitPromptMessage(prompt: string): { prefix: string; message: string } {
+  const text = String(prompt ?? "");
+  let lastEnd = -1;
+  for (const match of text.matchAll(/<\/(?:file|directory|session)>/g)) {
+    lastEnd = (match.index ?? 0) + match[0].length;
+  }
+  if (lastEnd < 0) return { prefix: "", message: text.trim() };
+  return { prefix: text.slice(0, lastEnd), message: text.slice(lastEnd).trim() };
 }
 
 /** 算出编辑后的队列（保持原顺序；插话与追加分开）。 */

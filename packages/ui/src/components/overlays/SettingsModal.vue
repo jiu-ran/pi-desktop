@@ -90,11 +90,25 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
 
 const currentTabMeta = computed(() => tabs.find((t) => t.id === settingsModalState.tab) ?? tabs[0]);
 const settingsQuery = ref("");
-const visibleTabs = computed(() => {
+
+/** 左侧导航分组：把「Ai 本体相关」和「桌面端能力」分开，避免一长串平铺 */
+const TAB_GROUPS: Array<{ id: string; label: string; tabs: SettingsTabId[] }> = [
+  { id: "agent", label: "对话与 Agent", tabs: ["conversation", "agents", "skills", "mcp", "packages"] },
+  { id: "ui", label: "界面", tabs: ["appearance", "plugins"] },
+  { id: "desktop", label: "桌面端", tabs: ["terminal", "environment", "logs"] },
+];
+
+const visibleGroups = computed(() => {
   const query = settingsQuery.value.trim().toLocaleLowerCase();
-  if (!query) return tabs;
-  return tabs.filter((tab) => `${tab.label} ${tab.desc}`.toLocaleLowerCase().includes(query));
+  return TAB_GROUPS.map((group) => ({
+    ...group,
+    items: group.tabs
+      .map((id) => tabs.find((tab) => tab.id === id))
+      .filter((tab): tab is (typeof tabs)[number] => Boolean(tab))
+      .filter((tab) => !query || `${tab.label} ${tab.desc}`.toLocaleLowerCase().includes(query)),
+  })).filter((group) => group.items.length);
 });
+const visibleTabs = computed(() => visibleGroups.value.flatMap((group) => group.items));
 
 // ---------- 运行日志 ----------
 const LOG_CAP = 100 * 1024 * 1024;
@@ -822,32 +836,49 @@ onBeforeUnmount(() => {
     <div class="settings-modal" role="dialog" aria-modal="true" aria-label="偏好设置">
       <!-- 左侧导航栏 -->
       <aside class="settings-nav">
+        <div class="settings-brand">
+          <span class="settings-brand-icon" v-html="icons.sliders" />
+          <div class="settings-brand-text">
+            <div class="settings-brand-title">设置</div>
+            <div class="settings-brand-sub">Pi Desktop</div>
+          </div>
+        </div>
         <label class="settings-search">
           <span v-html="icons.search" />
           <input v-model="settingsQuery" type="search" placeholder="搜索设置" />
         </label>
 
         <nav class="settings-nav-list">
-          <button
-            v-for="item in visibleTabs"
-            :key="item.id"
-            type="button"
-            class="settings-nav-item"
-            :class="{ active: settingsModalState.tab === item.id }"
-            @click="settingsModalState.tab = item.id"
-          >
-            <span>{{ item.label }}</span>
-          </button>
+          <template v-for="group in visibleGroups" :key="group.id">
+            <div class="settings-nav-group">{{ group.label }}</div>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              type="button"
+              class="settings-nav-item"
+              :class="{ active: settingsModalState.tab === item.id }"
+              :data-settings-tab="item.id"
+              @click="settingsModalState.tab = item.id"
+            >
+              <span class="settings-nav-icon" v-html="item.icon" />
+              <span class="settings-nav-label">{{ item.label }}</span>
+            </button>
+          </template>
+          <div v-if="!visibleGroups.length" class="settings-nav-empty">没有匹配的设置项</div>
         </nav>
+
+        <div class="settings-nav-foot">
+          <span><kbd>Esc</kbd> 关闭</span>
+          <span>拖动边缘可移动</span>
+        </div>
       </aside>
 
       <!-- 右侧内容区 -->
       <section class="settings-main">
         <header class="settings-head">
-          <div class="settings-breadcrumb">
-            <span>设置</span>
-            <span>›</span>
-            <strong>{{ currentTabMeta.label }}</strong>
+          <div class="settings-head-text">
+            <h2 class="settings-title">{{ currentTabMeta.label }}</h2>
+            <p class="settings-desc">{{ currentTabMeta.desc }}</p>
           </div>
           <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
         </header>
@@ -1911,9 +1942,9 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <footer class="settings-footer">
-          <button type="button" class="btn ghost" @click="handleResetAll">恢复默认</button>
-          <button type="button" class="btn primary" @click="requestCloseSettings">确定</button>
-          <button type="button" class="btn" @click="requestCloseSettings">关闭</button>
+          <span class="settings-footer-hint">改动会立即生效并保存</span>
+          <button type="button" class="btn ghost small" @click="handleResetAll">恢复默认</button>
+          <button type="button" class="btn primary small" @click="requestCloseSettings">完成</button>
         </footer>
       </section>
     </div>

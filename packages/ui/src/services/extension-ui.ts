@@ -6,6 +6,8 @@ export interface ToastItem {
   id: number;
   level: string;
   text: string;
+  /** 同一条消息重复出现的次数（合并成一张卡片显示 ×N） */
+  count?: number;
 }
 
 export const extState = reactive({
@@ -16,13 +18,31 @@ export const extState = reactive({
 });
 
 let toastSeq = 0;
+/** 每条提示的消失定时器：重复消息要重置计时，否则第二条还没看清就没了 */
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export function pushToast(level: string, text: string): void {
+  // 所有通知从同一个入口中文化，避免 Electron IPC 前缀和 Node 英文错误直接弹给用户。
+  const localized = localizeNotification(text, level);
+  // 同一条消息在短时间内重复出现时只保留一条：以前一个失败会被多个路径各报一次，
+  // 界面上就堆出三四张一模一样的提示。
+  const existing = extState.toasts.find((item) => item.text === localized && item.level === level);
+  if (existing) {
+    existing.count = (existing.count ?? 1) + 1;
+    const timer = toastTimers.get(existing.id);
+    if (timer) clearTimeout(timer);
+    toastTimers.set(existing.id, scheduleDismiss(existing.id, level));
+    return;
+  }
   toastSeq += 1;
   const id = toastSeq;
-  // 所有通知从同一个入口中文化，避免 Electron IPC 前缀和 Node 英文错误直接弹给用户。
-  extState.toasts.push({ id, level, text: localizeNotification(text, level) });
-  setTimeout(() => {
+  extState.toasts.push({ id, level, text: localized, count: 1 });
+  toastTimers.set(id, scheduleDismiss(id, level));
+}
+
+function scheduleDismiss(id: number, level: string): ReturnType<typeof setTimeout> {
+  return setTimeout(() => {
+    toastTimers.delete(id);
     const index = extState.toasts.findIndex((item) => item.id === id);
     if (index >= 0) extState.toasts.splice(index, 1);
   }, level === "error" ? 8000 : 4500);

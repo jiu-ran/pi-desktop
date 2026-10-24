@@ -153,3 +153,42 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   assert.equal(extractSessionBody("没有包裹的纯文本"), "没有包裹的纯文本", "没有包裹时原样返回");
   console.log("session body OK 去包裹 / 再拼回 / 兜底");
 }
+
+// 带附件/引用时编辑排队消息：上下文必须原样保留（以前末尾对不上会把上下文整段丢掉）
+{
+  const { replacePromptMessage, splitPromptMessage } = await import("../../packages/ui/src/shared/queue-view.ts");
+  const prompt = '<file name="a.txt">\n内容\n</file>\n<session name="s.jsonl" title="T">\n摘要\n</session>\n原来的话';
+  const split = splitPromptMessage(prompt);
+  assert.equal(split.message, "原来的话", "应切出末尾的用户文字");
+  assert.ok(split.prefix.endsWith("</session>"), "前缀应包含全部上下文");
+  assert.equal(
+    replacePromptMessage(prompt, "原来的话", "改过的话"),
+    '<file name="a.txt">\n内容\n</file>\n<session name="s.jsonl" title="T">\n摘要\n</session>\n改过的话',
+  );
+  // 末尾文字对不上（比如消息里剥离了技能卡）也不能丢上下文
+  assert.equal(
+    replacePromptMessage(prompt, "完全对不上的旧文字", "新文字"),
+    '<file name="a.txt">\n内容\n</file>\n<session name="s.jsonl" title="T">\n摘要\n</session>\n新文字',
+  );
+  // 纯上下文（没有用户文字）时追加
+  assert.equal(
+    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "", "补一句"),
+    '<file name="a.txt">\n内容\n</file>\n补一句',
+  );
+  console.log("queue edit keeps context OK 拆分 / 替换 / 兜底");
+}
+
+// 主进程与渲染进程拼出的会话块必须一模一样：不一致会让历史里的引用卡片退化成纯文本
+{
+  const { buildSessionBlock } = await import("../../packages/ui/src/shared/session-block.ts");
+  const { sessionContextBlock } = await import("../../electron/session-context.ts");
+  const messages = [
+    { role: "user", content: [{ type: "text", text: "第一句" }] },
+    { role: "assistant", content: [{ type: "text", text: "第二句" }] },
+  ];
+  const fromMain = sessionContextBlock({ file: "C:\a\b.jsonl", title: "标题 & 特殊字符 <x>", messages });
+  const body = fromMain.slice(fromMain.indexOf(">") + 1, fromMain.lastIndexOf("</session>")).trim();
+  const fromRenderer = buildSessionBlock({ file: "C:\a\b.jsonl", title: "标题 & 特殊字符 <x>", body, messages: messages.length });
+  assert.equal(fromRenderer.trimEnd(), fromMain.trimEnd(), "两侧拼出的会话块必须一致");
+  console.log("session block parity OK 主进程 / 渲染进程一致");
+}

@@ -931,8 +931,27 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  /**
+   * 从「最近项目」里移除。
+   *
+   * 主进程会同时撤销该目录的授权，所以这里必须把本地工作区一起丢掉：
+   * 否则后续任何一次会话刷新都会报「项目目录尚未获得授权」，界面上刷出一片错误提示。
+   */
   async function forget(cwd: string): Promise<void> {
+    const ws = findWorkspace(cwd);
+    const target = ws?.cwd ?? cwd;
     state.recent = await host.forget(cwd);
+    if (!ws) return;
+    workspaces.delete(target);
+    const refresh = sessionRefreshes.get(ws);
+    if (refresh?.timer) clearTimeout(refresh.timer);
+    sessionRefreshes.delete(ws);
+    if (projectPathKey(state.activeCwd) === projectPathKey(target)) {
+      const remaining = [...workspaces.values()].find((item: any) => item.status === "ready");
+      state.activeCwd = remaining?.cwd ?? [...workspaces.keys()][0] ?? "";
+      bus.emit("workspace:switched", { cwd: state.activeCwd });
+    }
+    bus.emit("workspace:removed", { cwd: target });
   }
 
   async function removeProject(cwd: string, { deleteSessions = false }: { deleteSessions?: boolean } = {}): Promise<any> {

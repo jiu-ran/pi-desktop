@@ -13,6 +13,7 @@ import { checkSubagentInElectron } from "./subagent.electron.mjs";
 import { checkSessionQuoteInElectron } from "./session-quote.electron.mjs";
 import { checkQueueInElectron } from "./queue.electron.mjs";
 import { checkCrossProjectQuoteInElectron } from "./cross-quote.electron.mjs";
+import { checkSettingsInElectron } from "./settings.electron.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
@@ -198,6 +199,7 @@ app.whenReady().then(async () => {
       await runCheck("session-quote", () => checkSessionQuoteInElectron(win));
       await runCheck("queue", () => checkQueueInElectron(win));
       await runCheck("cross-quote", () => checkCrossProjectQuoteInElectron(win));
+      await runCheck("settings", () => checkSettingsInElectron(win));
     } catch (error) {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }
