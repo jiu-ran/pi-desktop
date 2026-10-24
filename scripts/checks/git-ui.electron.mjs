@@ -87,7 +87,18 @@ export async function checkGitUiInElectron(win) {
     await writeFile(path.join(dir, "nested/a/b/two.txt"), "two\n");
     await writeFile(path.join(dir, "nested/a/b/c/three.txt"), "three\n");
     await tab("更改"); await refresh();
-    await poll("document.querySelectorAll('.git-group').length === 3", "已暂存 / 未暂存 / 未跟踪分区");
+    // 分区数量依赖 git 状态解析：刷新是异步的，偶发慢一拍就再点一次刷新，别直接判失败。
+    {
+      let seen = false;
+      for (let attempt = 0; attempt < 4 && !seen; attempt += 1) {
+        for (let i = 0; i < 40; i += 1) {
+          if (await evaluate("document.querySelectorAll('.git-group').length === 3")) { seen = true; break; }
+          await wait(100);
+        }
+        if (!seen) await refresh();
+      }
+      assert(seen, "已暂存 / 未暂存 / 未跟踪分区");
+    }
     const names = await evaluate("[...document.querySelectorAll('.git-group-name')].map(e=>e.textContent)");
     assert.deepEqual(names, ["已暂存", "未暂存", "未跟踪"]);
     // 操作按钮必须整体隐藏，不能留下截图中的一排空白背景块。

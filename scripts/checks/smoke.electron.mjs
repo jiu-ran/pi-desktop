@@ -189,21 +189,38 @@ app.whenReady().then(async () => {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }
   }
-  // 卡顿日志链路：渲染进程上报 → 主进程 → userData/main-lag.log。
+  // 日志持久化链路：渲染进程上报 → 主进程 → userData/logs/*.log（总量上限 100MB）。
   // 界面「卡死」时这份日志是唯一的证据来源，坏掉就等于没法诊断。
+  const logsDir = path.join(app.getPath("userData"), "logs");
+  const readLog = (name) => readFile(path.join(logsDir, name), "utf8").catch(() => "");
   try {
-    const before = await readFile(path.join(app.getPath("userData"), "main-lag.log"), "utf8").catch(() => "");
+    const beforePerf = await readLog("perf.log");
     await win.webContents.executeJavaScript("window.piDesktop.reportLongTask(1234, 'smoke-check'); true");
-    let logged = false;
-    for (let i = 0; i < 20; i += 1) {
+    await win.webContents.executeJavaScript("window.piDesktop.logEvent('warn', 'smoke-check', '渲染侧日志落盘测试'); true");
+    let perfOk = false;
+    let rendererOk = false;
+    for (let i = 0; i < 30 && !(perfOk && rendererOk); i += 1) {
       await new Promise((r) => setTimeout(r, 150));
-      const now = await readFile(path.join(app.getPath("userData"), "main-lag.log"), "utf8").catch(() => "");
-      if (now !== before && now.includes("渲染进程长任务 1234ms")) { logged = true; break; }
+      if (!perfOk) {
+        const now = await readLog("perf.log");
+        perfOk = now !== beforePerf && now.includes("渲染进程长任务 1234ms");
+      }
+      if (!rendererOk) rendererOk = (await readLog("renderer.log")).includes("渲染侧日志落盘测试");
     }
-    if (!logged) errors.push("卡顿日志未写入 main-lag.log");
-    else console.log("[smoke] main-lag.log OK 渲染侧长任务已记录");
+    if (!perfOk) errors.push("卡顿日志未写入 logs/perf.log");
+    if (!rendererOk) errors.push("渲染进程日志未写入 logs/renderer.log");
+    const appLog = await readLog("app.log");
+    if (!appLog.includes("启动 v")) errors.push("启动信息未写入 logs/app.log");
+    // 总量必须受控：上限 100MB（冒烟时远低于，但顺带验证统计接口可用）
+    const info = JSON.parse(
+      await win.webContents.executeJavaScript("(async () => JSON.stringify(await window.piDesktop.logsInfo()))()"),
+    );
+    if (!info.dir || info.dir !== logsDir) errors.push(`日志目录不对：${info.dir}`);
+    if (info.totalBytes > 100 * 1024 * 1024) errors.push(`日志总量超过 100MB：${info.totalBytes}`);
+    if (!info.files.some((file) => file.name === "app.log")) errors.push("日志清单里应有 app.log");
+    if (perfOk && rendererOk) console.log("[smoke] logs OK 落盘 / 统计 / 上限");
   } catch (error) {
-    errors.push(`卡顿日志检查失败：${error?.message ?? error}`);
+    errors.push(`日志检查失败：${error?.message ?? error}`);
   }
 
   // 一次性临时工作区用完就从「最近项目」里去掉，别让冒烟 profile 越积越多空项目。

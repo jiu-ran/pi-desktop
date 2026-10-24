@@ -14,6 +14,7 @@ import { firstUserTitle } from "./session-title.ts";
 import { readSessionName } from "./session-name.ts";
 import { sessionContextBlock } from "./session-context.ts";
 import { logPerfLine } from "./perf-log.ts";
+import { log } from "./logger.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
@@ -971,6 +972,7 @@ export class PiHost {
   private async discardWorkspace(cwd: string): Promise<void> {
     const pool = this.clients.get(cwd);
     if (!pool) return;
+    log.pi("warn", "worker", `丢弃工作区 worker：${cwd}`);
     this.clients.delete(cwd);
     const clients = [...pool.workers.values()].map((slot) => slot.client);
     pool.workers.clear();
@@ -995,10 +997,13 @@ export class PiHost {
       else if (event?.type === "agent_settled") {
         slot.streaming = false;
         this.pruneIdleWorkers(pool);
-      } else if (event?.type === "compaction_start") slot.compacting = true;
-      else if (event?.type === "compaction_end") {
+      } else if (event?.type === "compaction_start") {
+        slot.compacting = true;
+        log.pi("info", "compaction", `开始压缩上下文 ${path.basename(slot.sessionFile || cwd)}`);
+      } else if (event?.type === "compaction_end") {
         slot.compacting = false;
         this.pruneIdleWorkers(pool);
+        log.pi("info", "compaction", `压缩结束 ${path.basename(slot.sessionFile || cwd)}`);
       }
       // Startup events can arrive before getState establishes the session identity.
       // Do not route an unowned event to the renderer's currently active session.
@@ -1009,6 +1014,7 @@ export class PiHost {
       await client.start();
       let state = await client.getState();
       const initialFile = state.sessionFile ?? "";
+      log.pi("info", "worker", `已启动 ${cwd} · ${path.basename(state.sessionFile || "(新会话)")}`);
 
       if (options.targetSessionFile) {
         if (normSessionFile(initialFile) !== normSessionFile(options.targetSessionFile)) {
@@ -1016,6 +1022,7 @@ export class PiHost {
           // 先用刚启动的新会话，用户可以在会话列表里换一个。
           const switched = await client.switchSession(options.targetSessionFile).catch((error: any) => {
             if (!isBrokenSessionError(error)) throw error;
+            log.warn("session", `会话文件无法加载，改用新会话：${path.basename(options.targetSessionFile!)}`);
             logPerfLine(`会话文件无法加载，改用新会话：${path.basename(options.targetSessionFile!)}`);
             return null;
           });

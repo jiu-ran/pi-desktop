@@ -18,6 +18,7 @@ import {
   type SettingsTabId,
 } from "../../services/settings.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
+import { formatBytes as formatSize } from "../../shared/attachments.ts";
 
 const TerminalSettings = defineAsyncComponent(() => import("../terminal/TerminalSettings.vue"));
 const { workbench, plugins, bus } = useKernel();
@@ -79,6 +80,12 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
     icon: icons.terminal,
     desc: "本机 Pi CLI 连接诊断、工作区进程池与全局快捷键",
   },
+  {
+    id: "logs",
+    label: "运行日志",
+    icon: icons.text,
+    desc: "主进程 / 渲染进程 / Pi / 卡顿日志，总量上限 100MB，可打开目录或清理",
+  },
 ];
 
 const currentTabMeta = computed(() => tabs.find((t) => t.id === settingsModalState.tab) ?? tabs[0]);
@@ -88,6 +95,68 @@ const visibleTabs = computed(() => {
   if (!query) return tabs;
   return tabs.filter((tab) => `${tab.label} ${tab.desc}`.toLocaleLowerCase().includes(query));
 });
+
+// ---------- 运行日志 ----------
+const LOG_CAP = 100 * 1024 * 1024;
+const logSummary = reactive<{ dir: string; totalBytes: number; files: Array<{ name: string; size: number; mtimeMs: number }> }>({
+  dir: "",
+  totalBytes: 0,
+  files: [],
+});
+const logBusy = ref(false);
+
+function formatLogTime(ms: number): string {
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function loadLogs(): Promise<void> {
+  const bridge = (window as any).piDesktop;
+  if (!bridge?.logsInfo) return;
+  try {
+    const info = await bridge.logsInfo();
+    if (!info) return;
+    logSummary.dir = info.dir ?? "";
+    logSummary.totalBytes = info.totalBytes ?? 0;
+    logSummary.files = info.files ?? [];
+  } catch {
+    // 读不到日志目录不影响设置界面
+  }
+}
+
+async function openLogs(): Promise<void> {
+  logBusy.value = true;
+  try {
+    await (window as any).piDesktop?.logsOpen?.();
+  } finally {
+    logBusy.value = false;
+  }
+}
+
+async function clearLogs(): Promise<void> {
+  logBusy.value = true;
+  try {
+    const info = await (window as any).piDesktop?.logsClear?.();
+    if (info) {
+      logSummary.dir = info.dir ?? logSummary.dir;
+      logSummary.totalBytes = info.totalBytes ?? 0;
+      logSummary.files = info.files ?? [];
+    } else {
+      await loadLogs();
+    }
+  } finally {
+    logBusy.value = false;
+  }
+}
+
+watch(
+  () => settingsModalState.tab,
+  (tab) => {
+    if (tab === "logs") void loadLogs();
+  },
+  { immediate: true },
+);
 
 const thinkingOptions: Array<{ value: typeof appSettings.defaultThinking; label: string }> = [
   { value: "off", label: `${thinkingLabel("off")} (off)` },
@@ -1798,6 +1867,45 @@ onBeforeUnmount(() => {
                 <div class="settings-shortcut-item"><span>停止当前正在执行的任务</span><kbd>Esc</kbd></div>
                 <div class="settings-shortcut-item"><span>引用项目文件或目录</span><kbd>@</kbd></div>
                 <div class="settings-shortcut-item"><span>打开斜杠命令菜单</span><kbd>/</kbd></div>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="settingsModalState.tab === 'logs'">
+            <div class="settings-group">
+              <div class="settings-group-title">日志目录</div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>占用 {{ formatSize(logSummary.totalBytes) }} / 上限 {{ formatSize(LOG_CAP) }}</strong>
+                  <span>{{ logSummary.dir || "尚未初始化" }}</span>
+                </div>
+                <div style="display: flex; gap: 6px; flex: none;">
+                  <button type="button" class="btn ghost small" :disabled="logBusy || !logSummary.dir" @click="openLogs">打开目录</button>
+                  <button type="button" class="btn ghost small" :disabled="logBusy || !logSummary.files.length" @click="clearLogs">清理</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>记录内容</strong>
+                  <span>
+                    app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error 与未捕获异常；
+                    pi.log 会话与压缩事件；perf.log 卡顿（主进程阻塞、慢 IPC、渲染进程长任务）。
+                    单文件 8MB 轮转，超过 100MB 会按时间删最旧的，正在写的文件不会被删。
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-title">文件（最近在前）</div>
+              <div v-if="!logSummary.files.length" class="settings-row">
+                <div class="settings-row-info"><span>还没有日志文件</span></div>
+              </div>
+              <div v-for="file in logSummary.files" :key="file.name" class="settings-row">
+                <div class="settings-row-info">
+                  <strong>{{ file.name }}</strong>
+                  <span>{{ formatSize(file.size) }} · {{ formatLogTime(file.mtimeMs) }}</span>
+                </div>
               </div>
             </div>
           </template>

@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { log } from "./logger.ts";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { IDisposable, IPty } from "node-pty";
@@ -337,10 +338,15 @@ export class TerminalHost {
     child.stderr?.on("data", (chunk: string) => this.append(task, "stderr", chunk));
     child.on("error", (error: Error) => {
       task.spawnError = error.message;
+      log.error("terminal", `进程错误：${error.message}`);
       this.append(task, "stderr", `\n[进程错误] ${error.message}\n`);
       this.finish(task, null, null);
     });
-    child.on("close", (code, signal) => this.finish(task, code, signal));
+    child.on("close", (code, signal) => {
+      // 只记退出码与信号，不记命令内容（可能带 token）
+      if (!task.pty) log.info("terminal", `任务结束 code=${code ?? "-"} signal=${signal ?? "-"}`);
+      this.finish(task, code, signal);
+    });
     return this.info(task);
   }
 

@@ -62,6 +62,13 @@ export interface WorkspaceEntry {
   kind: "folder" | "file";
 }
 
+/** 日志目录概览（设置页展示 / 清理按钮） */
+export interface LogSummary {
+  dir: string;
+  totalBytes: number;
+  files: Array<{ name: string; size: number; mtimeMs: number }>;
+}
+
 /** @ 引用对话时，主进程回传的会话上下文条目 */
 export interface SessionAttachmentItem {
   /** 会话文件绝对路径 */
@@ -402,8 +409,13 @@ export interface PiDesktopBridge {
   open: (cwd: string) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
-  /** 渲染进程卡顿上报（主进程记到 main-lag.log） */
+  /** 渲染进程卡顿上报（主进程记到 logs/perf.log） */
   reportLongTask?: (ms: number, label?: string) => void;
+  /** 前端日志持久化（logs/renderer.log） */
+  logEvent?: (level: "debug" | "info" | "warn" | "error", scope: string, message: string) => void;
+  logsInfo?: () => Promise<LogSummary>;
+  logsClear?: () => Promise<LogSummary>;
+  logsOpen?: () => Promise<boolean>;
   /** @ 引用对话：把别的会话压成上下文块 */
   prepareSessionAttachments: (cwd: string, files: string[]) => Promise<{
     items: SessionAttachmentItem[];

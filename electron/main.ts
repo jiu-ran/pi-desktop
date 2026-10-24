@@ -10,7 +10,8 @@ import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
-import { logPerfLine, setPerfLogFile } from "./perf-log.ts";
+import { logPerfLine } from "./perf-log.ts";
+import { configureLogs, log, logEvent, logStore } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
@@ -33,6 +34,19 @@ if (!app.isPackaged) {
     // 目录不可写时退回默认 profile，不影响启动
   }
 }
+/**
+ * 日志目录（userData/logs，总量上限 100MB）。
+ * 放在 profile 确定之后立即配置，这样启动早期的异常也能落盘。
+ */
+configureLogs(path.join(app.getPath("userData"), "logs"));
+
+process.on("uncaughtException", (error) => {
+  log.error("main", `未捕获异常：${error?.stack ?? error}`);
+});
+process.on("unhandledRejection", (reason: any) => {
+  log.error("main", `未处理的 Promise 拒绝：${reason?.stack ?? reason}`);
+});
+
 /** 剪贴板粘贴图片：允许的 MIME → 扩展名 */
 const PASTE_IMAGE_TYPES: Record<string, string> = {
   "image/png": "png",
@@ -382,12 +396,28 @@ function handle(channel: string, fn: (...args: any[]) => any) {
       }
       phase = "执行";
       return plain(await fn(...args));
+    } catch (error: any) {
+      // IPC 失败也要留痕：界面上只看到一句提示，真正的原因经常只在日志里。
+      log.error("ipc", `${channel} 失败（${phase}）：${error?.message ?? String(error)}`);
+      throw error;
     } finally {
       const cost = Date.now() - started;
       if (cost >= SLOW_IPC_MS) logPerfLine(`IPC ${channel} ${phase}耗时 ${cost}ms`);
     }
   });
 }
+
+app.on("render-process-gone", (_event, contents, details) => {
+  log.error("window", `渲染进程退出：${details.reason}（exitCode=${details.exitCode}）`);
+});
+app.on("child-process-gone", (_event, details) => {
+  log.warn("app", `子进程退出：${details.type} ${details.reason}（exitCode=${details.exitCode}）`);
+});
+
+app.on("browser-window-created", (_event, window) => {
+  log.info("window", `创建窗口 ${window.id}`);
+  window.on("closed", () => log.info("window", `关闭窗口 ${window.id}`));
+});
 
 app.on("second-instance", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -403,7 +433,6 @@ app.on("second-instance", () => {
  * 整个界面会像冻住一样。记录超过 1 秒的阻塞，出问题时能直接看出发生了什么。
  */
 function startLagWatchdog(): void {
-  setPerfLogFile(path.join(app.getPath("userData"), "main-lag.log"));
   let last = Date.now();
   const timer = setInterval(() => {
     const now = Date.now();
@@ -448,6 +477,28 @@ app.whenReady().then(() => {
     const label = typeof payload?.label === "string" ? payload.label.slice(0, 80) : "";
     if (!Number.isFinite(ms) || ms < 1000) return;
     logPerfLine(`渲染进程长任务 ${Math.round(ms)}ms${label ? `（${label}）` : ""}`);
+  });
+  // 渲染进程上报的日志（console.warn/error、Vue 错误、未捕获异常）
+  ipcMain.on("app:log-event", (event, payload: any) => {
+    if (!isAllowedSender(event)) return;
+    const level = ["debug", "info", "warn", "error"].includes(payload?.level) ? payload.level : "info";
+    const scope = typeof payload?.scope === "string" ? payload.scope.slice(0, 40) : "renderer";
+    const message = typeof payload?.message === "string" ? payload.message.slice(0, 8000) : "";
+    if (!message) return;
+    log.renderer(level, scope, message);
+  });
+  handle("app:logs-info", async () => logStore.summary());
+  handle("app:logs-clear", async () => {
+    await logStore.clear();
+    log.info("logs", "日志已清空");
+    return logStore.summary();
+  });
+  handle("app:logs-open", async () => {
+    const summary = await logStore.summary();
+    if (!summary.dir) return false;
+    await mkdir(summary.dir, { recursive: true });
+    await shell.openPath(summary.dir);
+    return true;
   });
   handle("pi:recent", async () => {
     const recent = await readRecent(recentFile());
@@ -618,6 +669,16 @@ app.whenReady().then(() => {
     }
   });
 
+  log.info(
+    "app",
+    `启动 v${app.getVersion()} · ${process.platform}/${process.arch} · ${app.isPackaged ? "packaged" : "dev"} · userData=${app.getPath("userData")} · pi=${process.env.PI_CODING_AGENT_DIR || "默认"}`,
+  );
+  app.on("before-quit", () => {
+    log.info("app", "退出");
+    // 退出前把缓冲刷干净，否则最后几行会丢
+    void logStore.flushAll();
+  });
+  void logStore.prune();
   createWindow();
   startLagWatchdog();
 

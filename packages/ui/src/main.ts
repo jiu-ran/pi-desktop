@@ -4,6 +4,7 @@ import { createKernel, KERNEL_KEY } from "./kernel/index.ts";
 import { builtinPlugins } from "./plugins/index.ts";
 import { localizeNotification } from "./shared/notify-text.ts";
 import { installLongTaskReporter } from "./shared/long-task.ts";
+import { installRenderLogReporter } from "./shared/render-log.ts";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/conversation.css";
@@ -25,6 +26,9 @@ async function boot(): Promise<void> {
   installLongTaskReporter({
     report: (ms, label) => (window as any).piDesktop?.reportLongTask?.(ms, label),
   });
+  // 前端 warn / error 与未捕获异常也落盘（logs/renderer.log），
+  // 否则主进程侧看不到前端到底报了什么错。
+  installRenderLogReporter({ logEvent: (level, scope, message) => (window as any).piDesktop?.logEvent?.(level, scope, message) });
   window.addEventListener("beforeunload", (event) => {
     if (!kernel.stage.allTabs.value.some(tab => tab.dirty || (tab.data as any)?.saving)) return;
     event.preventDefault();

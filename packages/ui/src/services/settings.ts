@@ -5,7 +5,17 @@ import { writeStorage } from "../shared/storage.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
-export type SettingsTabId = "conversation" | "appearance" | "terminal" | "mcp" | "packages" | "agents" | "skills" | "plugins" | "environment";
+export type SettingsTabId =
+  | "conversation"
+  | "appearance"
+  | "terminal"
+  | "mcp"
+  | "packages"
+  | "agents"
+  | "skills"
+  | "plugins"
+  | "environment"
+  | "logs";
 
 export type AutoSaveMode = "off" | "afterDelay" | "onFocusChange" | "onWindowChange";
 
