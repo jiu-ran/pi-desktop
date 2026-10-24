@@ -384,6 +384,30 @@ app.on("second-instance", () => {
   mainWindow.focus();
 });
 
+/**
+ * 主进程事件循环卡顿日志。
+ *
+ * 窗口绘制、IPC 分发都在主进程：一旦这里被同步阻塞（例如解析超大会话文件），
+ * 整个界面会像冻住一样。记录超过 1 秒的阻塞，出问题时能直接看出发生了什么。
+ */
+function startLagWatchdog(): void {
+  const logFile = path.join(app.getPath("userData"), "main-lag.log");
+  let last = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    const lag = now - last - 1000;
+    last = now;
+    if (lag < 1000) return;
+    const line = `${new Date(now).toISOString()} 主进程阻塞 ${lag}ms\n`;
+    void readFile(logFile, "utf8").then((text) => {
+      // 只留最近的一段，避免日志自己变成负担。
+      const next = text.length > 256 * 1024 ? line : text + line;
+      return writeFile(logFile, next);
+    }).catch(() => writeFile(logFile, line));
+  }, 1000);
+  (timer as any).unref?.();
+}
+
 app.whenReady().then(() => {
   if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => locatePi(customPath));
@@ -577,6 +601,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  startLagWatchdog();
 
   // 升级后顺手清理旧安装包与过大的运行时缓存：放在窗口出来之后再跑，
   // 不占启动时间；失败也只是少清一次，不影响使用。

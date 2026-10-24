@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseSessionHistory, sliceHistoryPage } from "../../electron/session-history.ts";
+import { clearSessionHistoryCache, parseSessionHistory, readSessionHistory, sliceHistoryPage } from "../../electron/session-history.ts";
 import { SESSION_TITLE_MAX, firstUserTitle, sessionTitleFromText } from "../../electron/session-title.ts";
 
 function line(obj: any): string {
@@ -186,3 +186,45 @@ assert.equal(
 );
 
 console.log(`history.check ok（共 ${history.length} 条，${pages} 页，覆盖 ${covered} 条）`);
+
+// 增量解析：会话文件是只追加的，读取时必须只解析新增的完整行，
+// 否则长会话（实测 85MB / 1.2 万条）每次 hydrate 都要重解析 300ms+，主进程被阻塞、界面像冻住。
+{
+  const { mkdtemp, appendFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-history-inc-"));
+  try {
+    const file = path.join(dir, "session.jsonl");
+    const rows = [line({ type: "session", version: 3, id: "s0", cwd: "C:/tmp" })];
+    for (let i = 0; i < 6; i += 1) rows.push(line({ type: "message", id: `m${i}`, parentId: i ? `m${i - 1}` : undefined, message: { role: i % 2 ? "assistant" : "user", content: [{ type: "text", text: `第 ${i} 条` }] } }));
+    await writeFile(file, rows.join("\n") + "\n");
+    const first = await readSessionHistory(file);
+    assert.equal(first.length, 6, "初次读取应为 6 条");
+
+    // 追加两条已正确链接的消息
+    await appendFile(file, line({ type: "message", id: "m6", parentId: "m5", message: { role: "user", content: [{ type: "text", text: "第 6 条" }] } }) + "\n");
+    await appendFile(file, line({ type: "message", id: "m7", parentId: "m6", message: { role: "assistant", content: [{ type: "text", text: "第 7 条" }] } }) + "\n");
+    const grown = await readSessionHistory(file);
+    assert.equal(grown.length, 8, "增量读取应包含新消息");
+    assert.deepEqual(grown.map((m) => m.role), parseSessionHistory((await (await import("node:fs/promises")).readFile(file, "utf8"))).map((m) => m.role), "增量结果必须和整份解析一致");
+
+    // 末尾半行（还没写完）不能被解析进去
+    await appendFile(file, '{"type":"message","id":"m8","parentId":"m7","message":{"role":"user","content":[{"type":"text","text":"写到一半');
+    const partial = await readSessionHistory(file);
+    assert.equal(partial.length, 8, "不完整的最后一行不应被解析");
+    await appendFile(file, '"}');
+    await appendFile(file, "]}}\n");
+    const completed = await readSessionHistory(file);
+    assert.equal(completed.length, 9, "补全后应读到这条消息");
+
+    // 文件被重写（变短 / 覆盖）时要整份重解析，不能沿用旧条目
+    await writeFile(file, rows.slice(0, 4).join("\n") + "\n");
+    const rewritten = await readSessionHistory(file);
+    assert.equal(rewritten.length, 3, "重写后应重新解析");
+    clearSessionHistoryCache(file);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+console.log("history incremental OK 追加 / 半行 / 重写");

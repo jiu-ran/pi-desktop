@@ -9,7 +9,7 @@
  * 因此必须读取 entry.message.role，而不是顶层 entry.role。
  */
 
-import { readFile, stat } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 
 export type HistoryRole = "user" | "assistant" | "toolResult";
 
@@ -57,10 +57,10 @@ function countBlocks(message: any): number {
   return 0;
 }
 
-export function parseSessionHistory(text: string): any[] {
-  const messages: any[] = [];
+/** 逐行解析 JSONL 条目（跳过坏行与空行）。 */
+export function parseSessionEntries(text: string): any[] {
   const entries: any[] = [];
-  if (!text) return messages;
+  if (!text) return entries;
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -73,8 +73,21 @@ export function parseSessionHistory(text: string): any[] {
     if (!entry || typeof entry !== "object") continue;
     entries.push(entry);
   }
-  // v3 JSONL 是树而不是扁平聊天：只沿最新叶子的 parentId 取当前分支，
-  // 不能把 fork 前的另一条回复也混入历史。旧文件没有 parentId 时维持兼容。
+  return entries;
+}
+
+export function parseSessionHistory(text: string): any[] {
+  return messagesFromEntries(parseSessionEntries(text));
+}
+
+/**
+ * 沿最新叶子的 parentId 取当前分支，再抽成可渲染消息列表。
+ * v3 JSONL 是树而不是扁平聊天：不能把 fork 前的另一条回复也混入历史；
+ * 旧文件没有 parentId 时维持兼容。
+ */
+export function messagesFromEntries(entries: any[]): any[] {
+  const messages: any[] = [];
+  if (!entries.length) return messages;
   const linked = entries.filter(entry => entry.type !== "session" && typeof entry.id === "string");
   let branch = entries;
   if (linked.length && linked.some(entry => Object.prototype.hasOwnProperty.call(entry, "parentId"))) {
@@ -151,12 +164,46 @@ export function sliceHistoryPage(
 interface CacheEntry {
   mtimeMs: number;
   size: number;
+  /** 已解析到文件的哪个字节位置（永远停在行边界） */
+  offset: number;
+  entries: any[];
   history: any[];
 }
 
 const cache = new Map<string, CacheEntry>();
 
-/** 读取并解析会话文件历史（带 mtime/size 缓存，避免翻页时重复解析大文件） */
+/** 从 offset 读新增内容，只取完整的行（末尾半行留给下次）。 */
+async function readAppended(sessionFile: string, offset: number, size: number): Promise<{ text: string; consumed: number }> {
+  const length = size - offset;
+  if (length <= 0) return { text: "", consumed: offset };
+  const handle = await open(sessionFile, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, offset);
+    const chunk = buffer.subarray(0, bytesRead);
+    const lastBreak = chunk.lastIndexOf(10);
+    if (lastBreak < 0) return { text: "", consumed: offset };
+    return { text: chunk.subarray(0, lastBreak + 1).toString("utf8"), consumed: offset + lastBreak + 1 };
+  } finally {
+    await handle.close();
+  }
+}
+
+function remember(sessionFile: string, entry: CacheEntry): void {
+  cache.set(sessionFile, entry);
+  if (cache.size > 24) {
+    const oldest = cache.keys().next().value;
+    if (oldest && oldest !== sessionFile) cache.delete(oldest);
+  }
+}
+
+/**
+ * 读取并解析会话文件历史。
+ *
+ * 以前文件一变就整份读进来重新 JSON.parse：长会话（实测 85MB / 1.2 万条）要 300ms 以上，
+ * 而流式期间文件一直在追加，每次 hydrate / 翻页都要重来一遍——主进程被阻塞，
+ * 窗口绘制也跟着停住，表现就是「整个界面卡死」。现在只解析新增的完整行。
+ */
 export async function readSessionHistory(sessionFile: string): Promise<any[]> {
   let stats: Awaited<ReturnType<typeof stat>>;
   try {
@@ -167,13 +214,24 @@ export async function readSessionHistory(sessionFile: string): Promise<any[]> {
   if (!stats.isFile()) return [];
   const hit = cache.get(sessionFile);
   if (hit && hit.mtimeMs === stats.mtimeMs && hit.size === stats.size) return hit.history;
-  const text = await readFile(sessionFile, "utf8");
-  const history = parseSessionHistory(text);
-  cache.set(sessionFile, { mtimeMs: stats.mtimeMs, size: stats.size, history });
-  if (cache.size > 24) {
-    const oldest = cache.keys().next().value;
-    if (oldest) cache.delete(oldest);
+
+  // 文件只是变长：只解析新追加的完整行，条目沿用上次结果。
+  if (hit && stats.size > hit.offset) {
+    const { text, consumed } = await readAppended(sessionFile, hit.offset, stats.size);
+    if (consumed > hit.offset) {
+      hit.entries.push(...parseSessionEntries(text));
+      hit.offset = consumed;
+    }
+    hit.history = messagesFromEntries(hit.entries);
+    hit.size = stats.size;
+    hit.mtimeMs = stats.mtimeMs;
+    return hit.history;
   }
+
+  const text = await readFile(sessionFile, "utf8");
+  const entries = parseSessionEntries(text);
+  const history = messagesFromEntries(entries);
+  remember(sessionFile, { mtimeMs: stats.mtimeMs, size: stats.size, offset: stats.size, entries, history });
   return history;
 }
 

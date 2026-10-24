@@ -112,8 +112,13 @@ export async function checkTooltipInElectron(win) {
     if (barBtn) {
       const box = barBtn.getBoundingClientRect();
       const atBar = { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
-      barBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atBar }));
-      await wait(800);
+      // 活动栏会随插件状态重渲染：轮询到 title 被摘掉为止，别只等一次。
+      for (let i = 0; i < 15; i += 1) {
+        barBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atBar }));
+        await wait(100);
+        if (!barBtn.isConnected) break;
+        if (barBtn.getAttribute('title') === null) break;
+      }
       barIntercepted = barBtn.isConnected ? barBtn.getAttribute('title') === null : null;
       barBtn.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 0, relatedTarget: document.body }));
       await wait(300);

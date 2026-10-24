@@ -55,3 +55,34 @@ assert.equal(sessionTimestamp(new Date(justNow - 60_000).toISOString(), justNow 
 assert.equal(sessionTimestamp(undefined, justNow), justNow, "没有文件头时间时退回 mtime");
 assert.equal(sessionTimestamp("not-a-date", justNow), justNow, "坏时间戳不能把时间算成 0");
 console.log("session timestamp OK 最近活动优先");
+
+// 大文件、没有 session_info：不能为了找名称把整个文件扫一遍（会阻塞主进程）。
+{
+  const bigRoot = await mkdtemp(path.join(tmpdir(), "pi-session-name-big-"));
+  try {
+    const big = path.join(bigRoot, "big-session.jsonl");
+    await writeFile(big, JSON.stringify({ type: "session", version: 1, timestamp: new Date().toISOString() }) + "\n");
+    const line = JSON.stringify({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "y".repeat(4000) }] } }) + "\n";
+    await appendFile(big, line.repeat(500));
+    const started = Date.now();
+    const name = await readSessionName(big, (await stat(big)).size, "头部名称");
+    const elapsed = Date.now() - started;
+    assert.equal(name, "头部名称", "找不到 session_info 时回退文件头名称");
+    assert.ok(elapsed < 1500, `大文件扫描必须有上限，实际 ${elapsed}ms`);
+
+    // 追加一条重命名：只扫新增的尾部就能拿到新名称。
+    const renamedAt = Date.now();
+    await appendFile(big, JSON.stringify({ type: "session_info", name: "新的会话名" }) + "\n");
+    const renamed = await readSessionName(big, (await stat(big)).size, "头部名称");
+    assert.equal(renamed, "新的会话名", "追加的 session_info 应被读出来");
+    assert.ok(Date.now() - renamedAt < 500, "追加后只应扫新增字节");
+
+    // 文件被重写（变长但没有新名称）时不能沿用旧名称。
+    await writeFile(big, JSON.stringify({ type: "session", version: 1, timestamp: new Date().toISOString() }) + "\n" + line.repeat(600));
+    const rewritten = await readSessionName(big, (await stat(big)).size, "重写后的头部名称");
+    assert.equal(rewritten, "重写后的头部名称", "重写文件后应回退到文件头名称");
+  } finally {
+    await rm(bigRoot, { recursive: true, force: true });
+  }
+}
+console.log("session name bounded scan OK 大文件 / 增量重命名 / 重写失效");
