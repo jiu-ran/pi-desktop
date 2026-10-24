@@ -36,6 +36,8 @@ export interface MentionSource {
   id: string;
   /** 注册它的插件 id（由内核填写，界面用来显示能力标签） */
   pluginId?: string;
+  /** 候选类型：session = 引用对话（用对话图标与对话样式） */
+  kind?: "session";
   /** 分组标题 */
   title: string;
   /** 分组顺序（越小越靠前） */
@@ -44,10 +46,26 @@ export interface MentionSource {
   pick: (item: MentionItem) => void | Promise<void>;
 }
 
+/** 插件提供的工具卡片渲染器（例如子代理） */
+export interface ToolRenderer {
+  id: string;
+  /** 接管哪些工具名 */
+  tools: string[];
+  /** 渲染组件（.vue 组件对象） */
+  component: any;
+  /** 注册它的插件 id（内核填写） */
+  pluginId?: string;
+}
+
 export interface PluginContext {
   readonly pluginId: string;
   /** 注册 `@` 选择器候选来源（停用插件时自动注销） */
   registerMentionSource: (source: MentionSource) => () => void;
+  /**
+   * 注册工具卡片渲染器：核心分发器只认这个注册表，
+   * 不再直接 import 任何插件组件（停用插件 = 卡片回到通用样式）。
+   */
+  registerToolRenderer: (renderer: ToolRenderer) => () => void;
   /** 订阅内核事件（插件停用时自动取消） */
   on: (type: string, handler: (payload: any) => void) => () => void;
   /** 发送内核事件 */
@@ -170,6 +188,18 @@ export function createPluginManager({
   const records = reactive<RegisteredSidebarPlugin[]>([]);
   /** 插件贡献的 `@` 候选来源（按 order 排序，停用时移除） */
   const mentionSources = reactive<MentionSource[]>([]);
+  /** 插件贡献的工具卡片渲染器（停用时移除） */
+  const toolRenderers = reactive<ToolRenderer[]>([]);
+
+  function registerToolRenderer(renderer: ToolRenderer, pluginId = ""): () => void {
+    if (!renderer?.id || !Array.isArray(renderer.tools) || !renderer.component) return () => {};
+    if (toolRenderers.some((item) => item.id === renderer.id)) return () => {};
+    toolRenderers.push(markRaw({ ...renderer, pluginId: pluginId || renderer.pluginId || "" }));
+    return () => {
+      const index = toolRenderers.findIndex((item) => item.id === renderer.id);
+      if (index >= 0) toolRenderers.splice(index, 1);
+    };
+  }
 
   function registerMentionSource(source: MentionSource, pluginId = ""): () => void {
     if (!source?.id || mentionSourceIds.has(source.id)) return () => {};
@@ -387,6 +417,8 @@ export function createPluginManager({
     sidebarPlugins,
     mentionSources,
     registerMentionSource,
+    toolRenderers,
+    registerToolRenderer,
     get,
     register,
     setEnabled,

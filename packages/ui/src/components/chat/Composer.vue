@@ -337,32 +337,16 @@ const menuItems = computed<any[]>(() => (menuMode.value === "options" ? optionIt
 const pathToken = computed(() => parseMentionToken(draft.value));
 
 /**
- * `@` 选择器里的「对话」候选：当前项目下除本会话之外的会话。
- * 引用会话不是插入路径，而是加一枚附件——发送时由主进程压成上下文块。
- */
-const SESSION_SUGGESTIONS = 5;
-const sessionRows = computed(() => {
-  if (!pathPicker.value) return [];
-  const list = (ws.value?.sessions ?? []) as any[];
-  const current = ws.value?.sessionFile ?? "";
-  const query = (pathToken.value?.query ?? "").trim().toLowerCase();
-  const words = query.split(/\s+/).filter(Boolean);
-  return list
-    .filter((item) => item?.path && item.path !== current && !item.empty)
-    .filter((item) => {
-      if (!words.length) return true;
-      const haystack = String(item.title ?? "").toLowerCase();
-      return words.every((word) => haystack.includes(word));
-    })
-    .slice(0, SESSION_SUGGESTIONS);
-});
-/**
- * 插件贡献的 `@` 候选分组（例如「其它项目的对话」）。
- * 来源由插件注册，停用插件时自动消失——这里只负责查询与展示。
+ * `@` 选择器里的候选分组。
+ *
+ * 核心只保留 Pi 自带的 `@` 文件 / 文件夹引用；对话引用（本项目、跨项目）都不是
+ * Pi 的能力，由插件贡献 —— 停用插件后 `@` 就只剩文件补全。
  */
 interface PickerGroup {
   id: string;
   title: string;
+  /** 候选类型：会话引用用对话图标，其它来源按默认样式 */
+  kind?: "session";
   items: Array<{ id: string; label: string; hint?: string; keywords?: string }>;
   source: any;
 }
@@ -370,11 +354,11 @@ const pluginGroups = ref<PickerGroup[]>([]);
 let pluginRequest = 0;
 
 const pluginItemCount = computed(() => pluginGroups.value.reduce((sum, group) => sum + group.items.length, 0));
-const pickerCount = computed(() => sessionRows.value.length + pluginItemCount.value + pathItems.value.length);
+const pickerCount = computed(() => pluginItemCount.value + pathItems.value.length);
 
-/** 分组在光标序列里的起始位置（会话 → 插件分组 → 文件） */
+/** 分组在光标序列里的起始位置（插件分组 → 文件） */
 function groupStart(index: number): number {
-  let start = sessionRows.value.length;
+  let start = 0;
   for (let i = 0; i < index; i += 1) start += pluginGroups.value[i]?.items.length ?? 0;
   return start;
 }
@@ -394,7 +378,7 @@ watch(
       sources.map(async (source) => {
         try {
           const items = await source.search(query);
-          return { id: source.id, title: source.title, items: items ?? [], source } as PickerGroup;
+          return { id: source.id, title: source.title, kind: source.kind, items: items ?? [], source } as PickerGroup;
         } catch {
           return null;
         }
@@ -544,23 +528,7 @@ function closePathPicker(): void {
   pathRequest += 1;
 }
 
-/** 选中「对话」：去掉输入框里的 @query，把这个会话加成附件。 */
-async function pickSession(session: any): Promise<void> {
-  if (!session) return;
-  const rest = removeMentionToken(draft.value);
-  try {
-    await workbench.addSessionAttachment(session);
-    draft.value = rest;
-  } catch (error) {
-    notifyError(error);
-    return;
-  }
-  closePathPicker();
-  await nextTick();
-  focus();
-}
-
-/** 选中插件提供的候选（例如其它项目的对话）：交给来源自己处理。 */
+/** 选中插件提供的候选（例如引用的对话）：交给来源自己处理。 */
 async function pickPluginItem(group: PickerGroup, item: PickerGroup["items"][number]): Promise<void> {
   if (!group?.source) return;
   try {
@@ -576,14 +544,9 @@ async function pickPluginItem(group: PickerGroup, item: PickerGroup["items"][num
   focus();
 }
 
-/** 回车/点击统一入口：会话 → 插件分组 → 文件。 */
+/** 回车/点击统一入口：插件分组 → 文件。 */
 async function pickPickerRow(index: number): Promise<void> {
-  const sessions = sessionRows.value;
-  if (index < sessions.length) {
-    await pickSession(sessions[index]);
-    return;
-  }
-  let cursor = sessions.length;
+  let cursor = 0;
   for (const group of pluginGroups.value) {
     if (index < cursor + group.items.length) {
       await pickPluginItem(group, group.items[index - cursor]);
@@ -967,37 +930,24 @@ const argHint = computed(() => {
           <div class="path-picker-head">
             <div class="path-picker-title">
               <span class="path-picker-at">@</span>
-              <span>对话 · 文件</span>
+              <span>文件与对话</span>
               <span v-if="pathToken?.query" class="path-picker-query">{{ pathToken.query }}</span>
             </div>
             <button class="path-picker-close" title="关闭（Esc）" aria-label="关闭" @click="closePathPicker">×</button>
           </div>
-          <div ref="pathList" class="path-picker-list" role="listbox" aria-label="对话、文件和文件夹">
-            <template v-if="sessionRows.length">
-              <div class="path-picker-section">引用对话</div>
-              <button
-                v-for="(item, index) in sessionRows"
-                :key="item.path"
-                class="path-picker-item path-picker-session"
-                :class="{ active: index === pathCursor }"
-                :aria-selected="index === pathCursor"
-                role="option"
-                @mouseenter="pathCursor = index"
-                @click="pickSession(item)"
-              >
-                <span class="path-item-icon session" v-html="icons.chat" />
-                <span class="path-item-name">{{ item.title || "未命名会话" }}</span>
-                <span class="path-item-relative">{{ relativeTime(item.timestamp) }}</span>
-              </button>
-            </template>
+          <div ref="pathList" class="path-picker-list" role="listbox" aria-label="文件和文件夹">
             <template v-for="(group, groupIndex) in pluginGroups" :key="group.id">
               <div class="path-picker-section">{{ group.title }}</div>
               <button
                 v-for="(item, index) in group.items"
                 :key="item.id"
                 class="path-picker-item path-picker-plugin"
-                :class="{ active: groupStart(groupIndex) + index === pathCursor }"
+                :class="{
+                  active: groupStart(groupIndex) + index === pathCursor,
+                  'path-picker-session': group.kind === 'session',
+                }"
                 :aria-selected="groupStart(groupIndex) + index === pathCursor"
+                :data-mention-source="group.id"
                 role="option"
                 @mouseenter="pathCursor = groupStart(groupIndex) + index"
                 @click="pickPluginItem(group, item)"
@@ -1009,15 +959,15 @@ const argHint = computed(() => {
             </template>
             <div v-if="pathLoading" class="path-picker-state"><span class="mini-spinner" />正在搜索…</div>
             <template v-if="pathItems.length">
-              <div v-if="sessionRows.length || pluginItemCount" class="path-picker-section">文件与文件夹</div>
+              <div v-if="pluginItemCount" class="path-picker-section">文件与文件夹</div>
               <button
                 v-for="(item, index) in pathItems"
                 :key="item.path"
                 class="path-picker-item"
-                :class="{ active: sessionRows.length + pluginItemCount + index === pathCursor }"
-                :aria-selected="sessionRows.length + pluginItemCount + index === pathCursor"
+                :class="{ active: pluginItemCount + index === pathCursor }"
+                :aria-selected="pluginItemCount + index === pathCursor"
                 role="option"
-                @mouseenter="pathCursor = sessionRows.length + pluginItemCount + index"
+                @mouseenter="pathCursor = pluginItemCount + index"
                 @click="pickPath(item)"
               >
                 <span class="path-item-icon" :class="pathIcon(item).className" v-html="pathIcon(item).icon" />

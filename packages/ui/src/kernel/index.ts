@@ -173,6 +173,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
     return Object.freeze({
       pluginId: plugin.id,
       registerMentionSource: (source) => track(plugins.registerMentionSource(source, plugin.id)),
+      registerToolRenderer: (renderer) => track(plugins.registerToolRenderer(renderer, plugin.id)),
       on: (type: string, handler: (payload: any) => void) => track(bus.on(type, handler)),
       emit: (type: string, payload?: any) => bus.emit(type, payload),
       onDispose: (dispose: () => void) => track(dispose),

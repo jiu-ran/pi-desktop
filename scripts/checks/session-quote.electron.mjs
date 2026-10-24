@@ -25,6 +25,21 @@ export async function checkSessionQuoteInElectron(win) {
     throw new Error(`引用对话检查超时：${label}`);
   };
 
+  /** 等对话框里的「保存」可用再点：Vue 需要一拍才会放开 disabled。 */
+  const saveQuote = async (label) => {
+    for (let i = 0; i < 30; i += 1) {
+      const clicked = await evaluate(`(() => {
+        const save = [...document.querySelectorAll('.quote-dialog .quote-actions button')].find((n) => n.textContent.trim() === "保存");
+        if (!save || save.disabled) return false;
+        save.click();
+        return true;
+      })()`);
+      if (clicked) return;
+      await wait(100);
+    }
+    throw new Error(`${label}：保存按钮一直不可用`);
+  };
+
   const dir = await mkdtemp(path.join(tmpdir(), "pi-quote-"));
   const seeds = [];
   const literal = JSON.stringify(dir);
@@ -105,7 +120,10 @@ export async function checkSessionQuoteInElectron(win) {
     assert.ok(box.top >= 0 && box.bottom <= box.viewport, `选择器应在视口内：top=${box.top} bottom=${box.bottom} viewport=${box.viewport}`);
     assert.ok(box.visibleRows >= 2, `至少要有 2 行可见候选，实际 ${box.visibleRows}`);
 
-    assert.ok(picker.sections.includes("引用对话"), `缺少「引用对话」分组：${picker.sections.join("/")}`);
+    assert.ok(
+      picker.sections.some((title) => title.includes("对话")),
+      `缺少对话分组：${picker.sections.join("/")}`,
+    );
     assert.ok(picker.sessions.length >= 2, `应至少有两个可引用对话，实际 ${picker.sessions.length}`);
     assert.ok(picker.sessions.every((item) => item.title.length > 0), "对话候选必须显示名称");
     assert.ok(picker.sessions.every((item) => item.icon), "对话候选要有图标");
@@ -166,14 +184,7 @@ export async function checkSessionQuoteInElectron(win) {
       area.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     })()`);
-    // Vue 要等一拍才会把「保存」从 disabled 状态放开，所以单独点
-    await evaluate(`(() => {
-      const dialog = document.querySelector('.quote-dialog');
-      const save = [...dialog.querySelectorAll('.quote-actions button')].find((n) => n.textContent.trim() === "保存");
-      if (!save || save.disabled) return false;
-      save.click();
-      return true;
-    })()`).then((ok) => assert.ok(ok, "「保存」按钮应可用"));
+    await saveQuote("改名称与正文后保存");
 await poll("!document.querySelector('[data-quote-modal]')", "保存后对话框应关闭");
     const edited = JSON.parse(await evaluate(`(() => {
       const chip = document.querySelector('.attachment-chip.session');
@@ -264,12 +275,7 @@ await poll("!document.querySelector('[data-quote-modal]')", "保存后对话框�
       name.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     })()`);
-    await evaluate(`(() => {
-      const save = [...document.querySelectorAll('.quote-dialog .quote-actions button')].find((n) => n.textContent.trim() === "保存");
-      if (!save || save.disabled) return false;
-      save.click();
-      return true;
-    })()`).then((ok) => assert.ok(ok, "改回名称后应能保存"));
+    await saveQuote("改回名称后保存");
     await poll("!document.querySelector('[data-quote-modal]')", "改回名称后对话框应关闭");
 
     // 重复添加同一会话不会产生第二枚
@@ -324,10 +330,11 @@ await poll("!document.querySelector('[data-quote-modal]')", "保存后对话框�
     await poll("Boolean(document.querySelector('.path-picker-session'))", "按标题搜索应命中对话");
     const searched = JSON.parse(await evaluate(`JSON.stringify({
       sessions: [...document.querySelectorAll('.path-picker-session')].map((n) => n.querySelector('.path-item-name')?.textContent.trim() ?? ''),
+      project: [...document.querySelectorAll('[data-mention-source="session-quote.project"]')].map((n) => n.querySelector('.path-item-name')?.textContent.trim() ?? ''),
       paths: document.querySelectorAll('.path-picker-item:not(.path-picker-session)').length,
     })`));
-    assert.equal(searched.sessions.length, 1, `搜索「报表」应只剩一个对话候选：${searched.sessions.join("/")}`);
-    assert.match(searched.sessions[0], /报表/, "搜索命中的对话标题应含关键词");
+    assert.equal(searched.project.length, 1, `搜索「报表」在本项目应只剩一条：${searched.project.join("/")}`);
+    assert.match(searched.project[0], /报表/, "搜索命中的对话标题应含关键词");
 
     // 视觉：暗色 / 亮色各截一张，人工确认排版。
     // 用调试协议截图：窗口被遮挡时 capturePage 会拿到旧画面（检查刚加上的浮层看不到）。

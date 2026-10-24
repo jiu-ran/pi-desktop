@@ -21,6 +21,7 @@ const manager = createPluginManager({
     },
     registerCommand: () => () => {},
     registerMentionSource: () => () => {},
+    registerToolRenderer: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -91,6 +92,7 @@ const second = createPluginManager({
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
     registerCommand: () => () => {},
     registerMentionSource: () => () => {},
+    registerToolRenderer: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -116,6 +118,7 @@ const late = createPluginManager({
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
     registerCommand: () => () => {},
     registerMentionSource: () => () => {},
+    registerToolRenderer: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -153,7 +156,8 @@ const createOptionalManager = () => createPluginManager({
     pluginId: _plugin.id, on: () => () => {}, emit: () => {},
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
     registerCommand: () => () => {},
-    registerMentionSource: () => () => {}, togglePlugin: async () => {},
+    registerMentionSource: () => () => {},
+    registerToolRenderer: () => () => {}, togglePlugin: async () => {},
     workbench: {} as any, workspace: {} as any, stage: {} as any, host: {} as any,
   }),
   onPluginDeactivated: () => {},
@@ -193,6 +197,7 @@ console.log("plugin-lifecycle OK");
         return dispose;
       },
       registerCommand: () => () => {},
+      registerToolRenderer: () => () => {},
       registerMentionSource: (source) => {
         const dispose = manager2.registerMentionSource(source, _plugin.id);
         disposers.push(dispose);

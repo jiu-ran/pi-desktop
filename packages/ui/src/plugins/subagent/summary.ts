@@ -156,3 +156,10 @@ export function formatDuration(ms: number | null): string {
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
+
+/**
+ * 这个插件接管哪些工具名。
+ * 由 pi-subagents 扩展提供（不是 Pi 自带工具），所以集中在插件里声明，
+ * 核心分发器不需要知道这些名字。
+ */
+export const SUBAGENT_TOOLS = ["subagent", "parallel", "review", "bg_wait"] as const;

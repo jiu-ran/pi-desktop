@@ -90,7 +90,7 @@ export async function checkCrossProjectQuoteInElectron(win) {
 
     const view = JSON.parse(await evaluate(`(() => {
       const groups = [...document.querySelectorAll('.path-picker-section')].map((n) => n.textContent.trim());
-      const rows = [...document.querySelectorAll('.path-picker-plugin')].map((n) => ({
+      const rows = [...document.querySelectorAll('[data-mention-source="session-quote.other-projects"]')].map((n) => ({
         label: n.querySelector('.path-item-name')?.textContent.trim() ?? '',
         hint: n.querySelector('.path-item-relative')?.textContent.trim() ?? '',
         icon: Boolean(n.querySelector('.path-item-icon.session svg')),
@@ -129,7 +129,7 @@ export async function checkCrossProjectQuoteInElectron(win) {
     await wait(200);
 
     // 选中 → 变成对话附件，@query 清掉
-    await evaluate("document.querySelector('.path-picker-plugin').click(); true");
+    await evaluate(`document.querySelector('[data-mention-source="session-quote.other-projects"]').click(); true`);
     await poll("Boolean(document.querySelector('.attachment-chip.session'))", "选中后应出现对话附件");
     const chip = JSON.parse(await evaluate(`(() => {
       const node = document.querySelector('.attachment-chip.session');
@@ -174,7 +174,7 @@ export async function checkCrossProjectQuoteInElectron(win) {
     await poll("Boolean(document.querySelector('.path-picker'))", "停用后选择器仍应能打开");
     await wait(600);
     const after = JSON.parse(await evaluate(`(() => JSON.stringify({
-      rows: document.querySelectorAll('.path-picker-plugin').length,
+      rows: document.querySelectorAll('[data-mention-source="session-quote.other-projects"]').length,
       groups: [...document.querySelectorAll('.path-picker-section')].map((n) => n.textContent.trim()),
     }))()`));
     assert.equal(after.rows, 0, "停用插件后不应再列出其它项目的对话");

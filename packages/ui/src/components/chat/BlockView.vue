@@ -8,17 +8,22 @@ import BashTool from "./tools/BashTool.vue";
 import DiffTool from "./tools/DiffTool.vue";
 import ReadTool from "./tools/ReadTool.vue";
 import GenericTool from "./tools/GenericTool.vue";
-import SubagentTool from "../../plugins/subagent/SubagentTool.vue";
 import { computed, inject } from "vue";
 import { KERNEL_KEY } from "../../kernel/index.ts";
 
 /**
- * 2 区域消息与工具块渲染分发器（直接调用标准内置组件，不再绕道贡献点）。
+ * 2 区域消息与工具块渲染分发器。
+ *
+ * Pi 自带工具（read / bash / edit / write）在核心里直接渲染；
+ * 非 Pi 自带的工具卡片（例如子代理）由插件通过 registerToolRenderer 注册，
+ * 这里只查注册表 —— 停用插件后自动回退到通用工具卡片。
  */
-const subagentTools = new Set(["subagent", "parallel", "review", "bg_wait"]);
-// 子代理渲染由插件启用状态决定；停用或未注册时退回通用工具卡片。
 const kernel = inject(KERNEL_KEY, null);
-const subagentEnabled = computed(() => kernel?.plugins.records.find((record) => record.id === "subagent")?.enabled ?? false);
+const toolRenderers = computed(() => kernel?.plugins.toolRenderers ?? []);
+
+function pluginRendererFor(name: string) {
+  return toolRenderers.value.find((item) => item.tools.includes(name))?.component;
+}
 
 defineProps<{
   block: TranscriptBlock;
@@ -46,7 +51,12 @@ defineProps<{
     <BashTool v-if="block.name === 'bash'" :block="block" :query="query" />
     <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" :query="query" />
     <ReadTool v-else-if="block.name === 'read'" :block="block" :query="query" />
-    <SubagentTool v-else-if="subagentEnabled && subagentTools.has(block.name ?? '')" :block="block" :query="query" />
+    <component
+      :is="pluginRendererFor(block.name ?? '')"
+      v-else-if="pluginRendererFor(block.name ?? '')"
+      :block="block"
+      :query="query"
+    />
     <GenericTool v-else :block="block" :query="query" />
   </template>
   <div v-else class="block-fallback" :data-kind="block.kind">
