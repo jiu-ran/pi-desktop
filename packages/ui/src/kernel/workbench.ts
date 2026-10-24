@@ -5,6 +5,7 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
+import { queueDraftText } from "../shared/queue-view.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -1221,14 +1222,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
           inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
           messages: typeof item.messages === "number" ? item.messages : undefined,
         }));
+      // 先拼出真正要发的提示词：Pi 的排队列表里存的是它，气泡靠它去重。
+      const prompt = composePrompt({ sessionText: prepared.sessionText, fileText: prepared.fileText, message });
       optimisticId = thread.transcript.pushUser(
         message,
         imageFiles.length,
-        { imageItems, attachments: files },
+        { imageItems, attachments: files, queueText: prompt },
       ).id;
       thread.loaded = true;
       if (!behavior) thread.streaming = true;
-      const prompt = composePrompt({ sessionText: prepared.sessionText, fileText: prepared.fileText, message });
       // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
       const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
       thread.attachments = thread.attachments.filter(item => !sentPaths.has(item.path));
@@ -1416,6 +1418,28 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       if (pendingSessionSwitches.get(ws.cwd) === switchGate) pendingSessionSwitches.delete(ws.cwd);
       releaseSwitch();
     }
+  }
+
+  /**
+   * 撤回还排在 Pi 队列里的消息：清空队列，并把对应的乐观气泡删掉
+   * （它们并没有真正发出去，留着会让人以为已经发出）。返回放回输入框的文字。
+   */
+  async function recallQueued(): Promise<string> {
+    const ws = active.value;
+    if (!ws) return "";
+    const thread = ws.activeThread;
+    const queued = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const texts: string[] = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])];
+    thread.queue = { steering: [], followUp: [] };
+    if (texts.length) {
+      const wanted = new Set(texts.map((text) => String(text ?? "").replace(/\r\n/g, "\n").trim()));
+      for (const block of [...thread.blocks]) {
+        if (block.kind !== "user") continue;
+        const key = String(block.queueText ?? block.text ?? "").replace(/\r\n/g, "\n").trim();
+        if (wanted.has(key)) thread.transcript.removeBlock(block.id);
+      }
+    }
+    return texts.map((text) => queueDraftText(text)).filter(Boolean).join("\n");
   }
 
   async function setModel(model: any): Promise<void> {
@@ -1901,6 +1925,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     completePaths,
     addFiles,
     addSessionAttachment,
+    recallQueued,
     addPastedImage,
     extractDroppedPaths,
     chooseFiles,

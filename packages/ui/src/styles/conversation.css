@@ -392,6 +392,27 @@
   line-height: 18px;
 }
 .msg-user-file-icon { display: inline-flex; color: var(--fg-3); }
+/* 排队中的气泡：整体弱化 + 顶部「待发送」标记，提示它还没真正发出去 */
+.msg-user-bubble.queued { opacity: 0.82; }
+.msg-user-queued {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.msg-user-queued-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: queue-pulse 1.6s ease-in-out infinite;
+}
 /* 气泡里引用的对话 */
 .msg-user-file.session {
   border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
@@ -1287,19 +1308,80 @@
 .picker-check { flex: none; color: var(--accent); }
 .picker-empty { margin: 8px; color: var(--fg-3); font-size: 12px; }
 
-.queue-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.queue-label { color: var(--accent); font-size: 11.5px; font-weight: 600; }
-.queue-chip {
-  max-width: 260px;
-  overflow: hidden;
-  padding: 1px 9px;
+/* 待发送：只显示「还没有出现在对话里」的排队消息，气泡自己会带「待发送」标记 */
+.queue-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+.queue-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.queue-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: queue-pulse 1.6s ease-in-out infinite;
+}
+@keyframes queue-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.queue-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 420px;
+  height: 26px;
+  padding: 0 9px 0 7px;
   border: 1px solid var(--line-2);
-  border-radius: 99px;
+  border-radius: 7px;
+  background: var(--bg-2);
   color: var(--fg-2);
   font-size: 12px;
+}
+.queue-card-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+.queue-card.steer .queue-card-tag {
+  background: color-mix(in srgb, var(--warn, var(--accent)) 16%, transparent);
+}
+.queue-card-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.queue-recall {
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+.queue-recall:hover { background: var(--hover); color: var(--fg); }
+.queue-recall:disabled { opacity: 0.5; }
 
 /* 斜杠命令菜单：分组列表 + 底部按键提示 */
 .slash-menu {

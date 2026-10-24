@@ -12,6 +12,8 @@ const props = defineProps<{
   block: TranscriptBlock;
   query?: string;
   collapseLong?: boolean;
+  /** 还在 Pi 的队列里等待发送 */
+  queued?: boolean;
 }>();
 
 // 长消息折叠与技能卡片参考 ThinkRail（Apache-2.0，见 THIRD-PARTY-NOTICES.md）。
@@ -42,7 +44,11 @@ function openPreview(index: number): void {
 
 <template>
   <div class="msg user">
-    <div class="msg-user-bubble" :class="{ 'only-media': !text && !block.skill }">
+    <div class="msg-user-bubble" :class="{ 'only-media': !text && !block.skill, queued }">
+      <div v-if="queued" class="msg-user-queued" title="这条消息还在等待发送，可以在输入框上方撤回">
+        <span class="msg-user-queued-dot" />
+        <span>待发送</span>
+      </div>
       <div v-if="block.skill" class="msg-skill">
         <button
           type="button"

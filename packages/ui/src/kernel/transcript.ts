@@ -31,6 +31,11 @@ export interface TranscriptBlock {
   imageItems?: Array<{ mimeType: string; data: string }>;
   /** 用户消息里被抽离出来的附件标记 */
   attachments?: MessageAttachment[];
+  /**
+   * 这条消息实际发出去的完整提示词（含附件块）。
+   * Pi 的排队列表里存的是它，用它判断「这条已经在界面上、不用再显示成待发送」。
+   */
+  queueText?: string;
   /** `/skill:name` 展开后的技能调用（正文折叠展示） */
   skill?: SkillInvocation;
   streaming?: boolean;
@@ -391,7 +396,11 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     }
   }
 
-  function pushUser(text: string, images = 0, extra: Pick<TranscriptBlock, "imageItems" | "attachments"> = {}): TranscriptBlock {
+  function pushUser(
+    text: string,
+    images = 0,
+    extra: Pick<TranscriptBlock, "imageItems" | "attachments" | "queueText"> = {},
+  ): TranscriptBlock {
     const block: TranscriptBlock = { kind: "user", id: uid("u"), text, images, ...extra };
     blocks.push(block);
     return block;

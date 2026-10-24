@@ -6,6 +6,7 @@ import { collectChanges } from "../../shared/diff.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
+import { planQueueView } from "../../shared/queue-view.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
 import { searchableText } from "../../shared/search-text.ts";
@@ -509,6 +510,10 @@ function syncOutline(): void {
   activeOutlineId.value = index >= 0 ? outline.value[index]!.id : "";
 }
 
+/** 还排在 Pi 队列里的消息：气泡上标「待发送」，输入框上方就不再重复列出。 */
+const queuedBlockIds = computed(
+  () => new Set(planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? null).queuedIds),
+);
 const copyTextByIndex = computed(() =>
   buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
 );
@@ -672,6 +677,7 @@ watch(searchMatches, () => {
                   :query="searchQuery"
                   :copy-text="copyTextByIndex.get(item.index) ?? ''"
                   :collapse-long="item.index < ws.blocks.length - 1"
+                  :queued="queuedBlockIds.has(item.block.id)"
                 />
               </div>
               <ActivityGroup

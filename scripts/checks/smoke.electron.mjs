@@ -10,6 +10,7 @@ import { checkTooltipInElectron } from "./tooltip.electron.mjs";
 import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
 import { checkSubagentInElectron } from "./subagent.electron.mjs";
 import { checkSessionQuoteInElectron } from "./session-quote.electron.mjs";
+import { checkQueueInElectron } from "./queue.electron.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
@@ -183,6 +184,7 @@ app.whenReady().then(async () => {
       await runCheck("composer-draft", () => checkComposerDraftInElectron(win));
       await runCheck("subagent", () => checkSubagentInElectron(win));
       await runCheck("session-quote", () => checkSessionQuoteInElectron(win));
+      await runCheck("queue", () => checkQueueInElectron(win));
     } catch (error) {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }

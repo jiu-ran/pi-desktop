@@ -145,11 +145,24 @@ export async function checkSessionQuoteInElectron(win) {
       "同一会话不应重复添加",
     );
 
-    // 键盘：↓ 移动光标、Enter 选中（选中的是第二个会话）
+    // 键盘：↓ 移动光标、Enter 选中。
+    // 候选顺序依赖会话时间戳，不能假设「第二行就是另一个会话」——
+    // 按标题找到还没引用过的那一行，再按对应次数移动光标。
     await typeAt();
+    const steps = await evaluate(`(() => {
+      const attached = new Set([...document.querySelectorAll('.attachment-chip.session span:nth-child(2)')]
+        .map((n) => n.textContent.trim()));
+      const titles = [...document.querySelectorAll('.path-picker-session .path-item-name')]
+        .map((n) => n.textContent.trim());
+      const target = titles.findIndex((title) => title && !attached.has(title));
+      return target < 0 ? -1 : target;
+    })()`);
+    assert.ok(steps >= 0, "应有一个还没被引用的对话可用于键盘选择");
     await evaluate(`(() => {
       const el = document.querySelector('.composer-field textarea');
-      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      for (let i = 0; i < ${steps}; i += 1) {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      }
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       return true;
     })()`);

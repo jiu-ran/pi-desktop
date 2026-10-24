@@ -5,6 +5,7 @@ import { formatTokens, icons, relativeTime, thinkingLabel } from "../../shared/u
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
+import { planQueueView, queuePreview } from "../../shared/queue-view.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -41,7 +42,29 @@ const draft = computed({
   },
 });
 
-const queued = computed(() => [...(ws.value?.queue.steering ?? []), ...(ws.value?.queue.followUp ?? [])]);
+/**
+ * 待发送列表只显示「还没有气泡」的排队消息。
+ * 发出去的消息已经乐观渲染进对话，再在输入框上方重复一遍就是同一个东西出现两次。
+ */
+const queuePlan = computed(() =>
+  planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? { steering: [], followUp: [] }),
+);
+const queuePending = computed(() => queuePlan.value.pending);
+const queueBusy = ref(false);
+
+async function recallQueue(): Promise<void> {
+  if (queueBusy.value) return;
+  queueBusy.value = true;
+  try {
+    const text = await workbench.recallQueued();
+    if (text) draft.value = [draft.value, text].filter(Boolean).join("\n");
+    nextTick(focus);
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
+}
 const attachments = computed(() => ws.value?.attachments ?? []);
 const imageAttachments = computed(() =>
   attachments.value.filter((item: any) => item.image && item.data),
@@ -697,9 +720,22 @@ const argHint = computed(() => {
     <div class="composer-inner">
       <Widgets />
 
-      <div v-if="queued.length" class="queue-strip">
-        <span class="queue-label">待发送 {{ queued.length }}</span>
-        <span v-for="(item, i) in queued" :key="i" class="queue-chip" :title="item">{{ item }}</span>
+      <div v-if="queuePending.length" class="queue-strip">
+        <span class="queue-label">
+          <span class="queue-dot" />
+          {{ queuePending.length }} 条待发送
+        </span>
+        <div
+          v-for="(item, i) in queuePending"
+          :key="i"
+          class="queue-card"
+          :class="item.mode"
+          :title="queuePreview(item.text, 400)"
+        >
+          <span class="queue-card-tag">{{ item.mode === "steer" ? "插话" : "排队" }}</span>
+          <span class="queue-card-text">{{ queuePreview(item.text, 70) }}</span>
+        </div>
+        <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">撤回</button>
       </div>
 
       <div
