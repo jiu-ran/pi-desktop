@@ -234,7 +234,68 @@ export async function checkGitUiInElectron(win) {
     await tab("历史");
     await poll("document.querySelectorAll('.git-commit-row').length > 0", "提交历史入口");
     assert(await evaluate("[...document.querySelectorAll('.git-view-tabs button')].length === 5"), "五个可发现的视图入口");
-    console.log("[git-ui] PASS 分区导航 / 本地分支切换 / 新建分支 / 草稿与运行任务保护 / 真实分区 Diff / 单文件暂存 / 中文路径");
+    // 评审评论框：diff 里有超长行时，评论框和「取消 / 添加」按钮必须留在可视区域内，
+    // 不能跟着内容宽度一起被推到屏幕右边（以前只能靠加宽窗口才点得到）。
+    await writeFile(path.join(dir, "wide.txt"), `${"x".repeat(400)}
+`);
+    await git(["add", "wide.txt"]);
+    await tab("更改");
+    await refresh();
+    await poll("Boolean(document.querySelector('.git-tree-row[title=\"wide.txt\"]'))", "长行文件进入暂存区");
+    await click("document.querySelector('.git-tree-row[title=\"wide.txt\"]')", "打开长行文件 diff");
+    await poll("Boolean(document.querySelector('.diff-view .diff-row'))", "长行 diff 渲染");
+    const reviewGeometry = await evaluate(`(() => {
+      const view = document.querySelector('.diff-view');
+      const body = document.querySelector('.diff-body');
+      document.querySelector('.diff-comment-add')?.click();
+      return JSON.stringify({
+        viewWidth: Math.round(view.clientWidth),
+        bodyWidth: Math.round(body.getBoundingClientRect().width),
+      });
+    })()`);
+    await poll("Boolean(document.querySelector('.diff-comment-composer'))", "评论输入框出现");
+    const composerGeometry = await evaluate(`(() => {
+      const view = document.querySelector('.diff-view').getBoundingClientRect();
+      const box = document.querySelector('.diff-comment-composer').getBoundingClientRect();
+      const primary = document.querySelector('.diff-comment-actions .btn.primary').getBoundingClientRect();
+      const area = document.querySelector('.diff-comment-composer textarea');
+      const before = Math.round(area.getBoundingClientRect().height);
+      const placeholderClipped = area.scrollHeight > area.clientHeight + 1;
+      area.value = ["第一行", "第二行", "第三行", "第四行"].join(String.fromCharCode(10));
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      return JSON.stringify({
+        viewWidth: Math.round(view.width),
+        viewRight: Math.round(view.right),
+        boxWidth: Math.round(box.width),
+        boxLeft: Math.round(box.left),
+        primaryRight: Math.round(primary.right),
+        before,
+        resize: getComputedStyle(area).resize,
+        placeholderClipped,
+      });
+    })()`);
+    await wait(250);
+    const composerAfter = await evaluate(
+      "Math.round(document.querySelector('.diff-comment-composer textarea').getBoundingClientRect().height)",
+    );
+    const wideDiff = JSON.parse(reviewGeometry);
+    const composer = JSON.parse(composerGeometry);
+    assert(wideDiff.bodyWidth > wideDiff.viewWidth + 50, "该用例必须真的出现横向溢出的长行");
+    assert(
+      Math.abs(composer.boxWidth - composer.viewWidth) <= 2,
+      `评论框宽度应等于可视宽度：${composer.boxWidth} vs ${composer.viewWidth}`,
+    );
+    assert(composer.boxLeft >= 0, "评论框不能被推到视口左侧之外");
+    assert(
+      composer.primaryRight <= composer.viewRight + 1,
+      `「添加」按钮必须留在可视区域内：${composer.primaryRight} > ${composer.viewRight}`,
+    );
+    assert.equal(composer.resize, "none", "评论框不应保留手拖缩放手柄");
+    assert(!composer.placeholderClipped, "占位文案不能被裁掉");
+    assert(composerAfter > composer.before, `输入多行后评论框应自动增高：${composer.before} → ${composerAfter}`);
+    await evaluate("document.querySelector('.diff-comment-actions .btn')?.click(); true");
+
+    console.log("[git-ui] PASS 分区导航 / 本地分支切换 / 新建分支 / 草稿与运行任务保护 / 真实分区 Diff / 单文件暂存 / 评审评论框自适应 / 中文路径");
   } finally {
     await evaluate("window.__piDesktop.workbench.active.value.streaming=false; window.__piDesktop.stage.clear(); true");
     await evaluate(`window.__piDesktop.workbench.open(${JSON.stringify(previous.cwd)}).then(()=>true)`);
