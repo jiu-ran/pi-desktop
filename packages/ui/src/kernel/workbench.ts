@@ -656,6 +656,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const switched = projectPathKey(state.activeCwd) !== projectPathKey(target);
     state.activeCwd = target;
     if (switched) bus.emit("workspace:switched", { cwd: target });
+    // 日志写在当前项目下：切换项目时让主进程跟着换目录（包括切到已就绪的项目）
+    try {
+      await host.useProjectLogs?.(target);
+    } catch {
+      // 日志目录切换失败不影响工作区
+    }
     if (ws?.status === "ready") return ws;
     const pending = opens.get(target);
     if (pending) return pending;

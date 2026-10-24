@@ -531,7 +531,7 @@ async function walkDirectory(root: string, current = root, output: string[] = []
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     if (output.length >= limit) break;
-    if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".pi") continue;
+    if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".pi" || entry.name === ".pi-desktop") continue;
     if (entry.isSymbolicLink()) continue;
     const full = path.join(current, entry.name);
     if (entry.isDirectory()) {
@@ -1281,7 +1281,8 @@ export class PiHost {
     try { entries = await readdir(target, { withFileTypes: true }); } catch { throw new Error("无法读取目录内容"); }
     const result: WorkspaceEntry[] = [];
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === ".pi" || entry.name === "node_modules") continue;
+      // .pi-desktop 是应用自己的目录（日志等），不该出现在项目文件树里
+      if (entry.name === ".git" || entry.name === ".pi" || entry.name === ".pi-desktop" || entry.name === "node_modules") continue;
       const absolute = path.join(target, entry.name);
       let entryInfo;
       try { entryInfo = await lstat(absolute); } catch { continue; }

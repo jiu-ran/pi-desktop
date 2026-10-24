@@ -11,6 +11,8 @@
  * - 单文件到 8MB 就轮转成 `<stream>-<时间戳>.log`，最多留 12 个（96MB < 100MB），
  *   并且总量超限时从最旧的开始删；正在写的文件永远不删。
  * - 写入走内存缓冲 + 定时 flush，不当场 await：慢磁盘不能拖慢界面。
+ * - 日志写在**当前项目目录**下（`<项目>/.pi-desktop/logs`），跟着项目走；
+ *   项目还没选中时先攒在内存里，选中第一个项目时再落盘。
  * - 所有内容先脱敏（密钥 / Bearer / 密码 / 长 base64），避免把秘密写进文件。
  */
 import { appendFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
@@ -115,9 +117,13 @@ interface StreamState {
 /** 日志落盘器：由主进程 configure 之后使用，模块内单例。 */
 class LogStore {
   private dir = "";
+  private switching: Promise<void> = Promise.resolve();
   private streams = new Map<LogStream, StreamState>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private rotating = false;
+  /** 还没有项目目录时的缓冲区：启动早期的日志不能丢，也不能写到项目外面 */
+  private pending: Array<{ stream: LogStream; line: string }> = [];
+  private pendingBytes = 0;
 
   configure(dir: string): void {
     this.dir = dir;
@@ -127,6 +133,28 @@ class LogStore {
       void this.flushAll();
     }, FLUSH_MS);
     (this.timer as any).unref?.();
+    // 把之前攒下来的启动日志原样补写进新目录
+    const pending = this.pending;
+    this.pending = [];
+    this.pendingBytes = 0;
+    for (const item of pending) this.pushLine(item.stream, item.line);
+  }
+
+  /**
+   * 切换日志目录（跟着当前项目走）。
+   * 先把旧目录的缓冲刷盘，再换目录，避免最后几行丢在旧项目里。
+   */
+  switchTo(dir: string): Promise<void> {
+    if (!dir || dir === this.dir) return Promise.resolve();
+    this.switching = this.switching
+      .then(async () => {
+        if (dir === this.dir) return;
+        await this.flushAll().catch(() => {});
+        this.configure(dir);
+        await this.prune().catch(() => {});
+      })
+      .catch(() => {});
+    return this.switching;
   }
 
   get directory(): string {
@@ -156,13 +184,24 @@ class LogStore {
     return state;
   }
 
-  write(stream: LogStream, level: LogLevel, scope: string, message: string): void {
-    if (!this.dir) return;
+  private pushLine(stream: LogStream, line: string): void {
     const state = this.state(stream);
-    const line = formatLogLine(level, scope, message);
     state.buffer.push(line);
     state.bufferedBytes += line.length;
     if (state.bufferedBytes >= MAX_BUFFER_BYTES) void this.flush(stream);
+  }
+
+  write(stream: LogStream, level: LogLevel, scope: string, message: string): void {
+    const line = formatLogLine(level, scope, message);
+    if (!this.dir) {
+      // 还没有项目目录：先攒着（有上限，不能把内存当磁盘用）
+      if (this.pendingBytes < MAX_BUFFER_BYTES) {
+        this.pending.push({ stream, line });
+        this.pendingBytes += line.length;
+      }
+      return;
+    }
+    this.pushLine(stream, line);
   }
 
   private async flush(stream: LogStream): Promise<void> {
@@ -252,9 +291,15 @@ class LogStore {
 
 export const logStore = new LogStore();
 
-/** 主进程启动时调一次（目录来自 userData）。 */
+/** 直接设置日志目录（测试与兜底用）。 */
 export function configureLogs(dir: string): void {
   logStore.configure(dir);
+}
+
+/** 切换当前项目的日志目录：`<项目>/.pi-desktop/logs`。 */
+export function useProjectLogs(cwd: string): Promise<void> {
+  if (!cwd) return Promise.resolve();
+  return logStore.switchTo(path.join(cwd, ".pi-desktop", "logs"));
 }
 
 /** 写一条日志（不 await：慢磁盘不应拖住调用方）。 */

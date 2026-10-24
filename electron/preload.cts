@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   logsInfo: () => ipcRenderer.invoke("app:logs-info"),
   logsClear: () => ipcRenderer.invoke("app:logs-clear"),
   logsOpen: () => ipcRenderer.invoke("app:logs-open"),
+  logsReveal: () => ipcRenderer.invoke("app:logs-reveal"),
+  useProjectLogs: (cwd: string) => ipcRenderer.invoke("app:use-project-logs", cwd),
   listDirectory: (cwd: string, relative: string) => ipcRenderer.invoke("pi:list-directory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => ipcRenderer.invoke("pi:read-workspace-file", cwd, relative),
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content, revision),

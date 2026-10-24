@@ -116,3 +116,35 @@ try {
 }
 
 console.log("logger.check ok 100MB 上限 / 轮转 / 清理 / 脱敏 / 落盘");
+
+// 日志跟着项目走：没有项目时先攒在内存里，选中项目后补写进去；切换项目时旧目录先刷盘
+{
+  const first = await mkdtemp(path.join(tmpdir(), "pi-logs-a-"));
+  const second = await mkdtemp(path.join(tmpdir(), "pi-logs-b-"));
+  try {
+    // 先重置到一个「未配置」的状态：用一个新实例不方便，这里直接验证 switchTo 行为
+    logStore.configure("");
+    logStore.write("app", "info", "pre", "启动早期的日志");
+    await logStore.switchTo(path.join(first, ".pi-desktop", "logs"));
+    await logStore.flushAll();
+    const early = await readFile(path.join(first, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
+    assert.ok(early.includes("启动早期的日志"), `没有项目目录时的日志应补写到第一个项目：${early}`);
+
+    logStore.write("app", "info", "pre", "第一个项目里的事");
+    await logStore.switchTo(path.join(second, ".pi-desktop", "logs"));
+    await logStore.flushAll();
+    const firstText = await readFile(path.join(first, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
+    const secondText = await readFile(path.join(second, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
+    assert.ok(firstText.includes("第一个项目里的事"), "切换前应把旧目录的缓冲刷干净");
+    assert.ok(!secondText.includes("第一个项目里的事"), "旧项目的日志不应出现在新项目里");
+
+    logStore.write("app", "info", "pre", "第二个项目里的事");
+    await logStore.flushAll();
+    const secondAfter = await readFile(path.join(second, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
+    assert.ok(secondAfter.includes("第二个项目里的事"), "切换后应写到新项目目录");
+  } finally {
+    await rm(first, { recursive: true, force: true });
+    await rm(second, { recursive: true, force: true });
+  }
+}
+console.log("logger.check ok 跟着项目走 / 早期日志补写 / 切换刷盘");

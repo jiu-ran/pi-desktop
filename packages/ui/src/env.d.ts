@@ -429,6 +429,9 @@ export interface PiDesktopBridge {
   logsInfo?: () => Promise<LogSummary>;
   logsClear?: () => Promise<LogSummary>;
   logsOpen?: () => Promise<boolean>;
+  logsReveal?: () => Promise<boolean>;
+  /** 告诉主进程当前项目：日志写在 <项目>/.pi-desktop/logs */
+  useProjectLogs?: (cwd: string) => Promise<boolean>;
   /** 跨项目会话列表（@ 引用其它项目对话） */
   crossProjectSessions?: (limit?: number) => Promise<CrossProjectSessionSummary[]>;
   /** @ 引用对话：把别的会话压成上下文块 */
