@@ -184,6 +184,19 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     live = null;
   }
 
+  /** 清掉无名占位工具块：早先只会读到 partial 之外字段时留下的空「工具」卡片。 */
+  function dropNamelessTools(): boolean {
+    let changed = false;
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const block = blocks[i];
+      if (block.kind !== "tool" || block.name) continue;
+      blocks.splice(i, 1);
+      tools.delete(block.id);
+      changed = true;
+    }
+    return changed;
+  }
+
   function settleRunningTools(): boolean {
     let changed = false;
     for (const block of blocks) {
@@ -209,13 +222,22 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           b.text = (b.text ?? "") + update.delta;
         } else if (update.type === "text_end") liveBlock(update.contentIndex, "text").text = update.content ?? "";
         else if (update.type === "thinking_end") liveBlock(update.contentIndex, "thinking").text = update.content ?? "";
-        else if (update.type === "toolcall_start") pushTool(update.id, update.toolName, null, "pending");
-        else if (update.type === "toolcall_delta") {
-          const block = pushTool(update.id ?? update.toolCallId, update.toolName, null, "pending");
-          const raw = update.delta ?? update.argumentsDelta ?? "";
-          if (raw) {
-            const current = typeof block.details?.streamedArgs === "string" ? block.details.streamedArgs : "";
-            block.details = { ...(block.details ?? {}), streamedArgs: `${current}${raw}` };
+        else if (update.type === "toolcall_start" || update.type === "toolcall_delta") {
+          // Pi 的 toolcall_start / toolcall_delta 只带 contentIndex 与 partial，
+          // 没有 id / name；以前按 update.id / update.toolName 建块会留下一个
+          // 无名占位块，界面上就是一个空的「工具」卡片。这里从 partial 里取。
+          const call = update.partial?.content?.[update.contentIndex];
+          const id = update.id ?? update.toolCallId ?? call?.id;
+          const name = update.toolName ?? call?.name ?? "";
+          // 首帧可能还没有 toolCall 内容，等下一次增量再建块。
+          if (!id) return true;
+          const block = pushTool(id, name, null, "pending");
+          if (update.type === "toolcall_delta") {
+            const raw = update.delta ?? update.argumentsDelta ?? "";
+            if (raw) {
+              const current = typeof block.details?.streamedArgs === "string" ? block.details.streamedArgs : "";
+              block.details = { ...(block.details ?? {}), streamedArgs: `${current}${raw}` };
+            }
           }
         } else if (update.type === "toolcall_end" && update.toolCall) {
           pushTool(update.toolCall.id, update.toolCall.name, update.toolCall.arguments, "pending");
@@ -232,6 +254,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         if (event.message.stopReason === "error" && event.message.errorMessage) {
           blocks.push({ kind: "notice", id: uid("n"), level: "error", text: event.message.errorMessage });
         }
+        dropNamelessTools();
         return true;
       }
       case "agent_settled":
@@ -240,7 +263,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       case "agent_error": {
         const hadLive = Boolean(live);
         if (hadLive) finalizeLive(true);
-        return settleRunningTools() || hadLive;
+        const dropped = dropNamelessTools();
+        return settleRunningTools() || dropped || hadLive;
       }
       case "tool_execution_start": {
         const block = pushTool(event.toolCallId, event.toolName, event.args, "running");

@@ -2,6 +2,7 @@ import { computed, reactive, shallowReactive, toRaw } from "vue";
 import { displayProjectName, projectPathKey } from "../shared/util.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
 import { applySessionName } from "../shared/session-title.ts";
+import { clearComposerDraft, readComposerDraft, writeComposerDraft } from "../shared/composer-draft.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -180,6 +181,31 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   /** 用户点了「取消下载」后，下载 Promise 的失败不应再报成错误 Toast。 */
   let appUpdateCancelled = false;
 
+  const draftTimers = new Map<string, number>();
+
+  /** 草稿写入防抖：连续输入只写最后一次，避免每键一次 localStorage。 */
+  function saveDraftSoon(cwd: string, sessionFile: string, text: string): void {
+    if (!cwd) return;
+    const key = `${cwd}|${sessionFile}`;
+    const timer = draftTimers.get(key);
+    if (timer) window.clearTimeout(timer);
+    draftTimers.set(key, window.setTimeout(() => {
+      draftTimers.delete(key);
+      writeComposerDraft(cwd, sessionFile, text);
+    }, 400) as unknown as number);
+  }
+
+  /** 立即落盘（发送 / 切换会话前调用，避免防抖窗口内丢失）。 */
+  function flushDraft(cwd: string, sessionFile: string, text: string): void {
+    const key = `${cwd}|${sessionFile}`;
+    const timer = draftTimers.get(key);
+    if (timer) {
+      window.clearTimeout(timer);
+      draftTimers.delete(key);
+    }
+    writeComposerDraft(cwd, sessionFile, text);
+  }
+
   function makeThread(sessionFile = ""): SessionThreadState {
     const transcript = createTranscript(reactive as any);
     return reactive<SessionThreadState>({
@@ -208,6 +234,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     let thread = ws.threads[key];
     if (!thread) {
       thread = makeThread(sessionFile);
+      // 重启后恢复上次未发送的草稿。
+      thread.draft = readComposerDraft(ws.cwd, sessionFile);
       ws.threads[key] = thread;
     } else if (sessionFile && !thread.sessionFile) {
       thread.sessionFile = sessionFile;
@@ -293,7 +321,10 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
         return this.activeThread.draft;
       },
       set draft(value: string) {
-        this.activeThread.draft = value;
+        const thread = this.activeThread;
+        thread.draft = value;
+        // 输入过程中持续落盘（防抖），重启后可以接着写。
+        saveDraftSoon(this.cwd, thread.sessionFile, value);
       },
       get attachments(): any[] {
         return this.activeThread.attachments;
@@ -820,6 +851,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
     const sessions = await host.deleteSession(target, file);
+    clearComposerDraft(target, file);
     if (ws) {
       delete ws.threads[normalizeThreadKey(file)];
       if (ws.status === "ready") {
@@ -1023,30 +1055,30 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       const prepared = attachmentSnapshot.length
         ? await host.prepareAttachments(ws.cwd, attachmentSnapshot.map((item: any) => item.path))
         : { text: "", images: [] as any[], items: [] as any[] };
-      if (!behavior) {
-        // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致
-        const items = prepared.items?.length ? prepared.items : attachmentSnapshot;
-        const imageFiles = items.filter((item: any) => item.image);
-        const imageItems = imageFiles
-          .filter((item: any) => item.data)
-          .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: item.data as string }));
-        const files = items
-          .filter((item: any) => !item.image)
-          .map((item: any) => ({
-            path: String(item.path),
-            name: String(item.name),
-            kind: item.kind === "folder" ? "folder" as const : "file" as const,
-            size: typeof item.size === "number" ? item.size : undefined,
-            inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
-          }));
-        optimisticId = thread.transcript.pushUser(
-          message,
-          imageFiles.length,
-          { imageItems, attachments: files },
-        ).id;
-        thread.streaming = true;
-        thread.loaded = true;
-      }
+      // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致。
+      // 引导（steering）与追加（followUp）也必须立即插入：它们同样会写进会话文件，
+      // 之前只在非流式时渲染，导致「发出去看不到、重开会话才出现」。
+      const items = prepared.items?.length ? prepared.items : attachmentSnapshot;
+      const imageFiles = items.filter((item: any) => item.image);
+      const imageItems = imageFiles
+        .filter((item: any) => item.data)
+        .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: item.data as string }));
+      const files = items
+        .filter((item: any) => !item.image)
+        .map((item: any) => ({
+          path: String(item.path),
+          name: String(item.name),
+          kind: item.kind === "folder" ? "folder" as const : "file" as const,
+          size: typeof item.size === "number" ? item.size : undefined,
+          inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
+        }));
+      optimisticId = thread.transcript.pushUser(
+        message,
+        imageFiles.length,
+        { imageItems, attachments: files },
+      ).id;
+      thread.loaded = true;
+      if (!behavior) thread.streaming = true;
       const prompt = [prepared.text, message].filter(Boolean).join("\n");
       // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
       const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
@@ -1133,6 +1165,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         if (realFile) {
           const realKey = normalizeThreadKey(realFile);
           tempThread.sessionFile = realFile;
+          // 新会话的临时文件名只在内存里出现过，草稿要迁移到真实会话键上。
+          if (tempThread.draft) {
+            clearComposerDraft(ws.cwd, tempFile);
+            writeComposerDraft(ws.cwd, realFile, tempThread.draft);
+          }
           if (res?.state) {
             tempThread.sessionName = res.state.sessionName ?? tempThread.sessionName ?? "";
             tempThread.model = res.state.model ?? tempThread.model;

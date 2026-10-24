@@ -4,6 +4,7 @@ import { checkNetworkInElectron } from "./network.electron.mjs";
 import { checkEditorInElectron } from "./editor.electron.mjs";
 import { checkGitUiInElectron } from "./git-ui.electron.mjs";
 import { checkTooltipInElectron } from "./tooltip.electron.mjs";
+import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
@@ -21,7 +22,7 @@ let win;
 setTimeout(() => {
   console.error("[result] FAIL hard timeout");
   app.exit(1);
-}, 60000);
+}, 150000);
 
 async function probe(label) {
   const result = JSON.parse(await win.webContents.executeJavaScript(`JSON.stringify((() => {
@@ -103,6 +104,7 @@ app.whenReady().then(async () => {
       await checkEditorInElectron(win);
       await checkGitUiInElectron(win);
       await checkTooltipInElectron(win);
+      await checkComposerDraftInElectron(win);
     } catch (error) {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }

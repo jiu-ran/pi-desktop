@@ -216,3 +216,34 @@ if (compactionNotice.compaction?.running || compactionNotice.compaction?.summary
 if (!compactionNotice.text?.includes("154.2k → 32.0k")) throw new Error("压缩提示应显示 token 变化");
 
 console.log("notices OK");
+
+// 工具调用流式事件：Pi 的 toolcall_start / toolcall_delta 只带 contentIndex + partial，
+// 不含 id / name。必须从 partial 里取，否则会多出一个无名占位块（界面上的空「工具」卡片）。
+const toolStream = createTranscript();
+const partialCall = { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "echo hi" } };
+toolStream.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+toolStream.applyEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, partial: { content: [] } } });
+toolStream.applyEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, partial: { content: [partialCall] } } });
+toolStream.applyEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: '{"command":', partial: { content: [partialCall] } } });
+toolStream.applyEvent({ type: "message_update", assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: partialCall, partial: { content: [partialCall] } } });
+const streamTools = toolStream.blocks.filter((block) => block.kind === "tool");
+if (streamTools.length !== 1) throw new Error(`工具块应按 toolCall.id 去重，实际 ${streamTools.length} 个`);
+if (streamTools[0].name !== "bash") throw new Error(`工具块名称应取自 partial，实际 ${streamTools[0].name}`);
+if (streamTools[0].id !== "call_1") throw new Error("工具块 id 应取自 partial");
+if (!toolStream.blocks.some((block) => block.kind === "tool" && block.details?.streamedArgs === '{"command":')) {
+  throw new Error("流式参数应累积到 streamedArgs");
+}
+toolStream.applyEvent({ type: "message_end", message: { role: "assistant", content: [partialCall] } });
+if (toolStream.blocks.filter((block) => block.kind === "tool").length !== 1) throw new Error("消息结束后不应残留多余工具块");
+
+// 残留的无名占位块必须被清理，避免界面上出现空「工具」卡片
+const stale = createTranscript();
+stale.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+stale.blocks.push({ kind: "tool", id: "ghost", name: "", args: {}, status: "pending", output: "", details: null, isError: false, durationMs: null });
+const withGhost: number = stale.blocks.length;
+if (withGhost !== 1) throw new Error("前置条件：应存在一个无名占位块");
+stale.applyEvent({ type: "agent_settled" });
+const afterSettle: number = stale.blocks.length;
+if (afterSettle !== 0) throw new Error("结算后应清掉无名占位工具块");
+
+console.log("tool stream OK");
