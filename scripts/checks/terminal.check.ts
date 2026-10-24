@@ -138,8 +138,11 @@ try {
   const fixture = fileURLToPath(new URL("./terminal-pty.fixture.cjs", import.meta.url));
   const ptyCommand = `"${process.execPath}" "${fixture}"`;
   host.writePty(pty.id, `${ptyCommand}\r`);
-  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-PROBE-READY")));
+  // 探针一次绘制多行（READY → TTY → TERM → 尺寸 → 页脚），按 READY 就断言会抢跑，
+  // 页脚是这段输出的最后一行；Linux 运行器上就因此误报过「未声明 xterm 能力」。
+  await waitFor(() => host.list().find((item) => item.id === pty.id && item.output.includes("PTY-FOOTER:")));
   const probe = host.list().find((item) => item.id === pty.id);
+  assert(probe?.output.includes("PTY-PROBE-READY"), "PTY 探针未就绪");
   assert(probe?.output.includes("TTY: input=true output=true"), "PTY 子进程必须拿到真实 TTY");
   assert(probe?.output.includes("TERM:xterm-256color"), "PTY 应声明 xterm 能力");
   assert(probe?.output.includes("\u001B[?1049h"), "全屏备用屏幕控制序列被丢弃");
