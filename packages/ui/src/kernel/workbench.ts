@@ -3,6 +3,7 @@ import { displayProjectName, projectPathKey } from "../shared/util.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
 import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from "../shared/composer-draft.ts";
+import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -175,7 +176,18 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   });
 
   const workspaces = shallowReactive(new Map<string, WorkspaceState>());
-  const sessionRefreshes = new WeakMap<WorkspaceState, { timer: number | null; running: Promise<void> | null; dirty: boolean; generation: number }>();
+  const sessionRefreshes = new WeakMap<
+    WorkspaceState,
+    {
+      timer: number | null;
+      running: Promise<void> | null;
+      dirty: boolean;
+      generation: number;
+      /** 重排退避状态与上次完成时间：避免事件风暴把刷新变成 0ms 自旋 */
+      backoff: RefreshBackoff;
+      lastDone: number;
+    }
+  >();
   const opens = new Map<string, Promise<WorkspaceState>>();
   let stopHostEvents: (() => void) | null = null;
   let initPromise: Promise<void> | null = null;
@@ -944,7 +956,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   async function refreshSessions(ws: WorkspaceState | null = active.value): Promise<void> {
     if (!ws || disposed || workspaces.get(ws.cwd) !== ws) return;
-    const previous = sessionRefreshes.get(ws) ?? { timer: null, running: null, dirty: false, generation: 0 };
+    const previous = sessionRefreshes.get(ws) ?? {
+      timer: null,
+      running: null,
+      dirty: false,
+      generation: 0,
+      backoff: { streak: 0 },
+      lastDone: 0,
+    };
     const generation = ++previous.generation;
     sessionRefreshes.set(ws, previous);
     if (previous.running) {
@@ -959,6 +978,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       // Session refresh is advisory; the active transcript remains usable when the host is unavailable.
     }).finally(() => {
       previous.running = null;
+      previous.lastDone = Date.now();
       if (!disposed && previous.dirty && workspaces.get(ws.cwd) === ws) {
         previous.dirty = false;
         scheduleSessionsRefresh(ws);
@@ -972,17 +992,27 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   function scheduleSessionsRefresh(ws: WorkspaceState): void {
     if (disposed || workspaces.get(ws.cwd) !== ws) return;
-    const previous = sessionRefreshes.get(ws) ?? { timer: null, running: null, dirty: false, generation: 0 };
+    const previous = sessionRefreshes.get(ws) ?? {
+      timer: null,
+      running: null,
+      dirty: false,
+      generation: 0,
+      backoff: { streak: 0 },
+      lastDone: 0,
+    };
     sessionRefreshes.set(ws, previous);
     previous.dirty = true;
     if (previous.timer !== null || previous.running) return;
+    // 不再用 0ms 重排：事件密集时会变成「刷新 → 写回 → 再刷新」的自旋。
+    const step = nextRefreshDelay(Date.now(), previous.backoff, previous.lastDone);
+    previous.backoff = step.state;
     const schedule = typeof window !== "undefined" ? window.setTimeout : setTimeout;
     previous.timer = schedule(() => {
       previous.timer = null;
       if (disposed || workspaces.get(ws.cwd) !== ws || !previous.dirty) return;
       previous.dirty = false;
       void refreshSessions(ws);
-    }, 0) as unknown as number;
+    }, step.delay) as unknown as number;
   }
 
   function listSessions(cwd: string): Promise<any[]> {

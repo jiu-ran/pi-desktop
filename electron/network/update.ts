@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { downloadFileStream, normalizeNetworkError } from "./http.ts";
+import { pruneUpdateDir } from "../maintenance.ts";
 import {
   fetchStableRelease,
   compareVersions,
@@ -170,6 +171,9 @@ export class AppUpdateManager {
 
       if (controller.signal.aborted) throw new Error("下载已取消");
 
+      // 下载完成后立刻清掉旧安装包：只留这一版，避免 userData 越积越大。
+      await pruneUpdateDir(updateDir, path.basename(filePath)).catch(() => {});
+
       const prepared: PreparedAppUpdate = {
         version: latest,
         url: release.html_url ?? "",
@@ -211,6 +215,8 @@ export class AppUpdateManager {
     for await (const chunk of createReadStream(prepared.filePath)) hash.update(chunk);
     const actual = hash.digest("hex");
     if (actual !== prepared.sha256) throw new Error("安装包在下载后被修改，已阻止执行，请重新下载");
+    // 启动安装器之前再清一次，别把旧版本安装包留在磁盘上。
+    await pruneUpdateDir(path.dirname(prepared.filePath), path.basename(prepared.filePath)).catch(() => {});
     this.installing = true;
     try {
     if (process.platform === "linux" && /\.AppImage$/i.test(prepared.filePath)) await chmod(prepared.filePath, 0o700);

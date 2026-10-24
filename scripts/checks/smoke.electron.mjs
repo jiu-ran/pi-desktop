@@ -59,6 +59,40 @@ async function probe(label) {
 }
 
 /**
+ * 渲染进程卡住时（executeJavaScript 不返回），用调试协议强行暂停并抓调用栈。
+ * 这类卡死看不出日志，只有栈能说明它在转什么。
+ */
+async function dumpRendererStack(label) {
+  try {
+    const dbg = win.webContents.debugger;
+    if (!dbg.isAttached()) await dbg.attach("1.3");
+    const paused = new Promise((resolve) => {
+      const onMessage = (_event, method, params) => {
+        if (method !== "Debugger.paused") return;
+        dbg.removeListener("message", onMessage);
+        resolve(params);
+      };
+      dbg.on("message", onMessage);
+    });
+    await dbg.sendCommand("Debugger.enable");
+    await dbg.sendCommand("Debugger.pause");
+    const params = await Promise.race([paused, new Promise((r) => setTimeout(() => r(null), 5000))]);
+    if (!params) {
+      console.error(`[smoke] ${label} 渲染进程无响应，且无法暂停（可能整个进程卡死）`);
+      return;
+    }
+    const frames = (params.callFrames ?? []).slice(0, 20).map((frame, index) => {
+      const url = (frame.url || "").split("/").pop();
+      return `  #${index} ${frame.functionName || "(anonymous)"} ${url}:${frame.location.lineNumber + 1}`;
+    });
+    console.error(`[smoke] ${label} 卡在：\n${frames.join("\n")}`);
+    await dbg.sendCommand("Debugger.resume").catch(() => {});
+  } catch (error) {
+    console.error(`[smoke] ${label} 抓栈失败：${error.message || error}`);
+  }
+}
+
+/**
  * 每个检查单独计时并设上限：卡住时能看出是哪一步，也不会一直拖到全局硬超时。
  */
 async function runCheck(name, run) {
@@ -66,7 +100,10 @@ async function runCheck(name, run) {
   console.log(`[smoke] → ${name}`);
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${name} 检查超时（${STEP_TIMEOUT_MS / 1000}s）`)), STEP_TIMEOUT_MS);
+    timer = setTimeout(async () => {
+      await dumpRendererStack(name);
+      reject(new Error(`${name} 检查超时（${STEP_TIMEOUT_MS / 1000}s）`));
+    }, STEP_TIMEOUT_MS);
   });
   try {
     await Promise.race([run(), timeout]);

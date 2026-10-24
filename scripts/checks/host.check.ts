@@ -61,6 +61,30 @@ try {
   }
   if (!rejected) throw new Error("会话目录之外的文件必须拒绝读取");
   console.log("outside session rejected OK");
+
+  // 启动卡死必须能失败、能重试：以前 open() 会一直等着卡住的 worker，
+  // 界面永远停在「启动中」。这里把 spawnWorker 换成永不 resolve 的函数，
+  // 用很小的上限验证超时 + 重试。
+  const stuckCwd = path.join(root, "project-stuck");
+  await mkdir(stuckCwd);
+  const stuckAuthorized = await host.authorizeWorkspace(stuckCwd);
+  const realSpawn = (host as any).spawnWorker.bind(host);
+  let stuckRejected = "";
+  (host as any).spawnWorker = () => new Promise(() => {});
+  try {
+    await host.open(stuckAuthorized, 400);
+  } catch (error) {
+    stuckRejected = String(error);
+  } finally {
+    (host as any).spawnWorker = realSpawn;
+  }
+  if (!/启动 Pi 超时/.test(stuckRejected)) throw new Error(`启动卡死应超时报错，实际：${stuckRejected}`);
+  console.log("stuck start timed out OK");
+
+  // 超时之后状态必须清干净：同一个工作区能重新启动成功。
+  const retried = await host.open(stuckAuthorized, 60_000);
+  if (!retried?.state?.sessionFile) throw new Error("超时后重试应能正常启动");
+  console.log("retry after timeout OK");
 } finally {
   await host.stopAll();
   await rm(root, { recursive: true, force: true });

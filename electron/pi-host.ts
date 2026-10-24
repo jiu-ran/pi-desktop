@@ -715,6 +715,29 @@ function gitOperationPaths(root: string, paths: unknown): string[] {
 }
 
 /** 只允许操作该项目会话目录里的 .jsonl，防止渲染进程传入任意路径 */
+/** 启动 Pi 的上限：worker 卡住时不能把界面永远留在「启动中」。 */
+const START_TIMEOUT_MS = 25_000;
+/** 启动后读取快照的上限：RPC 挂起时同样要能失败、能重试。 */
+const SNAPSHOT_TIMEOUT_MS = 15_000;
+
+/** 给 Promise 加上限，超时抛错；原始错误照常透传。 */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    (timer as any).unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 const normalizePath = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
 
 /** 会话（含子代理会话）统一放在 <agentDir>/sessions 下。 */
@@ -816,6 +839,8 @@ export class PiHost {
   worktreeRoot: string;
   private authorizedAttachmentPaths = new Set<string>();
   private authorizedWorkspaces = new Map<string, string>();
+  /** 每个工作区的启动尝试序号：超时后递增，让半启动的 start() 结果失效。 */
+  private startAttempts = new Map<string, number>();
   private closing = false;
 
   constructor({ emit, trash, worktreeRoot }: PiHostOptions) {
@@ -853,17 +878,52 @@ export class PiHost {
     if (typeof cwd === "string" && cwd.trim()) this.authorizedWorkspaces.delete(this.workspaceKey(cwd));
   }
 
-  async open(cwd: string) {
+  /** @param timeoutMs 启动等待上限（测试可传更小的值） */
+  async open(cwd: string, timeoutMs = START_TIMEOUT_MS) {
     if (this.closing) throw new Error("Pi 宿主正在关闭");
     const authorized = await this.requireAuthorizedWorkspace(cwd);
     cwd = authorized;
     if (!this.clients.has(cwd)) {
-      if (!this.starting.has(cwd)) {
-        this.starting.set(cwd, this.start(cwd).finally(() => { this.starting.delete(cwd); }));
+      // 只读当前尝试序号：只有超时才递增它（见下面的 catch），
+      // 否则并发的第二次 open() 会把正在进行的启动判成过期。
+      const attempt = this.startAttempts.get(cwd) ?? 0;
+      let tracked = this.starting.get(cwd);
+      if (!tracked) {
+        let self: Promise<void>;
+        const pending = this.start(cwd, attempt);
+        self = pending.finally(() => {
+          // 只有自己还是当前记录时才清理：超时后重新发起的那次不能被旧记录删掉。
+          if (this.starting.get(cwd) === self) this.starting.delete(cwd);
+        });
+        tracked = self;
+        this.starting.set(cwd, self);
       }
-      await this.starting.get(cwd);
+      try {
+        await withTimeout(
+          tracked,
+          timeoutMs,
+          `启动 Pi 超时（${timeoutMs / 1000}s）：会话进程没有响应，请重试`,
+        );
+      } catch (error) {
+        // 这次启动作废：让仍在进行的 start() 自己收尾，并把可能半启动的 worker 清掉，
+        // 否则下一次重试会复用一个卡住的进程。
+        this.startAttempts.set(cwd, attempt + 1);
+        if (this.starting.get(cwd) === tracked) this.starting.delete(cwd);
+        await this.discardWorkspace(cwd).catch(() => {});
+        throw error;
+      }
     }
-    return this.snapshot(cwd);
+    return withTimeout(this.snapshot(cwd), SNAPSHOT_TIMEOUT_MS, "读取会话状态超时，请重试");
+  }
+
+  /** 只清掉这个工作区的 worker，不等待可能还挂着的启动流程。 */
+  private async discardWorkspace(cwd: string): Promise<void> {
+    const pool = this.clients.get(cwd);
+    if (!pool) return;
+    this.clients.delete(cwd);
+    const clients = [...pool.workers.values()].map((slot) => slot.client);
+    pool.workers.clear();
+    await Promise.allSettled(clients.map((client) => client.stop()));
   }
 
   private async spawnWorker(
@@ -1061,13 +1121,20 @@ export class PiHost {
     }
   }
 
-  async start(cwd: string): Promise<void> {
+  async start(cwd: string, attempt = this.startAttempts.get(cwd) ?? 0): Promise<void> {
     const pool: WorkspaceClientPool = {
       client: null as unknown as RpcClient,
       activeSessionFile: "",
       workers: new Map(),
     };
     await this.spawnWorker(cwd, pool, { pickLatestOnInit: true });
+    // 启动期间已经被判超时（attempt 变了）：别把这个 worker 留在内存里。
+    if ((this.startAttempts.get(cwd) ?? 0) !== attempt) {
+      const clients = [...pool.workers.values()].map((slot) => slot.client);
+      pool.workers.clear();
+      await Promise.allSettled(clients.map((client) => client.stop()));
+      throw new Error("启动已取消");
+    }
     this.clients.set(cwd, pool);
   }
 

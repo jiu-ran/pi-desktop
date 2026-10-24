@@ -10,6 +10,7 @@ import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
+import { runStartupMaintenance } from "./maintenance.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -576,6 +577,18 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // 升级后顺手清理旧安装包与过大的运行时缓存：放在窗口出来之后再跑，
+  // 不占启动时间；失败也只是少清一次，不影响使用。
+  setTimeout(() => {
+    void runStartupMaintenance(app.getPath("userData")).then((result) => {
+      if (!result.removedInstallers.length && !result.freedBytes) return;
+      const freedMb = Math.round(result.freedBytes / (1024 * 1024));
+      console.log(
+        `[maintenance] 清理旧安装包 ${result.removedInstallers.length} 个，缓存 ${freedMb}MB`,
+      );
+    }).catch(() => {});
+  }, 5000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
