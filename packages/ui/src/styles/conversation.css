@@ -392,6 +392,12 @@
   line-height: 18px;
 }
 .msg-user-file-icon { display: inline-flex; color: var(--fg-3); }
+/* 气泡里引用的对话 */
+.msg-user-file.session {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  color: var(--fg);
+}
+.msg-user-file.session .msg-user-file-icon { color: var(--accent); }
 .msg-user-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-user-file-meta { flex: none; color: var(--fg-3); font-size: 10.5px; white-space: nowrap; }
 
@@ -1465,6 +1471,19 @@
 .path-item-icon.archive { color: var(--accent); }
 .path-item-icon.text { color: var(--fg-2); }
 .path-item-icon.folder { color: var(--fg-2); }
+.path-item-icon.session { color: var(--accent); }
+/* 选择器里的分组标题：引用对话 / 文件与文件夹 */
+.path-picker-section {
+  padding: 7px 10px 4px;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.path-picker-section:first-child { padding-top: 6px; }
+/* 对话候选：标题占满剩余宽度，时间靠右弱化 */
+.path-picker-session .path-item-name { font-weight: 500; }
+.path-picker-session .path-item-relative { flex: none; font-size: 11.5px; }
 .path-item-name { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .path-item-relative { min-width: 0; overflow: hidden; color: var(--fg-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .path-picker-state { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 76px; padding: 14px 10px; color: var(--fg-2); font-size: 12px; }
@@ -1557,6 +1576,12 @@
 .attachment-chip-icon { display: grid; flex: none; place-items: center; color: var(--accent); }
 .attachment-chip > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-chip-meta { flex: none; color: var(--fg-3); font-size: 10.5px; white-space: nowrap; }
+/* 引用的对话：和文件附件区分开，避免被当成路径 */
+.attachment-chip.session {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line-2));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-2));
+  color: var(--fg);
+}
 .attachment-chip button {
   width: 17px;
   height: 17px;

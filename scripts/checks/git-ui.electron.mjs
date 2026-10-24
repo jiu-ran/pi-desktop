@@ -205,7 +205,11 @@ export async function checkGitUiInElectron(win) {
       typography.header - typography.row >= 2,
       `分区标题应明显大于子行：${typography.header}px vs ${typography.row}px`,
     );
-    assert(await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]').length === 2"), "同一文件有索引及工作区修改时应分开呈现");
+    // 暂存后再改文件，索引与工作区两侧都要出现：刷新是异步的，轮询到两行为止。
+    await poll(
+      "document.querySelectorAll('.git-tree-row[title=\"a.txt\"]').length === 2",
+      "同一文件应有索引与工作区两条记录",
+    );
     await click("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[0]", "已暂存 a.txt 行");
     await poll("window.__piDesktop.stage.activeTab.value?.data.detail?.diff.includes('+two')", "已暂存 diff");
     assert(!(await evaluate("window.__piDesktop.stage.activeTab.value.data.detail.diff.includes('+three')")), "暂存详情不能混入工作区修改");
@@ -261,8 +265,19 @@ export async function checkGitUiInElectron(win) {
       });
     })()`);
     await poll("Boolean(document.querySelector('.diff-comment-composer'))", "评论输入框出现");
-    // 评论框出现后可能出现竖向滚动条，clientWidth 会变；等 ResizeObserver 更新完再量。
-    await wait(300);
+    // 评论框出现后竖向滚动条可能来回变化，clientWidth 与 --diff-visible 会短暂不同步：
+    // 等两者收敛（最多 3 秒），再断言宽度。
+    for (let i = 0; i < 30; i += 1) {
+      const settled = await evaluate(`(() => {
+        const view = document.querySelector('.diff-view');
+        const box = document.querySelector('.diff-comment-composer');
+        if (!view || !box) return false;
+        return Math.abs(box.getBoundingClientRect().width - view.clientWidth) <= 2;
+      })()`);
+      if (settled) break;
+      await wait(100);
+    }
+    await wait(120);
     const composerGeometry = await evaluate(`(() => {
       const viewNode = document.querySelector('.diff-view');
       const view = viewNode.getBoundingClientRect();

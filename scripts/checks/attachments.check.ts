@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -59,4 +60,26 @@ try {
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
+}
+
+// 引用对话的会话块：渲染历史时同样要还原成一张「对话」卡片，而不是把摘要铺进气泡
+{
+  const { splitAttachmentMarkers } = await import("../../packages/ui/src/shared/attachments.ts");
+  const parsed = splitAttachmentMarkers(
+    [
+      "<session name=\"C:\\a\\session.jsonl\" title=\"登录改造\" messages=\"42\">",
+      "下面是用户引用的另一个会话",
+      "</session>",
+      "接着改吧",
+    ].join("\n"),
+  );
+  assert.deepEqual(parsed.attachments, [
+    { path: "C:\\a\\session.jsonl", name: "登录改造", kind: "session", messages: 42 },
+  ], "会话块应解析成附件卡片");
+  assert.equal(parsed.text, "接着改吧", "会话摘要不应留在正文里");
+
+  // 没有 title 的老格式退回文件名
+  const legacy = splitAttachmentMarkers(String.raw`<session name="C:\a\b.jsonl">` + "\n摘要\n</session>");
+  assert.equal(legacy.attachments[0]?.name, "b.jsonl", "缺 title 时用文件名");
+  console.log("session attachment markers OK");
 }

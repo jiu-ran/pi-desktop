@@ -4,6 +4,7 @@ import { readStorage, writeStorage } from "../shared/storage.ts";
 import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
+import { composePrompt } from "../shared/prompt.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -37,6 +38,8 @@ const INITIAL_MIN_TURNS = 3;
 const AGENT_SESSION_LIMIT = 400;
 /** 与主进程 prepareAttachments 的上限保持一致 */
 const MAX_ATTACHMENTS = 20;
+/** 引用对话的上限：每个都占掉一大段上下文，多了提示词会被撑爆 */
+const MAX_SESSION_ATTACHMENTS = 5;
 const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 480;
@@ -242,7 +245,10 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       for (const item of stored) {
         if (thread.attachments.length >= MAX_ATTACHMENTS) break;
         try {
-          const prepared = await host.prepareAttachments(ws.cwd, [item.path], [item.path]);
+          // 会话附件不在项目目录内，要走会话专用的校验入口。
+          const prepared = item.kind === "session"
+            ? await host.prepareSessionAttachments(ws.cwd, [item.path])
+            : await host.prepareAttachments(ws.cwd, [item.path], [item.path]);
           for (const entry of prepared.items ?? []) {
             if (!entry?.path || thread.attachments.some((existing: any) => existing.path === entry.path)) continue;
             thread.attachments.push(entry);
@@ -820,6 +826,38 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
   }
 
+  /**
+   * @ 引用另一个对话：加一枚「会话」附件，发送时由主进程压成上下文块。
+   * 会话可能来自任意项目，所以单独走 prepareSessionAttachments（不要求在项目目录内）。
+   */
+  async function addSessionAttachment(session: { path?: string; id?: string; title?: string } | null): Promise<void> {
+    const ws = active.value;
+    if (!ws || !session) return;
+    const file = String(session.path || session.id || "");
+    if (!file) return;
+    const thread = ws.activeThread;
+    if (file === thread.sessionFile) {
+      bus.emit("notify", { level: "info", text: "这是当前对话，不用引用" });
+      return;
+    }
+    if (thread.attachments.some((item: any) => item.kind === "session" && item.path === file)) return;
+    const sessions = thread.attachments.filter((item: any) => item.kind === "session").length;
+    if (sessions >= MAX_SESSION_ATTACHMENTS) {
+      bus.emit("notify", { level: "warning", text: `一次最多引用 ${MAX_SESSION_ATTACHMENTS} 个对话` });
+      return;
+    }
+    if (thread.attachments.length >= MAX_ATTACHMENTS) {
+      bus.emit("notify", { level: "warning", text: `附件总数最多 ${MAX_ATTACHMENTS} 个` });
+      return;
+    }
+    const prepared = await host.prepareSessionAttachments(ws.cwd, [file]);
+    for (const item of prepared.items ?? []) {
+      if (!item?.path || thread.attachments.some((existing: any) => existing.path === item.path)) continue;
+      thread.attachments.push(item);
+    }
+    saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
+  }
+
   /** 粘贴剪贴板图片：主进程落盘到临时目录后作为普通附件加入 */
   async function addPastedImage(payload: { name?: string; mimeType?: string; data: string }): Promise<void> {
     const ws = active.value;
@@ -1151,9 +1189,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     let accepted = false;
     let optimisticId = "";
     try {
-      const prepared = attachmentSnapshot.length
-        ? await host.prepareAttachments(ws.cwd, attachmentSnapshot.map((item: any) => item.path))
-        : { text: "", images: [] as any[], items: [] as any[] };
+      // 会话引用和文件附件走不同的准备入口：会话在项目目录之外，且内容是压缩过的摘��。
+      const filePaths = attachmentSnapshot.filter((item: any) => item.kind !== "session").map((item: any) => item.path);
+      const sessionPaths = attachmentSnapshot.filter((item: any) => item.kind === "session").map((item: any) => item.path);
+      const [preparedFiles, preparedSessions] = await Promise.all([
+        filePaths.length ? host.prepareAttachments(ws.cwd, filePaths) : Promise.resolve({ text: "", images: [] as any[], items: [] as any[] }),
+        sessionPaths.length ? host.prepareSessionAttachments(ws.cwd, sessionPaths) : Promise.resolve({ text: "", images: [] as any[], items: [] as any[] }),
+      ]);
+      const prepared = {
+        sessionText: preparedSessions.text,
+        fileText: preparedFiles.text,
+        text: [preparedSessions.text, preparedFiles.text].filter(Boolean).join("\n"),
+        images: preparedFiles.images,
+        items: [...(preparedSessions.items ?? []), ...(preparedFiles.items ?? [])],
+      };
       // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致。
       // 引导（steering）与追加（followUp）也必须立即插入：它们同样会写进会话文件，
       // 之前只在非流式时渲染，导致「发出去看不到、重开会话才出现」。
@@ -1167,9 +1216,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         .map((item: any) => ({
           path: String(item.path),
           name: String(item.name),
-          kind: item.kind === "folder" ? "folder" as const : "file" as const,
+          kind: item.kind === "session" ? "session" as const : item.kind === "folder" ? "folder" as const : "file" as const,
           size: typeof item.size === "number" ? item.size : undefined,
           inlined: typeof item.inlined === "boolean" ? item.inlined : undefined,
+          messages: typeof item.messages === "number" ? item.messages : undefined,
         }));
       optimisticId = thread.transcript.pushUser(
         message,
@@ -1178,7 +1228,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       ).id;
       thread.loaded = true;
       if (!behavior) thread.streaming = true;
-      const prompt = [prepared.text, message].filter(Boolean).join("\n");
+      const prompt = composePrompt({ sessionText: prepared.sessionText, fileText: prepared.fileText, message });
       // 只移除本次发送快照；准备期间新加的附件留给下一条消息。
       const sentPaths = new Set(attachmentSnapshot.map(item => item.path));
       thread.attachments = thread.attachments.filter(item => !sentPaths.has(item.path));
@@ -1850,6 +1900,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     removeGitWorktree,
     completePaths,
     addFiles,
+    addSessionAttachment,
     addPastedImage,
     extractDroppedPaths,
     chooseFiles,

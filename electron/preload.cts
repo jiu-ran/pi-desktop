@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   open: (cwd: string) => ipcRenderer.invoke("pi:open", cwd),
   snapshot: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:snapshot", cwd, sessionFile),
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) => ipcRenderer.invoke("pi:prepare-attachments", cwd, paths, authorizePaths),
+  prepareSessionAttachments: (cwd: string, files: string[]) => ipcRenderer.invoke("pi:prepare-session-attachments", cwd, files),
   listDirectory: (cwd: string, relative: string) => ipcRenderer.invoke("pi:list-directory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => ipcRenderer.invoke("pi:read-workspace-file", cwd, relative),
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content, revision),

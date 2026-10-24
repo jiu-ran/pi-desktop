@@ -1,4 +1,4 @@
-import { applyMention, buildMention, parseMentionToken } from "../../packages/ui/src/shared/mentions.ts";
+import { applyMention, buildMention, parseMentionToken, removeMentionToken } from "../../packages/ui/src/shared/mentions.ts";
 
 const assert = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
 const equal = (actual: unknown, expected: unknown, message: string) => {
@@ -60,3 +60,11 @@ equal(
   { text: '@"my dir/sub/"', cursor: 13, keepOpen: true },
   "带引号目录的替换结果不正确",
 );
+
+// 选中「对话」时只去掉 @query，前面的文字原样保留
+equal(removeMentionToken("参考一下 @登录"), "参考一下 ", "去掉末尾 @query（保留前导空格）");
+equal(removeMentionToken("@登录"), "", "整行只有 @query 时清空");
+equal(removeMentionToken('看看 @"两个 词"'), "看看 ", "带引号的 @query 也要去掉");
+equal(removeMentionToken("没有引用"), "没有引用", "没有 @query 时原样返回");
+equal(removeMentionToken("a@b"), "a@b", "前面没有边界的 @ 不改动");
+console.log("mention removal OK");

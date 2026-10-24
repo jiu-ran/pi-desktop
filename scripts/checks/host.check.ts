@@ -53,6 +53,25 @@ try {
   if (!childText.includes("子代理任务") || !childText.includes("做完了")) throw new Error("子代理会话内容不完整");
   console.log("child session messages", childPage.messages.length, "OK");
 
+  // @ 引用对话：主进程把别的会话压成上下文块，内容不能是整份 JSONL。
+  const quoted = await host.prepareSessionAttachments(authorizedCwd, [childSession]);
+  if (quoted.items.length !== 1) throw new Error("引用对话应回传一个条目");
+  const quotedItem = quoted.items[0];
+  if (quotedItem.kind !== "session" || quotedItem.path !== childSession) throw new Error("引用对话的条目信息不完整");
+  if (!quotedItem.name) throw new Error("引用对话应带名称");
+  if (!quoted.text.includes("<session name=") || !quoted.text.includes("子代理任务")) {
+    throw new Error("引用对话的上下文块内容不正确");
+  }
+  if (quoted.text.includes('"type":"session"')) throw new Error("上下文块里不能出现原始 JSONL");
+  let rejectOutside = "";
+  try {
+    await host.prepareSessionAttachments(authorizedCwd, [path.join(root, "outside", "x.jsonl")]);
+  } catch (error) {
+    rejectOutside = String(error);
+  }
+  if (!rejectOutside) throw new Error("会话目录之外的文件不能被引用");
+  console.log("quote session context", quoted.text.length, "chars OK");
+
   let rejected = "";
   try {
     await host.messagePage(authorizedCwd, path.join(root, "outside", "x.jsonl"), 0, 10);

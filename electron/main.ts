@@ -357,7 +357,7 @@ function plain<T>(value: T): T | null {
 }
 
 const workspaceChannels = new Set([
-  "pi:forget", "pi:snapshot", "pi:prepare-attachments", "pi:list-directory",
+  "pi:forget", "pi:snapshot", "pi:prepare-attachments", "pi:prepare-session-attachments", "pi:list-directory",
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
   "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:complete-paths", "pi:restart", "pi:sessions",
@@ -505,6 +505,8 @@ app.whenReady().then(() => {
     host.authorizeAttachmentPaths(authorizePaths ?? []);
     return host.prepareAttachments(cwd, paths);
   });
+  // @ 引用对话：会话可能在任意项目目录下，主进程只校验它在会话根目录内。
+  handle("pi:prepare-session-attachments", (cwd: string, files: string[]) => host.prepareSessionAttachments(cwd, files));
   handle("pi:list-directory", (cwd: string, relative: string) => host.listDirectory(cwd, relative));
   handle("pi:read-workspace-file", (cwd: string, relative: string) => host.readWorkspaceFile(cwd, relative));
   handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => host.writeWorkspaceFile(cwd, relative, content, revision));

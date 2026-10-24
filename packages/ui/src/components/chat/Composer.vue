@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
+import { formatTokens, icons, relativeTime, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
-import { applyMention, parseMentionToken } from "../../shared/mentions.ts";
+import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -210,6 +210,28 @@ const optionItems = computed(() => {
 const menuItems = computed<any[]>(() => (menuMode.value === "options" ? optionItems.value : commandItems.value));
 const pathToken = computed(() => parseMentionToken(draft.value));
 
+/**
+ * `@` 选择器里的「对话」候选：当前项目下除本会话之外的会话。
+ * 引用会话不是插入路径，而是加一枚附件——发送时由主进程压成上下文块。
+ */
+const SESSION_SUGGESTIONS = 5;
+const sessionRows = computed(() => {
+  if (!pathPicker.value) return [];
+  const list = (ws.value?.sessions ?? []) as any[];
+  const current = ws.value?.sessionFile ?? "";
+  const query = (pathToken.value?.query ?? "").trim().toLowerCase();
+  const words = query.split(/\s+/).filter(Boolean);
+  return list
+    .filter((item) => item?.path && item.path !== current && !item.empty)
+    .filter((item) => {
+      if (!words.length) return true;
+      const haystack = String(item.title ?? "").toLowerCase();
+      return words.every((word) => haystack.includes(word));
+    })
+    .slice(0, SESSION_SUGGESTIONS);
+});
+const pickerCount = computed(() => sessionRows.value.length + pathItems.value.length);
+
 watch(
   () => [pathPicker.value, draft.value, ws.value?.cwd],
   async () => {
@@ -245,7 +267,7 @@ watch(
   },
 );
 watch(
-  () => [pathCursor.value, pathItems.value.length, pathPicker.value],
+  () => [pathCursor.value, pickerCount.value, pathPicker.value],
   async () => {
     await nextTick();
     const list = pathList.value;
@@ -333,16 +355,45 @@ function removeAttachment(file: string): void {
 
 function onAtKey(event: KeyboardEvent): void {
   if (event.key !== "@" || event.ctrlKey || event.metaKey || event.altKey) return;
-  requestAnimationFrame(() => {
+  // 键盘事件先于字符插入，要等这一轮事件处理完再看输入框内容。
+  // 不用 requestAnimationFrame：窗口被遮挡时它可能一直不触发，选择器就打不开。
+  setTimeout(() => {
     pathPicker.value = Boolean(pathToken.value);
-  });
+  }, 0);
 }
 
 function closePathPicker(): void {
   pathPicker.value = false;
   pathItems.value = [];
   pathLoading.value = false;
+  pathCursor.value = 0;
   pathRequest += 1;
+}
+
+/** 选中「对话」：去掉输入框里的 @query，把这个会话加成附件。 */
+async function pickSession(session: any): Promise<void> {
+  if (!session) return;
+  const rest = removeMentionToken(draft.value);
+  try {
+    await workbench.addSessionAttachment(session);
+    draft.value = rest;
+  } catch (error) {
+    notifyError(error);
+    return;
+  }
+  closePathPicker();
+  await nextTick();
+  focus();
+}
+
+/** 回车/点击统一入口：会话在前、路径在后。 */
+async function pickPickerRow(index: number): Promise<void> {
+  const sessions = sessionRows.value;
+  if (index < sessions.length) {
+    await pickSession(sessions[index]);
+    return;
+  }
+  await pickPath(pathItems.value[index - sessions.length]);
 }
 
 async function pickPath(item: WorkspaceEntry): Promise<void> {
@@ -535,7 +586,7 @@ async function stop(): Promise<void> {
 function onKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return;
   if (pathPicker.value) {
-    const count = pathItems.value.length;
+    const count = pickerCount.value;
     if (event.key === "ArrowDown" && count) {
       pathCursor.value = (pathCursor.value + 1) % count;
       event.preventDefault();
@@ -552,7 +603,7 @@ function onKeydown(event: KeyboardEvent): void {
       return;
     }
     if (((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") && count) {
-      pickPath(pathItems.value[pathCursor.value]);
+      void pickPickerRow(pathCursor.value);
       event.preventDefault();
       return;
     }
@@ -669,34 +720,54 @@ const argHint = computed(() => {
           <div class="path-picker-head">
             <div class="path-picker-title">
               <span class="path-picker-at">@</span>
-              <span>Files and Folders</span>
+              <span>对话 · 文件</span>
               <span v-if="pathToken?.query" class="path-picker-query">{{ pathToken.query }}</span>
             </div>
             <button class="path-picker-close" title="关闭（Esc）" aria-label="关闭" @click="closePathPicker">×</button>
           </div>
-          <div ref="pathList" class="path-picker-list" role="listbox" aria-label="文件和文件夹">
+          <div ref="pathList" class="path-picker-list" role="listbox" aria-label="对话、文件和文件夹">
+            <template v-if="sessionRows.length">
+              <div class="path-picker-section">引用对话</div>
+              <button
+                v-for="(item, index) in sessionRows"
+                :key="item.path"
+                class="path-picker-item path-picker-session"
+                :class="{ active: index === pathCursor }"
+                :aria-selected="index === pathCursor"
+                role="option"
+                @mouseenter="pathCursor = index"
+                @click="pickSession(item)"
+              >
+                <span class="path-item-icon session" v-html="icons.chat" />
+                <span class="path-item-name">{{ item.title || "未命名会话" }}</span>
+                <span class="path-item-relative">{{ relativeTime(item.timestamp) }}</span>
+              </button>
+            </template>
             <div v-if="pathLoading" class="path-picker-state"><span class="mini-spinner" />正在搜索…</div>
-            <button
-              v-for="(item, index) in pathItems"
-              :key="item.path"
-              class="path-picker-item"
-              :class="{ active: index === pathCursor }"
-              :aria-selected="index === pathCursor"
-              role="option"
-              @mouseenter="pathCursor = index"
-              @click="pickPath(item)"
-            >
-              <span class="path-item-icon" :class="pathIcon(item).className" v-html="pathIcon(item).icon" />
-              <span class="path-item-name">{{ item.name }}</span>
-              <span class="path-item-relative">{{ item.relative }}</span>
-            </button>
-            <div v-if="!pathLoading && !pathItems.length" class="path-picker-state">没有匹配的文件或文件夹</div>
+            <template v-if="pathItems.length">
+              <div v-if="sessionRows.length" class="path-picker-section">文件与文件夹</div>
+              <button
+                v-for="(item, index) in pathItems"
+                :key="item.path"
+                class="path-picker-item"
+                :class="{ active: sessionRows.length + index === pathCursor }"
+                :aria-selected="sessionRows.length + index === pathCursor"
+                role="option"
+                @mouseenter="pathCursor = sessionRows.length + index"
+                @click="pickPath(item)"
+              >
+                <span class="path-item-icon" :class="pathIcon(item).className" v-html="pathIcon(item).icon" />
+                <span class="path-item-name">{{ item.name }}</span>
+                <span class="path-item-relative">{{ item.relative }}</span>
+              </button>
+            </template>
+            <div v-if="!pathLoading && !pickerCount" class="path-picker-state">没有匹配的对话、文件或文件夹</div>
           </div>
           <div class="path-picker-foot">
             <span><kbd>↑</kbd><kbd>↓</kbd> 导航</span>
-            <span><kbd>Enter</kbd> 插入引用</span>
+            <span><kbd>Enter</kbd> 选中</span>
             <span><kbd>Esc</kbd> 关闭</span>
-            <span v-if="pathItems.length" class="path-picker-count">{{ pathItems.length }} 项</span>
+            <span v-if="pickerCount" class="path-picker-count">{{ pickerCount }} 项</span>
           </div>
         </div>
         <SlashMenu
@@ -723,11 +794,21 @@ const argHint = computed(() => {
               </button>
               <button type="button" class="attachment-thumb-remove" title="移除图片" @click="removeAttachment(item.path)">×</button>
             </div>
-            <span v-for="item in fileAttachments" :key="item.path" class="attachment-chip" :title="item.path">
-              <span class="attachment-chip-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
+            <span
+              v-for="item in fileAttachments"
+              :key="item.path"
+              class="attachment-chip"
+              :class="{ session: item.kind === 'session' }"
+              :title="item.kind === 'session' ? `引用对话：${item.name}` : item.path"
+            >
+              <span
+                class="attachment-chip-icon"
+                v-html="item.kind === 'session' ? icons.chat : item.kind === 'folder' ? icons.folder : icons.attach"
+              />
               <span>{{ item.name }}</span>
-              <span v-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}</span>
-              <button type="button" title="移除附件" @click="removeAttachment(item.path)">×</button>
+              <span v-if="item.kind === 'session' && item.messages" class="attachment-chip-meta">{{ item.messages }} 条</span>
+              <span v-else-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}</span>
+              <button type="button" :title="item.kind === 'session' ? '移除对话引用' : '移除附件'" @click="removeAttachment(item.path)">×</button>
             </span>
           </div>
           <textarea

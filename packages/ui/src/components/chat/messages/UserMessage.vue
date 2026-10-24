@@ -88,11 +88,16 @@ function openPreview(index: number): void {
           v-for="item in files"
           :key="item.path"
           class="msg-user-file"
-          :title="item.path"
+          :class="{ session: item.kind === 'session' }"
+          :title="item.kind === 'session' ? `引用对话：${item.path}` : item.path"
         >
-          <span class="msg-user-file-icon" v-html="item.kind === 'folder' ? icons.folder : icons.attach" />
+          <span
+            class="msg-user-file-icon"
+            v-html="item.kind === 'session' ? icons.chat : item.kind === 'folder' ? icons.folder : icons.attach"
+          />
           <span class="msg-user-file-name">{{ item.name }}</span>
-          <span v-if="item.size" class="msg-user-file-meta">{{ formatBytes(item.size) }}</span>
+          <span v-if="item.kind === 'session' && item.messages" class="msg-user-file-meta">{{ item.messages }} 条</span>
+          <span v-else-if="item.size" class="msg-user-file-meta">{{ formatBytes(item.size) }}</span>
         </span>
       </div>
 

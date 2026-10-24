@@ -29,6 +29,18 @@ export function parseMentionToken(input: string): MentionToken | null {
   return { start, query: quoted ? match[1]! : match[2] ?? "", quoted };
 }
 
+/**
+ * 去掉输入框末尾的 `@query`（选中「对话」时用：会话不是插入文本，而是加一枚附件）。
+ * 前面的文字原样保留，用户继续打字即可。
+ */
+export function removeMentionToken(input: string): string {
+  const text = String(input ?? "");
+  const match = text.match(/(?:^|\s)@(?:"[^"]*"?|[^\s]*)$/);
+  if (!match || match.index === undefined) return text;
+  const start = match.index + (match[0].startsWith("@") ? 0 : 1);
+  return text.slice(0, start);
+}
+
 /** 生成要插入的引用文本；`relative` 使用 `/` 分隔，目录以 `/` 结尾 */
 export function buildMention(
   relative: string,

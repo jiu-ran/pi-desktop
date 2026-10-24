@@ -62,6 +62,19 @@ export interface WorkspaceEntry {
   kind: "folder" | "file";
 }
 
+/** @ 引用对话时，主进程回传的会话上下文条目 */
+export interface SessionAttachmentItem {
+  /** 会话文件绝对路径 */
+  path: string;
+  /** 会话名称（没起名时取第一段用户文字） */
+  name: string;
+  kind: "session";
+  size: number;
+  inlined: boolean;
+  /** 这个会话共有多少条消息 */
+  messages: number;
+}
+
 export interface WorkspaceFileData {
   path: string;
   relative: string;
@@ -389,6 +402,12 @@ export interface PiDesktopBridge {
   open: (cwd: string) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
+  /** @ 引用对话：把别的会话压成上下文块 */
+  prepareSessionAttachments: (cwd: string, files: string[]) => Promise<{
+    items: SessionAttachmentItem[];
+    text: string;
+    images: any[];
+  }>;
   listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => Promise<WorkspaceFileData>;

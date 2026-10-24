@@ -1,4 +1,7 @@
 import { app, BrowserWindow } from "electron";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { checkTerminalInElectron } from "./terminal.smoke.mjs";
 import { checkNetworkInElectron } from "./network.electron.mjs";
 import { checkEditorInElectron } from "./editor.electron.mjs";
@@ -6,6 +9,7 @@ import { checkGitUiInElectron } from "./git-ui.electron.mjs";
 import { checkTooltipInElectron } from "./tooltip.electron.mjs";
 import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
 import { checkSubagentInElectron } from "./subagent.electron.mjs";
+import { checkSessionQuoteInElectron } from "./session-quote.electron.mjs";
 
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
@@ -142,7 +146,15 @@ app.whenReady().then(async () => {
   console.log("[smoke] probing");
   await probe("boot");
   console.log("[smoke] probed");
-  const workspace = process.env.PI_DESKTOP_SMOKE_WORKSPACE ?? process.cwd();
+  // 默认用一次性临时工作区：直接开当前仓库会把开发者自己的长会话（可能几十 MB）读进来，
+  // 冒烟变成在测「我的会话有多大」，既慢又和代码质量无关。
+  // composer-draft 等检查需要 README.md，这里补一个。
+  let workspace = process.env.PI_DESKTOP_SMOKE_WORKSPACE ?? "";
+  if (!workspace) {
+    workspace = await mkdtemp(path.join(tmpdir(), "pi-smoke-ws-"));
+    await writeFile(path.join(workspace, "README.md"), "# smoke workspace\n");
+    await writeFile(path.join(workspace, "notes.txt"), "smoke\n");
+  }
   const workspaceLiteral = JSON.stringify(workspace);
   await win.webContents.executeJavaScript(`window.__piDesktop.workbench.open(${workspaceLiteral}).then(() => true)`);
   for (let i = 0; i < 40; i += 1) {
@@ -164,9 +176,16 @@ app.whenReady().then(async () => {
       await runCheck("tooltip", () => checkTooltipInElectron(win));
       await runCheck("composer-draft", () => checkComposerDraftInElectron(win));
       await runCheck("subagent", () => checkSubagentInElectron(win));
+      await runCheck("session-quote", () => checkSessionQuoteInElectron(win));
     } catch (error) {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }
+  }
+  // 一次性临时工作区用完就从「最近项目」里去掉，别让冒烟 profile 越积越多空项目。
+  if (!process.env.PI_DESKTOP_SMOKE_WORKSPACE) {
+    await win.webContents
+      .executeJavaScript(`window.__piDesktop.workbench.forget(${JSON.stringify(workspace)}).catch(() => true)`)
+      .catch(() => {});
   }
   console.log("[errors]",  errors.length ? errors.join("\n") : "none");
   const passed = ready.ws?.status === "ready" && !errors.length;

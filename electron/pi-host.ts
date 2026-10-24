@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
-import { clearSessionHistoryCache, readSessionHistoryPage } from "./session-history.ts";
+import { clearSessionHistoryCache, readSessionHistory, readSessionHistoryPage } from "./session-history.ts";
 import { firstUserTitle } from "./session-title.ts";
 import { readSessionName } from "./session-name.ts";
+import { sessionContextBlock } from "./session-context.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
@@ -337,6 +338,23 @@ function sessionDir(cwd: string): string {
   const resolved = path.resolve(cwd);
   const encoded = `--${[...resolved].map((ch) => ("\\/:".includes(ch) ? "-" : ch)).join("").replace(/^-/, "")}--`;
   return path.join(agentDir, "sessions", encoded);
+}
+
+/** 一次最多引用几个会话：多了提示词会被撑爆，而且是同一份上下文反复计入 token。 */
+const SESSION_ATTACHMENT_LIMIT = 5;
+
+/** 会话没有命名时，用第一段用户文字当标题。 */
+function firstUserTitleFromMessages(messages: any[]): string {
+  for (const message of messages) {
+    if (message?.role !== "user") continue;
+    const content = message?.content;
+    const text = Array.isArray(content)
+      ? content.filter((part: any) => part?.type === "text").map((part: any) => String(part.text ?? "")).join(" ")
+      : typeof content === "string" ? content : "";
+    const trimmed = text.replace(/<[^>]*>[\s\S]*?<\/[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (trimmed) return trimmed.slice(0, 40);
+  }
+  return "";
 }
 
 const IMAGE_MIME = new Map<string, string>([
@@ -1784,6 +1802,44 @@ export class PiHost {
         this.authorizedAttachmentPaths.add(path.resolve(target));
       }
     }
+  }
+
+  /**
+   * 把「别的会话」准备成上下文块（输入框里 @ 引用对话）。
+   *
+   * 和文件附件不同，会话可能在会话根目录下的任何项目里，所以只校验它在会话目录内，
+   * 不要求位于当前项目。内容经过压缩，不会把整份 JSONL 塞进提示词。
+   */
+  async prepareSessionAttachments(cwd: string, files: string[] = []) {
+    if (!Array.isArray(files) || files.length > SESSION_ATTACHMENT_LIMIT) {
+      throw new Error(`一次最多引用 ${SESSION_ATTACHMENT_LIMIT} 个会话`);
+    }
+    const items: any[] = [];
+    const blocks: string[] = [];
+    for (const file of files) {
+      if (typeof file !== "string" || !file.trim()) continue;
+      const target = assertReadableSessionFile(cwd, file);
+      let info: Awaited<ReturnType<typeof stat>>;
+      try {
+        info = await stat(target);
+      } catch {
+        throw new Error("这个会话文件已不存在");
+      }
+      if (!info.isFile()) throw new Error("只能引用会话文件");
+      const messages = await readSessionHistory(target);
+      if (!messages.length) throw new Error("这个会话还没有内容，无法引用");
+      const title = (await readSessionName(target, info.size)) || firstUserTitleFromMessages(messages) || "未命名会话";
+      items.push({
+        path: target,
+        name: title,
+        kind: "session" as const,
+        size: info.size,
+        inlined: true,
+        messages: messages.length,
+      });
+      blocks.push(sessionContextBlock({ file: target, title, messages }));
+    }
+    return { items, text: blocks.join(""), images: [] as any[] };
   }
 
   async prepareAttachments(cwd: string, paths: string[] = []) {
