@@ -165,13 +165,6 @@ export async function checkSubagentInElectron(win) {
     assert.equal(live.current, "bash", "运行中应显示当前工具");
     assert.match(live.stat, /1 运行中/);
 
-    // 截图留档
-    await evaluate(`document.querySelector('.tool-card[data-block-id="probe-subagent"]')?.scrollIntoView({ block: "center" }); true`);
-    await wait(250);
-    const shot = await win.webContents.capturePage();
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile("C:/Users/jiuran/AppData/Local/Temp/subagent-card.png", shot.toPNG());
-
     // 停用插件 → 同样的工具退化为通用卡片
     await evaluate("window.__piDesktop.plugins.setEnabled('subagent', false).then(() => true)");
     await wait(200);
