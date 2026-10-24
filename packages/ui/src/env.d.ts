@@ -62,6 +62,19 @@ export interface WorkspaceEntry {
   kind: "folder" | "file";
 }
 
+/** 跨项目会话摘要（其它项目的对话） */
+export interface CrossProjectSessionSummary {
+  id: string;
+  path: string;
+  title: string;
+  empty: boolean;
+  timestamp: number;
+  /** 会话所属项目目录 */
+  cwd: string;
+  /** 项目目录名 */
+  project: string;
+}
+
 /** 日志目录概览（设置页展示 / 清理按钮） */
 export interface LogSummary {
   dir: string;
@@ -416,6 +429,8 @@ export interface PiDesktopBridge {
   logsInfo?: () => Promise<LogSummary>;
   logsClear?: () => Promise<LogSummary>;
   logsOpen?: () => Promise<boolean>;
+  /** 跨项目会话列表（@ 引用其它项目对话） */
+  crossProjectSessions?: (limit?: number) => Promise<CrossProjectSessionSummary[]>;
   /** @ 引用对话：把别的会话压成上下文块 */
   prepareSessionAttachments: (cwd: string, files: string[]) => Promise<{
     items: SessionAttachmentItem[];

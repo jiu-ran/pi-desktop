@@ -574,6 +574,8 @@ app.whenReady().then(() => {
   });
   // @ 引用对话：会话可能在任意项目目录下，主进程只校验它在会话根目录内。
   handle("pi:prepare-session-attachments", (cwd: string, files: string[]) => host.prepareSessionAttachments(cwd, files));
+  // @ 引用其它项目对话：跨项目只读列举，限 40 条，带 3 秒缓存
+  handle("pi:cross-project-sessions", (limit?: number) => host.crossProjectSessions(limit));
   handle("pi:list-directory", (cwd: string, relative: string) => host.listDirectory(cwd, relative));
   handle("pi:read-workspace-file", (cwd: string, relative: string) => host.readWorkspaceFile(cwd, relative));
   handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => host.writeWorkspaceFile(cwd, relative, content, revision));

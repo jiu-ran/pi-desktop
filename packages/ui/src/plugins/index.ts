@@ -6,6 +6,7 @@ import pluginManagerPlugin from "./plugin-manager/index.ts";
 import markdownPlugin from "./markdown/index.ts";
 import mermaidPlugin from "./mermaid/index.ts";
 import subagentPlugin from "./subagent/index.ts";
+import sessionQuotePlugin from "./session-quote/index.ts";
 import terminalPlugin from "./terminal/index.ts";
 
 /**
@@ -22,5 +23,6 @@ export const builtinPlugins: SidebarPlugin[] = [
   mermaidPlugin,
   markdownPlugin,
   subagentPlugin,
+  sessionQuotePlugin,
   terminalPlugin,
 ];

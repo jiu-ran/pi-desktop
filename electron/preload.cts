@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   snapshot: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:snapshot", cwd, sessionFile),
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) => ipcRenderer.invoke("pi:prepare-attachments", cwd, paths, authorizePaths),
   prepareSessionAttachments: (cwd: string, files: string[]) => ipcRenderer.invoke("pi:prepare-session-attachments", cwd, files),
+  crossProjectSessions: (limit?: number) => ipcRenderer.invoke("pi:cross-project-sessions", limit),
   /** 渲染进程卡顿上报（>1s 才记日志），用来定位「界面卡住」发生在哪一侧 */
   reportLongTask: (ms: number, label = "") => ipcRenderer.send("perf:long-task", { ms, label }),
   /** 前端日志持久化（console.warn/error、Vue 错误、未捕获异常） */

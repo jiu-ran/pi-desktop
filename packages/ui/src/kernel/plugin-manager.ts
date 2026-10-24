@@ -16,8 +16,38 @@ export interface PluginCommand {
   run: () => void | Promise<void>;
 }
 
+/** `@` 选择器里的一个候选（由插件提供） */
+export interface MentionItem {
+  /** 唯一标识；引用对话时是会话文件路径 */
+  id: string;
+  /** 主标题 */
+  label: string;
+  /** 右侧弱化信息，例如所属项目 */
+  hint?: string;
+  /** 附加搜索词（项目路径等），不显示 */
+  keywords?: string;
+}
+
+/**
+ * 插件向 `@` 选择器贡献一组候选。
+ * 典型用法：引用其它项目的对话——搜出会话，选中后加一枚会话附件。
+ */
+export interface MentionSource {
+  id: string;
+  /** 注册它的插件 id（由内核填写，界面用来显示能力标签） */
+  pluginId?: string;
+  /** 分组标题 */
+  title: string;
+  /** 分组顺序（越小越靠前） */
+  order?: number;
+  search: (query: string) => MentionItem[] | Promise<MentionItem[]>;
+  pick: (item: MentionItem) => void | Promise<void>;
+}
+
 export interface PluginContext {
   readonly pluginId: string;
+  /** 注册 `@` 选择器候选来源（停用插件时自动注销） */
+  registerMentionSource: (source: MentionSource) => () => void;
   /** 订阅内核事件（插件停用时自动取消） */
   on: (type: string, handler: (payload: any) => void) => () => void;
   /** 发送内核事件 */
@@ -114,6 +144,8 @@ export function definePlugin(plugin: SidebarPlugin): SidebarPlugin {
   return plugin;
 }
 
+const mentionSourceIds = new Set<string>();
+
 function loadDisabled(): Set<string> {
   try {
     return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"));
@@ -136,6 +168,20 @@ export function createPluginManager({
     try { return new Set<string>(JSON.parse(localStorage.getItem(ENABLED_KEY) || "[]")); } catch { return new Set<string>(); }
   })();
   const records = reactive<RegisteredSidebarPlugin[]>([]);
+  /** 插件贡献的 `@` 候选来源（按 order 排序，停用时移除） */
+  const mentionSources = reactive<MentionSource[]>([]);
+
+  function registerMentionSource(source: MentionSource, pluginId = ""): () => void {
+    if (!source?.id || mentionSourceIds.has(source.id)) return () => {};
+    mentionSourceIds.add(source.id);
+    mentionSources.push(markRaw({ ...source, pluginId: pluginId || source.pluginId || "" }));
+    mentionSources.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    return () => {
+      mentionSourceIds.delete(source.id);
+      const index = mentionSources.findIndex((item) => item.id === source.id);
+      if (index >= 0) mentionSources.splice(index, 1);
+    };
+  }
   const runtime = new Map<
     string,
     {
@@ -339,6 +385,8 @@ export function createPluginManager({
     list,
     enabledList,
     sidebarPlugins,
+    mentionSources,
+    registerMentionSource,
     get,
     register,
     setEnabled,

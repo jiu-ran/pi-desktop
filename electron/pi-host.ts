@@ -47,6 +47,14 @@ export interface SessionSummary {
   timestamp: number;
 }
 
+/** 跨项目列出会话时用的摘要：多带一个所属项目路径。 */
+export interface CrossProjectSessionSummary extends SessionSummary {
+  /** 会话所属项目目录（从会话头的 cwd 读：目录名是编码过的，反解有歧义） */
+  cwd: string;
+  /** 项目目录名（展示用） */
+  project: string;
+}
+
 export interface WorkspaceEntry {
   path: string;
   relative: string;
@@ -817,41 +825,101 @@ export async function listSessions(cwd: string, keepFile: string | Iterable<stri
   const keepSet = new Set<string>(
     (typeof keepFile === "string" ? (keepFile ? [keepFile] : []) : [...keepFile].filter(Boolean)).map((f) => normSessionFile(f)),
   );
-  const items = await Promise.all(names.map(async (name): Promise<SessionSummary | null> => {
-    const file = path.join(dir, name);
-    const cacheKey = normSessionFile(file);
-    try {
-      const info = await stat(file);
-      const cached = sessionMetaCache.get(cacheKey);
-      if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
-        return cached.summary;
-      }
-      const rawText = await readHeadText(file, info.size);
-      const lines = rawText.split(/\r?\n/);
-      let header: Record<string, any> = {};
-      try { header = JSON.parse(lines[0] || "{}"); } catch { header = {}; }
-      const title = firstUserTitle(lines);
-      // Pi 重命名会追加 session_info，并不修改文件头；长会话必须从尾部读取最新名称。
-      const customTitle = await readSessionName(file, info.size, header.name);
-      const summary: SessionSummary = {
-        id: file,
-        path: file,
-        title: customTitle || title || "新会话",
-        // 有自定义名称的会话即使还没有文字内容也不能算空会话，
-        // 否则切换会话时会被当作空文件清理掉。
-        empty: !customTitle && !title,
-        timestamp: sessionTimestamp(header.timestamp, info.mtimeMs),
-      };
-      sessionMetaCache.set(cacheKey, { mtimeMs: info.mtimeMs, size: info.size, summary });
-      return summary;
-    } catch {
-      sessionMetaCache.delete(cacheKey);
-      return null;
-    }
-  }));
+  const items = await Promise.all(
+    names.map(async (name): Promise<SessionSummary | null> => {
+      // 解析逻辑在 summarizeSessionFile 里（标题 / 空会话 / 最近活动时间同源）。
+      const summary = await summarizeSessionFile(path.join(dir, name));
+      return summary ? { id: summary.id, path: summary.path, title: summary.title, empty: summary.empty, timestamp: summary.timestamp } : null;
+    }),
+  );
   return items
     .filter((item): item is SessionSummary => Boolean(item && (!item.empty || keepSet.has(normSessionFile(item.path)))))
     .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/**
+ * 单个会话文件 → 摘要（标题 / 是否空 / 最近活动时间 / 所属项目）。
+ * listSessions 与「跨项目引用对话」共用，避免两套解析逻辑各自漂移。
+ */
+async function summarizeSessionFile(file: string): Promise<CrossProjectSessionSummary | null> {
+  const cacheKey = normSessionFile(file);
+  try {
+    const info = await stat(file);
+    const cached = sessionMetaCache.get(cacheKey);
+    const rawText = await readHeadText(file, info.size);
+    const lines = rawText.split(/\r?\n/);
+    let head: Record<string, any> = {};
+    try { head = JSON.parse(lines[0] || "{}"); } catch { head = {}; }
+    const projectOf = (value: unknown) => (typeof value === "string" ? path.basename(value) || value : "");
+    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+      return { ...cached.summary, cwd: typeof head.cwd === "string" ? head.cwd : "", project: projectOf(head.cwd) };
+    }
+    const title = firstUserTitle(lines);
+    const customTitle = await readSessionName(file, info.size, head.name);
+    const summary: SessionSummary = {
+      id: file,
+      path: file,
+      title: customTitle || title || "新会话",
+      empty: !customTitle && !title,
+      timestamp: sessionTimestamp(head.timestamp, info.mtimeMs),
+    };
+    sessionMetaCache.set(cacheKey, { mtimeMs: info.mtimeMs, size: info.size, summary });
+    return { ...summary, cwd: typeof head.cwd === "string" ? head.cwd : "", project: projectOf(head.cwd) };
+  } catch {
+    sessionMetaCache.delete(cacheKey);
+    return null;
+  }
+}
+
+/** 跨项目会话列表的短暂缓存：输入 @ 时会反复查询，别每次都扫目录。 */
+const crossProjectCache = new Map<string, { at: number; items: CrossProjectSessionSummary[] }>();
+const CROSS_PROJECT_TTL_MS = 3000;
+
+/**
+ * 列出所有项目的会话（「@ 引用其它项目对话」用）。
+ *
+ * 会话目录是 `<agentDir>/sessions/<编码过的项目路径>/<会话文件>`。
+ * 每个项目只取最近几个会话再合并排序：用户可能有几百个项目目录，
+ * 全扫一遍会把「输入 @」变成卡顿源。
+ */
+export async function listCrossProjectSessions(limit = 40): Promise<CrossProjectSessionSummary[]> {
+  const root = agentSessionsRoot();
+  const cached = crossProjectCache.get(root);
+  if (cached && Date.now() - cached.at < CROSS_PROJECT_TTL_MS) return cached.items.slice(0, limit);
+
+  let dirs: string[] = [];
+  try {
+    dirs = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+  const picked: Array<{ file: string; mtimeMs: number }> = [];
+  for (const dir of dirs) {
+    const files = await readdir(path.join(root, dir)).catch(() => [] as string[]);
+    const stats = await Promise.all(
+      files
+        .filter((name) => name.endsWith(".jsonl"))
+        .map(async (name) => {
+          const file = path.join(root, dir, name);
+          const info = await stat(file).catch(() => null);
+          return info?.isFile() ? { file, mtimeMs: info.mtimeMs } : null;
+        }),
+    );
+    picked.push(
+      ...stats
+        .filter((item): item is { file: string; mtimeMs: number } => Boolean(item))
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, 4),
+    );
+  }
+  picked.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const items: CrossProjectSessionSummary[] = [];
+  for (const candidate of picked.slice(0, limit)) {
+    const summary = await summarizeSessionFile(candidate.file);
+    if (summary && !summary.empty) items.push(summary);
+  }
+  crossProjectCache.set(root, { at: Date.now(), items });
+  return items;
 }
 
 /** 只有缓存与文件当前 mtime/size 完全一致时才认为是空会话，避免误删刚写入消息的会话。 */
@@ -1846,6 +1914,11 @@ export class PiHost {
    * 和文件附件不同，会话可能在会话根目录下的任何项目里，所以只校验它在会话目录内，
    * 不要求位于当前项目。内容经过压缩，不会把整份 JSONL 塞进提示词。
    */
+  /** 跨项目会话列表：供「@ 引用其它项目对话」插件使用（只读）。 */
+  async crossProjectSessions(limit = 40) {
+    return listCrossProjectSessions(limit);
+  }
+
   async prepareSessionAttachments(cwd: string, files: string[] = []) {
     if (!Array.isArray(files) || files.length > SESSION_ATTACHMENT_LIMIT) {
       throw new Error(`一次最多引用 ${SESSION_ATTACHMENT_LIMIT} 个会话`);

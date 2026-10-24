@@ -20,6 +20,7 @@ const manager = createPluginManager({
       return dispose;
     },
     registerCommand: () => () => {},
+    registerMentionSource: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -89,6 +90,7 @@ const second = createPluginManager({
     emit: () => {},
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
     registerCommand: () => () => {},
+    registerMentionSource: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -113,6 +115,7 @@ const late = createPluginManager({
     emit: () => {},
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
     registerCommand: () => () => {},
+    registerMentionSource: () => () => {},
     togglePlugin: async () => {},
     workbench: {} as any,
     workspace: {} as any,
@@ -149,7 +152,8 @@ const createOptionalManager = () => createPluginManager({
   createContext: (_plugin, disposers) => ({
     pluginId: _plugin.id, on: () => () => {}, emit: () => {},
     onDispose: (dispose) => { disposers.push(dispose); return dispose; },
-    registerCommand: () => () => {}, togglePlugin: async () => {},
+    registerCommand: () => () => {},
+    registerMentionSource: () => () => {}, togglePlugin: async () => {},
     workbench: {} as any, workspace: {} as any, stage: {} as any, host: {} as any,
   }),
   onPluginDeactivated: () => {},
@@ -176,3 +180,68 @@ if (disabledOptional.get(optional.id)?.enabled) throw new Error("重启后忽略
 disabledOptional.dispose();
 
 console.log("plugin-lifecycle OK");
+
+// `@` 候选来源：插件注册后出现在 mentionSources，停用后自动移除
+{
+  const manager2 = createPluginManager({
+    createContext: (_plugin, disposers) => ({
+      pluginId: _plugin.id,
+      on: () => () => {},
+      emit: () => {},
+      onDispose: (dispose) => {
+        disposers.push(dispose);
+        return dispose;
+      },
+      registerCommand: () => () => {},
+      registerMentionSource: (source) => {
+        const dispose = manager2.registerMentionSource(source, _plugin.id);
+        disposers.push(dispose);
+        return dispose;
+      },
+      togglePlugin: async () => {},
+      workbench: {} as any,
+      workspace: {} as any,
+      stage: {} as any,
+      host: {} as any,
+    }),
+    onPluginDeactivated: () => {},
+  });
+  const fake: SidebarPlugin = {
+    id: "mention-plugin",
+    name: "Mention plugin",
+    description: "",
+    version: "1.0.0",
+    icon: "",
+    area: "conversation",
+    activate: (ctx) => {
+      ctx.registerMentionSource({ id: "mention-plugin.source", title: "其它项目", search: () => [], pick: () => {} });
+    },
+  };
+  await manager2.register(fake);
+  // 类型收窄会把字面量定死，这里放宽成 any 便于断言
+  const sources = (): any[] => manager2.mentionSources as any[];
+  if (sources().length !== 1) throw new Error("启用后应有一个候选来源");
+  if (sources()[0].title !== "其它项目") throw new Error("候选来源信息不对");
+  if (sources()[0].pluginId !== "mention-plugin") throw new Error("候选来源应记录所属插件");
+  // 顺序：order 小的在前
+  await manager2.register({
+    id: "mention-plugin-2",
+    name: "Second",
+    description: "",
+    version: "1.0.0",
+    icon: "",
+    area: "conversation",
+    activate: (ctx) => {
+      ctx.registerMentionSource({ id: "mention-plugin-2.source", title: "排前面", order: 1, search: () => [], pick: () => {} });
+    },
+  });
+  if (sources()[0].title !== "排前面") throw new Error("候选来源应按 order 排序");
+  await manager2.toggle("mention-plugin");
+  if (sources().some((source) => source.id === "mention-plugin.source")) {
+    throw new Error("停用插件后候选来源应被移除");
+  }
+  await manager2.toggle("mention-plugin-2");
+  if (sources().length !== 0) throw new Error("全部停用后不应残留候选来源");
+  manager2.dispose();
+}
+console.log("plugin mention source OK 注册 / 排序 / 停用清理");

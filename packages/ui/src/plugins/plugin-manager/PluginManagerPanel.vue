@@ -16,6 +16,8 @@ const areaCaps: Record<PluginArea, string[]> = {
   shell: ["工作台停靠区", "终端快捷键"],
 };
 
+const mentionPluginIds = computed(() => new Set(plugins.mentionSources.map((source) => source.pluginId).filter(Boolean)));
+
 const groups = computed(() =>
   PLUGIN_AREAS.map((area) => ({
     ...area,
@@ -32,7 +34,7 @@ function onToggle(id: string, event: Event): void {
 <template>
   <div class="plugin-manager">
     <p class="plugin-manager-intro">
-      插件按所作用的界面区域分组。停用「扩展工具」插件会移除其活动栏图标、收起工具面板并关闭其详情标签；停用「对话区域 / 文件区域」插件会立即停用对应的渲染能力。
+      插件按所作用的界面区域分组。停用「扩展工具」插件会移除其活动栏图标、收起工具面板并关闭其详情标签；停用「对话区域 / 文件区域」插件会立即停用对应的渲染能力，并一并撤掉它注册的输入框 @ 候选（例如「引用其它项目对话」）。
     </p>
     <section v-for="group in groups" :key="group.id" class="plugin-manager-group">
       <h3>{{ group.label }}</h3>
@@ -50,6 +52,7 @@ function onToggle(id: string, event: Event): void {
               <span v-for="cap in areaCaps[record.area]" :key="cap">{{ cap }}</span>
               <b v-if="record.stage">编辑器与详情视图</b>
               <b v-if="record.dock">底部停靠面板</b>
+              <b v-if="mentionPluginIds.has(record.id)">输入框 @ 候选来源</b>
             </div>
             <p v-if="record.error" class="plugin-manager-error">激活失败：{{ record.error }}</p>
           </div>

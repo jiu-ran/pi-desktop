@@ -1117,6 +1117,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   /**
+   * 跨项目会话列表（只读，最多 40 条）。
+   * 「@ 引用其它项目对话」插件用它填候选；主进程侧有 3 秒缓存，反复查询不会扫盘。
+   */
+  async function crossProjectSessions(limit = 40): Promise<any[]> {
+    if (!host?.crossProjectSessions) return [];
+    try {
+      const list = await host.crossProjectSessions(limit);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * 读取子代理自己的会话记录（只读），用于弹窗里展示它的对话。
    * 子代理会话文件由扩展写在本项目会话目录下的嵌套目录里；读不到时返回空数组，
    * 调用方退回展示最终输出，不要因此报错打断阅读。
@@ -1943,6 +1957,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     listSessions,
     openSession,
     readAgentSession,
+    crossProjectSessions,
     loadMoreMessages,
     call,
     send,
