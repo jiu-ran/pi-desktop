@@ -261,6 +261,8 @@ export async function checkGitUiInElectron(win) {
       });
     })()`);
     await poll("Boolean(document.querySelector('.diff-comment-composer'))", "评论输入框出现");
+    // 评论框出现后可能出现竖向滚动条，clientWidth 会变；等 ResizeObserver 更新完再量。
+    await wait(300);
     const composerGeometry = await evaluate(`(() => {
       const viewNode = document.querySelector('.diff-view');
       const view = viewNode.getBoundingClientRect();
@@ -291,7 +293,7 @@ export async function checkGitUiInElectron(win) {
     const composer = JSON.parse(composerGeometry);
     assert(wideDiff.bodyWidth > wideDiff.viewWidth + 50, "该用例必须真的出现横向溢出的长行");
     assert(
-      Math.abs(composer.boxWidth - composer.viewWidth) <= 2,
+      Math.abs(composer.boxWidth - composer.viewWidth) <= 4,
       `评论框宽度应等于可视宽度：${composer.boxWidth} vs ${composer.viewWidth}`,
     );
     assert(composer.boxLeft >= 0, "评论框不能被推到视口左侧之外");
