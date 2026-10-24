@@ -24,7 +24,7 @@
 .git-section-action { flex: none; padding: 3px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--accent); font-size: 10px; }
 .git-section-action:hover:not(:disabled) { background: var(--accent-soft); }
 .git-section-action:disabled { color: var(--fg-3); opacity: 0.45; }
-.git-panel .git-tree-row { height: 28px; min-height: 28px; padding-right: 8px; gap: 5px; }
+.git-panel .git-tree-row { height: 28px; min-height: 28px; padding-right: 8px; gap: 5px; padding-left: calc(var(--git-tree-base, 26px) + var(--depth, 0) * var(--git-tree-indent, 20px)); }
 .git-panel .git-tree-name { flex: 1; }
 .git-file-icon { display: grid; flex: none; color: var(--fg-3); }
 .git-file-icon svg { width: 14px; height: 14px; }

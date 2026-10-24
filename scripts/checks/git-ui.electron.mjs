@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 
@@ -65,6 +65,11 @@ export async function checkGitUiInElectron(win) {
     await writeFile(path.join(dir, "a.txt"), "two\n"); await git(["add", "a.txt"]);
     await writeFile(path.join(dir, "a.txt"), "three\n");
     await writeFile(path.join(dir, "中文 空格.txt"), "new\n");
+    // 深层目录用于验证层级缩进。每层至少要有一个兄弟节点，否则单链目录会被折叠成一行。
+    await mkdir(path.join(dir, "nested/a/b/c"), { recursive: true });
+    await writeFile(path.join(dir, "nested/a/one.txt"), "one\n");
+    await writeFile(path.join(dir, "nested/a/b/two.txt"), "two\n");
+    await writeFile(path.join(dir, "nested/a/b/c/three.txt"), "three\n");
     await tab("更改"); await refresh();
     await poll("document.querySelectorAll('.git-group').length === 3", "已暂存 / 未暂存 / 未跟踪分区");
     const names = await evaluate("[...document.querySelectorAll('.git-group-name')].map(e=>e.textContent)");
@@ -74,6 +79,49 @@ export async function checkGitUiInElectron(win) {
     await wait(200);
     assert(await evaluate("[...document.querySelectorAll('.git-row-actions')].some(e=>getComputedStyle(e).display==='none')"), "非悬停操作栏不应留下背景块");
     assert(await evaluate("document.querySelector('.git-panel').scrollWidth <= document.querySelector('.git-panel').clientWidth"), "290px 面板不应出现横向溢出");
+    // 层级缩进：同一深度对齐，逐层恒定右移；文件与同级目录的图标列一致；
+    // 第一层必须相对分区标题右移（否则看起来和「未暂存」同列）。
+    const geometry = await evaluate(`(() => {
+      const tree = document.querySelector('.git-tree');
+      const base = tree.getBoundingClientRect().left;
+      const off = node => node ? Math.round(node.getBoundingClientRect().left - base) : null;
+      const groupCaret = off(document.querySelector('.git-group-toggle .git-caret'));
+      return {
+        groupCaret,
+        rows: [...document.querySelectorAll('.git-tree-row')].map(row => ({
+          depth: Number(row.style.getPropertyValue('--depth') || 0),
+          folder: row.classList.contains('folder'),
+          caret: off(row.querySelector('.git-caret')),
+          icon: off(row.querySelector('.git-file-icon')),
+          name: off(row.querySelector('.git-tree-name')),
+        })),
+      };
+    })()`);
+    assert(geometry.rows.length, "应渲染出树行");
+    const groupCaret = geometry.groupCaret;
+    const treeRows = geometry.rows;
+    const byDepth = new Map();
+    for (const row of treeRows) {
+      if (row.name === null) continue;
+      if (!byDepth.has(row.depth)) byDepth.set(row.depth, []);
+      byDepth.get(row.depth).push(row);
+    }
+    const depths = [...byDepth.keys()].sort((a, b) => a - b);
+    assert(depths.length >= 3, "深层目录应产生至少三层缩进");
+    for (const [depth, list] of byDepth) {
+      const names = new Set(list.map(row => row.name));
+      assert.equal(names.size, 1, `深度 ${depth} 的名字列必须对齐：${[...names].join('/')}`);
+      const icons = new Set(list.map(row => row.icon));
+      assert.equal(icons.size, 1, `深度 ${depth} 的图标列必须对齐（文件与目录一致）`);
+    }
+    for (let i = 1; i < depths.length; i += 1) {
+      const step = byDepth.get(depths[i])[0].name - byDepth.get(depths[i - 1])[0].name;
+      assert.equal(step, 20, `层级缩进应恒定 20px，实际 ${step}px（深度 ${depths[i - 1]} → ${depths[i]}）`);
+    }
+    // 第一层树行必须比分区标题的箭头明显右移，且从分区文字列开始。
+    const firstCaret = byDepth.get(depths[0])[0].caret;
+    assert(firstCaret - groupCaret >= 16, `第一层应相对分区标题右移，实际 ${firstCaret - groupCaret}px`);
+    assert(firstCaret <= byDepth.get(depths[0])[0].name - 24, "第一层箭头应仍位于其名称左侧");
     assert(await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]').length === 2"), "同一文件有索引及工作区修改时应分开呈现");
     await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[0].click(); true");
     await poll("window.__piDesktop.stage.activeTab.value?.data.detail?.diff.includes('+two')", "已暂存 diff");

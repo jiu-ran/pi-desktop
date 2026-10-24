@@ -702,7 +702,7 @@ function reveal(change: RepoChange): void {
                 :key="row.id"
                 class="git-tree-row"
                 :class="{ folder: row.kind === 'folder', active: row.change && isActive(row.change, section) }"
-                :style="{ paddingLeft: `${row.depth * 12 + 6}px` }"
+                :style="{ '--depth': row.depth }"
                 role="button"
                 tabindex="0"
                 :title="row.path"
