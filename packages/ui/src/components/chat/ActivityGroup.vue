@@ -39,7 +39,9 @@ const counts = computed(() => activityCountLabel(props.group));
       <span class="activity-count">{{ counts }}</span>
       <span class="activity-summary">{{ group.summary }}</span>
       <span v-if="group.live" class="mini-spinner activity-live" aria-hidden="true" />
+      <!-- 以失败收尾才标红；中途失败但随后恢复，只留一个弱提示，不继续报警。 -->
       <span v-if="group.errored" class="activity-error">失败</span>
+      <span v-else-if="group.failedCount" class="activity-error warn">失败 ×{{ group.failedCount }}</span>
     </button>
     <div v-if="expanded" class="activity-body" :data-activity-body="group.id">
       <slot />

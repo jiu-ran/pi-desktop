@@ -26,7 +26,13 @@ export interface ActivityGroup<T extends ActivityBlockLike = ActivityBlockLike> 
   toolCount: number;
   thinkingCount: number;
   live: boolean;
+  /**
+   * 这段活动是否「以失败收尾」。整组会跨越多个回合，中间失败但随后重试成功时
+   * 不应继续报警，所以只看最后一个已结算的工具；失败总数另由 failedCount 提供。
+   */
   errored: boolean;
+  /** 组内失败的工具数量，用于在中途失败但已恢复时给出弱提示 */
+  failedCount: number;
   /** 折叠头的一行摘要 */
   summary: string;
   /** 完整摘要，放在 title 里 */
@@ -142,11 +148,18 @@ function uniqueActions(entries: ActivityEntry[]): string[] {
   return actions;
 }
 
-export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup, "toolCount" | "thinkingCount" | "live" | "errored" | "summary" | "detail"> {
+const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";
+const isSettled = (block: ActivityBlockLike): boolean => block.status === "done" || block.status === "error";
+
+export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup, "toolCount" | "thinkingCount" | "live" | "errored" | "failedCount" | "summary" | "detail"> {
   const tools = entries.filter((entry) => entry.block.kind === "tool");
   const thoughts = entries.filter((entry) => entry.block.kind === "thinking");
-  const errored = tools.some((entry) => entry.block.isError || entry.block.status === "error");
+  const failedCount = tools.filter((entry) => isFailed(entry.block)).length;
   const live = entries.some((entry) => isLiveTool(entry.block) || entry.block.streaming);
+  // 只看最后一个已结算的工具：失败后重试成功，这一组就不再算失败；
+  // 仍在运行时也先不报警（可能是重试还没结束）。
+  const lastSettled = [...tools].reverse().find((entry) => isSettled(entry.block));
+  const errored = !live && Boolean(lastSettled && isFailed(lastSettled.block));
   const actions = uniqueActions(entries);
   const detail = actions.length
     ? clip(actions.slice(0, 8).join(" · ") + (actions.length > 8 ? ` · +${actions.length - 8}` : ""), 240)
@@ -167,8 +180,7 @@ export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup,
     else if (thinking) summary = "正在思考…";
     else summary = "正在处理…";
   } else if (errored) {
-    const failed = tools.find((entry) => entry.block.isError || entry.block.status === "error");
-    summary = failed ? `失败 · ${describeActivityBlock(failed.block)}` : "有工具执行失败";
+    summary = lastSettled ? `失败 · ${describeActivityBlock(lastSettled.block)}` : "有工具执行失败";
   }
 
   return {
@@ -176,6 +188,7 @@ export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup,
     thinkingCount: thoughts.length,
     live,
     errored,
+    failedCount,
     summary: clip(summary || "活动", 96),
     detail,
   };

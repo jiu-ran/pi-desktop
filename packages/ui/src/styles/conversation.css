@@ -792,6 +792,10 @@
   color: var(--del-fg);
   font-size: 10.5px;
 }
+.activity-error.warn {
+  background: color-mix(in srgb, var(--del-bg) 40%, transparent);
+  color: color-mix(in srgb, var(--del-fg) 65%, var(--fg-3));
+}
 .activity-live { flex: none; color: var(--accent); }
 @container (max-width: 360px) {
   .activity-summary { display: none; }

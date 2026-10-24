@@ -62,7 +62,31 @@ assert.equal(errored[0]!.kind, "activity");
 const errorGroup = errored[0]!.kind === "activity" ? errored[0].group : null;
 assert.ok(errorGroup);
 assert.equal(errorGroup.errored, true);
+assert.equal(errorGroup.failedCount, 1);
 assert.match(errorGroup.summary, /失败/);
+
+// 中途失败但随后重试成功：整组不再报警，只保留弱提示的失败数量。
+const recovered = deriveActivityItems([
+  read("r1"),
+  read("r2", "src/broken.ts", { status: "error", isError: true }),
+  read("r3"),
+  read("r4"),
+]);
+const recoveredGroup = recovered[0]!.kind === "activity" ? recovered[0].group : null;
+assert.ok(recoveredGroup);
+assert.equal(recoveredGroup.errored, false, "失败后重试成功，活动组不应继续显示失败");
+assert.equal(recoveredGroup.failedCount, 1, "弱提示仍需给出失败次数");
+assert.doesNotMatch(recoveredGroup.summary, /^失败/);
+
+// 失败后重试仍在进行：同样不报警，摘要走「正在…」。
+const retrying = summarizeActivity([
+  { index: 0, block: read("t1") },
+  { index: 1, block: read("t2", "src/broken.ts", { status: "error", isError: true }) },
+  { index: 2, block: step("t3", "bash", { command: "npm test" }, { status: "running" }) },
+]);
+assert.equal(retrying.errored, false);
+assert.equal(retrying.failedCount, 1);
+assert.match(retrying.summary, /^正在运行 npm test/);
 
 const live = summarizeActivity([
   { index: 0, block: read("l1") },
