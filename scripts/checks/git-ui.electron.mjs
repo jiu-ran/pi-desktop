@@ -140,6 +140,38 @@ export async function checkGitUiInElectron(win) {
       treeRows.reduce((sum, row) => sum + row.depth, 0),
       `引导线数量应等于各层深度之和，实际 ${railCount}`,
     );
+    // 提交框：不允许手动拖拽改变高度（不能出现 resize 手柄），改为随内容自动增高并受上限约束。
+    const commitBox = await evaluate(`(() => {
+      const el = document.querySelector('.git-commit-input');
+      if (!el) return null;
+      const style = getComputedStyle(el);
+      return {
+        resize: style.resize,
+        maxHeight: Number.parseFloat(style.maxHeight) || 0,
+        before: Math.round(el.getBoundingClientRect().height),
+      };
+    })()`);
+    assert(commitBox, "应存在提交消息输入框");
+    assert.equal(commitBox.resize, "none", "提交框不应保留鼠标拖拽缩放的 resize 手柄");
+    const commitGrown = await evaluate(`(() => {
+      const el = document.querySelector('.git-commit-input');
+      el.value = Array.from({ length: 40 }, (_, i) => \`第 \${i} 行提交说明\`).join("\\n");
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    assert(commitGrown, "应能输入多行提交消息");
+    await wait(200);
+    const commitSized = await evaluate(`(() => {
+      const el = document.querySelector('.git-commit-input');
+      const height = Math.round(el.getBoundingClientRect().height);
+      const max = Number.parseFloat(getComputedStyle(el).maxHeight) || 0;
+      el.value = "";
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return { height, max };
+    })()`);
+    assert(commitSized.height > commitBox.before, `输入多行后提交框应自动增高：${commitBox.before} → ${commitSized.height}`);
+    assert(commitSized.max > 0 && commitSized.height <= commitSized.max + 1, `提交框高度应受上限约束：${commitSized.height} > ${commitSized.max}`);
+    await wait(120);
     // 分区标题必须与子行用不同颜色区分（标题是「标签」层，子行才是内容）。
     const palette = await evaluate(`(() => {
       const color = (selector) => {

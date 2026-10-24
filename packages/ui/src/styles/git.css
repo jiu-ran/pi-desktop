@@ -46,7 +46,8 @@
 .git-panel .git-commit-input {
   min-height: 54px;
   max-height: 280px;
-  resize: vertical;
+  /* 不允许手动拖拽改变高度：高度随内容自动增长，上限见 max-height。 */
+  resize: none;
   border-radius: 6px;
   font-size: 11px;
   overflow-y: auto;

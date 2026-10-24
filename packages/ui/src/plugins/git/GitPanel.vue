@@ -1,6 +1,6 @@
 <!-- 工作区与变更展示参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import GitBranches from "./GitBranches.vue";
 import "../../styles/git.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
@@ -48,6 +48,19 @@ const worktrees = ref<GitWorktree[]>([]);
 const worktreeBusy = ref("");
 const worktreeError = ref("");
 const commitMessage = ref("");
+const commitInput = ref<HTMLTextAreaElement | null>(null);
+/** 提交框高度跟随内容（不可手动拖拽），上限由 CSS max-height 控制。 */
+function autosizeCommit(): void {
+  const el = commitInput.value;
+  if (!el) return;
+  el.style.height = "auto";
+  const max = Number.parseFloat(getComputedStyle(el).maxHeight) || 280;
+  el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+}
+watch(commitMessage, () => void nextTick(autosizeCommit));
+watch(commitInput, (el) => {
+  if (el) nextTick(autosizeCommit);
+});
 const collapsedFolders = reactive(new Set<string>());
 const collapsedGroups = reactive(new Set<string>());
 let request = 0;
@@ -741,6 +754,7 @@ function reveal(change: RepoChange): void {
           <div class="git-commit-summary"><strong>提交到 {{ overview?.branch }}</strong><span>{{ stagedCount }} 个文件已暂存</span></div>
           <template v-if="overview?.canWrite">
             <textarea
+              ref="commitInput"
               v-model="commitMessage"
               class="git-commit-input"
               rows="2"
@@ -748,6 +762,7 @@ function reveal(change: RepoChange): void {
               maxlength="5000"
               aria-label="提交消息"
               placeholder="提交消息（Ctrl/Cmd+Enter 提交）"
+              @input="autosizeCommit"
               @keydown.ctrl.enter.prevent="commit"
               @keydown.meta.enter.prevent="commit"
             />
