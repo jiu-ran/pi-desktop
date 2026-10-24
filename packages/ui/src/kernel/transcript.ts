@@ -274,6 +274,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       case "tool_execution_update": {
         const block = pushTool(event.toolCallId, event.toolName, event.args, "running");
         applyToolResult(block, event.partialResult);
+        // 子代理等工具把进度放在 details 里，实时同步才能看到子任务状态变化。
+        if (event.partialResult?.details) block.details = event.partialResult.details;
         return true;
       }
       case "tool_execution_end": {

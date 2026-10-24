@@ -53,7 +53,7 @@ const duration = computed(() => {
 </script>
 
 <template>
-  <div class="tool-card" :data-status="block.status" :class="{ open }">
+  <div class="tool-card" :data-status="block.status" :data-block-id="block.id" :class="{ open }">
     <button class="step-head" @click="open = !open">
       <span class="step-caret" :class="{ open }">
         <span v-if="running" class="mini-spinner" />

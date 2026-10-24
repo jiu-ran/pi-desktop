@@ -1,0 +1,51 @@
+/* 子代理插件：子任务清单样式（跟随主题变量）。 */
+.subagent-list { gap: 6px; }
+.subagent-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.subagent-head:hover { color: var(--fg); }
+.subagent-caret { color: var(--fg-3); transition: transform 0.12s ease; }
+.subagent-caret.open { transform: rotate(90deg); }
+.subagent-stat { padding: 0 5px; border-radius: 4px; background: var(--bg-2); font-size: 10px; color: var(--fg-2); }
+.subagent-stat.ok { color: var(--ok-fg); }
+.subagent-stat.err { color: var(--del-fg); }
+.subagent-stat.run { color: var(--accent); background: var(--accent-soft); }
+.subagent-rows { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.subagent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+.subagent-row:hover { background: var(--hover); }
+.subagent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--fg-3); }
+.subagent-row[data-state="ok"] .subagent-dot { background: var(--ok-fg); }
+.subagent-row[data-state="failed"] .subagent-dot,
+.subagent-row[data-state="timeout"] .subagent-dot { background: var(--del-fg); }
+.subagent-row[data-state="running"] .subagent-dot { background: var(--accent); }
+.subagent-row[data-state="stopped"] .subagent-dot { background: var(--warn); }
+.subagent-agent { color: var(--fg); font-weight: 500; }
+.subagent-state { color: var(--fg-3); font-size: 10px; }
+.subagent-current { color: var(--accent); font-size: 10px; }
+.subagent-meta { margin-left: auto; color: var(--fg-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.subagent-error {
+  flex-basis: 100%;
+  overflow: hidden;
+  color: var(--del-fg);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1687,4 +1687,3 @@
 .cursor-diagram-fullscreen .cursor-diagram-view.dragging { cursor: grabbing; user-select: none; }
 .cursor-diagram-error { display: flex; flex-direction: column; gap: 8px; padding: 14px; color: var(--err); }
 .cursor-diagram-error pre { color: var(--fg-2); white-space: pre-wrap; }
-
