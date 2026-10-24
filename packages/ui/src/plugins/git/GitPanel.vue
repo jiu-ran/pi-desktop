@@ -757,7 +757,7 @@ function reveal(change: RepoChange): void {
               ref="commitInput"
               v-model="commitMessage"
               class="git-commit-input"
-              rows="2"
+              rows="4"
               spellcheck="false"
               maxlength="5000"
               aria-label="提交消息"

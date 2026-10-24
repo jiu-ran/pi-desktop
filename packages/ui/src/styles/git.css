@@ -44,8 +44,9 @@
   min-height: 0;
 }
 .git-panel .git-commit-input {
-  min-height: 54px;
-  max-height: 280px;
+  min-height: 108px;
+  /* 上限同时受面板高度约束，窄窗口下不会把变更树挤没。 */
+  max-height: min(560px, 55vh);
   /* 不允许手动拖拽改变高度：高度随内容自动增长，上限见 max-height。 */
   resize: none;
   border-radius: 6px;
