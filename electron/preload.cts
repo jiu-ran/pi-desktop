@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   snapshot: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:snapshot", cwd, sessionFile),
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) => ipcRenderer.invoke("pi:prepare-attachments", cwd, paths, authorizePaths),
   prepareSessionAttachments: (cwd: string, files: string[]) => ipcRenderer.invoke("pi:prepare-session-attachments", cwd, files),
+  /** 渲染进程卡顿上报（>1s 才记日志），用来定位「界面卡住」发生在哪一侧 */
+  reportLongTask: (ms: number, label = "") => ipcRenderer.send("perf:long-task", { ms, label }),
   listDirectory: (cwd: string, relative: string) => ipcRenderer.invoke("pi:list-directory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => ipcRenderer.invoke("pi:read-workspace-file", cwd, relative),
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content, revision),

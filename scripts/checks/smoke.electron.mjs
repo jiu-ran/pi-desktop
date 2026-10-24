@@ -1,5 +1,5 @@
 import { app, BrowserWindow } from "electron";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { checkTerminalInElectron } from "./terminal.smoke.mjs";
@@ -14,6 +14,12 @@ import { checkSessionQuoteInElectron } from "./session-quote.electron.mjs";
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
 process.env.PI_DESKTOP_PROFILE ||= "Pi Desktop Smoke";
+// 会话目录也隔离：否则每跑一次检查都会在开发者的 ~/.pi/agent/sessions 里
+// 留下一堆临时项目的会话（历史上堆了 290 多个），既脏又会在会话列表里看得见。
+if (!process.env.PI_CODING_AGENT_DIR) {
+  const agentDir = await mkdtemp(path.join(tmpdir(), "pi-smoke-agent-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+}
 // 自动化窗口常被宿主工具遮挡；禁用 native occlusion，否则新版 Chromium
 // 会暂停 xterm 的 IntersectionObserver 绘制，造成假阴性。
 app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
@@ -181,6 +187,23 @@ app.whenReady().then(async () => {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }
   }
+  // 卡顿日志链路：渲染进程上报 → 主进程 → userData/main-lag.log。
+  // 界面「卡死」时这份日志是唯一的证据来源，坏掉就等于没法诊断。
+  try {
+    const before = await readFile(path.join(app.getPath("userData"), "main-lag.log"), "utf8").catch(() => "");
+    await win.webContents.executeJavaScript("window.piDesktop.reportLongTask(1234, 'smoke-check'); true");
+    let logged = false;
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise((r) => setTimeout(r, 150));
+      const now = await readFile(path.join(app.getPath("userData"), "main-lag.log"), "utf8").catch(() => "");
+      if (now !== before && now.includes("渲染进程长任务 1234ms")) { logged = true; break; }
+    }
+    if (!logged) errors.push("卡顿日志未写入 main-lag.log");
+    else console.log("[smoke] main-lag.log OK 渲染侧长任务已记录");
+  } catch (error) {
+    errors.push(`卡顿日志检查失败：${error?.message ?? error}`);
+  }
+
   // 一次性临时工作区用完就从「最近项目」里去掉，别让冒烟 profile 越积越多空项目。
   if (!process.env.PI_DESKTOP_SMOKE_WORKSPACE) {
     await win.webContents

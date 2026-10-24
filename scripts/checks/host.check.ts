@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -80,6 +80,28 @@ try {
   }
   if (!rejected) throw new Error("会话目录之外的文件必须拒绝读取");
   console.log("outside session rejected OK");
+
+  // 会话文件坏了不能把工作区搞失灵：错误要能识别、要给出可操作的说法，
+  // 而且之后 snapshot / 切换会话必须还正常（以前会一路变成「这个工作区还没有启动 Pi」）。
+  const { isBrokenSessionError } = await import("../../electron/pi-host.ts");
+  if (!isBrokenSessionError(new Error("Session file is not a valid pi session: C:/x/y.jsonl"))) {
+    throw new Error("应能识别 Pi 的会话损坏报错");
+  }
+  if (!isBrokenSessionError(new Error("invalid session file"))) throw new Error("应能识别 invalid session file");
+  if (isBrokenSessionError(new Error("这个工作区还没有启动 Pi"))) throw new Error("普通错误不能被当成会话损坏");
+
+  const brokenFile = path.join(path.dirname(a.state.sessionFile!), "broken-0000.jsonl");
+  await writeFile(brokenFile, '{"type":"session","version":3}\n{"type":"message","message":{"role":"user"}}\n');
+  let brokenError = "";
+  try {
+    await host.call(authorizedCwd, "switchSession", [brokenFile]);
+  } catch (error) {
+    brokenError = String(error);
+  }
+  const readyAfterBroken = await host.snapshot(authorizedCwd);
+  if (!readyAfterBroken.state?.sessionFile) throw new Error("坏会话之后工作区必须仍然可用");
+  console.log("broken session handled", brokenError ? brokenError.slice(0, 60) : "(Pi 接受了该文件)", "OK");
+  await unlink(brokenFile).catch(() => {});
 
   // 启动卡死必须能失败、能重试：以前 open() 会一直等着卡住的 worker，
   // 界面永远停在「启动中」。这里把 spawnWorker 换成永不 resolve 的函数，

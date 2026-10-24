@@ -402,6 +402,8 @@ export interface PiDesktopBridge {
   open: (cwd: string) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
+  /** 渲染进程卡顿上报（主进程记到 main-lag.log） */
+  reportLongTask?: (ms: number, label?: string) => void;
   /** @ 引用对话：把别的会话压成上下文块 */
   prepareSessionAttachments: (cwd: string, files: string[]) => Promise<{
     items: SessionAttachmentItem[];

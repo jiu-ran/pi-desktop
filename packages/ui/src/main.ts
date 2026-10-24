@@ -3,6 +3,7 @@ import App from "./App.vue";
 import { createKernel, KERNEL_KEY } from "./kernel/index.ts";
 import { builtinPlugins } from "./plugins/index.ts";
 import { localizeNotification } from "./shared/notify-text.ts";
+import { installLongTaskReporter } from "./shared/long-task.ts";
 import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/conversation.css";
@@ -20,6 +21,10 @@ async function boot(): Promise<void> {
   };
   app.mount("#app");
   window.__piDesktop = kernel;
+  // 渲染侧长任务写进主进程的卡顿日志：卡死时能分清是主进程还是渲染进程。
+  installLongTaskReporter({
+    report: (ms, label) => (window as any).piDesktop?.reportLongTask?.(ms, label),
+  });
   window.addEventListener("beforeunload", (event) => {
     if (!kernel.stage.allTabs.value.some(tab => tab.dirty || (tab.data as any)?.saving)) return;
     event.preventDefault();

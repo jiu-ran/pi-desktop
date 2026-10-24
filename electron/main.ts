@@ -10,6 +10,7 @@ import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
+import { logPerfLine, setPerfLogFile } from "./perf-log.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
@@ -367,13 +368,24 @@ const workspaceChannels = new Set([
   "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
 ]);
 
+/** 超过这个耗时的 IPC 会记一条：界面「卡住」时能直接看到是哪个调用慢。 */
+const SLOW_IPC_MS = 400;
+
 function handle(channel: string, fn: (...args: any[]) => any) {
   ipcMain.handle(channel, async (event, ...args) => {
     if (!isAllowedSender(event)) throw new Error("不允许的 IPC 调用来源");
-    if (workspaceChannels.has(channel) && typeof args[0] === "string") {
-      args[0] = await authorizedCwd(args[0]);
+    const started = Date.now();
+    let phase = "鉴权";
+    try {
+      if (workspaceChannels.has(channel) && typeof args[0] === "string") {
+        args[0] = await authorizedCwd(args[0]);
+      }
+      phase = "执行";
+      return plain(await fn(...args));
+    } finally {
+      const cost = Date.now() - started;
+      if (cost >= SLOW_IPC_MS) logPerfLine(`IPC ${channel} ${phase}耗时 ${cost}ms`);
     }
-    return plain(await fn(...args));
   });
 }
 
@@ -391,19 +403,14 @@ app.on("second-instance", () => {
  * 整个界面会像冻住一样。记录超过 1 秒的阻塞，出问题时能直接看出发生了什么。
  */
 function startLagWatchdog(): void {
-  const logFile = path.join(app.getPath("userData"), "main-lag.log");
+  setPerfLogFile(path.join(app.getPath("userData"), "main-lag.log"));
   let last = Date.now();
   const timer = setInterval(() => {
     const now = Date.now();
     const lag = now - last - 1000;
     last = now;
     if (lag < 1000) return;
-    const line = `${new Date(now).toISOString()} 主进程阻塞 ${lag}ms\n`;
-    void readFile(logFile, "utf8").then((text) => {
-      // 只留最近的一段，避免日志自己变成负担。
-      const next = text.length > 256 * 1024 ? line : text + line;
-      return writeFile(logFile, next);
-    }).catch(() => writeFile(logFile, line));
+    logPerfLine(`主进程阻塞 ${lag}ms`);
   }, 1000);
   (timer as any).unref?.();
 }
@@ -432,6 +439,15 @@ app.whenReady().then(() => {
       /* 忽略窗口已关闭等竞态 */
     }
     return next;
+  });
+  // 渲染进程的长任务（>1s）也记到同一份日志里：卡死可能出在渲染侧，
+  // 只记主进程会让人误以为主进程没问题。
+  ipcMain.on("perf:long-task", (event, payload: any) => {
+    if (!isAllowedSender(event)) return;
+    const ms = Number(payload?.ms);
+    const label = typeof payload?.label === "string" ? payload.label.slice(0, 80) : "";
+    if (!Number.isFinite(ms) || ms < 1000) return;
+    logPerfLine(`渲染进程长任务 ${Math.round(ms)}ms${label ? `（${label}）` : ""}`);
   });
   handle("pi:recent", async () => {
     const recent = await readRecent(recentFile());

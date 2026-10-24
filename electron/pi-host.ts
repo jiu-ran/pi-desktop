@@ -13,6 +13,7 @@ import { clearSessionHistoryCache, readSessionHistory, readSessionHistoryPage } 
 import { firstUserTitle } from "./session-title.ts";
 import { readSessionName } from "./session-name.ts";
 import { sessionContextBlock } from "./session-context.ts";
+import { logPerfLine } from "./perf-log.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
@@ -338,6 +339,12 @@ function sessionDir(cwd: string): string {
   const resolved = path.resolve(cwd);
   const encoded = `--${[...resolved].map((ch) => ("\\/:".includes(ch) ? "-" : ch)).join("").replace(/^-/, "")}--`;
   return path.join(agentDir, "sessions", encoded);
+}
+
+/** Pi 拒绝加载会话文件时的报错（会话损坏 / 不是 Pi 的 JSONL 格式）。 */
+export function isBrokenSessionError(error: any): boolean {
+  const text = String(error?.message ?? error ?? "");
+  return /not a valid pi session|invalid session file|无法读取会话/i.test(text);
 }
 
 /** 一次最多引用几个会话：多了提示词会被撑爆，而且是同一份上下文反复计入 token。 */
@@ -944,6 +951,22 @@ export class PiHost {
     return withTimeout(this.snapshot(cwd), SNAPSHOT_TIMEOUT_MS, "读取会话状态超时，请重试");
   }
 
+  /**
+   * 会话文件读不出来（损坏 / 被别的工具改成非 Pi 格式）时，worker 会停在
+   * 半切换状态：后续每个调用都会继续报错，界面表现成「这个工作区还没有启动 Pi」。
+   * 这里把这一槽 worker 丢掉，工作区保持可用，用户换一个会话即可继续。
+   */
+  private async discardBrokenSlot(cwd: string, client: any): Promise<void> {
+    const pool = this.clients.get(cwd);
+    if (!pool) return;
+    for (const [key, slot] of [...pool.workers.entries()]) {
+      if (slot.client !== client) continue;
+      pool.workers.delete(key);
+      if (pool.client === client) pool.client = [...pool.workers.values()][0]?.client ?? pool.client;
+    }
+    await client.stop().catch(() => {});
+  }
+
   /** 只清掉这个工作区的 worker，不等待可能还挂着的启动流程。 */
   private async discardWorkspace(cwd: string): Promise<void> {
     const pool = this.clients.get(cwd);
@@ -989,9 +1012,15 @@ export class PiHost {
 
       if (options.targetSessionFile) {
         if (normSessionFile(initialFile) !== normSessionFile(options.targetSessionFile)) {
-          const switched = await client.switchSession(options.targetSessionFile);
+          // 目标会话文件坏了（损坏 / 是别的工具写的）：不要因此打不开项目，
+          // 先用刚启动的新会话，用户可以在会话列表里换一个。
+          const switched = await client.switchSession(options.targetSessionFile).catch((error: any) => {
+            if (!isBrokenSessionError(error)) throw error;
+            logPerfLine(`会话文件无法加载，改用新会话：${path.basename(options.targetSessionFile!)}`);
+            return null;
+          });
           if (switched?.cancelled) throw new Error("会话切换已取消");
-          if (initialFile && state.messageCount === 0) {
+          if (switched && initialFile && state.messageCount === 0 && normSessionFile(initialFile) !== normSessionFile(state.sessionFile ?? "")) {
             await unlink(initialFile).catch(() => {});
           }
           state = await client.getState();
@@ -1985,7 +2014,14 @@ export class PiHost {
       if (idleSlot) {
         const oldFile = idleSlot.sessionFile;
         const oldKey = normSessionFile(oldFile);
-        const res = await idleSlot.client.switchSession(targetFile);
+        const res = await idleSlot.client.switchSession(targetFile).catch(async (error: any) => {
+          // 会话文件坏了：丢掉这一槽 worker，别让整个工作区跟着失灵。
+          if (isBrokenSessionError(error)) {
+            await this.discardBrokenSlot(cwd, idleSlot.client);
+            throw new Error(`这个会话文件读不出来（可能已损坏或被其它工具改写过）：${path.basename(targetFile)}。文件已保留，换一个会话或新建会话即可继续。`);
+          }
+          throw error;
+        });
         if (!res?.cancelled) {
           if (oldKey) pool.workers.delete(oldKey);
           if (oldFile && await isKnownEmptySession(oldFile)) {
