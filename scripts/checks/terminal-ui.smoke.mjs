@@ -31,7 +31,8 @@ export async function checkTerminalUiInElectron(win) {
     await key("Home");
     assert(await evaluate("document.activeElement === document.querySelector('.terminal-select-item')"), "Home 到首项");
     await key("End");
-    assert(await evaluate("document.activeElement === [...document.querySelectorAll('.terminal-select-item')].at(-1)"), "End 到末项");
+    // 菜单可能因为重渲染而换一批节点：轮询到焦点落在末项为止。
+    await poll("document.activeElement === [...document.querySelectorAll('.terminal-select-item')].at(-1)", "End 到末项");
     await key("Escape");
     assert(await evaluate("!document.querySelector('.terminal-select-menu') && document.activeElement?.closest('.terminal-profile-picker')"), "Esc 撤掉浮层并恢复触发按钮焦点");
 
