@@ -715,11 +715,34 @@ function gitOperationPaths(root: string, paths: unknown): string[] {
 }
 
 /** 只允许操作该项目会话目录里的 .jsonl，防止渲染进程传入任意路径 */
+const normalizePath = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
+
+/** 会话（含子代理会话）统一放在 <agentDir>/sessions 下。 */
+function agentSessionsRoot(): string {
+  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
+  return normalizePath(path.join(agentDir, "sessions")) + path.sep;
+}
+
+/** 删除等写操作只允许该项目自己的会话文件。 */
 function assertSessionFile(cwd: string, file: string): string {
-  const norm = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
-  const dir = norm(sessionDir(cwd)) + path.sep;
-  if (typeof file !== "string" || !file.endsWith(".jsonl") || !norm(file).startsWith(dir)) {
+  const dir = normalizePath(sessionDir(cwd)) + path.sep;
+  if (typeof file !== "string" || !file.endsWith(".jsonl") || !normalizePath(file).startsWith(dir)) {
     throw new Error("只能删除该项目自己的会话文件");
+  }
+  return path.resolve(file);
+}
+
+/**
+ * 读取历史时放宽到整个会话根目录：子代理把自己的会话放在
+ * <agentDir>/sessions/<父项目>/<会话>/<runId>/run-0/session.jsonl，
+ * 在 worktree 里运行时还可能落在别的项目目录下。
+ */
+function assertReadableSessionFile(cwd: string, file: string): string {
+  const dir = normalizePath(sessionDir(cwd)) + path.sep;
+  if (typeof file !== "string" || !file.endsWith(".jsonl")) throw new Error("只能读取会话文件");
+  const target = normalizePath(file);
+  if (!target.startsWith(dir) && !target.startsWith(agentSessionsRoot())) {
+    throw new Error("只能读取会话目录下的记录");
   }
   return path.resolve(file);
 }
@@ -1765,7 +1788,7 @@ export class PiHost {
     minBlocks = 0,
   ): Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }> {
     try {
-      assertSessionFile(cwd, sessionFile);
+      assertReadableSessionFile(cwd, sessionFile);
       return await readSessionHistoryPage(sessionFile, endIndex, limit, minTurns, minBlocks);
     } catch (error) {
       throw new Error(`读取会话历史失败: ${error instanceof Error ? error.message : String(error)}`);

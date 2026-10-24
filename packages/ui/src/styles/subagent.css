@@ -49,3 +49,207 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 清单行现在是按钮：点击进入该子代理的对话弹窗。 */
+.subagent-rows li { display: flex; }
+button.subagent-row {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+button.subagent-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.subagent-open {
+  flex: none;
+  margin-left: 4px;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.subagent-row:hover .subagent-open,
+.subagent-row:focus-visible .subagent-open { opacity: 1; }
+
+/* 状态圆点：行与弹窗共用，按 data-state 上色。 */
+.subagent-dot[data-state="ok"] { background: var(--ok-fg); }
+.subagent-dot[data-state="failed"],
+.subagent-dot[data-state="timeout"] { background: var(--del-fg); }
+.subagent-dot[data-state="running"] { background: var(--accent); }
+.subagent-dot[data-state="stopped"] { background: var(--warn); }
+
+/* ── 子代理对话弹窗 ───────────────────────────────────────── */
+.subagent-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.subagent-modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  animation: fade 0.12s ease-out;
+}
+.subagent-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 94vw);
+  height: min(760px, 84vh);
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  outline: none;
+  background: var(--bg-1);
+  box-shadow: var(--shadow);
+  animation: rise 0.14s ease-out;
+}
+.subagent-dialog-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.subagent-dialog-agent { color: var(--fg); font-size: 13px; font-weight: 600; }
+.subagent-dialog-state {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 10.5px;
+  line-height: 17px;
+}
+.subagent-dialog-state[data-state="ok"] { color: var(--ok-fg); }
+.subagent-dialog-state[data-state="failed"],
+.subagent-dialog-state[data-state="timeout"] { color: var(--del-fg); }
+.subagent-dialog-state[data-state="running"] { color: var(--accent); }
+.subagent-dialog-state[data-state="stopped"] { color: var(--warn); }
+.subagent-dialog-meta {
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-dialog-spacer { flex: 1; }
+.subagent-dialog-hint { flex: none; color: var(--fg-3); font-size: 10.5px; }
+.subagent-dialog-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.subagent-dialog-close:hover { background: var(--hover); color: var(--fg); }
+.subagent-dialog-body { display: flex; flex: 1; min-height: 0; }
+.subagent-dialog-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  width: 190px;
+  padding: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+.subagent-rail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.subagent-rail-row:hover { background: var(--hover); }
+.subagent-rail-row.active { background: var(--bg-2); color: var(--fg); }
+.subagent-rail-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-rail-state { margin-left: auto; flex: none; color: var(--fg-3); font-size: 10px; }
+.subagent-dialog-thread {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.subagent-dialog-task {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.subagent-dialog-note { margin: 8px 0; color: var(--fg-3); font-size: 11.5px; }
+.subagent-dialog-error {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--del-bg);
+  color: var(--del-fg);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+.subagent-dialog-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.subagent-dialog-path {
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 10.5px/1.5 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .subagent-modal { padding: 0; }
+  .subagent-dialog { width: 100vw; height: 100vh; border-radius: 0; border: 0; }
+  .subagent-dialog-body.with-rail { flex-direction: column; }
+  .subagent-dialog-rail {
+    flex-direction: row;
+    width: auto;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .subagent-dialog-hint { display: none; }
+}
+
+/* 子代理自己的回答是普通 markdown，弹窗里把标题压小，避免 h1 顶满整个宽度。 */
+/* 子代理回答里的标题按弹窗尺度收敛（markstream 默认 h1=29px，会把弹窗撑满）。 */
+.subagent-dialog-thread .heading-node.heading-1 { margin: 14px 0 8px; font-size: 17px; }
+.subagent-dialog-thread .heading-node.heading-2 { margin: 12px 0 6px; font-size: 15px; }
+.subagent-dialog-thread .heading-node.heading-3 { margin: 10px 0 6px; font-size: 13.5px; }
+.subagent-dialog-thread .heading-node:first-child { margin-top: 0; }

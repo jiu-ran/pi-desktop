@@ -20,8 +20,17 @@ export interface SubagentRow {
   tokens: number | null;
   currentTool: string;
   error: string;
+  /** 列表用的输出摘要 */
   output: string;
   truncated: boolean;
+  /** 子代理自己的会话文件：存在时可打开它的完整对话 */
+  sessionFile: string;
+  /** 完整输出，弹窗在没有会话文件时用它兜底 */
+  finalOutput: string;
+  /** 交给子代理的任务描述 */
+  task: string;
+  model: string;
+  exitCode: number | null;
 }
 
 export interface SubagentSummary {
@@ -51,11 +60,19 @@ function pickOutput(result: any): { output: string; truncated: boolean } {
   return { output: `${raw.slice(0, OUTPUT_PREVIEW).trimEnd()}…`, truncated: true };
 }
 
+const SUCCESS_STATES = new Set(["complete", "completed", "ok", "success", "done"]);
+const STOP_STATES = new Set(["cancelled", "canceled", "stopped", "aborted", "interrupted"]);
+const TIMEOUT_STATES = new Set(["timeout", "timed-out", "timedout"]);
+
 function stateOf(result: any, settled: boolean): SubagentState {
-  if (result?.timedOut) return "timeout";
-  if (result?.stopped || result?.interrupted) return "stopped";
+  const outputState = text(result?.outputState).toLowerCase();
+  if (result?.timedOut || TIMEOUT_STATES.has(outputState)) return "timeout";
+  if (result?.stopped || result?.interrupted || STOP_STATES.has(outputState)) return "stopped";
   if (result?.success === false || text(result?.error)) return "failed";
   if (result?.success === true) return "ok";
+  // 有的版本不给 success，只留 exitCode：非 0 即失败。
+  if (typeof result?.exitCode === "number" && result.exitCode !== 0) return "failed";
+  if (SUCCESS_STATES.has(outputState)) return "ok";
   const activity = text(result?.progress?.activityState);
   if (activity === "running" || activity === "waiting") return "running";
   // 没有明确状态时的兜底：工具已结束就当作成功，否则仍在运行。
@@ -84,6 +101,11 @@ export function summarizeSubagent(details: unknown, settled = true): SubagentSum
       error: text(result?.error),
       output,
       truncated,
+      sessionFile: text(result?.sessionFile),
+      finalOutput: text(result?.finalOutput) || text(result?.output),
+      task: text(result?.task),
+      model: text(result?.model),
+      exitCode: num(result?.exitCode),
     };
   });
 

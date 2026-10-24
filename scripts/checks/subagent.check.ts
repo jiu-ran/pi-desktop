@@ -91,6 +91,53 @@ assert.equal(bare!.rows[0].agent, "子代理");
 assert.equal(bare!.rows[0].tools, null);
 
 // 模式与耗时的展示文案
+// 弹窗需要的数据：会话文件、完整输出、任务描述、模型；缺失字段留空而不是 undefined。
+const dialogData = summarizeSubagent({
+  mode: "single",
+  results: [
+    {
+      agent: "scout",
+      task: "看看这个目录",
+      sessionFile: "C:\\sessions\\a.jsonl",
+      finalOutput: "# 报告\n\n没有项目",
+      model: "deepseek/v4",
+      exitCode: 0,
+      outputState: "complete",
+    },
+  ],
+});
+assert.ok(dialogData);
+assert.equal(dialogData!.rows[0].sessionFile, "C:\\sessions\\a.jsonl");
+assert.equal(dialogData!.rows[0].finalOutput, "# 报告\n\n没有项目");
+assert.equal(dialogData!.rows[0].task, "看看这个目录");
+assert.equal(dialogData!.rows[0].model, "deepseek/v4");
+assert.equal(dialogData!.rows[0].exitCode, 0);
+assert.equal(dialogData!.rows[0].state, "ok", "outputState=complete 应判为完成");
+
+// 没有 success 字段时按 exitCode 判断失败（pi-subagents 多数版本只给 exitCode）
+const exitFailed = summarizeSubagent({
+  mode: "single",
+  results: [{ agent: "builder", exitCode: 1, error: "构建失败" }],
+});
+assert.equal(exitFailed!.rows[0].state, "failed");
+
+// outputState 表达超时 / 取消时优先于「已结束就当成功」的兜底
+const stateHints = summarizeSubagent({
+  mode: "parallel",
+  results: [
+    { agent: "slow", outputState: "timeout" },
+    { agent: "cancelled", outputState: "cancelled" },
+    { agent: "fine", outputState: "completed" },
+  ],
+});
+assert.equal(stateHints!.rows[0].state, "timeout");
+assert.equal(stateHints!.rows[1].state, "stopped");
+assert.equal(stateHints!.rows[2].state, "ok");
+
+// 没有任何会话信息时字段为空字符串，弹窗据此回退到最终输出
+assert.equal(bare!.rows[0].sessionFile, "");
+assert.equal(bare!.rows[0].finalOutput, "");
+
 assert.equal(subagentModeLabel("parallel"), "并行");
 assert.equal(subagentModeLabel("workflow"), "工作流");
 assert.equal(subagentModeLabel("unknown-mode"), "unknown-mode", "未知模式直接显示原值");

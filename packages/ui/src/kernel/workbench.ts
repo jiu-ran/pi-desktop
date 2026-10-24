@@ -32,6 +32,8 @@ const PAGE_MIN_BLOCKS = 8;
 const INITIAL_PAGE_SIZE = 40;
 /** 首屏至少凑够多少轮用户对话 */
 const INITIAL_MIN_TURNS = 3;
+/** 子代理会话弹窗一次读取的消息条数（只读快照，不做分页） */
+const AGENT_SESSION_LIMIT = 400;
 /** 与主进程 prepareAttachments 的上限保持一致 */
 const MAX_ATTACHMENTS = 20;
 const SIDEBAR_WIDTH_KEY = "pi-desktop.sidebar-width";
@@ -994,6 +996,22 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (file && ws?.status === "ready") await switchSession(file);
   }
 
+  /**
+   * 读取子代理自己的会话记录（只读），用于弹窗里展示它的对话。
+   * 子代理会话文件由扩展写在本项目会话目录下的嵌套目录里；读不到时返回空数组，
+   * 调用方退回展示最终输出，不要因此报错打断阅读。
+   */
+  async function readAgentSession(sessionFile: string): Promise<any[]> {
+    const ws = active.value;
+    if (!ws || !sessionFile) return [];
+    try {
+      const page = await host.messagePage(ws.cwd, sessionFile, 0, AGENT_SESSION_LIMIT, 0);
+      return Array.isArray(page?.messages) ? page.messages : [];
+    } catch {
+      return [];
+    }
+  }
+
   /** 向上加载一页更早的历史消息（同时写入 transcript） */
   async function loadMoreMessages(
     cwd: string,
@@ -1765,6 +1783,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     refreshSessions,
     listSessions,
     openSession,
+    readAgentSession,
     loadMoreMessages,
     call,
     send,

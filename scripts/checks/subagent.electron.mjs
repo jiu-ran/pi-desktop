@@ -129,6 +129,65 @@ export async function checkSubagentInElectron(win) {
     assert.equal(view.badge, "并行", "徽标应显示模式");
     assert.equal(view.verb, "子代理");
 
+    // 点击子任务行 → 弹窗查看该子代理的对话（不新建会话，只覆盖当前界面）。
+    const openRow = (agent) =>
+      evaluate(`(() => {
+        const card = document.querySelector('.tool-card[data-block-id="probe-subagent"]');
+        const row = [...card.querySelectorAll('.subagent-row')]
+          .find((item) => item.querySelector('.subagent-agent')?.textContent.trim() === ${JSON.stringify(agent)});
+        if (!row) return false;
+        row.click();
+        return true;
+      })()`);
+    const dialogState = () =>
+      evaluate(`(() => {
+        const modal = document.querySelector('[data-subagent-modal]');
+        if (!modal) return null;
+        return {
+          agent: modal.querySelector('.subagent-dialog-agent')?.textContent.trim() ?? "",
+          state: modal.querySelector('.subagent-dialog-state')?.textContent.trim() ?? "",
+          meta: modal.querySelector('.subagent-dialog-meta')?.textContent.trim() ?? "",
+          rail: [...modal.querySelectorAll('.subagent-rail-row')].map((row) => ({
+            agent: row.querySelector('.subagent-rail-agent')?.textContent.trim() ?? "",
+            active: row.classList.contains('active'),
+          })),
+          thread: modal.querySelector('[data-subagent-thread]')?.textContent?.replace(/\\s+/g, " ").trim() ?? "",
+        };
+      })()`);
+
+    assert(await openRow("reviewer"), "应能点击子任务行");
+    await poll(`Boolean(document.querySelector('[data-subagent-modal]'))`, "子代理对话弹窗打开");
+    const firstDialog = await dialogState();
+    assert.equal(firstDialog.agent, "reviewer", "弹窗应显示被点击的子代理");
+    assert.equal(firstDialog.state, "完成");
+    assert.match(firstDialog.meta, /12\.4s/, "弹窗头部应显示耗时");
+    assert.deepEqual(firstDialog.rail.map((item) => item.agent), ["reviewer", "builder", "tester"], "并行时左侧应列出全部子任务");
+    assert.equal(firstDialog.rail[0].active, true);
+    // 这条结果没有会话文件：退回展示最终输出，并说明原因。
+    assert.match(firstDialog.thread, /没有留下子代理会话文件/, "缺少会话文件时应说明回退原因");
+    assert.match(firstDialog.thread, /看起来没问题/, "回退时应展示最终输出");
+
+    // 左侧切换子任务
+    await evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.subagent-rail-row')];
+      rows.find((row) => row.querySelector('.subagent-rail-agent')?.textContent.trim() === 'builder')?.click();
+      return true;
+    })()`);
+    await poll(`document.querySelector('.subagent-dialog-agent')?.textContent.trim() === 'builder'`, "切换子任务");
+    const secondDialog = await dialogState();
+    assert.equal(secondDialog.state, "失败");
+    assert.match(secondDialog.thread, /构建失败：缺少依赖/, "失败原因应出现在弹窗里");
+
+    // Esc 关闭
+    await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+    await poll(`!document.querySelector('[data-subagent-modal]')`, "Esc 关闭弹窗");
+
+    // 点遮罩关闭
+    assert(await openRow("tester"), "应能再次打开弹窗");
+    await poll(`Boolean(document.querySelector('[data-subagent-modal]'))`, "弹窗重新打开");
+    await evaluate(`document.querySelector('.subagent-modal-scrim').click(); true`);
+    await poll(`!document.querySelector('[data-subagent-modal]')`, "点击遮罩关闭弹窗");
+
     // 实时进度：partialResult.details 立即驱动清单
     await evaluate(`(() => {
       const thread = window.__piDesktop.workbench.active.value.activeThread;
@@ -179,7 +238,7 @@ export async function checkSubagentInElectron(win) {
       "停用插件后回退通用卡片",
     );
 
-    console.log("[subagent] PASS 插件注册 / 子任务清单 / 状态与用量 / 实时进度 / 停用后回退通用卡片");
+    console.log("[subagent] PASS 插件注册 / 子任务清单 / 状态与用量 / 对话弹窗 / 实时进度 / 停用后回退通用卡片");
   } finally {
     await evaluate(`(() => {
       const thread = window.__piDesktop.workbench.active.value?.activeThread;

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -35,6 +35,32 @@ try {
   }
   firstSlot.streaming = false;
   console.log("parallel workers", pool.workers.size, "OK");
+
+  // 子代理会话放在 <agentDir>/sessions 下的嵌套目录里，且可能属于别的项目目录：
+  // 读取历史要放行整个会话根目录，删除 / 切换会话仍然只认本项目。
+  const agentSessions = path.join(root, "agent", "sessions");
+  const otherProject = path.join(agentSessions, "--other-project--", "run-0");
+  await mkdir(otherProject, { recursive: true });
+  const childSession = path.join(otherProject, "session.jsonl");
+  await writeFile(childSession, [
+    JSON.stringify({ type: "session", version: 1, timestamp: new Date().toISOString(), cwd: "/other" }),
+    JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "子代理任务" }] } }),
+    JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "做完了" }] } }),
+  ].join("\n") + "\n");
+  const childPage = await host.messagePage(authorizedCwd, childSession, 0, 10);
+  if (childPage.messages.length !== 2) throw new Error("子代理会话应可读取");
+  const childText = JSON.stringify(childPage.messages);
+  if (!childText.includes("子代理任务") || !childText.includes("做完了")) throw new Error("子代理会话内容不完整");
+  console.log("child session messages", childPage.messages.length, "OK");
+
+  let rejected = "";
+  try {
+    await host.messagePage(authorizedCwd, path.join(root, "outside", "x.jsonl"), 0, 10);
+  } catch (error) {
+    rejected = String(error);
+  }
+  if (!rejected) throw new Error("会话目录之外的文件必须拒绝读取");
+  console.log("outside session rejected OK");
 } finally {
   await host.stopAll();
   await rm(root, { recursive: true, force: true });

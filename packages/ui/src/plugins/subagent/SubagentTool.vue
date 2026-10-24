@@ -4,6 +4,7 @@ import type { TranscriptBlock } from "../../kernel/transcript.ts";
 import ToolCard from "../../components/chat/tools/ToolCard.vue";
 import SearchHighlight from "../../components/chat/SearchHighlight.vue";
 import { formatDuration, subagentModeLabel, subagentStateLabel, summarizeSubagent } from "./summary.ts";
+import SubagentDialog from "./SubagentDialog.vue";
 import "../../styles/subagent.css";
 
 /**
@@ -66,6 +67,9 @@ function metaOf(row: NonNullable<ReturnType<typeof summarizeSubagent>>["rows"][n
   return parts.join(" · ");
 }
 
+/** 打开第 N 个子任务的对话弹窗；null 表示关闭。 */
+const dialogIndex = ref<number | null>(null);
+
 const expanded = ref(false);
 // 有失败项时默认展开明细，方便直接定位问题。
 watch(
@@ -94,13 +98,24 @@ watch(
         <span v-if="summary.running" class="subagent-stat run">{{ summary.running }} 运行中</span>
       </button>
       <ul v-if="expanded" class="subagent-rows">
-        <li v-for="(row, index) in summary.rows" :key="`${row.agent}-${index}`" class="subagent-row" :data-state="row.state">
-          <span class="subagent-dot" aria-hidden="true" />
-          <span class="subagent-agent">{{ row.agent }}</span>
-          <span class="subagent-state">{{ subagentStateLabel(row.state) }}</span>
-          <span v-if="row.currentTool && row.state === 'running'" class="subagent-current">{{ row.currentTool }}</span>
-          <span class="subagent-meta">{{ metaOf(row) }}</span>
-          <span v-if="row.error" class="subagent-error" :title="row.error">{{ row.error }}</span>
+        <li v-for="(row, index) in summary.rows" :key="`${row.agent}-${index}`">
+          <!-- 点一行就像进入那个子代理的对话：弹窗展示它自己的记录，不新建会话。 -->
+          <button
+            type="button"
+            class="subagent-row"
+            :data-state="row.state"
+            :title="`查看 ${row.agent} 的对话`"
+            :aria-label="`查看 ${row.agent} 的对话`"
+            @click="dialogIndex = index"
+          >
+            <span class="subagent-dot" aria-hidden="true" />
+            <span class="subagent-agent">{{ row.agent }}</span>
+            <span class="subagent-state">{{ subagentStateLabel(row.state) }}</span>
+            <span v-if="row.currentTool && row.state === 'running'" class="subagent-current">{{ row.currentTool }}</span>
+            <span class="subagent-meta">{{ metaOf(row) }}</span>
+            <span class="subagent-open" aria-hidden="true">›</span>
+            <span v-if="row.error" class="subagent-error" :title="row.error">{{ row.error }}</span>
+          </button>
         </li>
       </ul>
     </div>
@@ -114,5 +129,12 @@ watch(
       <span class="tool-section-label">结果</span>
       <pre class="term-out" :class="{ err: block.isError }"><SearchHighlight :text="output" :query="query" /></pre>
     </div>
+
+    <SubagentDialog
+      v-if="dialogIndex !== null && summary?.rows.length"
+      :rows="summary.rows"
+      :initial-index="dialogIndex"
+      @close="dialogIndex = null"
+    />
   </ToolCard>
 </template>
