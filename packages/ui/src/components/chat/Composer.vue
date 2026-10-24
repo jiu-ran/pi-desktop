@@ -5,7 +5,8 @@ import { formatTokens, icons, relativeTime, thinkingLabel } from "../../shared/u
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
-import { planQueueView, queuePreview } from "../../shared/queue-view.ts";
+import { planQueueView, queuePreview, stripQueueMarkers } from "../../shared/queue-view.ts";
+import QuoteEditor from "./QuoteEditor.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -15,6 +16,9 @@ import ImageLightbox from "./ImageLightbox.vue";
 import Widgets from "../overlays/Widgets.vue";
 
 const { workbench, slashCommands, bus, plugins } = useKernel();
+// 气泡上的「编辑」入口通过 bus 传上来：气泡在对话区，编辑框在输入框上方
+const stopQueueEditListener = bus.on("queue:edit", onQueueEditRequest);
+onBeforeUnmount(stopQueueEditListener);
 const ws = computed(() => workbench.active.value);
 const input = ref<HTMLTextAreaElement | null>(null);
 const mode = computed({
@@ -51,6 +55,105 @@ const queuePlan = computed(() =>
 );
 const queuePending = computed(() => queuePlan.value.pending);
 const queueBusy = ref(false);
+
+/** 排队消息编辑：点气泡或卡片上的「编辑」，在上方展开一个内联编辑框。 */
+const queueEdit = ref<{ mode: "steer" | "followUp"; prompt: string; message: string } | null>(null);
+const queueEditDraft = ref("");
+const queueEditBusy = ref(false);
+
+function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string; message: string }): void {
+  queueEdit.value = entry;
+  queueEditDraft.value = entry.message;
+  nextTick(() => {
+    const area = document.querySelector<HTMLTextAreaElement>(".queue-editor textarea");
+    area?.focus();
+    area?.setSelectionRange(area.value.length, area.value.length);
+  });
+}
+
+function closeQueueEdit(): void {
+  queueEdit.value = null;
+  queueEditDraft.value = "";
+}
+
+/** 从队列里定位某条消息的模式（气泡只知道提示词文本）。 */
+function queueModeOf(prompt: string): "steer" | "followUp" {
+  const queue = ws.value?.queue ?? { steering: [], followUp: [] };
+  const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const wanted = normalize(prompt);
+  if ((queue.steering ?? []).some((item) => normalize(item) === wanted)) return "steer";
+  return "followUp";
+}
+
+/** 编辑来自对话气泡的排队消息（气泡自己只知道文本，通过 bus 传上来）。 */
+function onQueueEditRequest(payload: { prompt?: string; message?: string } | undefined): void {
+  const prompt = String(payload?.prompt ?? "");
+  if (!prompt) return;
+  openQueueEdit({
+    mode: queueModeOf(prompt),
+    prompt,
+    message: String(payload?.message ?? stripQueueMarkers(prompt)),
+  });
+}
+
+async function saveQueueEdit(): Promise<void> {
+  const entry = queueEdit.value;
+  const text = queueEditDraft.value.trim();
+  if (!entry || !text || queueEditBusy.value) return;
+  queueEditBusy.value = true;
+  try {
+    const ok = await workbench.editQueued({ mode: entry.mode, text: entry.prompt }, text);
+    if (ok) closeQueueEdit();
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueEditBusy.value = false;
+  }
+}
+
+/** 会话引用编辑：改名称与注入的上下文正文。 */
+const quoteEditor = ref<{
+  open: boolean;
+  file: string;
+  title: string;
+  autoText: string;
+  customText?: string;
+  messages?: number;
+  size?: number;
+}>({ open: false, file: "", title: "", autoText: "" });
+const quoteBusy = ref(false);
+
+async function openQuoteEditor(item: any): Promise<void> {
+  if (!item?.path || item.kind !== "session" || quoteBusy.value) return;
+  quoteBusy.value = true;
+  try {
+    // 先把自动摘要取回来再打开对话框：否则打开后再填充会把用户正在改的内容覆盖掉
+    const preview = await workbench.previewSessionQuote(item.path);
+    quoteEditor.value = {
+      open: true,
+      file: item.path,
+      title: item.name || preview.title || "",
+      autoText: preview.text,
+      customText: typeof item.customText === "string" ? item.customText : undefined,
+      messages: item.messages,
+      size: item.size,
+    };
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    quoteBusy.value = false;
+  }
+}
+
+function closeQuoteEditor(): void {
+  quoteEditor.value = { ...quoteEditor.value, open: false };
+}
+
+function saveQuoteEditor(patch: { name: string; customText: string | null }): void {
+  if (!quoteEditor.value.file) return;
+  const ok = workbench.setSessionQuote(quoteEditor.value.file, patch);
+  if (ok) closeQuoteEditor();
+}
 
 async function recallQueue(): Promise<void> {
   if (queueBusy.value) return;
@@ -792,7 +895,36 @@ const argHint = computed(() => {
     <div class="composer-inner">
       <Widgets />
 
-      <div v-if="queuePending.length" class="queue-strip">
+      <!-- 编辑排队消息：清空队列 → 其余原样重新入队 → 这条换成新文字 -->
+      <div v-if="queueEdit" class="queue-strip queue-strip-editing">
+        <span class="queue-label">
+          <span class="queue-dot" />
+          编辑排队消息
+        </span>
+        <div class="queue-editor">
+          <textarea
+            v-model="queueEditDraft"
+            rows="2"
+            spellcheck="false"
+            placeholder="修改这条要发送的内容"
+            @keydown.enter.exact.prevent="saveQueueEdit"
+            @keydown.esc.prevent="closeQueueEdit"
+          />
+          <div class="queue-editor-actions">
+            <span class="queue-editor-hint">{{ queueEdit.mode === "steer" ? "插话" : "排队" }} · Enter 保存 · Esc 取消</span>
+            <button type="button" class="btn ghost small" @click="closeQueueEdit">取消</button>
+            <button
+              type="button"
+              class="btn primary small"
+              :disabled="queueEditBusy || !queueEditDraft.trim()"
+              @click="saveQueueEdit"
+            >
+              保存并重新排队
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="queuePending.length" class="queue-strip">
         <span class="queue-label">
           <span class="queue-dot" />
           {{ queuePending.length }} 条待发送
@@ -805,7 +937,14 @@ const argHint = computed(() => {
           :title="queuePreview(item.text, 400)"
         >
           <span class="queue-card-tag">{{ item.mode === "steer" ? "插话" : "排队" }}</span>
-          <span class="queue-card-text">{{ queuePreview(item.text, 70) }}</span>
+          <button
+            type="button"
+            class="queue-card-text"
+            title="编辑这条消息"
+            @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
+          >
+            {{ queuePreview(item.text, 70) }}
+          </button>
         </div>
         <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">撤回</button>
       </div>
@@ -923,8 +1062,10 @@ const argHint = computed(() => {
               v-for="item in fileAttachments"
               :key="item.path"
               class="attachment-chip"
-              :class="{ session: item.kind === 'session' }"
-              :title="item.kind === 'session' ? `引用对话：${item.name}` : item.path"
+              :class="{ session: item.kind === 'session', edited: Boolean(item.customText) }"
+              :title="item.kind === 'session' ? `引用对话：${item.name}（点击编辑注入的上下文）` : item.path"
+              :data-quote-chip="item.kind === 'session' ? item.path : undefined"
+              @click="item.kind === 'session' && openQuoteEditor(item)"
             >
               <span
                 class="attachment-chip-icon"
@@ -933,7 +1074,8 @@ const argHint = computed(() => {
               <span>{{ item.name }}</span>
               <span v-if="item.kind === 'session' && item.messages" class="attachment-chip-meta">{{ item.messages }} 条</span>
               <span v-else-if="item.size" class="attachment-chip-meta">{{ formatBytes(item.size) }}</span>
-              <button type="button" :title="item.kind === 'session' ? '移除对话引用' : '移除附件'" @click="removeAttachment(item.path)">×</button>
+              <span v-if="item.customText" class="attachment-chip-edited" title="上下文已手动修改">已编辑</span>
+              <button type="button" :title="item.kind === 'session' ? '移除对话引用' : '移除附件'" @click.stop="removeAttachment(item.path)">×</button>
             </span>
           </div>
           <textarea
@@ -1057,5 +1199,17 @@ const argHint = computed(() => {
       </div>
     </div>
     <ImageLightbox v-model:index="imagePreviewIndex" :items="imageAttachments.map((item: any) => ({ src: imageDataUrl(item.mimeType, item.data), name: item.name }))" />
+    <QuoteEditor
+      :open="quoteEditor.open"
+      :file="quoteEditor.file"
+      :title="quoteEditor.title"
+      :auto-text="quoteEditor.autoText"
+      :custom-text="quoteEditor.customText"
+      :messages="quoteEditor.messages"
+      :size="quoteEditor.size"
+      :busy="quoteBusy"
+      @close="closeQuoteEditor"
+      @save="saveQuoteEditor"
+    />
   </div>
 </template>

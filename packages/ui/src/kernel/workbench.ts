@@ -5,7 +5,8 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { queueDraftText } from "../shared/queue-view.ts";
+import { planQueueEdit, queueDraftText, replacePromptMessage } from "../shared/queue-view.ts";
+import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
 import type {
@@ -1212,17 +1213,29 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     try {
       // 会话引用和文件附件走不同的准备入口：会话在项目目录之外，且内容是压缩过的摘��。
       const filePaths = attachmentSnapshot.filter((item: any) => item.kind !== "session").map((item: any) => item.path);
-      const sessionPaths = attachmentSnapshot.filter((item: any) => item.kind === "session").map((item: any) => item.path);
+      // 用户改过上下文的会话引用不再重新生成，直接用它保存的文本（格式与主进程一致）。
+      const sessionAttachments = attachmentSnapshot.filter((item: any) => item.kind === "session");
+      const customSessions = sessionAttachments.filter((item: any) => typeof item.customText === "string" && item.customText.trim());
+      const sessionPaths = sessionAttachments
+        .filter((item: any) => !customSessions.includes(item))
+        .map((item: any) => item.path);
       const [preparedFiles, preparedSessions] = await Promise.all([
         filePaths.length ? host.prepareAttachments(ws.cwd, filePaths) : Promise.resolve({ text: "", images: [] as any[], items: [] as any[] }),
         sessionPaths.length ? host.prepareSessionAttachments(ws.cwd, sessionPaths) : Promise.resolve({ text: "", images: [] as any[], items: [] as any[] }),
       ]);
+      const customSessionText = buildCustomSessionBlocks(customSessions as any[]);
+      const sessionText = [customSessionText, preparedSessions.text].filter(Boolean).join("\n");
       const prepared = {
-        sessionText: preparedSessions.text,
+        sessionText,
         fileText: preparedFiles.text,
-        text: [preparedSessions.text, preparedFiles.text].filter(Boolean).join("\n"),
+        text: [sessionText, preparedFiles.text].filter(Boolean).join("\n"),
         images: preparedFiles.images,
-        items: [...(preparedSessions.items ?? []), ...(preparedFiles.items ?? [])],
+        // 改过上下文的引用主进程不会再回传条目，这里用快照里的那份（保留名称与条数）
+        items: [
+          ...customSessions.map((item: any) => ({ ...item, image: false, inlined: true })),
+          ...(preparedSessions.items ?? []),
+          ...(preparedFiles.items ?? []),
+        ],
       };
       // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致。
       // 引导（steering）与追加（followUp）也必须立即插入：它们同样会写进会话文件，
@@ -1460,6 +1473,81 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       }
     }
     return texts.map((text) => queueDraftText(text)).filter(Boolean).join("\n");
+  }
+
+  /**
+   * 编辑排队中的消息。
+   *
+   * Pi 的队列只能整体清空（clearQueue 返回全部文本），没有「删掉其中一条」。
+   * 所以做法是：清空 → 按原顺序把其余消息重新入队 → 目标消息用新文字替换。
+   * 重新入队失败时把内容放回输入框，绝不能把用户排队的话弄丢。
+   */
+  async function editQueued(target: { mode: "steer" | "followUp"; text: string }, newText: string): Promise<boolean> {
+    const ws = active.value;
+    const next = String(newText ?? "").trim();
+    if (!ws || !next || !target?.text) return false;
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const wanted = normalize(target.text);
+    const block = thread.blocks.find(
+      (item) => item.kind === "user" && normalize(item.queueText ?? "") === wanted,
+    );
+    const images = (block?.imageItems ?? []) as Array<{ mimeType: string; data: string }>;
+    const oldMessage = block?.text ?? "";
+    const nextPrompt = replacePromptMessage(target.text, oldMessage, next);
+    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    const planned = planQueueEdit(current, target, nextPrompt);
+    try {
+      for (const text of planned.steering) await rpc(ws.cwd, "steer", [text], thread.sessionFile);
+      for (const text of planned.followUp) await rpc(ws.cwd, "followUp", [text], thread.sessionFile);
+    } catch (error: any) {
+      // 重新入队失败：把没排上的内容交回输入框，并刷新队列状态
+      thread.queue = { steering: [], followUp: [] };
+      bus.emit("notify", {
+        level: "error",
+        text: `排队消息重新提交失败，内容已放回输入框：${error?.message ?? String(error)}`,
+      });
+      return false;
+    }
+    if (block) {
+      block.text = next;
+      block.queueText = nextPrompt;
+    }
+    thread.queue = planned;
+    // 目标消息可能带图片：编辑不丢图，但 Pi 的队列只能按文本恢复，这里保留在气泡上
+    if (images.length && block) block.imageItems = images;
+    saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
+    return true;
+  }
+
+  /** 重新生成某个会话引用的自动上下文（编辑框里「恢复自动」用）。 */
+  async function previewSessionQuote(file: string): Promise<{ text: string; title: string }> {
+    const ws = active.value;
+    if (!ws || !file) return { text: "", title: "" };
+    const prepared = await host.prepareSessionAttachments(ws.cwd, [file]);
+    return {
+      // 只回正文：外层 <session> 由发送时按同样格式重新拼，避免套娃
+      text: extractSessionBody(String(prepared?.text ?? "")),
+      title: String(prepared?.items?.[0]?.name ?? ""),
+    };
+  }
+
+  /** 修改会话引用：改名或改写上下文正文（正文为 null 表示恢复自动摘要）。 */
+  function setSessionQuote(file: string, patch: { name?: string; customText?: string | null }): boolean {
+    const ws = active.value;
+    if (!ws || !file) return false;
+    const thread = ws.activeThread;
+    const item = thread.attachments.find((entry: any) => entry.kind === "session" && entry.path === file);
+    if (!item) return false;
+    if (typeof patch.name === "string" && patch.name.trim()) item.name = patch.name.trim();
+    if (patch.customText === null) delete (item as any).customText;
+    else if (typeof patch.customText === "string" && patch.customText.trim()) item.customText = patch.customText;
+    saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
+    return true;
   }
 
   async function setModel(model: any): Promise<void> {
@@ -1946,6 +2034,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     addFiles,
     addSessionAttachment,
     recallQueued,
+    editQueued,
+    previewSessionQuote,
+    setSessionQuote,
     addPastedImage,
     extractDroppedPaths,
     chooseFiles,

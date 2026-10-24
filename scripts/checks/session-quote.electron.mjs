@@ -135,6 +135,143 @@ export async function checkSessionQuoteInElectron(win) {
     assert.equal(chip.draft, "", "选中对话后输入框里的 @query 应被清掉");
     assert.equal(chip.pickerOpen, false, "选中后选择器应关闭");
 
+    // ---- 编辑引用：改名称与注入的上下文 ----
+    await evaluate("document.querySelector('.attachment-chip.session').click(); true");
+    await poll("Boolean(document.querySelector('[data-quote-modal]'))", "点击对话附件应打开编辑对话框");
+    const quote = JSON.parse(await evaluate(`(() => {
+      const dialog = document.querySelector('.quote-dialog');
+      const area = dialog.querySelector('.quote-textarea');
+      const name = dialog.querySelector('.quote-input');
+      return JSON.stringify({
+        name: name?.value ?? '',
+        body: area?.value ?? '',
+        meta: dialog.querySelector('.quote-meta')?.textContent.replace(/\s+/g, ' ').trim() ?? '',
+        actions: [...dialog.querySelectorAll('.quote-actions button')].map((n) => n.textContent.trim()),
+        restoreDisabled: dialog.querySelector('.quote-actions .btn.ghost')?.disabled ?? null,
+      });
+    })()`));
+    assert.match(quote.name, /报表/, `对话框应带出会话名称，实际「${quote.name}」`);
+    assert.ok(quote.body.includes("报表导出的表头错位"), "上下文正文应预填自动摘要");
+    assert.match(quote.meta, /\d+ 条消息/, `应显示消息条数，实际「${quote.meta}」`);
+    assert.ok(quote.actions.includes("保存"), "要有保存按钮");
+    assert.equal(quote.restoreDisabled, true, "还没改成自定义时「恢复自动摘要」应禁用");
+
+    await evaluate(`(() => {
+      const dialog = document.querySelector('.quote-dialog');
+      const name = dialog.querySelector('.quote-input');
+      name.value = "报表会话（我的备注）";
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      const area = dialog.querySelector('.quote-textarea');
+      area.value = "只保留结论：表头错位的原因是对齐时取了错的列宽。";
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    // Vue 要等一拍才会把「保存」从 disabled 状态放开，所以单独点
+    await evaluate(`(() => {
+      const dialog = document.querySelector('.quote-dialog');
+      const save = [...dialog.querySelectorAll('.quote-actions button')].find((n) => n.textContent.trim() === "保存");
+      if (!save || save.disabled) return false;
+      save.click();
+      return true;
+    })()`).then((ok) => assert.ok(ok, "「保存」按钮应可用"));
+await poll("!document.querySelector('[data-quote-modal]')", "保存后对话框应关闭");
+    const edited = JSON.parse(await evaluate(`(() => {
+      const chip = document.querySelector('.attachment-chip.session');
+      const item = window.__piDesktop.workbench.active.value.attachments.find((a) => a.kind === "session");
+      return JSON.stringify({
+        label: chip.querySelector('span:nth-child(2)')?.textContent.trim() ?? '',
+        badge: chip.querySelector('.attachment-chip-edited')?.textContent.trim() ?? '',
+        chipEdited: chip.classList.contains('edited'),
+        customText: item?.customText ?? '',
+        name: item?.name ?? '',
+      });
+    })()`));
+    assert.equal(edited.label, "报表会话（我的备注）", "名称应更新到附件上");
+    assert.equal(edited.badge, "已编辑", "改过的引用应有「已编辑」标记");
+    assert.ok(edited.chipEdited, "改过的引用应有虚线边框样式");
+    assert.ok(edited.customText.includes("只保留结论"), `自定义正文应保存下来，实际「${edited.customText}」`);
+
+    // 发送时用自定义正文，不再走自动摘要
+    {
+      const { buildCustomSessionBlocks } = await import("../../packages/ui/src/shared/session-block.ts");
+      const text = buildCustomSessionBlocks([
+        { path: "quote-report.jsonl", name: edited.name, customText: edited.customText, messages: 2 },
+      ]);
+      assert.ok(text.includes("只保留结论"), "自定义正文应进入上下文块");
+      assert.ok(text.startsWith('<session name="'), "仍是标准的会话块格式");
+      assert.ok(!text.includes("已经改成 JWT"), "不应再带上自动摘要");
+    }
+
+    // 恢复自动摘要 → 「已编辑」消失
+    await evaluate("document.querySelector('.attachment-chip.session').click(); true");
+    await poll("Boolean(document.querySelector('[data-quote-modal]'))", "再次打开编辑对话框");
+    await evaluate(`(() => {
+      const dialog = document.querySelector('.quote-dialog');
+      [...dialog.querySelectorAll('.quote-actions button')].find((n) => n.textContent.includes("恢复自动")).click();
+      return true;
+    })()`);
+    await poll("!document.querySelector('[data-quote-modal]')", "恢复自动后对话框应关闭");
+    const restored = JSON.parse(await evaluate(`(() => {
+      const chip = document.querySelector('.attachment-chip.session');
+      const item = window.__piDesktop.workbench.active.value.attachments.find((a) => a.kind === "session");
+      return JSON.stringify({
+        badge: Boolean(chip.querySelector('.attachment-chip-edited')),
+        customText: item?.customText ?? null,
+      });
+    })()`));
+    assert.equal(restored.badge, false, "恢复自动后不应再有「已编辑」标记");
+    assert.equal(restored.customText, null, "恢复自动后应清掉自定义正文");
+
+    // 截图：引用编辑对话框（人工确认排版）
+    await evaluate("document.querySelector('.attachment-chip.session').click(); true");
+    await poll("Boolean(document.querySelector('[data-quote-modal]'))", "截图用引用编辑对话框");
+    {
+      const shot = async (name) => {
+        try {
+          const dbg = win.webContents.debugger;
+          if (!dbg.isAttached()) await dbg.attach("1.3");
+          const result = await Promise.race([
+            dbg.sendCommand("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+          ]);
+          if (!result?.data) return `${name}（跳过）`;
+          const { writeFile } = await import("node:fs/promises");
+          const nodePath = await import("node:path");
+          const { tmpdir } = await import("node:os");
+          await writeFile(nodePath.join(tmpdir(), name), Buffer.from(result.data, "base64"));
+          return name;
+        } catch (error) {
+          return `${name}（失败：${error?.message ?? error}）`;
+        } finally {
+          if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+        }
+      };
+      console.log("[session-quote] shot", await shot("quote-dialog-dark.png"));
+      await evaluate("window.__piDesktop.workbench.setTheme('light'); true");
+      await wait(400);
+      console.log("[session-quote] shot", await shot("quote-dialog-light.png"));
+      await evaluate("window.__piDesktop.workbench.setTheme('dark'); true");
+      await wait(200);
+    }
+    await evaluate("document.querySelector('.quote-dialog .quote-actions .btn.ghost')?.click(); true");
+    await wait(250);
+    // 把名称改回真实标题：后面的键盘/去重用例按标题匹配候选
+    await evaluate("document.querySelector('.attachment-chip.session').click(); true");
+    await poll("Boolean(document.querySelector('[data-quote-modal]'))", "改回名称前打开对话框");
+    await evaluate(`(() => {
+      const name = document.querySelector('.quote-dialog .quote-input');
+      name.value = "修一下报表导出的表头错位";
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await evaluate(`(() => {
+      const save = [...document.querySelectorAll('.quote-dialog .quote-actions button')].find((n) => n.textContent.trim() === "保存");
+      if (!save || save.disabled) return false;
+      save.click();
+      return true;
+    })()`).then((ok) => assert.ok(ok, "改回名称后应能保存"));
+    await poll("!document.querySelector('[data-quote-modal]')", "改回名称后对话框应关闭");
+
     // 重复添加同一会话不会产生第二枚
     await typeAt();
     await evaluate("document.querySelector('.path-picker-session').click(); true");
@@ -237,7 +374,7 @@ export async function checkSessionQuoteInElectron(win) {
       return true;
     })()`);
 
-    console.log("[session-quote] PASS 分组 / 选择 / 去重 / 键盘 / 搜索 / 移除 / 发送上下文");
+    console.log("[session-quote] PASS 分组 / 选择 / 去重 / 键盘 / 搜索 / 编辑引用 / 移除 / 发送上下文");
   } finally {
     // 临时工作区不能留在「最近项目」里：下次启动会去加载已被删掉的会话，
     // 界面会一直弹「会话无效」。会话文件也一并清掉。

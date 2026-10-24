@@ -20,6 +20,8 @@ export interface MessageAttachment {
   inlined?: boolean;
   /** 引用对话时：这个会话有多少条消息 */
   messages?: number;
+  /** 引用对话时：用户改过上下文正文（有值就不再走自动摘要） */
+  customText?: string;
 }
 
 export function formatBytes(bytes: number): string {

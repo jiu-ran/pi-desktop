@@ -77,3 +77,79 @@ assert.equal(queuePreview('<session name="C:\\s.jsonl" title="t">\n摘要\n</ses
 assert.equal(queueDraftText('<file name="C:\\a\\b.txt">\n内容\n</file>\n看看这个'), "[文件: C:\\a\\b.txt]\n看看这个");
 
 console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览");
+
+// 编辑排队消息：只替换提示词末尾的用户文字，前面的上下文（附件 / 引用）原样保留
+{
+  const { replacePromptMessage, planQueueEdit } = await import("../../packages/ui/src/shared/queue-view.ts");
+  const prompt = '<file name="C:\a\b.txt">\n内容\n</file>\n原来的话';
+  assert.equal(
+    replacePromptMessage(prompt, "原来的话", "改过的话"),
+    '<file name="C:\a\b.txt">\n内容\n</file>\n改过的话',
+    "编辑只替换末尾的用户文字",
+  );
+  assert.equal(replacePromptMessage("原来的话", "原来的话", "改过的话"), "改过的话");
+  assert.equal(
+    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "", "只有附件"),
+    '<file name="a.txt">\n内容\n</file>\n只有附件',
+    "纯附件消息补充文字",
+  );
+  assert.equal(replacePromptMessage("别的上下文", "找不到的老文字", "新文字"), "新文字", "对不上时退回新文字");
+
+  // 队列重排：目标换文字，其余保持原样与原顺序
+  const queue = { steering: ["插话一", "插话二"], followUp: ["追加一"] };
+  assert.deepEqual(
+    planQueueEdit(queue, { mode: "steer", text: "插话二" }, "插话二（改）"),
+    { steering: ["插话一", "插话二（改）"], followUp: ["追加一"] },
+    "编辑插话只改那一条",
+  );
+  assert.deepEqual(
+    planQueueEdit(queue, { mode: "followUp", text: "追加一" }, "追加一（改）"),
+    { steering: ["插话一", "插话二"], followUp: ["追加一（改）"] },
+    "编辑追加不影响插话",
+  );
+  assert.deepEqual(queue.steering, ["插话一", "插话二"], "不能改到原对象");
+  console.log("queue edit OK 替换末尾 / 重排 / 不可变");
+}
+
+// 会话引用块：自定义正文也要能被历史解析回卡片
+{
+  const { buildSessionBlock, buildCustomSessionBlocks } = await import("../../packages/ui/src/shared/session-block.ts");
+  const { splitAttachmentMarkers } = await import("../../packages/ui/src/shared/attachments.ts");
+  const block = buildSessionBlock({
+    file: "C:\s\a.jsonl",
+    title: '登录 <改造> "任务"',
+    body: "用户改过的正文",
+    messages: 12,
+  });
+  assert.ok(block.startsWith('<session name="C:\s\a.jsonl" title="登录 &lt;改造&gt; &quot;任务&quot;" messages="12">'), block.slice(0, 100));
+  assert.ok(block.includes("用户改过的正文"));
+  const parsed = splitAttachmentMarkers(block + "\n接着干");
+  assert.equal(parsed.attachments.length, 1, "自定义引用也要能解析成卡片");
+  assert.equal(parsed.attachments[0]!.kind, "session");
+  assert.equal(parsed.attachments[0]!.name, '登录 <改造> "任务"');
+  assert.equal(parsed.attachments[0]!.messages, 12);
+  assert.equal(parsed.text, "接着干", "正文里不该残留引用块");
+
+  // 只拼「改过正文」的引用；没改的交给主进程生成
+  const joined = buildCustomSessionBlocks([
+    { path: "/a.jsonl", name: "A", customText: "自定义 A", messages: 3 },
+    { path: "/b.jsonl", name: "B" },
+    { path: "/c.jsonl", name: "C", customText: "   " },
+  ]);
+  assert.equal((joined.match(/<session name=/g) ?? []).length, 1, "没改过正文的引用不应重复拼");
+  assert.ok(joined.includes("自定义 A"));
+  assert.ok(!joined.includes("/b.jsonl"));
+  console.log("session block OK XML 转义 / 卡片还原 / 只拼自定义");
+}
+
+// 编辑框里拿到的是「正文」，外层 <session> 由发送时重新拼（否则会套两层）
+{
+  const { extractSessionBody, buildSessionBlock } = await import("../../packages/ui/src/shared/session-block.ts");
+  const block = buildSessionBlock({ file: "/a.jsonl", title: "A", body: "用户：问题\n助手：回答", messages: 2 });
+  assert.equal(extractSessionBody(block), "用户：问题\n助手：回答", "应只取出正文");
+  // 改完再拼回去，正好一层
+  const rebuilt = buildSessionBlock({ file: "/a.jsonl", title: "A", body: "用户：改过的问题", messages: 2 });
+  assert.equal((rebuilt.match(/<session /g) ?? []).length, 1, "重新拼装不能套娃");
+  assert.equal(extractSessionBody("没有包裹的纯文本"), "没有包裹的纯文本", "没有包裹时原样返回");
+  console.log("session body OK 去包裹 / 再拼回 / 兜底");
+}

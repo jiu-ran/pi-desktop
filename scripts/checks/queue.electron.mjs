@@ -40,7 +40,7 @@ export async function checkQueueInElectron(win) {
     const cards = [...document.querySelectorAll('.queue-card')];
     return JSON.stringify({
       bubblesWithBadge: document.querySelectorAll('.msg-user-bubble.queued').length,
-      badgeText: badge?.textContent.trim() ?? '',
+      badgeText: badge?.querySelector('span:nth-child(2)')?.textContent.trim() ?? '',
       cards: cards.map((n) => ({
         tag: n.querySelector('.queue-card-tag')?.textContent.trim() ?? '',
         text: n.querySelector('.queue-card-text')?.textContent.trim() ?? '',
@@ -92,6 +92,127 @@ export async function checkQueueInElectron(win) {
   await evaluate("window.__piDesktop.workbench.setTheme('dark'); true");
   await wait(200);
 
+  // ---- 编辑排队消息 ----
+  // 真实编辑会调用 clearQueue / steer / followUp（可能真的开始一轮对话），
+  // 这里只验证界面链路：把 editQueued 换成记录函数，断言参数正确。
+  await evaluate(`(() => {
+    window.__queueEditCalls = [];
+    const workbench = window.__piDesktop.workbench;
+    window.__queueEditOriginal = workbench.editQueued;
+    workbench.editQueued = async (target, text) => {
+      window.__queueEditCalls.push({ target, text });
+      return true;
+    };
+    return true;
+  })()`);
+
+  // 1) 卡片上的文字就是编辑入口
+  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "点击卡片应展开编辑框");
+  {
+    const editor = JSON.parse(await evaluate(`(() => {
+      const area = document.querySelector('.queue-editor textarea');
+      return JSON.stringify({
+        value: area.value,
+        rows: area.rows,
+        actions: [...document.querySelectorAll('.queue-editor-actions button')].map((n) => n.textContent.trim()),
+        hint: document.querySelector('.queue-editor-hint')?.textContent.trim() ?? '',
+      });
+    })()`));
+    assert.equal(editor.value, "只存在于队列里的消息", `编辑框应预填这条消息的实际内容，实际「${editor.value}」`);
+    assert.ok(editor.actions.includes("保存并重新排队"), "要有保存按钮");
+    assert.ok(editor.actions.includes("取消"), "要有取消按钮");
+    assert.match(editor.hint, /排队/, "编辑框要标出模式");
+  }
+
+  // 2) 保存 → editQueued 收到「原来的完整提示词 + 新文字」
+  await evaluate(`(() => {
+    const area = document.querySelector('.queue-editor textarea');
+    area.value = "改过之后的消息";
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    const save = [...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes("保存"));
+    save.click();
+    return true;
+  })()`);
+  await poll("!document.querySelector('.queue-editor')", "保存后编辑框应关闭");
+  {
+    const calls = JSON.parse(await evaluate("JSON.stringify(window.__queueEditCalls)"));
+    assert.equal(calls.length, 1, `应只提交一次编辑，实际 ${calls.length}`);
+    assert.equal(calls[0].text, "改过之后的消息", "保存的是新文字");
+    assert.equal(calls[0].target.text, "只存在于队列里的消息", "要带上原来的队列项用于定位");
+    assert.equal(calls[0].target.mode, "followUp", "模式要对");
+  }
+
+  // 3) Esc 取消不发请求
+  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "再次打开编辑框");
+  await evaluate(`(() => {
+    const area = document.querySelector('.queue-editor textarea');
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+  })()`);
+  await wait(200);
+  assert.equal(await evaluate("document.querySelectorAll('.queue-editor').length"), 0, "Esc 应关闭编辑框");
+  assert.equal(
+    JSON.parse(await evaluate("JSON.stringify(window.__queueEditCalls)")).length,
+    1,
+    "取消不应提交编辑",
+  );
+
+  // 4) 气泡上的「编辑」按钮同样能进入编辑（走内核事件）
+  await evaluate(`(() => {
+    const badge = document.querySelector('.msg-user-queued');
+    const button = badge?.querySelector('.msg-user-queued-edit');
+    button?.click();
+    return Boolean(button);
+  })()`).then((ok) => assert.ok(ok, "排队气泡上应有「编辑」按钮"));
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "气泡上的编辑应打开编辑框");
+  {
+    const value = await evaluate("document.querySelector('.queue-editor textarea').value");
+    assert.equal(value, "顺便看下日志", `编辑框应预填气泡里的文字，实际「${value}」`);
+  }
+  await evaluate("[...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes('取消'))?.click(); true");
+  await wait(200);
+
+  // 还原 editQueued
+  await evaluate(`(() => {
+    window.__piDesktop.workbench.editQueued = window.__queueEditOriginal;
+    return true;
+  })()`);
+
+  // 截图：编辑态的排队消息（人工确认排版）
+  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "截图用编辑框");
+  {
+    const shot = async (name) => {
+      try {
+        const dbg = win.webContents.debugger;
+        if (!dbg.isAttached()) await dbg.attach("1.3");
+        const result = await Promise.race([
+          dbg.sendCommand("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+        ]);
+        if (!result?.data) return `${name}（跳过）`;
+        const { writeFile } = await import("node:fs/promises");
+        const nodePath = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        await writeFile(nodePath.join(tmpdir(), name), Buffer.from(result.data, "base64"));
+        return name;
+      } catch (error) {
+        return `${name}（失败：${error?.message ?? error}）`;
+      } finally {
+        if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+      }
+    };
+    console.log("[queue] shot", await shot("queue-edit-dark.png"));
+    await evaluate("window.__piDesktop.workbench.setTheme('light'); true");
+    await wait(400);
+    console.log("[queue] shot", await shot("queue-edit-light.png"));
+    await evaluate("window.__piDesktop.workbench.setTheme('dark'); true");
+    await wait(200);
+  }
+  await evaluate("[...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes('取消'))?.click(); true");
+  await wait(200);
   // 队列被消费（清空）后：气泡标记与卡片都要消失
   await evaluate(`(() => {
     const thread = window.__piDesktop.workbench.active.value.activeThread;
@@ -109,5 +230,5 @@ export async function checkQueueInElectron(win) {
     return true;
   })()`);
 
-  console.log("[queue] PASS 单次展示 / 气泡标记 / 卡片预览 / 撤回入口 / 清空回收", ids.a, ids.b);
+  console.log("[queue] PASS 单次展示 / 气泡标记 / 卡片预览 / 编辑 / 撤回入口 / 清空回收", ids.a, ids.b);
 }

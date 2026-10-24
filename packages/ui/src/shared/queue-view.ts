@@ -88,6 +88,38 @@ export function queuePreview(input: string, limit = 80): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }
 
+/**
+ * 编辑排队中的消息：把「这一段提示词末尾的用户文字」换成新文字。
+ *
+ * Pi 的队列里存的是完整提示词（前面可能带 <file> / <session> 上下文），
+ * 用户编辑的是自己写的那部分，所以只能替换末尾，前面原样保留。
+ * 找不到对应文字时（例如纯附件消息）退回用新文字，避免把别人的上下文弄坏。
+ */
+export function replacePromptMessage(prompt: string, oldMessage: string, newMessage: string): string {
+  const text = String(prompt ?? "");
+  const oldText = String(oldMessage ?? "");
+  const next = String(newMessage ?? "");
+  if (!oldText) return text ? `${text}\n${next}` : next;
+  if (text.endsWith(oldText)) return `${text.slice(0, text.length - oldText.length)}${next}`;
+  return next;
+}
+
+/** 算出编辑后的队列（保持原顺序；插话与追加分开）。 */
+export function planQueueEdit(
+  queue: QueueState,
+  target: QueuedEntry,
+  newText: string,
+): QueueState {
+  const normalizeText = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const wanted = normalizeText(target.text);
+  const map = (list: string[]) =>
+    list.map((item) => (normalizeText(item) === wanted ? newText : item));
+  return {
+    steering: target.mode === "steer" ? map(queue.steering) : [...queue.steering],
+    followUp: target.mode === "followUp" ? map(queue.followUp) : [...queue.followUp],
+  };
+}
+
 /** 撤回后放回输入框的文本：只留人写的那部分，别把附件 XML 塞回去。 */
 export function queueDraftText(input: string): string {
   return stripQueueMarkers(input).replace(/\n{3,}/g, "\n\n").trim();

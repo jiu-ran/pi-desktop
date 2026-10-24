@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
+import { KERNEL_KEY } from "../../../kernel/index.ts";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import { formatBytes, imageDataUrl } from "../../../shared/attachments.ts";
 import { shouldCollapseUserText } from "../../../shared/chat-text.ts";
@@ -35,6 +36,16 @@ const images = computed(() =>
 const fallbackCount = computed(() => (props.block.imageItems?.length ? 0 : props.block.images ?? 0));
 const empty = computed(() => !text.value && !files.value.length && !images.value.length && !fallbackCount.value);
 
+// 排队中的消息可以就地编辑：气泡在这里，编辑框在输入框上方，所以通过内核事件传上去。
+const kernel = inject(KERNEL_KEY, null);
+function editQueued(): void {
+  if (!props.queued) return;
+  kernel?.bus.emit("queue:edit", {
+    prompt: props.block.queueText ?? "",
+    message: text.value,
+  });
+}
+
 // 点击缩略图放大
 const previewIndex = ref<number | null>(null);
 function openPreview(index: number): void {
@@ -45,9 +56,10 @@ function openPreview(index: number): void {
 <template>
   <div class="msg user">
     <div class="msg-user-bubble" :class="{ 'only-media': !text && !block.skill, queued }">
-      <div v-if="queued" class="msg-user-queued" title="这条消息还在等待发送，可以在输入框上方撤回">
+      <div v-if="queued" class="msg-user-queued" title="这条消息还在等待发送：点「编辑」改写内容，或在上方撤回">
         <span class="msg-user-queued-dot" />
         <span>待发送</span>
+        <button type="button" class="msg-user-queued-edit" @click="editQueued">编辑</button>
       </div>
       <div v-if="block.skill" class="msg-skill">
         <button
