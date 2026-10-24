@@ -30,9 +30,18 @@ export async function checkTooltipInElectron(win) {
     document.body.appendChild(el);
     await wait(50);
 
-    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0 }));
-    await wait(900);
-
+    // 界面在冒烟期间可能滚动（滚动会按设计收起浮层），因此轮询到出现为止再断言。
+    let shown = false;
+    for (let attempt = 0; attempt < 12 && !shown; attempt += 1) {
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0 }));
+      for (let i = 0; i < 10; i += 1) {
+        await wait(100);
+        if (document.querySelector('.pi-tooltip')) { shown = true; break; }
+        if (el.isConnected && !el.hasAttribute('title')) {
+          // title 已被摘掉说明正在延迟/展示中，继续等待即可
+        }
+      }
+    }
     const first = [...document.querySelectorAll('.pi-tooltip')];
     const firstBg = first[0] ? getComputedStyle(first[0]).backgroundColor : '';
     const themedVar = getComputedStyle(document.documentElement).getPropertyValue('--bg-2').trim();

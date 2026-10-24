@@ -18,13 +18,14 @@
 .git-changes-filter button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .git-panel .git-tree { padding: 6px 6px 10px; }
 .git-panel .git-group { flex: none; border-bottom: 1px solid var(--line); padding-bottom: 5px; margin-bottom: 5px; }
-.git-panel .git-group-head { min-height: 29px; padding: 0 5px 0 0; gap: 8px; background: var(--bg-1); }
-.git-group-toggle { display: flex; align-items: center; flex: 1; gap: 5px; min-width: 0; padding: 0 6px; height: 29px; border: 0; background: transparent; color: inherit; font-size: 11px; text-align: left; }
+.git-panel .git-group-head { min-height: 32px; padding: 0 5px 0 0; gap: 8px; background: var(--bg-1); color: var(--git-group-label, color-mix(in srgb, var(--accent) 45%, var(--fg-2))); }
+.git-panel .git-group-name { color: var(--git-group-label, color-mix(in srgb, var(--accent) 45%, var(--fg-2))); }
+.git-panel .git-group-toggle { display: flex; align-items: center; flex: 1; gap: 5px; min-width: 0; padding: 0 6px; height: 32px; border: 0; background: transparent; color: inherit; font-size: 15px; font-weight: 600; text-align: left; }
 .git-panel .git-group-count { padding: 0 4px; font: 10px var(--mono); }
 .git-section-action { flex: none; padding: 3px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--accent); font-size: 10px; }
 .git-section-action:hover:not(:disabled) { background: var(--accent-soft); }
 .git-section-action:disabled { color: var(--fg-3); opacity: 0.45; }
-.git-panel .git-tree-row { height: 28px; min-height: 28px; padding-right: 8px; gap: 5px; padding-left: calc(var(--git-tree-base, 26px) + var(--depth, 0) * var(--git-tree-indent, 20px)); }
+.git-panel .git-tree-row { height: 28px; min-height: 28px; padding-right: 8px; gap: 5px; padding-left: calc(var(--git-tree-base, 6px) + var(--depth, 0) * var(--git-tree-indent, 20px)); }
 .git-panel .git-tree-name { flex: 1; }
 .git-file-icon { display: grid; flex: none; color: var(--fg-3); }
 .git-file-icon svg { width: 14px; height: 14px; }

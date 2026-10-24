@@ -17,9 +17,24 @@ export async function checkGitUiInElectron(win) {
   const git = args => promisify(execFile)("git", args, { cwd: dir });
   const literal = JSON.stringify(dir);
   const previous = await evaluate("({cwd:window.__piDesktop.workbench.state.activeCwd,panel:window.__piDesktop.workbench.state.activePanelId,width:window.__piDesktop.workbench.state.panelWidth})");
-  const tab = name => evaluate(`(()=>{[...document.querySelectorAll('.git-view-tabs button')].find(b=>b.textContent.trim().startsWith(${JSON.stringify(name)})).click();return true})()`);
-  const switchTo = name => evaluate(`document.querySelector(${JSON.stringify(`.git-branch-row[aria-label="切换分支 ${name}"]`)}).click(); true`);
-  const refresh = () => evaluate("document.querySelector('.git-sc-toolbar button[title=\"刷新\"]').click(); true");
+  /** 等目标节点出现后再点击：界面重渲染时裸 click 会抛 "reading 'click'"，表现为整套冒烟偶发失败。 */
+  const click = async (expression, label) => {
+    for (let i = 0; i < 60; i += 1) {
+      const done = await evaluate(`(() => { const node = ${expression}; if (!node) return false; node.click(); return true; })()`);
+      if (done) return;
+      await wait(100);
+    }
+    throw new Error(`点击超时：${label}`);
+  };
+  const tab = name => click(
+    `[...document.querySelectorAll('.git-view-tabs button')].find(b=>b.textContent.trim().startsWith(${JSON.stringify(name)}))`,
+    `视图 ${name}`,
+  );
+  const switchTo = name => click(
+    `document.querySelector(${JSON.stringify(`.git-branch-row[aria-label="切换分支 ${name}"]`)})`,
+    `切换分支 ${name}`,
+  );
+  const refresh = () => click(`document.querySelector('.git-sc-toolbar button[title="刷新"]')`, "刷新");
   try {
     await git(["init", "-b", "main"]);
     await git(["config", "user.name", "Pi UI Check"]);
@@ -52,7 +67,7 @@ export async function checkGitUiInElectron(win) {
     await switchTo("main");
     await poll("window.__piDesktop.workbench.active.value.branch === 'main' && !window.__piDesktop.stage.tabs.some(t=>t.pluginId==='files')", "切换后清除旧源码标签");
 
-    await evaluate("[...document.querySelectorAll('.git-branches .btn')].find(b=>b.textContent.includes('新建分支')).click(); true");
+    await click("[...document.querySelectorAll('.git-branches .btn')].find(b=>b.textContent.includes('新建分支'))", "新建分支按钮");
     await poll("Boolean(document.querySelector('.prompt-field input'))", "新建分支对话框");
     await evaluate("(()=>{const input=document.querySelector('.prompt-field input');input.value='feature/new-ui';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('form.modal').requestSubmit();return true})()");
     await poll("window.__piDesktop.workbench.active.value.branch === 'feature/new-ui'", "对话框新建并切换分支");
@@ -118,17 +133,45 @@ export async function checkGitUiInElectron(win) {
       const step = byDepth.get(depths[i])[0].name - byDepth.get(depths[i - 1])[0].name;
       assert.equal(step, 20, `层级缩进应恒定 20px，实际 ${step}px（深度 ${depths[i - 1]} → ${depths[i]}）`);
     }
-    // 第一层树行必须比分区标题的箭头明显右移，且从分区文字列开始。
+    // 分区标题必须与子行用不同颜色区分（标题是「标签」层，子行才是内容）。
+    const palette = await evaluate(`(() => {
+      const color = (selector) => {
+        const node = document.querySelector(selector);
+        return node ? getComputedStyle(node).color : null;
+      };
+      return {
+        header: color('.git-group-name'),
+        folder: color('.git-tree-row.folder .git-tree-name'),
+        file: color('.git-tree-row:not(.folder) .git-tree-name'),
+      };
+    })()`);
+    assert(palette.header && palette.folder && palette.file, "分区标题与子行都应可测量颜色");
+    assert.notEqual(palette.header, palette.file, "分区标题不能与文件行同色");
+    assert.notEqual(palette.header, palette.folder, "分区标题不能与目录行同色");
+    // 第一层树行与分区标题左对齐（靠字号区分层级，而不是靠缩进）。
     const firstCaret = byDepth.get(depths[0])[0].caret;
-    assert(firstCaret - groupCaret >= 16, `第一层应相对分区标题右移，实际 ${firstCaret - groupCaret}px`);
-    assert(firstCaret <= byDepth.get(depths[0])[0].name - 24, "第一层箭头应仍位于其名称左侧");
+    assert(Math.abs(firstCaret - groupCaret) <= 2, `第一层应与分区标题对齐，实际相差 ${firstCaret - groupCaret}px`);
+    // 分区标题字号必须明显大于树行，作为「大标题」区分层级。
+    const typography = await evaluate(`(() => {
+      const header = document.querySelector('.git-group-toggle');
+      const row = document.querySelector('.git-tree-row .git-tree-name');
+      return {
+        header: header ? parseFloat(getComputedStyle(header).fontSize) : null,
+        row: row ? parseFloat(getComputedStyle(row).fontSize) : null,
+      };
+    })()`);
+    assert(typography.header && typography.row, "分区标题与树行字号都应可测量");
+    assert(
+      typography.header - typography.row >= 2,
+      `分区标题应明显大于子行：${typography.header}px vs ${typography.row}px`,
+    );
     assert(await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]').length === 2"), "同一文件有索引及工作区修改时应分开呈现");
-    await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[0].click(); true");
+    await click("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[0]", "已暂存 a.txt 行");
     await poll("window.__piDesktop.stage.activeTab.value?.data.detail?.diff.includes('+two')", "已暂存 diff");
     assert(!(await evaluate("window.__piDesktop.stage.activeTab.value.data.detail.diff.includes('+three')")), "暂存详情不能混入工作区修改");
-    await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[1].click(); true");
+    await click("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[1]", "未暂存 a.txt 行");
     await poll("window.__piDesktop.stage.activeTab.value?.data.detail?.diff.includes('+three')", "未暂存 diff");
-    await evaluate("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[1].querySelector('button[title=\"暂存此文件\"]').click(); true");
+    await click("document.querySelectorAll('.git-tree-row[title=\"a.txt\"]')[1]?.querySelector('button[title=\"暂存此文件\"]')", "单文件暂存按钮");
     await poll("document.querySelectorAll('.git-group').length === 2", "单文件暂存移入索引分区");
     await tab("分支");
     await poll("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))", "有改动时分支入口");
