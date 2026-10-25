@@ -2,7 +2,7 @@
   "name": "pi-desktop",
   "productName": "Pi Desktop",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.9",
   "author": "jiu-ran",
   "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）",
   "license": "MIT",

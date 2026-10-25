@@ -1740,15 +1740,17 @@ onBeforeUnmount(() => {
           <!-- 6. 环境与快捷键 -->
           <template v-else-if="settingsModalState.tab === 'environment'">
             <div class="settings-group">
-              <div class="settings-group-title">本机 Pi CLI 与当前工作区状态</div>
+              <div class="settings-group-title">本机 Pi CLI</div>
 
+              <!-- 状态与版本合成一行：以前「已连接 · 版本」和「当前 · 最新」分在两张卡里，说的是同一件事 -->
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>本机 Pi Coding Agent CLI</strong>
-                  <span>{{ state.pi.found ? `已连接 · 版本 ${state.pi.version}` : "未检测到本机 pi 命令，请检查 PATH" }}</span>
+                  <strong>Pi Coding Agent CLI</strong>
+                  <span v-if="state.pi.found">已连接 · 当前 {{ state.pi.version || "未知" }}{{ state.pi.latest ? ` · 最新 ${state.pi.latest}` : "" }}</span>
+                  <span v-else>未检测到本机 pi 命令，请检查 PATH，或在下方手动指定路径</span>
                 </div>
-                <span class="settings-status-pill" :class="state.pi.found ? 'ok' : 'err'">
-                  {{ state.pi.found ? "就绪" : "未安装" }}
+                <span class="settings-status-pill" :class="piUpdateStatus.tone">
+                  {{ piUpdateStatus.label }}
                 </span>
               </div>
 
@@ -1787,6 +1789,50 @@ onBeforeUnmount(() => {
                 <div style="display: flex; gap: 6px; flex: none;">
                   <button type="button" class="btn ghost small" @click="applyPiCustomPath">使用此路径</button>
                   <button type="button" class="btn ghost small" @click="cancelPiPathEdit">取消</button>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>检查并更新 Pi</strong>
+                  <span>使用识别到的 Pi 执行更新，由它按实际安装方式（npm、pnpm 或官方安装器）处理；完成后展示版本变化与输出</span>
+                </div>
+                <div style="display: flex; gap: 6px; flex: none; align-items: center;">
+                  <select v-model="appSettings.piUpdateScope" class="settings-select" :disabled="state.pi.updating" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
+                    <option value="self">pi update</option>
+                    <option value="all">update --all</option>
+                  </select>
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.checking || state.pi.updating"
+                    @click="checkPiUpdateNow"
+                  >
+                    <span v-if="state.pi.checking" class="mini-spinner" />检查更新
+                  </button>
+                  <button
+                    type="button"
+                    class="btn ghost small"
+                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.updating"
+                    @click="updatePiNow"
+                  >
+                    <span v-if="state.pi.updating" class="mini-spinner" />立即更新
+                  </button>
+                </div>
+              </div>
+
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>Pi 自动更新</strong>
+                  <span>启动并定位到本机 Pi 后，若发现新版本则按上方所选范围自动更新</span>
+                </div>
+                <input v-model="appSettings.piAutoUpdate" type="checkbox" class="settings-switch" />
+              </label>
+
+              <div v-if="state.pi.lastUpdate" class="settings-row">
+                <div class="settings-row-info">
+                  <strong>上次更新结果</strong>
+                  <span :title="state.pi.lastUpdate.log">{{ state.pi.lastUpdate.from === state.pi.lastUpdate.to ? `已确认最新（${state.pi.lastUpdate.to || state.pi.version}）` : `已从 ${state.pi.lastUpdate.from || "未知版本"} 更新到 ${state.pi.lastUpdate.to}` }} · {{ formatPiUpdateTime(state.pi.lastUpdate.at) }}</span>
                 </div>
               </div>
 
@@ -1839,64 +1885,6 @@ onBeforeUnmount(() => {
                 </div>
                 <input v-model="appSettings.appUpdateCheck" type="checkbox" class="settings-switch" />
               </label>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">Pi CLI 更新</div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>版本状态</strong>
-                  <span>{{ state.pi.found ? `当前 ${state.pi.version || "未知"}${state.pi.latest ? ` · 最新 ${state.pi.latest}` : ""}` : "PATH 中没有 pi，请安装后重试，或在上方手动指定路径" }}</span>
-                </div>
-                <span class="settings-status-pill" :class="piUpdateStatus.tone">
-                  {{ piUpdateStatus.label }}
-                </span>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>检查并更新 Pi</strong>
-                  <span>使用识别到的 Pi 执行更新，由它按实际安装方式（npm、pnpm 或官方安装器）处理；完成后展示版本变化与输出</span>
-                </div>
-                <div style="display: flex; gap: 6px; flex: none; align-items: center;">
-                  <select v-model="appSettings.piUpdateScope" class="settings-select" :disabled="state.pi.updating" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
-                    <option value="self">pi update</option>
-                    <option value="all">update --all</option>
-                  </select>
-                  <button
-                    type="button"
-                    class="btn ghost small"
-                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.checking || state.pi.updating"
-                    @click="checkPiUpdateNow"
-                  >
-                    <span v-if="state.pi.checking" class="mini-spinner" />检查更新
-                  </button>
-                  <button
-                    type="button"
-                    class="btn ghost small"
-                    :disabled="(!state.pi.found && !appSettings.piCustomPath) || state.pi.updating"
-                    @click="updatePiNow"
-                  >
-                    <span v-if="state.pi.updating" class="mini-spinner" />立即更新
-                  </button>
-                </div>
-              </div>
-
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>Pi 自动更新</strong>
-                  <span>启动并定位到本机 Pi 后，若发现新版本则按下方所选范围自动更新</span>
-                </div>
-                <input v-model="appSettings.piAutoUpdate" type="checkbox" class="settings-switch" />
-              </label>
-
-              <div v-if="state.pi.lastUpdate" class="settings-row">
-                <div class="settings-row-info">
-                  <strong>上次更新结果</strong>
-                  <span :title="state.pi.lastUpdate.log">{{ state.pi.lastUpdate.from === state.pi.lastUpdate.to ? `已确认最新（${state.pi.lastUpdate.to || state.pi.version}）` : `已从 ${state.pi.lastUpdate.from || "未知版本"} 更新到 ${state.pi.lastUpdate.to}` }} · {{ formatPiUpdateTime(state.pi.lastUpdate.at) }}</span>
-                </div>
-              </div>
             </div>
 
             <div class="settings-group">

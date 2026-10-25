@@ -113,6 +113,24 @@ export async function checkSettingsInElectron(win) {
   assert.equal(agents.noteMono, true, "路径要用等宽字体");
   console.log("[settings] agents", JSON.stringify(agents));
 
+  // 环境页：Pi 状态/路径/更新应该在同一张卡里（以前分成两张，内容还重复）
+  await evaluate(`document.querySelector('[data-settings-tab="environment"]').click(); true`);
+  await wait(350);
+  const env = JSON.parse(await evaluate(`(() => {
+    const groups = [...document.querySelectorAll('.settings-body .settings-group')].map((group) => ({
+      title: group.querySelector('.settings-group-title')?.textContent.trim() ?? '',
+      rows: [...group.querySelectorAll('.settings-row strong')].map((n) => n.textContent.trim()),
+    }));
+    const pi = groups.find((group) => group.title.includes('Pi CLI'));
+    return JSON.stringify({ titles: groups.map((g) => g.title), piRows: pi?.rows ?? [] });
+  })()`));
+  assert.ok(!env.titles.includes("Pi CLI 更新"), `不应再有单独的「Pi CLI 更新」卡：${env.titles.join("/")}`);
+  assert.ok(env.titles.includes("本机 Pi CLI"), `应有合并后的「本机 Pi CLI」卡：${env.titles.join("/")}`);
+  for (const label of ["Pi Coding Agent CLI", "Pi 路径", "检查并更新 Pi", "Pi 自动更新", "当前活动项目目录"]) {
+    assert.ok(env.piRows.includes(label), `合并后的卡片应包含「${label}」，实际：${env.piRows.join("/")}`);
+  }
+  console.log("[settings] environment", JSON.stringify({ titles: env.titles }));
+
   // 搜索过滤
   await evaluate(`(() => {
     const input = document.querySelector('.settings-search input');
