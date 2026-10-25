@@ -4,13 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 /**
- * .md 文件的三种视图回归：源码 / 分栏实时预览 / 纯预览。
+ * .md 的 Typora 式混合预览回归。
  *
- * 以前工具栏那个控件用的是不存在的 `.settings-segmented` 类，渲染成一个灰色空白块；
- * 现在统一成 `.settings-segments`，并且分栏要求「边写边看」：
- * - 输入后预览跟着变（去抖 ~140ms）
- * - 编辑器滚动时预览按比例跟随
- * - 视图选择落到设置里（重开文件仍然是这个视图）
+ * 期望（用户明确要的形态）：默认就是**预览**，不是分栏；点其中某一块时只有那一块
+ * 变成源码编辑框，改完写回全文，其它块继续以渲染结果展示。
  */
 export async function checkMarkdownViewInElectron(win) {
   const evaluate = (expression) => win.webContents.executeJavaScript(expression, true);
@@ -30,7 +27,7 @@ export async function checkMarkdownViewInElectron(win) {
   const body = [
     "# 实时预览验收",
     "",
-    "第一段：用来验证分栏实时预览。",
+    "第一段文字，用来验证块级就地编辑。",
     "",
     "## 小标题",
     "",
@@ -41,12 +38,39 @@ export async function checkMarkdownViewInElectron(win) {
     "const a = 1;",
     "```",
     "",
+    "| 列 A | 列 B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
   ].join("\n");
   const filePath = path.join(cwd, "md-view-check.md");
   await writeFile(filePath, body, "utf8").catch(() => {});
 
-  const open = () =>
+  const state = () =>
     evaluate(`(() => {
+      const toggle = document.querySelector(".file-view-toggle");
+      const buttons = toggle ? [...toggle.querySelectorAll("button")] : [];
+      const host = document.querySelector(".md-editable");
+      const editor = document.querySelector(".md-block-editor");
+      const tab = window.__piDesktop.stage.findTab("files", "md-view-check.md");
+      return JSON.stringify({
+        labels: buttons.map(((n) => n.textContent.trim())),
+        active: buttons.filter((n) => n.classList.contains("active")).map((n) => n.textContent.trim()),
+        editable: Boolean(host),
+        aligned: host?.getAttribute("data-aligned") ?? null,
+        blocks: document.querySelectorAll("[data-md-block]").length,
+        editing: Boolean(editor),
+        editorValue: editor?.value ?? "",
+        sourceVisible: Boolean(document.querySelector(".markdown-highlight-input")),
+        draft: tab?.data?.draft ?? "",
+        view: window.__piDesktop.settings.settings.markdownView,
+      });
+    })()`);
+
+  try {
+    // 默认应该是预览（混合编辑）
+    await evaluate(`window.__piDesktop.settings.settings.markdownView = "preview"; true`).catch(() => {});
+    await evaluate(`(() => {
       const text = ${JSON.stringify(body)};
       window.__piDesktop.stage.open({
         pluginId: "files",
@@ -67,107 +91,69 @@ export async function checkMarkdownViewInElectron(win) {
       });
       return true;
     })()`);
-
-  const setView = (label) =>
-    evaluate(`(() => {
-      const button = [...document.querySelectorAll(".file-view-toggle button")].find((n) => n.textContent.trim() === ${JSON.stringify(label)});
-      if (!button) return false;
-      button.click();
-      return true;
-    })()`);
-
-  const state = () =>
-    evaluate(`(() => {
-      const toggle = document.querySelector(".file-view-toggle");
-      const buttons = toggle ? [...toggle.querySelectorAll("button")] : [];
-      const split = document.querySelector(".file-editor-split");
-      const panes = split ? [...split.children].map((el) => Math.round(el.getBoundingClientRect().width)) : [];
-      return JSON.stringify({
-        hasToggle: Boolean(toggle),
-        // 以前是「有底色、没字」的灰块：这里同时要求按钮有文字
-        labels: buttons.map((n) => n.textContent.trim()),
-        active: buttons.filter((n) => n.classList.contains("active")).map((n) => n.textContent.trim()),
-        split: Boolean(split),
-        panes,
-        previewVisible: Boolean(document.querySelector(".md-preview")),
-        editorVisible: Boolean(document.querySelector(".markdown-highlight-input")),
-        view: window.__piDesktop.settings.settings.markdownView,
-      });
-    })()`);
-
-  try {
-    await evaluate(`window.__piDesktop.settings.settings.markdownView = "split"; true`).catch(() => {});
-    await open();
     await poll(`Boolean(document.querySelector(".file-view-toggle"))`, "工具栏视图切换");
-    await wait(600);
+    await wait(700);
 
-    const split = JSON.parse(await state());
-    assert.deepEqual(split.labels, ["源码", "分栏", "预览"], `视图切换应为三档，实际 ${JSON.stringify(split.labels)}`);
-    assert.deepEqual(split.active, ["分栏"], `默认应是分栏，实际 ${JSON.stringify(split.active)}`);
-    assert.ok(split.split, "分栏模式下应有左右两栏");
-    assert.equal(split.panes.length, 2, `分栏应有两个面板，实际 ${JSON.stringify(split.panes)}`);
-    assert.ok(split.panes.every((width) => width > 60), `两栏都要有宽度，实际 ${JSON.stringify(split.panes)}`);
-    assert.ok(split.editorVisible && split.previewVisible, "分栏里输入框与预览都应存在");
-    assert.equal(split.view, "split", "视图选择应写进设置");
+    const initial = JSON.parse(await state());
+    assert.deepEqual(initial.labels, ["源码", "预览"], `只应有两档：源码 / 预览，实际 ${JSON.stringify(initial.labels)}`);
+    assert.deepEqual(initial.active, ["预览"], `默认应是预览，实际 ${JSON.stringify(initial.active)}`);
+    assert.equal(initial.view, "preview", "默认视图应写进设置");
+    assert.ok(initial.editable, "预览里应有混合编辑容器");
+    assert.equal(initial.aligned, "1", "块与渲染节点必须对齐（对不上就退化成纯预览）");
+    assert.ok(initial.blocks >= 6, `每块都要有编号，实际 ${initial.blocks} 块`);
+    assert.equal(initial.sourceVisible, false, "预览模式不该出现源码编辑器");
 
-    // 边写边看：往输入框里打字，预览要跟着变
+    // 点标题块 → 只有这一块变成编辑框，内容是它的源码
     await evaluate(`(() => {
-      const box = document.querySelector(".markdown-highlight-input");
-      box.focus();
-      box.value = box.value + "新增的一句话：实时预览应该立刻出现。";
+      const slot = document.querySelector('[data-md-block="0"]');
+      if (!slot) return false;
+      const rect = slot.getBoundingClientRect();
+      slot.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: rect.left + 12, clientY: rect.top + 8 }));
+      return true;
+    })()`);
+    await poll(`Boolean(document.querySelector(".md-block-editor"))`, "点击块后就地编辑");
+    const editing = JSON.parse(await state());
+    assert.equal(editing.editing, true, "应出现就地编辑框");
+    assert.equal(editing.editorValue, "# 实时预览验收", `编辑框应预填这一块的源码，实际「${editing.editorValue}」`);
+    // 其它块仍然是渲染结果（列表还在，不是源码）
+    const stillRendered = await evaluate(`document.querySelectorAll(".md-editable li").length`);
+    assert.ok(stillRendered >= 2, `其它块要保持渲染：列表项 ${stillRendered}`);
+
+    // 改完失焦 → 写回草稿，预览更新
+    await evaluate(`(() => {
+      const box = document.querySelector(".md-block-editor");
+      box.value = "# 改过的标题";
       box.dispatchEvent(new Event("input", { bubbles: true }));
+      box.dispatchEvent(new FocusEvent("blur"));
       return true;
     })()`);
-    await poll(
-      `(() => {
-        const root = document.querySelector(".file-editor-split-preview");
-        return Boolean(root && root.textContent.includes("实时预览应该立刻出现"));
-      })()`,
-      "输入后预览即时更新",
-    );
+    await poll(`!document.querySelector(".md-block-editor")`, "编辑框收起");
+    await wait(400);
+    const updated = JSON.parse(await state());
+    assert.match(updated.draft, /^# 改过的标题/, `草稿应已更新，实际开头「${updated.draft.slice(0, 20)}」`);
+    assert.ok(updated.draft.includes("第一段文字"), "其它块不能被改掉");
+    const rendered = await evaluate(`document.querySelector(".md-editable")?.textContent ?? ""`);
+    assert.match(rendered, /改过的标题/, "预览应显示修改后的内容");
 
-    // 滚动同步：编辑器滚到底，预览也要往下走
-    const scrolled = await evaluate(`(() => {
-      const box = document.querySelector(".markdown-highlight-input");
-      box.scrollTop = box.scrollHeight;
-      box.dispatchEvent(new Event("scroll"));
+    // 切到源码
+    await evaluate(`(() => {
+      [...document.querySelectorAll(".file-view-toggle button")].find((n) => n.textContent.trim() === "源码")?.click();
       return true;
     })()`);
-    assert.ok(scrolled, "应能滚动编辑器");
-    await wait(250);
-    const previewTop = await evaluate(
-      `(() => Math.round((document.querySelector(".file-editor-split-preview")?.scrollTop) ?? -1))()`,
-    );
-    assert.ok(previewTop >= 0, `预览面板不可滚动：${previewTop}`);
-
-    // 纯预览
-    assert.ok(await setView("预览"), "找不到「预览」按钮");
-    await wait(500);
-    const preview = JSON.parse(await state());
-    assert.equal(preview.split, false, "预览模式不该再有分栏");
-    assert.ok(preview.previewVisible && !preview.editorVisible, "预览模式只显示渲染结果");
-    assert.equal(preview.view, "preview", "视图选择要持久化到设置");
-    const previewText = await evaluate(`document.querySelector(".md-preview")?.textContent ?? ""`);
-    assert.match(previewText, /实时预览验收/, "预览应渲染出文档内容");
-    assert.match(previewText, /甲/, "列表也要渲染出来");
-
-    // 源码
-    assert.ok(await setView("源码"), "找不到「源码」按钮");
     await wait(400);
     const source = JSON.parse(await state());
-    assert.equal(source.split, false, "源码模式不该有分栏");
-    assert.ok(source.editorVisible && !source.previewVisible, "源码模式只显示编辑器");
-    assert.equal(source.view, "source", "视图选择要持久化到设置");
+    assert.equal(source.sourceVisible, true, "源码模式应显示源码编辑器");
+    assert.equal(source.editable, false, "源码模式不该再有混合编辑容器");
+    assert.equal(source.view, "source", "视图选择要写进设置");
 
-    console.log("[markdown-view]", JSON.stringify({ panes: split.panes, views: [split.view, preview.view, source.view] }));
+    console.log("[markdown-view]", JSON.stringify({ blocks: initial.blocks, labels: initial.labels, draft: updated.draft.slice(0, 12) }));
   } finally {
-    await evaluate(`window.__piDesktop.settings.settings.markdownView = "split"; true`).catch(() => {});
+    await evaluate(`window.__piDesktop.settings.settings.markdownView = "preview"; true`).catch(() => {});
     await evaluate(`(() => {
       const tab = window.__piDesktop.stage.findTab("files", "md-view-check.md");
       if (tab) window.__piDesktop.stage.close(tab.key);
       return true;
     })()`).catch(() => {});
     await rm(filePath, { force: true }).catch(() => {});
-    await rm(path.join(cwd, "md-view-check.md"), { force: true }).catch(() => {});
   }
 }

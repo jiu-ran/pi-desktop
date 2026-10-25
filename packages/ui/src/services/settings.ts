@@ -83,8 +83,8 @@ export interface AppSettings {
   columnWidth: ColumnWidthId;
   /** 关闭界面动效（弹层、过渡、动画） */
   reduceMotion: boolean;
-  /** .md 文件的默认视图：源码 / 分栏实时预览 / 纯预览 */
-  markdownView: "source" | "split" | "preview";
+  /** .md 文件的默认视图：预览（点哪块编辑哪块）/ 源码 */
+  markdownView: "source" | "preview";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -115,8 +115,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   radius: "default",
   columnWidth: "default",
   reduceMotion: false,
-  // 默认分栏：左边写、右边实时看，和 Obsidian 的「源码 + 预览」一个用法
-  markdownView: "split",
+  // 默认预览：和 Typora 一样，点哪一块就地改哪一块
+  markdownView: "preview",
 }
 
 function loadSavedSettings(): AppSettings {
@@ -165,7 +165,8 @@ function loadSavedSettings(): AppSettings {
       radius: normalizeRadius(parsed.radius),
       columnWidth: normalizeColumnWidth(parsed.columnWidth),
       reduceMotion: parsed.reduceMotion === true,
-      markdownView: parsed.markdownView === "source" || parsed.markdownView === "preview" ? parsed.markdownView : "split",
+      // 试过一版「分栏」写法（split），升级后统一回到预览
+      markdownView: parsed.markdownView === "source" ? "source" : "preview",
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

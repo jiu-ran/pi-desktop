@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { appSettings, openSettingsModal } from "../../services/settings.ts";
-import MarkdownPreview from "../markdown/MarkdownPreview.vue";
+import MarkdownEditable from "../markdown/MarkdownEditable.vue";
 import MarkdownHighlightEditor from "../markdown/MarkdownHighlightEditor.vue";
 import { isMarkdownFile } from "../markdown/markdown.ts";
 import { icons } from "../../shared/util.ts";
@@ -24,78 +24,21 @@ const file = computed(() => props.tab.data);
 const markdownEnabled = computed(() => Boolean(plugins.get("markdown")?.enabled));
 const isMarkdown = computed(() => isMarkdownFile(file.value?.name));
 /**
- * .md 的默认视图：源码 / 分栏实时预览 / 纯预览。
- * 分栏就是 Obsidian 的「源码 + 预览」：左边写、右边跟着变，滚动按比例同步。
+ * .md 的默认视图：预览（Typora 式，点哪一块就地改哪一块）/ 源码。
  */
-const markdownView = computed<"source" | "split" | "preview">({
+const markdownView = computed<"source" | "preview">({
   get: () => appSettings.markdownView,
   set: (value) => {
     appSettings.markdownView = value;
-    if (value !== "source") refreshPreviewText();
   },
 });
 const showPreview = computed(() => markdownView.value === "preview" && isMarkdown.value && markdownEnabled.value);
-const showSplit = computed(() => markdownView.value === "split" && isMarkdown.value && markdownEnabled.value);
 
-/** 当前的编辑内容（和下面的 draft 同一个来源；这里先取，避免声明顺序问题） */
-const draftText = (): string => file.value?.draft ?? file.value?.content ?? "";
-
-/** 分栏里的预览文本：输入时去抖，避免每个字符都重新解析一遍 markdown */
-const previewText = ref("");
-let previewTimer: ReturnType<typeof setTimeout> | null = null;
-const previewScroll = ref<HTMLElement | null>(null);
-let previewSyncFrame = 0;
-
-function refreshPreviewText(): void {
-  if (previewTimer) {
-    clearTimeout(previewTimer);
-    previewTimer = null;
-  }
-  previewText.value = draftText();
+/** 预览模式里就地编辑某一块 → 写回草稿（自动保存照常生效） */
+function applyEditableContent(next: string): void {
+  draft.value = next;
 }
 
-function schedulePreviewText(): void {
-  if (!showSplit.value) return;
-  if (previewTimer) clearTimeout(previewTimer);
-  previewTimer = setTimeout(() => {
-    previewTimer = null;
-    previewText.value = draftText();
-  }, 140);
-}
-
-/** 编辑器滚动 → 预览按比例跟随（只做单向，避免两边互相拉扯）。 */
-function syncPreviewScroll(): void {
-  if (!showSplit.value || previewSyncFrame) return;
-  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn: FrameRequestCallback) => window.setTimeout(fn, 16);
-  previewSyncFrame = schedule(() => {
-    previewSyncFrame = 0;
-    const editor = markdownInput.value?.input;
-    const target = previewScroll.value;
-    if (!editor || !target) return;
-    const editorMax = editor.scrollHeight - editor.clientHeight;
-    const targetMax = target.scrollHeight - target.clientHeight;
-    if (editorMax <= 0 || targetMax <= 0) return;
-    target.scrollTop = (editor.scrollTop / editorMax) * targetMax;
-  }) as number;
-}
-
-
-
-watch(
-  () => file.value?.relative,
-  (relative, previous) => {
-    if (relative !== previous && showSplit.value) refreshPreviewText();
-  },
-);
-
-watch(
-  () => file.value?.loading,
-  (loading) => {
-    // 打开文件后先把预览内容对齐一次（视图模式走全局设置，不再每次重置）
-    if (loading === false) refreshPreviewText();
-  },
-  { immediate: true },
-);
 const saving = computed(() => Boolean(file.value?.saving));
 const lastAutoSaved = ref(false);
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,11 +91,6 @@ const autoSaveLabel = computed(() => {
 
 const lines = computed(() => String(draft.value ?? "").split(/\r?\n/));
 
-// 分栏：输入后去抖刷新预览；切到分栏时立刻对齐一次
-watch(draft, () => schedulePreviewText());
-watch(showSplit, (on) => {
-  if (on) refreshPreviewText();
-});
 const media = computed(() => file.value?.preview ?? null);
 const isBinary = computed(() => Boolean(file.value?.binary));
 const LARGE_TEXT_MAX = 2 * 1024 * 1024;
@@ -326,14 +264,6 @@ watch(
   },
 );
 
-watch(
-  () => file.value?.relative,
-  () => {
-    clearAutoSaveTimer();
-    lastAutoSaved.value = false;
-    nextTick(syncScroll);
-  },
-);
 
 onMounted(() => {
   window.addEventListener("blur", onWindowBlur);
@@ -352,7 +282,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="file-editor">
+  <section class="file-editor" :data-md-view="markdownView">
     <div class="file-editor-toolbar">
       <div class="file-editor-path" :title="file?.relative">
         <template v-for="(part, idx) in pathParts" :key="idx">
@@ -389,14 +319,6 @@ onBeforeUnmount(() => {
           :aria-selected="markdownView === 'source'"
           @click="markdownView = 'source'"
         >源码</button>
-        <button
-          type="button"
-          class="settings-segment"
-          role="tab"
-          :class="{ active: markdownView === 'split' }"
-          :aria-selected="markdownView === 'split'"
-          @click="markdownView = 'split'"
-        >分栏</button>
         <button
           type="button"
           class="settings-segment"
@@ -461,22 +383,12 @@ onBeforeUnmount(() => {
         <pre v-for="(chunk, index) in largeChunks" :key="index" class="file-editor-large-chunk">{{ chunk }}</pre>
       </div>
     </div>
-    <MarkdownPreview v-else-if="showPreview && file" :file="file" />
-    <!-- 分栏实时预览：左写右看，滚动按比例同步 -->
-    <div v-else-if="showSplit && file" class="file-editor-split" data-split="markdown">
-      <div class="file-editor-split-editor">
-        <MarkdownHighlightEditor
-          ref="markdownInput"
-          v-model="draft"
-          @blur="onEditorBlur"
-          @keydown="onKeydown"
-          @scroll="syncPreviewScroll"
-        />
-      </div>
-      <div ref="previewScroll" class="file-editor-split-preview">
-        <MarkdownPreview :content="previewText" />
-      </div>
-    </div>
+    <!-- 预览：Typora 式，点某一块就地变成源码编辑，其它块保持渲染结果 -->
+    <MarkdownEditable
+      v-else-if="showPreview && file"
+      :content="draft"
+      @update:content="applyEditableContent"
+    />
     <MarkdownHighlightEditor
       v-else-if="isMarkdown && markdownEnabled"
       ref="markdownInput"

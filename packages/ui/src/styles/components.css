@@ -373,45 +373,6 @@
 .file-editor-state.conflict span { flex: 1; min-width: 220px; text-align: left; line-height: 1.5; }
 .file-view-toggle { flex: none; }
 
-/* ---------- .md 分栏实时预览（左写右看，参照 Obsidian 的「源码 + 预览」） ---------- */
-.file-editor-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  background: var(--bg);
-}
-.file-editor-split-editor {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  border-right: 1px solid var(--line);
-}
-.file-editor-split-editor > .markdown-highlight-editor { flex: 1; }
-.file-editor-split-preview {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-}
-/* 分栏里的预览容器由外层滚动，自己不再伸出一条滚动条 */
-.file-editor-split-preview .md-preview {
-  overflow: visible;
-  height: auto;
-  min-height: 0;
-  flex: none;
-  padding: 16px 20px 60px;
-}
-/* 舞台太窄时上下分栏，仍然能边写边看（容器查询，跟窗口宽度无关） */
-@container (max-width: 760px) {
-  .file-editor-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
-  .file-editor-split-editor { border-right: 0; border-bottom: 1px solid var(--line); }
-  .file-editor-split-preview .md-preview { padding: 12px 14px 48px; }
-}
-
 /* ---------- .md 阅读视图排版（对齐 Obsidian / Typora 的观感） ---------- */
 .md-preview {
   flex: 1;
