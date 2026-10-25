@@ -43,7 +43,9 @@ const foldIcon = computed(() => (open.value ? icons.chevronDown : icons.chevronR
         <SearchHighlight :text="block.text ?? ''" :query="query" />
       </button>
       <span v-else class="notice-text"><SearchHighlight :text="block.text ?? ''" :query="query" /></span>
-      <span v-if="block.retry?.error && !block.retry.done" class="notice-detail">{{ block.retry.error }}</span>
+      <!-- 重试期间不再重复显示同一句错误（hover 里能看到的 title 已经带着），
+           一条提示只占一行，省掉以前那半屏的重复内容 -->
+      <span v-if="(block.count ?? 1) > 1" class="notice-count">×{{ block.count }}</span>
       <div
         v-if="block.retry && !block.retry.done"
         class="notice-retry-bar"

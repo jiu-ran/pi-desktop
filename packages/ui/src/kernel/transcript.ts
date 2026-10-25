@@ -2,6 +2,7 @@
 import { splitAttachmentMarkers, type MessageAttachment } from "../shared/attachments.ts";
 import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
 import { formatTokens } from "../shared/util.ts";
+import { localizeNotification } from "../shared/notify-text.ts";
 
 export interface RetryNotice {
   attempt: number;
@@ -55,6 +56,40 @@ export interface TranscriptBlock {
   retry?: RetryNotice;
   /** 上下文压缩的状态与摘要 */
   compaction?: CompactionNotice;
+  /** 同一条提示连续出现时的合并次数（界面上显示 ×N） */
+  count?: number;
+}
+
+/** 网络类英文报错压成短中文：重试提示里只留一句，不再整段英文堆着。 */
+function noticeErrorText(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^connection (error|reset|closed|refused).?$/i.test(raw) || /socket hang up/i.test(raw)) return "网络连接失败";
+  return localizeNotification(raw, "error");
+}
+
+/**
+ * 错误提示去重：
+ * - 正在重试的那条已经说明了原因时，不再单独插一条同样的错误；
+ * - 连续两条一模一样的提示合并成一条并计数（×N），不再各占一行。
+ */
+function pushErrorNotice(blocks: TranscriptBlock[], value: unknown): void {
+  const text = noticeErrorText(value);
+  if (!text) return;
+  const last = blocks[blocks.length - 1];
+  if (last?.kind === "notice" && last.retry && !last.retry.done) {
+    if (!last.retry.error) last.retry.error = text;
+    return;
+  }
+  // 重试已经失败并写明原因：紧随其后的同一条错误不再单独占一行。
+  if (last?.kind === "notice" && last.retry?.done && last.retry.success === false && last.retry.error === text) {
+    return;
+  }
+  if (last?.kind === "notice" && last.text === text && !last.retry && !last.compaction) {
+    last.count = (last.count ?? 1) + 1;
+    return;
+  }
+  blocks.push({ kind: "notice", id: uid("n"), level: "error", text, count: 1 });
 }
 
 function textOf(content: any): string {
@@ -170,7 +205,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         }
       }
       if (message.stopReason === "error" && message.errorMessage) {
-        blocks.push({ kind: "notice", id: uid("n"), level: "error", text: message.errorMessage });
+        pushErrorNotice(blocks, message.errorMessage);
       }
       return;
     }
@@ -271,7 +306,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           if ((block.kind === "text" || block.kind === "thinking") && !(block.text ?? "").trim()) blocks.splice(i, 1);
         }
         if (event.message.stopReason === "error" && event.message.errorMessage) {
-          blocks.push({ kind: "notice", id: uid("n"), level: "error", text: event.message.errorMessage });
+          pushErrorNotice(blocks, event.message.errorMessage);
         }
         dropNamelessTools();
         return true;
@@ -308,16 +343,43 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       }
       case "auto_retry_start": {
         const delay = Math.max(0, Number(event.delayMs ?? 0));
+        const reason = noticeErrorText(event.errorMessage);
+        // 同一次故障的多次重试复用同一条提示：以前每轮都 push 新块，
+        // 三次重试就在对话里堆三张几乎一样的卡片。
+        const running = [...blocks].reverse().find((block) => block.kind === "notice" && block.retry && !block.retry.done);
+        if (running?.retry) {
+          running.retry.attempt = event.attempt;
+          running.retry.maxAttempts = event.maxAttempts;
+          running.retry.delayMs = delay;
+          running.retry.error = reason || running.retry.error;
+          running.text = `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`;
+          return true;
+        }
+        // 上一次失败刚刚留下一条错误提示：直接把它改写成重试提示，
+        // 否则「网络连接失败 + 连接中断，X 秒后重试」两行说的是同一件事。
+        const justFailed = blocks[blocks.length - 1];
+        if (justFailed?.kind === "notice" && justFailed.level === "error" && !justFailed.retry && !justFailed.compaction) {
+          justFailed.level = "warning";
+          justFailed.text = `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`;
+          justFailed.count = undefined;
+          justFailed.retry = {
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: delay,
+            error: reason || justFailed.text,
+          };
+          return true;
+        }
         blocks.push({
           kind: "notice",
           id: uid("n"),
           level: "warning",
-          text: `连接中断，${(delay / 1000).toFixed(1)} 秒后自动重试（${event.attempt}/${event.maxAttempts}）`,
+          text: `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`,
           retry: {
             attempt: event.attempt,
             maxAttempts: event.maxAttempts,
             delayMs: delay,
-            error: event.errorMessage ? String(event.errorMessage) : undefined,
+            error: reason || undefined,
           },
         });
         return true;
@@ -329,10 +391,11 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         notice.retry.success = Boolean(event.success);
         if (event.success) {
           notice.level = "info";
-          notice.text = `自动重试成功（第 ${event.attempt} 次）`;
+          notice.text = `已重新连接（第 ${event.attempt} 次重试）`;
         } else {
           notice.level = "error";
-          notice.text = `自动重试失败：${event.finalError ?? "未知错误"}`;
+          const reason = noticeErrorText(event.finalError) || notice.retry.error || "未知错误";
+          notice.text = `重试 ${event.attempt}/${notice.retry.maxAttempts} 失败：${reason}`;
         }
         return true;
       }

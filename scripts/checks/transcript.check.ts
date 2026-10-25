@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createTranscript } from "../../packages/ui/src/kernel/transcript.ts";
 import { buildCopyTexts } from "../../packages/ui/src/shared/copy-text.ts";
 
@@ -236,7 +237,7 @@ if (retryNotice.kind !== "notice" || retryNotice.level !== "warning") throw new 
 if (retryNotice.retry?.attempt !== 2 || retryNotice.retry.delayMs !== 3000 || retryNotice.retry.done) throw new Error("重试进度不正确");
 retry.applyEvent({ type: "auto_retry_end", success: true, attempt: 2 });
 if (!retryNotice.retry.done || !retryNotice.retry.success) throw new Error("重试成功后应结束进度");
-if (String(retryNotice.level) !== "info" || !retryNotice.text?.includes("成功")) throw new Error("重试成功应更新提示");
+if (String(retryNotice.level) !== "info" || !retryNotice.text?.includes("已重新连接")) throw new Error("重试成功应更新提示");
 
 // 上下文压缩：运行中可显示，结束后携带摘要与 token 变化
 const compaction = createTranscript();
@@ -285,3 +286,46 @@ const afterSettle: number = stale.blocks.length;
 if (afterSettle !== 0) throw new Error("结算后应清掉无名占位工具块");
 
 console.log("tool stream OK");
+
+// 自动重试：同一次故障只留一条提示，原始 Connection error. 不再单独堆一行
+{
+  const { createTranscript } = await import("../../packages/ui/src/kernel/transcript.ts");
+  const t = createTranscript();
+  const error = { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } };
+  t.applyEvent({ ...error, message: { ...error.message, content: [] } });
+  t.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "Connection error." });
+  t.applyEvent({ ...error, message: { ...error.message, content: [] } });
+  t.applyEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: "Connection error." });
+  t.applyEvent({ ...error, message: { ...error.message, content: [] } });
+  const notices = t.blocks.filter((block) => block.kind === "notice");
+  assert.equal(notices.length, 1, `三轮重试只应留一条提示，实际 ${notices.length} 条：${notices.map((n) => n.text).join(" | ")}`);
+  assert.equal(notices[0].text, "连接中断，4.0 秒后重试（2/3）", `重试提示应就地更新，实际「${notices[0].text}」`);
+  assert.equal(notices[0].retry.error, "网络连接失败", "错误文案要中文化");
+  assert.ok(!notices.some((n) => /Connection error/.test(n.text)), "界面上不应再出现英文原文");
+
+  t.applyEvent({ type: "auto_retry_end", attempt: 2, success: true });
+  const done = t.blocks.filter((block) => block.kind === "notice");
+  assert.equal(done.length, 1, "重试成功后仍是一条");
+  assert.equal(done[0].text, "已重新连接（第 2 次重试）");
+  assert.equal(done[0].level, "info");
+
+  // 失败：说清楚重试到第几次失败、原因是什么
+  const t2 = createTranscript();
+  t2.applyEvent({ type: "auto_retry_start", attempt: 3, maxAttempts: 3, delayMs: 8000, errorMessage: "Connection error." });
+  t2.applyEvent({ type: "auto_retry_end", attempt: 3, success: false, finalError: "Connection error." });
+  const failed = t2.blocks.filter((block) => block.kind === "notice");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].text, "重试 3/3 失败：网络连接失败", `失败文案不对：${failed[0].text}`);
+  assert.equal(failed[0].level, "error");
+
+  // 连续两条相同错误（没有重试）合并成一条并计数
+  const t3 = createTranscript();
+  for (let i = 0; i < 3; i += 1) {
+    t3.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } });
+  }
+  const merged = t3.blocks.filter((block) => block.kind === "notice");
+  assert.equal(merged.length, 1, `相同的错误应合并，实际 ${merged.length} 条`);
+  assert.equal(merged[0].count, 3, `应显示重复次数，实际 ${merged[0].count}`);
+  assert.equal(merged[0].text, "网络连接失败");
+  console.log("retry notice OK 单条复用 / 中文化 / 成功与失败文案 / 重复合并");
+}
