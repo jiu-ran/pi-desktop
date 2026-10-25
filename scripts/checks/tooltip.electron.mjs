@@ -76,8 +76,24 @@ export async function checkTooltipInElectron(win) {
     replacement.id = 'pi-tooltip-fixture-replaced';
     replacement.setAttribute('title', '重渲染后的提示文本');
     document.body.replaceChild(replacement, el);
-    await wait(900);
-    const replacedStripped = replacement.getAttribute('title') === null;
+    // 接管靠 300ms 的指针探测：单次等待容易在「界面正在滚动 / 元素刚好被盖住」时误判，
+    // 这里按元素当前坐标持续把指针报给它，最多等 3 秒。
+    let replacedStripped = false;
+    for (let i = 0; i < 30; i += 1) {
+      await wait(100);
+      if (!replacement.isConnected) break;
+      if (replacement.getAttribute('title') === null) {
+        replacedStripped = true;
+        break;
+      }
+      const box = replacement.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) continue;
+      const at = { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
+      // 只报指针位置：再补 mouseover 会让浮层重新走一遍显示流程，数量断言就会闪一下。
+      replacement.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, ...at }));
+    }
+    // 让浮层的插入/替换落定再数，否则正好数在「旧的收起、新的还没插进来」的中间态
+    await wait(350);
     const replacedTip = document.querySelector('.pi-tooltip')?.textContent ?? '';
     const replacedCount = document.querySelectorAll('.pi-tooltip').length;
 

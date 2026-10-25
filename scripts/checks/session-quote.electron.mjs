@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 
@@ -46,15 +46,20 @@ export async function checkSessionQuoteInElectron(win) {
   await writeFile(path.join(dir, "readme.txt"), "session quote check\n");
 
   /** 造一个可引用的会话文件：会话头 + 几条消息（标题取第一段用户文字）。 */
-  const seedSession = async (sessionDir, name, title, reply) => {
+  const seedSession = async (sessionDir, name, title, reply, at = Date.now()) => {
     const file = path.join(sessionDir, `${name}.jsonl`);
     seeds.push(file);
+    const stamp = new Date(at).toISOString();
     const rows = [
-      { type: "session", version: 3, id: name, timestamp: new Date().toISOString(), cwd: dir },
+      { type: "session", version: 3, id: name, timestamp: stamp, cwd: dir },
       { type: "message", id: `${name}-1`, parentId: null, timestamp: new Date().toISOString(), message: { role: "user", content: [{ type: "text", text: title }] } },
       { type: "message", id: `${name}-2`, parentId: `${name}-1`, timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text: reply }] } },
     ];
     await writeFile(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+    // 会话列表按「最近活动」（mtime 与文件头时间取大）排序：显式设置 mtime，
+    // 否则两个会话挤在同一毫秒，列表顺序会在两次运行之间互换，断言就会偶尔失败。
+    const seconds = at / 1000;
+    await utimes(file, seconds, seconds).catch(() => {});
     return file;
   };
 
@@ -67,8 +72,8 @@ export async function checkSessionQuoteInElectron(win) {
     const sessionDir = path.dirname(current);
     seeds.push(current);
     // 标题里带关键词，用于验证搜索
-    await seedSession(sessionDir, "quote-jwt", "把登录改成 JWT，先看看现有实现", "已经改成 JWT 了");
-    await seedSession(sessionDir, "quote-report", "修一下报表导出的表头错位", "表头对齐已经修好");
+    await seedSession(sessionDir, "quote-jwt", "把登录改成 JWT，先看看现有实现", "已经改成 JWT 了", Date.now() - 60_000);
+    await seedSession(sessionDir, "quote-report", "修一下报表导出的表头错位", "表头对齐已经修好", Date.now());
     await evaluate("window.__piDesktop.workbench.refreshSessions().then(() => true)");
     await poll(
       "window.__piDesktop.workbench.active.value?.sessions.filter(s => !s.empty).length >= 2",
@@ -134,7 +139,15 @@ export async function checkSessionQuoteInElectron(win) {
     );
 
     // 点击选中 → 变成附件
-    await evaluate("document.querySelector('.path-picker-session').click(); true");
+    // 按标题点，不依赖排序（同毫秒创建的两个会话顺序可能互换）
+    const picked = await evaluate(`(() => {
+      const row = [...document.querySelectorAll('.path-picker-session')]
+        .find((n) => (n.querySelector('.path-item-name')?.textContent ?? '').includes('报表'));
+      if (!row) return false;
+      row.click();
+      return true;
+    })()`);
+    assert.equal(picked, true, "选择器里应能按标题找到目标对话");
     await poll("Boolean(document.querySelector('.attachment-chip.session'))", "选中后应出现对话附件");
     const chip = JSON.parse(await evaluate(`(() => {
       const node = document.querySelector('.attachment-chip.session');
@@ -278,9 +291,14 @@ await poll("!document.querySelector('[data-quote-modal]')", "保存后对话框�
     await saveQuote("改回名称后保存");
     await poll("!document.querySelector('[data-quote-modal]')", "改回名称后对话框应关闭");
 
-    // 重复添加同一会话不会产生第二枚
+    // 重复添加同一会话不会产生第二枚（同样按标题点，不依赖排序）
     await typeAt();
-    await evaluate("document.querySelector('.path-picker-session').click(); true");
+    await evaluate(`(() => {
+      const row = [...document.querySelectorAll('.path-picker-session')]
+        .find((n) => (n.querySelector('.path-item-name')?.textContent ?? '').includes('报表'));
+      row?.click();
+      return Boolean(row);
+    })()`);
     await wait(400);
     assert.equal(
       await evaluate("document.querySelectorAll('.attachment-chip.session').length"),
