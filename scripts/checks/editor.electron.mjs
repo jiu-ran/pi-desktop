@@ -46,8 +46,9 @@ export async function checkEditorInElectron(win) {
     // 明确丢弃本测试的草稿，不能触发关闭应用确认。
     await evaluate("window.__piDesktop.stage.activeTab.value.dirty=false; window.__piDesktop.stage.clear(); true");
     await evaluate(`window.__piDesktop.bus.emit('file:open', ${JSON.stringify(md)}); true`);
-    await poll("Boolean(document.querySelector('.md-body'))", "Markdown 预览");
-    await poll("Boolean(document.querySelector('.mermaid-preview-area svg, .mermaid-block-container svg'))", "时序图非空白");
+    await evaluate("window.__piDesktop.settings.settings.markdownView='preview'; true");
+    await poll("Boolean(document.querySelector('.md-live .cm-content'))", "Markdown 实时预览");
+    await poll("Boolean(document.querySelector('.cm-md-mermaid svg'))", "时序图非空白");
     assert.notEqual(await evaluate("window.__unsafeMarkdown"), 1, "Markdown 不能执行不可信脚本 / 事件属性");
     await evaluate("(()=>{const buttons=[...document.querySelectorAll('.file-view-toggle button')];buttons.find(b=>b.textContent==='源码').click();return true})()");
     await poll("Boolean(document.querySelector('.markdown-highlight-input'))", "Markdown 源码高亮编辑");

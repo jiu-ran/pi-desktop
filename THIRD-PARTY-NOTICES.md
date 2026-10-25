@@ -15,6 +15,16 @@
 
 分发应用时保留上述许可文件；node-pty 依赖目录中的 winpty / ConPTY 第三方版权文件同样随包保留。
 
+## Markdown 编辑器
+
+- **CodeMirror 6**（`@codemirror/state`、`@codemirror/view`、`@codemirror/commands`、`@codemirror/language`、
+  `@codemirror/lang-markdown`）：<https://github.com/codemirror/dev>，MIT。用于 `.md` 文件的实时预览编辑器
+  （编辑核心、选区、历史、键盘）。
+- **Lezer**（`@lezer/common`、`@lezer/highlight`、`@lezer/markdown`）：<https://github.com/lezer-parser>，MIT。
+  markdown 语法树由 `@lezer/markdown`（含 GFM 扩展）解析，实时预览的「标记收放」由本项目在
+  `packages/ui/src/plugins/markdown/live-preview-rules.ts` 中基于语法树自行实现。
+- 以上依赖均为未修改的 npm 包，随应用分发时保留其 LICENSE 与版权声明。
+
 ## ThinkRail
 
 - 来源：<https://github.com/JetBrains/thinkrail>

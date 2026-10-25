@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { appSettings, openSettingsModal } from "../../services/settings.ts";
-import MarkdownEditable from "../markdown/MarkdownEditable.vue";
+import MarkdownLive from "../markdown/MarkdownLive.vue";
 import MarkdownHighlightEditor from "../markdown/MarkdownHighlightEditor.vue";
 import { isMarkdownFile } from "../markdown/markdown.ts";
 import { icons } from "../../shared/util.ts";
@@ -24,7 +24,7 @@ const file = computed(() => props.tab.data);
 const markdownEnabled = computed(() => Boolean(plugins.get("markdown")?.enabled));
 const isMarkdown = computed(() => isMarkdownFile(file.value?.name));
 /**
- * .md 的默认视图：预览（Typora 式，点哪一块就地改哪一块）/ 源码。
+ * .md 的默认视图：预览（Typora / Obsidian 式实时预览，看到的就是排版结果）/ 源码。
  */
 const markdownView = computed<"source" | "preview">({
   get: () => appSettings.markdownView,
@@ -34,8 +34,8 @@ const markdownView = computed<"source" | "preview">({
 });
 const showPreview = computed(() => markdownView.value === "preview" && isMarkdown.value && markdownEnabled.value);
 
-/** 预览模式里就地编辑某一块 → 写回草稿（自动保存照常生效） */
-function applyEditableContent(next: string): void {
+/** 预览模式里编辑 → 写回草稿（自动保存照常生效） */
+function applyLiveContent(next: string): void {
   draft.value = next;
 }
 
@@ -383,11 +383,12 @@ onBeforeUnmount(() => {
         <pre v-for="(chunk, index) in largeChunks" :key="index" class="file-editor-large-chunk">{{ chunk }}</pre>
       </div>
     </div>
-    <!-- 预览：Typora 式，点某一块就地变成源码编辑，其它块保持渲染结果 -->
-    <MarkdownEditable
+    <!-- 预览：Typora / Obsidian 式实时预览，标记只在光标所在行露出 -->
+    <MarkdownLive
       v-else-if="showPreview && file"
       :content="draft"
-      @update:content="applyEditableContent"
+      @update:content="applyLiveContent"
+      @keydown="onKeydown"
     />
     <MarkdownHighlightEditor
       v-else-if="isMarkdown && markdownEnabled"
