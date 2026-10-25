@@ -134,7 +134,32 @@ export async function checkAutoScrollInElectron(win) {
   const following = JSON.parse(await metrics());
   assert.ok(following.distance <= 90, `恢复跟随后应继续贴底，实际离底部 ${following.distance}px`);
 
-  // 4. 内容不到一屏时上滑不该出现「回到底部」（否则按钮会乱弹）
+  // 4. 「思考中」的异步撑高：图片、代码高亮、思考块这些都会在指针不动时改高度，
+  //    走的是 markdown:height-change 这条路径，它同样不能在用户上滑后拉回底部。
+  await push(0);
+  await wait(200);
+  await wheelUp(-240);
+  await evaluate(`(() => {
+    const el = ${scrollerExpr};
+    el.scrollTop = Math.max(0, el.scrollTop - 260);
+    return true;
+  })()`);
+  await wait(150);
+  const asyncPaused = JSON.parse(await metrics());
+  assert.ok(asyncPaused.distance > 150, `上滑后应停在历史位置，实际离底部 ${asyncPaused.distance}px`);
+  for (let i = 0; i < 6; i += 1) {
+    await evaluate(`window.__piDesktop.bus.emit("markdown:height-change"); true`);
+    await wait(120);
+  }
+  await wait(250);
+  const asyncAfter = JSON.parse(await metrics());
+  assert.ok(
+    asyncAfter.distance > 150,
+    `异步撑高（思考/图片/高亮）不该把画面拉回底部：上滑后 ${asyncPaused.distance}px，之后只剩 ${asyncAfter.distance}px`,
+  );
+  assert.equal(asyncAfter.jump, true, "仍应显示「回到底部」");
+
+  // 5. 内容不到一屏时上滑不该出现「回到底部」（否则按钮会乱弹）
   await clear();
   await wait(200);
   await push(99);
