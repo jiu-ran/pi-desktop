@@ -1099,6 +1099,8 @@
   min-height: 46px;
   max-height: 260px;
   overflow-x: hidden;
+  /* textarea 默认不继承字体，会落回浏览器等宽字体：正文与参数提示宽度对不上，提示会错位 */
+  font-family: inherit;
   padding: 13px 14px 6px;
   border: 0;
   border-radius: 14px 14px 0 0;
@@ -1836,12 +1838,17 @@
 }
 .attach-popover button:hover { background: var(--hover); color: var(--fg); }
 .attach-popover button span { display: grid; place-items: center; color: var(--accent); }
+.composer-input { position: relative; }
 .arg-hint {
   position: absolute;
-  top: 9px;
-  left: 10px;
-  right: 10px;
+  /* 与 .composer textarea 的 padding（13px 14px）严格对齐，差 1px 提示就会飘 */
+  top: 13px;
+  left: 14px;
+  right: 14px;
+  overflow: hidden;
   color: var(--fg-3);
+  font-family: inherit;
+  font-size: 13.5px;
   line-height: 1.6;
   white-space: pre-wrap;
   pointer-events: none;

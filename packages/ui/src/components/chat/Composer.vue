@@ -847,9 +847,17 @@ const placeholder = computed(() => {
   if (ws.value?.streaming) return "继续输入，将按所选方式加入当前任务…";
   return hasHistory.value ? "继续这个任务，输入 / 使用命令" : "描述一个任务，输入 / 使用命令";
 });
+/**
+ * 命令后面的参数占位提示（/resume + 空格 → <会话>）。
+ *
+ * 直接贴在正文后面画：多行时没法对齐，菜单打开时也不用提示。
+ * 用户没打空格时补一个，否则会变成 /resume<会话>。
+ */
 const argHint = computed(() => {
   if (!exact.value || !parsed.value?.hasArg || parsed.value.arg || menuMode.value) return "";
-  return exact.value.args || "";
+  const args = (exact.value.args || "").trim();
+  if (!args || draft.value.includes("\n")) return "";
+  return `${/\s$/.test(draft.value) ? "" : " "}${args}`;
 });
 </script>
 
@@ -1042,16 +1050,19 @@ const argHint = computed(() => {
               <button type="button" :title="item.kind === 'session' ? '移除对话引用' : '移除附件'" @click.stop="removeAttachment(item.path)">×</button>
             </span>
           </div>
-          <textarea
-            ref="input"
-            v-model="draft"
-            rows="1"
-            :placeholder="placeholder"
-            spellcheck="false"
-            @keydown="onKeydown"
-            @keyup="onAtKey"
-          />
-          <span v-if="argHint" class="arg-hint" aria-hidden="true"><span class="arg-ghost">{{ draft }}</span>{{ argHint }}</span>
+          <!-- 输入框与参数提示必须同一个相对容器：挂在 .composer-field 上会被附件条顶偏，画到附件上面去 -->
+          <div class="composer-input">
+            <textarea
+              ref="input"
+              v-model="draft"
+              rows="1"
+              :placeholder="placeholder"
+              spellcheck="false"
+              @keydown="onKeydown"
+              @keyup="onAtKey"
+            />
+            <span v-if="argHint" class="arg-hint" aria-hidden="true"><span class="arg-ghost">{{ draft }}</span>{{ argHint }}</span>
+          </div>
         </div>
 
         <div class="composer-bar">
