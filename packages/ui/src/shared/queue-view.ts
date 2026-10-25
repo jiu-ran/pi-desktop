@@ -188,6 +188,39 @@ export function planQueuedFlush(
   return ids;
 }
 
+/** 队列里每条消息带的图片（Pi 的队列只回传文本，重新入队时必须自己带上图片）。 */
+export interface QueuedImage {
+  mimeType: string;
+  data: string;
+}
+
+export interface QueueImageBlockLike {
+  kind?: string;
+  queueText?: string;
+  imageItems?: QueuedImage[];
+}
+
+/**
+ * 按「完整提示词」收集排队气泡上的图片。
+ *
+ * Pi 的 clearQueue 只返回文本，图片是单独的数组（steer(message, images)）。
+ * 重新入队（编辑 / 单条撤回）时如果不把图片带回去，图片就丢了；反过来，
+ * 给每条都塞同一组图片又会出现「图片又被添加了一次」的重复。
+ * 所以按提示词文本一一对应地取。
+ */
+export function queueImagesByPrompt(blocks: QueueImageBlockLike[]): Record<string, QueuedImage[]> {
+  const map: Record<string, QueuedImage[]> = {};
+  for (const block of blocks ?? []) {
+    if (block.kind !== undefined && block.kind !== "user") continue;
+    const key = normalize(block.queueText ?? "");
+    if (!key || map[key]) continue;
+    const images = block.imageItems ?? [];
+    if (!images.length) continue;
+    map[key] = images.map((item) => ({ mimeType: item.mimeType, data: item.data }));
+  }
+  return map;
+}
+
 /** 撤回后放回输入框的文本：只留人写的那部分，别把附件 XML 塞回去。 */
 export function queueDraftText(input: string): string {
   return stripQueueMarkers(input).replace(/\n{3,}/g, "\n\n").trim();

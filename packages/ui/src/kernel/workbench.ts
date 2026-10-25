@@ -5,7 +5,7 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, replacePromptMessage } from "../shared/queue-view.ts";
+import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt, replacePromptMessage } from "../shared/queue-view.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -1528,9 +1528,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       followUp: [...(cleared?.followUp ?? [])],
     };
     const planned = planQueueWithdraw(current, target);
+    // 其余排队消息可能各自带图片，撤回一条时同样要按提示词带回去
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
     try {
-      for (const text of planned.steering) await rpc(ws.cwd, "steer", [text], thread.sessionFile);
-      for (const text of planned.followUp) await rpc(ws.cwd, "followUp", [text], thread.sessionFile);
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
     } catch (error: any) {
       applyQueue(thread, current);
       bus.emit("notify", {
@@ -1593,9 +1599,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       followUp: [...(cleared?.followUp ?? [])],
     };
     const planned = planQueueEdit(current, target, nextPrompt);
+    // 图片是单独一组数据（steer(message, images)），clearQueue 只回文本：
+    // 重新入队时必须按提示词把各自的图片带回去，否则图片丢；也不能全塞同一组，否则会重复。
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
     try {
-      for (const text of planned.steering) await rpc(ws.cwd, "steer", [text], thread.sessionFile);
-      for (const text of planned.followUp) await rpc(ws.cwd, "followUp", [text], thread.sessionFile);
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
     } catch (error: any) {
       // 重新入队失败：把没排上的内容交回输入框，并刷新队列状态
       applyQueue(thread, { steering: [], followUp: [] });
@@ -1610,8 +1623,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       block.queueText = nextPrompt;
     }
     applyQueue(thread, planned);
-    // 目标消息可能带图片：编辑不丢图，但 Pi 的队列只能按文本恢复，这里保留在气泡上
-    if (images.length && block) block.imageItems = images;
+    // 气泡上的图片保持原样（不要重新赋值成新数组：重复赋值会让「已编辑」的
+    // 那张卡片看起来又多了一张图）
+    if (block && images.length) block.images = images.length;
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
     return true;
   }

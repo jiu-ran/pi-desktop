@@ -730,13 +730,30 @@ function pasteError(error: any): Error {
   return error instanceof Error ? error : new Error(message || "粘贴图片失败");
 }
 
+/**
+ * 输入框高度跟随内容。
+ *
+ * 空输入必须把内联高度交还给 CSS：之前只写「按 scrollHeight 设高度」，
+ * 发完一段长文本后切到另一个会话时 draft 没变（都是空），watch 不触发，
+ * 输入框就沿用上一段长文本的高度——看起来就是「有时候莫名其妙变高」。
+ */
 function autosize(): void {
   const el = input.value;
   if (!el) return;
+  if (!el.value) {
+    el.style.height = "";
+    return;
+  }
   el.style.height = "auto";
   el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
 }
 watch(draft, () => nextTick(autosize));
+// 换会话 / 换项目：draft 可能两边都是空的，必须显式重算一次
+watch(() => ws.value?.sessionFile, () => nextTick(autosize));
+watch(() => ws.value?.cwd, () => nextTick(autosize));
+// 窗口变窄时空输入框的占位文案会换行，高度也要跟着重算
+onMounted(() => window.addEventListener("resize", autosize));
+onBeforeUnmount(() => window.removeEventListener("resize", autosize));
 
 function focus(): void {
   // 会话加载完成、附件添加等异步回调会再次聚焦输入框；

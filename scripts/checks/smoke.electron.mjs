@@ -7,6 +7,7 @@ import { checkTerminalInElectron } from "./terminal.smoke.mjs";
 import { checkNetworkInElectron } from "./network.electron.mjs";
 import { checkEditorInElectron } from "./editor.electron.mjs";
 import { checkMarkdownViewInElectron } from "./markdown-view.electron.mjs";
+import { checkComposerHeightInElectron } from "./composer-height.electron.mjs";
 import { checkGitUiInElectron } from "./git-ui.electron.mjs";
 import { checkTooltipInElectron } from "./tooltip.electron.mjs";
 import { checkAppearanceInElectron } from "./appearance.electron.mjs";
@@ -201,6 +202,7 @@ app.whenReady().then(async () => {
       await runCheck("terminal", () => checkTerminalInElectron(win));
       await runCheck("editor", () => checkEditorInElectron(win));
       await runCheck("markdown-view", () => checkMarkdownViewInElectron(win));
+      await runCheck("composer-height", () => checkComposerHeightInElectron(win));
       await runCheck("git-ui", () => checkGitUiInElectron(win));
       await runCheck("tooltip", () => checkTooltipInElectron(win));
       await runCheck("composer-draft", () => checkComposerDraftInElectron(win));

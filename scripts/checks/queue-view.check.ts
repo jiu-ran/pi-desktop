@@ -3,6 +3,7 @@ import {
   planQueueView,
   planQueueWithdraw,
   planQueuedFlush,
+  queueImagesByPrompt,
   queueDraftText,
   queuePreview,
   stripQueueMarkers,
@@ -266,4 +267,32 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   ];
   assert.deepEqual(planQueuedFlush(mix, { steering: ["插话那条"], followUp: [] }, drained), ["u1"], "插话被取走同样要挪");
   console.log("queue flush OK 只挪刚发出的那条");
+}
+
+// ---------- 重新入队时图片要「按条」带回去（不丢、不重复） ----------
+{
+  const png = (id: string) => ({ mimeType: "image/png", data: id });
+  const blocks = [
+    block("u1", "带图的排队消息", "带图的排队消息").valueOf() as any,
+    block("u2", "纯文字排队消息", "纯文字排队消息").valueOf() as any,
+    { id: "a1", kind: "text", text: "输出" },
+  ] as any[];
+  blocks[0].imageItems = [png("AAA")];
+  const map = queueImagesByPrompt(blocks);
+  assert.ok(map["带图的排队消息"], "带图的条目应收集到图片");
+  assert.equal(map["带图的排队消息"].length, 1, "一张图只能收一次");
+  assert.equal(map["带图的排队消息"][0].data, "AAA");
+  assert.equal(map["纯文字排队消息"], undefined, "没图的条目不应凭空多出图片");
+
+  // 同一段文字排两次也只会共用一组图（不能因为重复扫描而叠加）
+  const twice = queueImagesByPrompt([
+    { kind: "user", queueText: "同一句", imageItems: [png("BBB")] },
+    { kind: "user", queueText: "同一句", imageItems: [png("BBB")] },
+  ] as any[]);
+  assert.equal(twice["同一句"].length, 1, "重复气泡不能把图片叠成两张");
+
+  // 历史消息（没有 queueText）不参与，避免把老消息的图塞进队列
+  const history = queueImagesByPrompt([{ kind: "user", imageItems: [png("CCC")] }] as any[]);
+  assert.deepEqual(Object.keys(history), [], "没有 queueText 的历史消息不参与");
+  console.log("queue images OK 按条带回 / 不重复 / 历史忽略");
 }
