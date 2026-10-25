@@ -1608,7 +1608,7 @@ onBeforeUnmount(() => {
 
           <!-- 5. Skills 设置 -->
           <template v-else-if="settingsModalState.tab === 'agents'">
-            <div class="settings-group">
+            <div class="settings-group fill">
               <div class="settings-group-head">
                 <span class="settings-group-title">全局提示词</span>
                 <div class="settings-toolbar-actions">

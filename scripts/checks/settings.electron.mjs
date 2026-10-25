@@ -82,6 +82,37 @@ export async function checkSettingsInElectron(win) {
   }
   assert.deepEqual(problems, [], `分区渲染问题：${problems.join("；")}`);
 
+  // 全局提示词页：编辑器必须按主题铺开（曾因为 CSS 丢了只剩两行白底，读不出来）
+  await evaluate(`document.querySelector('[data-settings-tab="agents"]').click(); true`);
+  await wait(400);
+  const agents = JSON.parse(await evaluate(`(() => {
+    const area = document.querySelector('.settings-body .agents-editor');
+    const note = document.querySelector('.settings-body .settings-note');
+    if (!area) return JSON.stringify({ missing: true });
+    const style = getComputedStyle(area);
+    const rect = area.getBoundingClientRect();
+    const body = document.querySelector('.settings-body').getBoundingClientRect();
+    return JSON.stringify({
+      height: Math.round(rect.height),
+      width: Math.round(rect.width),
+      bodyWidth: Math.round(body.width),
+      bg: style.backgroundColor,
+      color: style.color,
+      radius: style.borderRadius,
+      font: style.fontFamily.slice(0, 24),
+      note: note?.textContent.trim() ?? '',
+      noteMono: note ? getComputedStyle(note).fontFamily.includes('Mono') || getComputedStyle(note).fontFamily.includes('mono') : false,
+    });
+  })()`));
+  assert.ok(!agents.missing, "全局提示词页应有编辑器");
+  assert.ok(agents.height >= 280, `编辑器高度太小：${agents.height}px`);
+  assert.ok(agents.width >= agents.bodyWidth - 80, `编辑器应基本铺满宽度：${agents.width}/${agents.bodyWidth}`);
+  assert.ok(!/rgb\(2[45]\d, 2[45]\d, 2[45]\d\)/.test(agents.bg), `深色主题下编辑器不该是白底：${agents.bg}`);
+  assert.notEqual(agents.radius, "0px", "编辑器应带圆角（说明样式生效了）");
+  assert.match(agents.note, /AGENTS\.md$/, `应显示配置文件路径：${agents.note}`);
+  assert.equal(agents.noteMono, true, "路径要用等宽字体");
+  console.log("[settings] agents", JSON.stringify(agents));
+
   // 搜索过滤
   await evaluate(`(() => {
     const input = document.querySelector('.settings-search input');
@@ -129,6 +160,9 @@ export async function checkSettingsInElectron(win) {
   await evaluate(`document.querySelector('[data-settings-tab="appearance"]').click(); true`);
   await wait(300);
   console.log("[settings] shot", await shot("settings-dark.png"));
+  await evaluate(`document.querySelector('[data-settings-tab="agents"]').click(); true`);
+  await wait(300);
+  console.log("[settings] shot", await shot("settings-dark-agents.png"));
   await evaluate("window.__piDesktop.workbench.setTheme('light'); true");
   await wait(400);
   console.log("[settings] shot", await shot("settings-light.png"));
