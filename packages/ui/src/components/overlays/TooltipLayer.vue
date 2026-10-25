@@ -241,74 +241,94 @@ function underPointer(element: Element): boolean {
  * 把「指针下面新出现的 title」也走主题化浮层。
  */
 /**
- * 一次回调里最多做几次「几何测量」。
+ * 全局 title 监听：**回调里绝不直接写 DOM**。
  *
- * 大列表重渲染会一次性写回成百上千个 title（每条都是一个 MutationRecord），
- * 而 underPointer 里的 :hover 匹配与 getBoundingClientRect 都会强制重排：
- * 逐条做就是 O(n) 次同步重排，主线程被占住几分钟——这就是「界面卡死」的成因
- * （日志里抓到的栈正是这个回调）。现在只对「指针悬停链上」的元素做几何测量，
- * 其余交给 300ms 的指针探测，爆量时不会再把主线程拖死。
+ * 踩过的坑：回调里调 scheduleShow / restoreTitle 会写回 title，写回又触发新的
+ * mutation 记录 → 回调再跑 → 再写……形成微任务乒乓，主线程被占满（日志里抓到的
+ * 栈就在这条链上：#0 restoreTitle ← #1 restoreActive ← #2 scheduleShow ← #3 回调）。
+ *
+ * 所以这里只「收集」目标元素，去重后放到下一个宏任务里处理；每批最多处理
+ * MAX_PER_FLUSH 个，处理过程中产生的新记录留到下一批——即使还有来回写，
+ * 主线程也能在批次之间喘口气，界面不会整片卡死。
  */
-/** 一批记录最多处理多少条，超出的丢弃（后面的 300ms 探测会补上） */
+const pendingTitles = new Set<Element>();
+let titleFlushTimer = 0;
+/** 每批最多处理多少个元素 */
+const MAX_PER_FLUSH = 40;
+/** 一批记录最多收集多少条，超出的丢弃（剩下的交给 300ms 指针探测） */
 const MAX_RECORDS_PER_BATCH = 4000;
-/**
- * 一批记录里最多安排几次「显示浮层」。
- *
- * 一次重渲染可能同时写回成百上千个 title，逐个走 scheduleShow 会各自排一个
- * 定时器、各自接管属性，叠起来就是几十秒的主线程占用。指针下面同时只会有一个
- * 元素，多出来的没有意义。
- */
+/** 一批里最多安排几次「显示浮层」：指针下同时只会有一个元素 */
 const MAX_SHOW_PER_BATCH = 2;
 
+function scheduleTitleFlush(): void {
+  if (titleFlushTimer) return;
+  titleFlushTimer = window.setTimeout(flushTitles, 0);
+}
+
+function flushTitles(): void {
+  titleFlushTimer = 0;
+  if (!pendingTitles.size) return;
+  const batch = [...pendingTitles].slice(0, MAX_PER_FLUSH);
+  for (const element of batch) pendingTitles.delete(element);
+  handleTitleTargets(batch);
+  if (pendingTitles.size) scheduleTitleFlush();
+}
+
 function onGlobalMutations(records: MutationRecord[]): void {
+  const limit = Math.min(records.length, MAX_RECORDS_PER_BATCH);
+  for (let index = 0; index < limit; index += 1) {
+    const record = records[index]!;
+    if (record.type !== "attributes") continue;
+    if (record.attributeName && record.attributeName !== "title") continue;
+    const target = record.target;
+    if (target instanceof Element) pendingTitles.add(target);
+  }
+  if (pendingTitles.size) scheduleTitleFlush();
+}
+
+/** 真正处理一批元素：判断是否在指针下、要不要接管。 */
+function handleTitleTargets(targets: Element[]): void {
   // 指针下到底是谁：每批只量一次（elementFromPoint 会触发一次布局），
   // 之后都用树上的包含关系判断，不再逐条 getBoundingClientRect。
   let hit: Element | null | undefined;
   let shows = 0;
-  const limit = Math.min(records.length, MAX_RECORDS_PER_BATCH);
-  for (let index = 0; index < limit; index += 1) {
-    const record = records[index];
-    if (record.type === "attributes") {
-      if (record.attributeName && record.attributeName !== "title") continue;
-      const element = record.target;
-      if (!(element instanceof Element)) continue;
-      const title = element.getAttribute("title");
-      if (!title || !title.trim()) continue;
-      if (selfWrites.get(element) === title) {
-        selfWrites.delete(element);
-        continue;
-      }
-      if (element.closest(".pi-tooltip")) continue;
-      // 先做不触发布局的判断：命中指针本身，或命中它的祖先容器（容器被写回 title）。
-      // 不能反过来用 hovered.contains(element)：hovered 可能是 body，那样整批元素
-      // 都会被当成「在悬停链上」，又退回逐条量几何。
-      if (element !== hovered && !element.contains(hovered as Node)) {
-        if (hit === undefined) {
-          hit = null;
-          if (!Number.isNaN(pointerX) && !Number.isNaN(pointerY)) {
-            const node = document.elementFromPoint(pointerX, pointerY);
-            hit = node instanceof Element ? node : null;
-          }
+  for (const element of targets) {
+    const title = element.getAttribute("title");
+    if (!title || !title.trim()) continue;
+    if (selfWrites.get(element) === title) {
+      selfWrites.delete(element);
+      continue;
+    }
+    if (element.closest(".pi-tooltip")) continue;
+    // 先做不触发布局的判断：命中指针本身，或命中它的祖先容器（容器被写回 title）。
+    // 不能反过来用 hovered.contains(element)：hovered 可能是 body，那样整批元素
+    // 都会被当成「在悬停链上」，又退回逐条量几何。
+    if (element !== hovered && !element.contains(hovered as Node)) {
+      if (hit === undefined) {
+        hit = null;
+        if (!Number.isNaN(pointerX) && !Number.isNaN(pointerY)) {
+          const node = document.elementFromPoint(pointerX, pointerY);
+          hit = node instanceof Element ? node : null;
         }
-        const under = Boolean(hit && (hit === element || hit.contains(element) || element.contains(hit)));
-        if (!under) continue;
       }
-      if (element === active) {
-        takeTitle(element);
-        activeTitle = title;
-        applyText(title);
-        void nextTick(position);
-        continue;
-      }
-      if (element === pending) {
-        takeTitle(element);
-        pendingTitle = title;
-        continue;
-      }
-      if (element instanceof HTMLElement && shows < MAX_SHOW_PER_BATCH) {
-        shows += 1;
-        scheduleShow(element);
-      }
+      const under = Boolean(hit && (hit === element || hit.contains(element) || element.contains(hit)));
+      if (!under) continue;
+    }
+    if (element === active) {
+      takeTitle(element);
+      activeTitle = title;
+      applyText(title);
+      void nextTick(position);
+      continue;
+    }
+    if (element === pending) {
+      takeTitle(element);
+      pendingTitle = title;
+      continue;
+    }
+    if (element instanceof HTMLElement && shows < MAX_SHOW_PER_BATCH) {
+      shows += 1;
+      scheduleShow(element);
     }
   }
 }
@@ -434,6 +454,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerup", onPointerUp, true);
   watcher?.disconnect();
   watcher = null;
+  if (titleFlushTimer) window.clearTimeout(titleFlushTimer);
+  titleFlushTimer = 0;
+  pendingTitles.clear();
   if (probeTimer) window.clearInterval(probeTimer);
   probeTimer = 0;
   hideNow();

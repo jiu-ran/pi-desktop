@@ -47,13 +47,13 @@ const draft = computed({
 });
 
 /**
- * 待发送列表只显示「还没有气泡」的排队消息。
- * 发出去的消息已经乐观渲染进对话，再在输入框上方重复一遍就是同一个东西出现两次。
+ * 还排在队列里的消息统一列在输入框上方（含插话与排队两种），
+ * 对话里那张乐观气泡由 AgentChat 暂时隐藏，避免同一条消息出现两次。
  */
 const queuePlan = computed(() =>
   planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? { steering: [], followUp: [] }),
 );
-const queuePending = computed(() => queuePlan.value.pending);
+const queuePending = computed(() => queuePlan.value.entries);
 const queueBusy = ref(false);
 
 /** 排队消息编辑：点气泡或卡片上的「编辑」，在上方展开一个内联编辑框。 */
@@ -888,10 +888,13 @@ const argHint = computed(() => {
         </div>
       </div>
       <div v-else-if="queuePending.length" class="queue-strip">
-        <span class="queue-label">
-          <span class="queue-dot" />
-          {{ queuePending.length }} 条待发送
-        </span>
+        <div class="queue-strip-head">
+          <span class="queue-label">
+            <span class="queue-dot" />
+            {{ queuePending.length }} 条待发送
+          </span>
+          <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">全部撤回</button>
+        </div>
         <div
           v-for="(item, i) in queuePending"
           :key="i"
@@ -899,17 +902,28 @@ const argHint = computed(() => {
           :class="item.mode"
           :title="queuePreview(item.text, 400)"
         >
+          <span class="queue-card-badge">
+            <span class="queue-dot" />
+            待发送
+          </span>
           <span class="queue-card-tag">{{ item.mode === "steer" ? "插话" : "排队" }}</span>
           <button
             type="button"
             class="queue-card-text"
+            title="点击编辑这条消息"
+            @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
+          >
+            {{ queuePreview(item.text, 160) }}
+          </button>
+          <button
+            type="button"
+            class="queue-card-edit"
             title="编辑这条消息"
             @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
           >
-            {{ queuePreview(item.text, 70) }}
+            编辑
           </button>
         </div>
-        <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">撤回</button>
       </div>
 
       <div

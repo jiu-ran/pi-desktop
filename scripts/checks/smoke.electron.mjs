@@ -18,6 +18,9 @@ import { checkSettingsInElectron } from "./settings.electron.mjs";
 // Smoke 直接跑编译后的主进程，避免 Electron 直接执行 .ts 时的 loader 差异。
 // profile 必须在导入 main.js 前指定，main.js 会在模块顶层设置 userData。
 process.env.PI_DESKTOP_PROFILE ||= "Pi Desktop Smoke";
+// 冒烟里也把调试器挂上：万一某个检查真的卡住渲染进程，日志里能直接拿到调用栈，
+// 而不是只有一句「无法暂停」。开发版默认不挂（会挡住 DevTools），这里显式打开。
+process.env.PI_DESKTOP_TRACE_HANG = "1";
 // 会话目录也隔离：否则每跑一次检查都会在开发者的 ~/.pi/agent/sessions 里
 // 留下一堆临时项目的会话（历史上堆了 290 多个），既脏又会在会话列表里看得见。
 if (!process.env.PI_CODING_AGENT_DIR) {

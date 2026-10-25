@@ -483,7 +483,7 @@ function openChangesPanel(): void {
 
 const blockText = searchableText;
 
-const outline = computed(() => (ws.value?.blocks ?? [])
+const outline = computed(() => visibleBlocks.value
   .filter((block) => block.kind === "user" && block.text?.trim())
   .map((block, index) => ({
     id: block.id,
@@ -510,16 +510,21 @@ function syncOutline(): void {
   activeOutlineId.value = index >= 0 ? outline.value[index]!.id : "";
 }
 
-/** 还排在 Pi 队列里的消息：气泡上标「待发送」，输入框上方就不再重复列出。 */
+/**
+ * 还排在 Pi 队列里的消息：内容已经在输入框上方按「待发送」列出来了，
+ * 这里把它们在对话里的乐观气泡暂时隐藏，等真正发出后再出现。
+ */
 const queuedBlockIds = computed(
-  () => new Set(planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? null).queuedIds),
+  () => new Set(planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? null).hiddenIds),
 );
+/** 时间线要渲染的块：把还排在队列里的乐观气泡剔除。 */
+const visibleBlocks = computed(() => (ws.value?.blocks ?? []).filter((block) => !queuedBlockIds.value.has(block.id)));
 const copyTextByIndex = computed(() =>
-  buildCopyTexts(ws.value?.blocks ?? [], Boolean(ws.value?.streaming)),
+  buildCopyTexts(visibleBlocks.value, Boolean(ws.value?.streaming)),
 );
 
 // 连续的工具 / 思考折叠成活动组；搜索命中时自动展开，错误组只用红色徽标提示。
-const activityItems = computed(() => deriveActivityItems(ws.value?.blocks ?? []));
+const activityItems = computed(() => deriveActivityItems(visibleBlocks.value));
 
 function openOutline(id: string): void {
   activeOutlineId.value = id;

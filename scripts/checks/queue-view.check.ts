@@ -8,61 +8,73 @@ import {
 
 const block = (id: string, text: string, queueText?: string) => ({ id, kind: "user", text, queueText });
 
-// 已经在对话里渲染出来的消息：队列里那条不该再显示成「待发送」
+// 语义（0.2.8 起）：还排在队列里的消息统一列在输入框上方，对话里的乐观气泡暂时隐藏。
+// 1) 队列里有内容 → 上方列出来，且对应气泡被隐藏
 {
   const plan = planQueueView([block("u1", "顺便查一下日志", "顺便查一下日志")], {
     steering: [],
     followUp: ["顺便查一下日志"],
   });
-  assert.deepEqual(plan.pending, [], "已经渲染过的排队消息不应再列一遍");
-  assert.deepEqual(plan.queuedIds, ["u1"], "对应气泡应标成排队中");
+  assert.deepEqual(plan.entries, [{ mode: "followUp", text: "顺便查一下日志" }], "排队中的消息要列到输入框上方");
+  assert.deepEqual(plan.hiddenIds, ["u1"], "对话里那条乐观气泡应暂时隐藏");
 }
 
-// 带附件时，Pi 队列里存的是完整提示词（含 <file> 块），要按 queueText 对上
+// 2) 带附件时，Pi 队列里存的是完整提示词（含 <file> 块），要按 queueText 对上才能隐藏气泡
 {
   const prompt = '<file name="C:\\a\\log.txt">\n内容\n</file>\n看看这个';
   const plan = planQueueView([block("u1", "看看这个", prompt)], { steering: [], followUp: [prompt] });
-  assert.deepEqual(plan.pending, [], "带附件的排队消息也要能对上气泡");
-  assert.deepEqual(plan.queuedIds, ["u1"]);
+  assert.deepEqual(plan.entries, [{ mode: "followUp", text: prompt }], "带附件的也要列出来");
+  assert.deepEqual(plan.hiddenIds, ["u1"], "带附件的排队消息也要能对上气泡");
 }
 
-// 对不上的（别的客户端排进来的）才显示成待发送
+// 3) 对不上气泡的（别的客户端排进来的、或消息还没渲染）同样列出来，但没有可隐藏的气泡
 {
   const plan = planQueueView([block("u1", "我的消息", "我的消息")], {
     steering: [],
     followUp: ["我的消息", "别人排进来的"],
   });
-  assert.deepEqual(plan.pending, [{ mode: "followUp", text: "别人排进来的" }], "对不上的条目要显示");
-  assert.deepEqual(plan.queuedIds, ["u1"], "对上的那条只标气泡");
+  assert.deepEqual(
+    plan.entries,
+    [
+      { mode: "followUp", text: "我的消息" },
+      { mode: "followUp", text: "别人排进来的" },
+    ],
+    "队列里的条目按顺序全部列出",
+  );
+  assert.deepEqual(plan.hiddenIds, ["u1"], "只有真正对上的那条隐藏气泡");
 }
 
-// 同一条消息排队两次：第二次没有气泡可对，就显示成待发送
+// 4) 同一条消息排队两次：一个气泡只能对一条，另一条仍然要在上方列出
 {
   const plan = planQueueView([block("u1", "重复", "重复")], { steering: [], followUp: ["重复", "重复"] });
-  assert.equal(plan.queuedIds.length, 1, "一个气泡只能对一条队列项");
-  assert.deepEqual(plan.pending, [{ mode: "followUp", text: "重复" }], "多出来的那条要显示");
+  assert.equal(plan.hiddenIds.length, 1, "一个气泡只能对一条队列项");
+  assert.equal(plan.entries.length, 2, "两条都排在队列里，都要列出来");
 }
 
-// 插话（steer）与追加（followUp）都参与匹配，顺序按队列顺序
+// 5) 插话（steer）与追加（followUp）都参与，顺序按队列顺序
 {
   const plan = planQueueView([], { steering: ["插话一句"], followUp: ["再补一句"] });
-  assert.deepEqual(plan.pending, [
+  assert.deepEqual(plan.entries, [
     { mode: "steer", text: "插话一句" },
     { mode: "followUp", text: "再补一句" },
   ]);
+  assert.deepEqual(plan.hiddenIds, [], "没有气泡可隐藏");
 }
 
-// 空队列：什么都不显示
-assert.deepEqual(planQueueView([block("u1", "x", "x")], { steering: [], followUp: [] }), { pending: [], queuedIds: [] });
-assert.deepEqual(planQueueView([], null), { pending: [], queuedIds: [] });
+// 6) 空队列：上方不显示、对话也不隐藏任何东西
+assert.deepEqual(planQueueView([block("u1", "x", "x")], { steering: [], followUp: [] }), {
+  entries: [],
+  hiddenIds: [],
+});
+assert.deepEqual(planQueueView([], null), { entries: [], hiddenIds: [] });
 
-// 换行差异不应影响匹配
+// 7) 换行差异不应影响「隐藏哪个气泡」的匹配
 {
   const plan = planQueueView([block("u1", "第一行", "第一行\r\n第二行")], {
     steering: [],
     followUp: ["第一行\n第二行"],
   });
-  assert.deepEqual(plan.queuedIds, ["u1"], "CRLF / LF 差异不应影响匹配");
+  assert.deepEqual(plan.hiddenIds, ["u1"], "CRLF / LF 差异不应影响匹配");
 }
 
 // 卡片预览：附件块换成标签，压缩空白，过长截断

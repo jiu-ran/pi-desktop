@@ -5,8 +5,9 @@
  * 会话才看得见），但 Pi 的队列里同一句话还在，于是输入框上方又显示一遍「待发送」，
  * 同一条消息在界面上出现两次。
  *
- * 规则：气泡是唯一的表现形式。队列里能对上气泡的条目不再单独显示；
- * 对不上的（别的客户端排进来的、或消息还没渲染）才显示成待发送卡片。
+ * 规则（0.2.8 起）：还排在队列里的消息**只在输入框上方**显示成「待发送」卡片，
+ * 对话里那条乐观渲染的气泡暂时隐藏——两者同时出现会让同一条消息看起来发了两遍。
+ * 等它真正被 Pi 取走（队列里没有了），对话里的气泡才出现。
  */
 
 export interface QueueState {
@@ -31,25 +32,24 @@ export interface QueuedEntry {
 }
 
 export interface QueuePlan {
-  /** 队列里还没有对应气泡的条目 */
-  pending: QueuedEntry[];
-  /** 已经有气泡、需要标成「排队中」的气泡 id */
-  queuedIds: string[];
+  /** 输入框上方要列出的待发送条目（按 Pi 的队列顺序，含插话与排队） */
+  entries: QueuedEntry[];
+  /** 对话里应该暂时隐藏的乐观气泡 id（它们的内容已经在上面列出来了） */
+  hiddenIds: string[];
 }
 
 function normalize(value: string): string {
   return String(value ?? "").replace(/\r\n/g, "\n").trim();
 }
 
-/** 计算待发送列表与「排队中」标记。 */
+/** 计算输入框上方的待发送列表，以及对话里需要暂时隐藏的气泡。 */
 export function planQueueView(blocks: QueueBlockLike[], queue: QueueState | null | undefined): QueuePlan {
   const entries: QueuedEntry[] = [
     ...(queue?.steering ?? []).map((text) => ({ mode: "steer" as const, text })),
     ...(queue?.followUp ?? []).map((text) => ({ mode: "followUp" as const, text })),
   ];
   const used = new Set<string>();
-  const queuedIds: string[] = [];
-  const pending: QueuedEntry[] = [];
+  const hiddenIds: string[] = [];
   for (const entry of entries) {
     const target = normalize(entry.text);
     // 队列里存的是完整提示词（附件也在里面），所以优先按 queueText 比；
@@ -61,14 +61,11 @@ export function planQueueView(blocks: QueueBlockLike[], queue: QueueState | null
         (normalize(block.queueText ?? "") === target ||
           (normalize(block.queueText ?? "") === "" && normalize(block.text ?? "") === target)),
     );
-    if (match) {
-      used.add(match.id);
-      queuedIds.push(match.id);
-    } else {
-      pending.push(entry);
-    }
+    if (!match) continue;
+    used.add(match.id);
+    hiddenIds.push(match.id);
   }
-  return { pending, queuedIds };
+  return { entries, hiddenIds };
 }
 
 /** 提示词里的附件块换成可读标签：排队卡片上不能铺一坨 XML。 */

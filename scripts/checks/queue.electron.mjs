@@ -32,15 +32,16 @@ export async function checkQueueInElectron(win) {
     return JSON.stringify({ a: a.id, b: b.id });
   })()`));
 
-  await poll("Boolean(document.querySelector('.msg-user-queued'))", "气泡上应出现「待发送」标记");
+  await poll("document.querySelectorAll('.queue-card').length === 2", "两条排队消息都应列在输入框上方");
 
   const view = JSON.parse(await evaluate(`(() => {
-    const badge = document.querySelector('.msg-user-queued');
-    const bubble = badge?.closest('.msg-user-bubble');
     const cards = [...document.querySelectorAll('.queue-card')];
     return JSON.stringify({
-      bubblesWithBadge: document.querySelectorAll('.msg-user-bubble.queued').length,
-      badgeText: badge?.querySelector('span:nth-child(2)')?.textContent.trim() ?? '',
+      // 队列里那条已经乐观渲染成气泡：上方既然列出来了，对话里就不能再显示
+      hiddenBubble: Boolean(document.querySelector('[data-block-id="queue-a"]')),
+      visibleBubbles: document.querySelectorAll('.msg-user-bubble').length,
+      badges: cards.map((n) => n.querySelector('.queue-card-badge')?.textContent.trim() ?? ''),
+      edits: cards.map((n) => Boolean(n.querySelector('.queue-card-edit'))),
       cards: cards.map((n) => ({
         tag: n.querySelector('.queue-card-tag')?.textContent.trim() ?? '',
         text: n.querySelector('.queue-card-text')?.textContent.trim() ?? '',
@@ -50,19 +51,22 @@ export async function checkQueueInElectron(win) {
       recall: Boolean(document.querySelector('.queue-recall')),
       // 附件 XML 绝不能出现在卡片上
       leaksMarkers: (document.querySelector('.queue-strip')?.textContent ?? '').includes('<file'),
-      badgeInsideUser: Boolean(bubble),
     });
   })()`));
 
-  assert.equal(view.bubblesWithBadge, 1, `只应有一个气泡标成待发送，实际 ${view.bubblesWithBadge}`);
-  assert.equal(view.badgeText, "待发送", "气泡上的标记文案不对");
-  assert.ok(view.badgeInsideUser, "标记要在用户气泡里");
-  assert.equal(view.cards.length, 1, `队列里只有没对上气泡的那条才显示，实际 ${view.cards.length}`);
+  assert.equal(view.hiddenBubble, false, "还排在队列里的消息不应同时出现在对话里");
+  assert.equal(view.visibleBubbles, 1, `队列里没有对应气泡的那条照常显示，实际 ${view.visibleBubbles}`);
+  assert.equal(view.cards.length, 2, `队列里的两条都应列在输入框上方，实际 ${view.cards.length}`);
+  assert.deepEqual(view.badges, ["待发送", "待发送"], "每条都要带「待发送」标记");
+  assert.deepEqual(view.edits, [true, true], "每条都要能点开编辑");
   assert.equal(view.cards[0].tag, "排队", "卡片要标出模式");
-  assert.equal(view.cards[0].text, "只存在于队列里的消息", `卡片预览不对：${view.cards[0].text}`);
+  assert.ok(
+    view.cards.some((card) => card.text === "只存在于队列里的消息"),
+    `队列里那条没有气泡的消息应显示在卡片上：${view.cards.map((c) => c.text).join(" | ")}`,
+  );
   assert.ok(view.recall, "待发送区要有撤回按钮");
   assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
-  assert.match(view.label, /1 条待发送/, `标题应显示条数，实际「${view.label}」`);
+  assert.match(view.label, /2 条待发送/, `标题应显示条数，实际「${view.label}」`);
 
   // 截图留档：人工确认排版（调试协议截图，避免拿到旧帧）
   const shot = async (name) => {
@@ -106,8 +110,13 @@ export async function checkQueueInElectron(win) {
     return true;
   })()`);
 
-  // 1) 卡片上的文字就是编辑入口
-  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  // 1) 卡片上的文字就是编辑入口（第一条是气泡对应的那条）
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    card?.querySelector('.queue-card-text')?.click();
+    return Boolean(card);
+  })()`);
   await poll("Boolean(document.querySelector('.queue-editor textarea'))", "点击卡片应展开编辑框");
   {
     const editor = JSON.parse(await evaluate(`(() => {
@@ -144,7 +153,12 @@ export async function checkQueueInElectron(win) {
   }
 
   // 3) Esc 取消不发请求
-  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    card?.querySelector('.queue-card-text')?.click();
+    return Boolean(card);
+  })()`);
   await poll("Boolean(document.querySelector('.queue-editor textarea'))", "再次打开编辑框");
   await evaluate(`(() => {
     const area = document.querySelector('.queue-editor textarea');
@@ -159,17 +173,17 @@ export async function checkQueueInElectron(win) {
     "取消不应提交编辑",
   );
 
-  // 4) 气泡上的「编辑」按钮同样能进入编辑（走内核事件）
+  // 4) 卡片右侧的「编辑」按钮同样能进入编辑
   await evaluate(`(() => {
-    const badge = document.querySelector('.msg-user-queued');
-    const button = badge?.querySelector('.msg-user-queued-edit');
-    button?.click();
-    return Boolean(button);
-  })()`).then((ok) => assert.ok(ok, "排队气泡上应有「编辑」按钮"));
-  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "气泡上的编辑应打开编辑框");
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    card?.querySelector('.queue-card-edit')?.click();
+    return Boolean(card);
+  })()`).then((ok) => assert.ok(ok, "待发送卡片上应有「编辑」按钮"));
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "卡片上的编辑应打开编辑框");
   {
     const value = await evaluate("document.querySelector('.queue-editor textarea').value");
-    assert.equal(value, "顺便看下日志", `编辑框应预填气泡里的文字，实际「${value}」`);
+    assert.equal(value, "只存在于队列里的消息", `编辑框应预填这条消息的内容，实际「${value}」`);
   }
   await evaluate("[...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes('取消'))?.click(); true");
   await wait(200);
@@ -181,7 +195,12 @@ export async function checkQueueInElectron(win) {
   })()`);
 
   // 截图：编辑态的排队消息（人工确认排版）
-  await evaluate("document.querySelector('.queue-card-text').click(); true");
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    card?.querySelector('.queue-card-text')?.click();
+    return Boolean(card);
+  })()`);
   await poll("Boolean(document.querySelector('.queue-editor textarea'))", "截图用编辑框");
   {
     const shot = async (name) => {
@@ -219,7 +238,7 @@ export async function checkQueueInElectron(win) {
     thread.queue = { steering: [], followUp: [] };
     return true;
   })()`);
-  await poll("!document.querySelector('.msg-user-queued')", "队列清空后「待发送」要消失");
+  await poll("!document.querySelector('.queue-card')", "队列清空后「待发送」要消失");
   assert.equal(await evaluate("document.querySelectorAll('.queue-card').length"), 0, "队列清空后不应残留卡片");
 
   // 清理注入的块

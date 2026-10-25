@@ -1322,12 +1322,19 @@
 .picker-empty { margin: 8px; color: var(--fg-3); font-size: 12px; }
 
 /* 待发送：只显示「还没有出现在对话里」的排队消息，气泡自己会带「待发送」标记 */
+/* 待发送消息：整条列出在输入框上方，带「待发送」标记，可直接点开编辑 */
 .queue-strip {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+.queue-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 2px;
 }
 .queue-label {
@@ -1351,18 +1358,51 @@
   50% { opacity: 0.35; }
 }
 .queue-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line-2));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.queue-card:hover {
+  border-style: solid;
+}
+/* 「待发送」标记：呼吸点 + 小字，和对话里那条气泡的状态一致 */
+.queue-card-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 420px;
-  height: 26px;
-  padding: 0 9px 0 7px;
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  background: var(--bg-2);
-  color: var(--fg-2);
-  font-size: 12px;
+  gap: 4px;
+  flex: none;
+  padding-top: 1px;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.queue-card-badge .queue-dot {
+  width: 5px;
+  height: 5px;
+}
+.queue-card-edit {
+  flex: none;
+  align-self: center;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+.queue-card-edit:hover {
+  background: var(--hover);
+  color: var(--fg);
 }
 .queue-card-tag {
   flex: none;
@@ -1378,7 +1418,10 @@
 }
 .queue-card-text {
   min-width: 0;
-  height: 100%;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
   padding: 0;
   border: 0;
@@ -1386,8 +1429,8 @@
   color: var(--fg-2);
   font: inherit;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-word;
   cursor: text;
 }
 .queue-card-text:hover { color: var(--fg); text-decoration: underline dotted; }
