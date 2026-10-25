@@ -110,7 +110,9 @@ defineExpose({ input });
   inset: 0;
   width: 100%;
   height: 100%;
-  overflow: auto;
+  /* 源码是自动换行的，不需要横向滚动条（分栏时那条蓝杠很扎眼） */
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 0;
   outline: none;
   resize: none;

@@ -83,6 +83,8 @@ export interface AppSettings {
   columnWidth: ColumnWidthId;
   /** 关闭界面动效（弹层、过渡、动画） */
   reduceMotion: boolean;
+  /** .md 文件的默认视图：源码 / 分栏实时预览 / 纯预览 */
+  markdownView: "source" | "split" | "preview";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -113,6 +115,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   radius: "default",
   columnWidth: "default",
   reduceMotion: false,
+  // 默认分栏：左边写、右边实时看，和 Obsidian 的「源码 + 预览」一个用法
+  markdownView: "split",
 }
 
 function loadSavedSettings(): AppSettings {
@@ -161,6 +165,7 @@ function loadSavedSettings(): AppSettings {
       radius: normalizeRadius(parsed.radius),
       columnWidth: normalizeColumnWidth(parsed.columnWidth),
       reduceMotion: parsed.reduceMotion === true,
+      markdownView: parsed.markdownView === "source" || parsed.markdownView === "preview" ? parsed.markdownView : "split",
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
