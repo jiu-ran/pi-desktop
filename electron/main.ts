@@ -11,7 +11,7 @@ import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions }
 import { createAppUpdateManager } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
 import { logPerfLine } from "./perf-log.ts";
-import { log, logEvent, logStore, useProjectLogs as pointLogsAtProject } from "./logger.ts";
+import { isWritableDir, log, logEvent, logStore, useAppLogs } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
@@ -35,48 +35,29 @@ if (!app.isPackaged) {
   }
 }
 /**
- * 日志写在当前项目目录下（`<项目>/.pi-desktop/logs`，总量上限 100MB）。
- * 启动早期的日志会先攒在内存里，选中项目后一起落盘——不写项目之外的位置。
+ * 日志目录：安装目录下的 `logs/`，跟程序放在一起（好找，也方便打给别人）。
  *
- * 顺手把 `.pi-desktop/` 加进这个仓库的 .git/info/exclude：
- * 日志不能出现在「改动」里，也不该进用户的提交。
+ * 整机安装（装在 Program Files、非管理员运行）时安装目录不可写，
+ * 这时回落到 userData，保证日志一定落得下去。总量上限 100MB。
  */
-const LOG_DIR_NAME = ".pi-desktop";
-
-async function ensureLogDirIgnored(cwd: string): Promise<void> {
-  const target = path.join(cwd, LOG_DIR_NAME, "logs");
-  await mkdir(target, { recursive: true }).catch(() => {});
-  try {
-    const dotGit = path.join(cwd, ".git");
-    const info = await fsStat(dotGit).catch(() => null);
-    let gitDir = dotGit;
-    if (info?.isFile()) {
-      // worktree：.git 是一个指向真实 git 目录的文件
-      const text = await readFile(dotGit, "utf8").catch(() => "");
-      const match = /^gitdir:\s*(.+)$/m.exec(text);
-      if (!match) return;
-      gitDir = path.resolve(cwd, match[1]!.trim());
-    } else if (!info?.isDirectory()) {
-      return;
-    }
-    const excludeFile = path.join(gitDir, "info", "exclude");
-    const current = await readFile(excludeFile, "utf8").catch(() => "");
-    const entry = `${LOG_DIR_NAME}/`;
-    if (current.split(/\r?\n/).some((line) => line.trim() === entry)) return;
-    await mkdir(path.dirname(excludeFile), { recursive: true }).catch(() => {});
-    await writeFile(excludeFile, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${entry}\n`);
-  } catch {
-    // 不是 git 仓库 / 无权限：忽略即可，日志照写
-  }
+async function resolveLogDir(): Promise<string> {
+  // 开发时落在仓库根目录，和打包版行为一致（打包后 __dirname 在 resources 里，用 exe 位置）
+  const installRoot = app.isPackaged ? path.dirname(app.getPath("exe")) : path.resolve(HERE, "..");
+  const preferred = path.join(installRoot, "logs");
+  if (await isWritableDir(preferred)) return preferred;
+  return path.join(app.getPath("userData"), "logs");
 }
 
-let logsProject = "";
+let logDirPromise: Promise<string> | null = null;
 
-/** 切换当前项目的日志目录（同一个项目只切一次）。 */
-function activateProjectLogs(cwd: string): void {
-  if (!cwd || cwd === logsProject) return;
-  logsProject = cwd;
-  void pointLogsAtProject(cwd).then(() => ensureLogDirIgnored(cwd));
+/** 启动时调用一次：之后所有日志都写这个目录。 */
+function activateLogs(): void {
+  logDirPromise ??= resolveLogDir()
+    .then(async (dir) => {
+      await useAppLogs(dir);
+      return dir;
+    })
+    .catch(() => "");
 }
 
 process.on("uncaughtException", (error) => {
@@ -629,6 +610,7 @@ function startLagWatchdog(): void {
 }
 
 app.whenReady().then(() => {
+  activateLogs();
   if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
@@ -752,14 +734,8 @@ app.whenReady().then(() => {
     if (!result.canceled) host.authorizeAttachmentPaths(result.filePaths);
     return result.canceled ? null : result.filePaths[0];
   });
-  // 日志跟着当前项目走：渲染进程在切换工作区时调用（切到已经就绪的项目也要生效）
-  handle("app:use-project-logs", (cwd: string) => {
-    activateProjectLogs(cwd);
-    return true;
-  });
   handle("pi:open", async (cwd: string) => {
     const authorized = await host.authorizeWorkspace(cwd);
-    activateProjectLogs(authorized);
     const result = await host.open(authorized);
     await writeRecent(recentFile(), authorized);
     return result;

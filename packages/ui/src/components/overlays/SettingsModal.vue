@@ -1919,7 +1919,7 @@ onBeforeUnmount(() => {
                 <div class="settings-row-info">
                   <strong>记录内容</strong>
                   <span>
-                    日志写在当前项目下（&lt;项目&gt;/.pi-desktop/logs，已加入 .git/info/exclude，不会出现在改动里）。<br />app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error 与未捕获异常；
+                    日志写在安装目录下的 logs/（安装目录不可写时回落到用户数据目录，例如装在 Program Files 里）。<br />app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error 与未捕获异常；
                     pi.log 会话与压缩事件；perf.log 卡顿（主进程阻塞、慢 IPC、渲染进程长任务）。
                     单文件 8MB 轮转，超过 100MB 会按时间删最旧的，正在写的文件不会被删。
                   </span>

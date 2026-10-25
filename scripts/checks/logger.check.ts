@@ -117,34 +117,44 @@ try {
 
 console.log("logger.check ok 100MB 上限 / 轮转 / 清理 / 脱敏 / 落盘");
 
-// 日志跟着项目走：没有项目时先攒在内存里，选中项目后补写进去；切换项目时旧目录先刷盘
+// 日志目录是启动时定的一个固定目录（安装目录下的 logs/）：切换目录要把旧缓冲刷干净，
+// 目录不可写时要能探测出来（打包版据此回落到 userData）。
 {
   const first = await mkdtemp(path.join(tmpdir(), "pi-logs-a-"));
   const second = await mkdtemp(path.join(tmpdir(), "pi-logs-b-"));
   try {
-    // 先重置到一个「未配置」的状态：用一个新实例不方便，这里直接验证 switchTo 行为
+    const { isWritableDir, useAppLogs } = await import("../../electron/logger.ts");
+    // 还没配置目录时先攒在内存
     logStore.configure("");
     logStore.write("app", "info", "pre", "启动早期的日志");
-    await logStore.switchTo(path.join(first, ".pi-desktop", "logs"));
+    await useAppLogs(first);
     await logStore.flushAll();
-    const early = await readFile(path.join(first, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
-    assert.ok(early.includes("启动早期的日志"), `没有项目目录时的日志应补写到第一个项目：${early}`);
+    const early = await readFile(path.join(first, "app.log"), "utf8").catch(() => "");
+    assert.ok(early.includes("启动早期的日志"), `目录确定前的日志应补写到第一个目录：${early}`);
 
-    logStore.write("app", "info", "pre", "第一个项目里的事");
-    await logStore.switchTo(path.join(second, ".pi-desktop", "logs"));
+    logStore.write("app", "info", "pre", "第一个目录里的事");
+    await useAppLogs(second);
     await logStore.flushAll();
-    const firstText = await readFile(path.join(first, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
-    const secondText = await readFile(path.join(second, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
-    assert.ok(firstText.includes("第一个项目里的事"), "切换前应把旧目录的缓冲刷干净");
-    assert.ok(!secondText.includes("第一个项目里的事"), "旧项目的日志不应出现在新项目里");
+    const firstText = await readFile(path.join(first, "app.log"), "utf8").catch(() => "");
+    const secondText = await readFile(path.join(second, "app.log"), "utf8").catch(() => "");
+    assert.ok(firstText.includes("第一个目录里的事"), "切换前应把旧目录的缓冲刷干净");
+    assert.ok(!secondText.includes("第一个目录里的事"), "旧目录的日志不应出现在新目录里");
 
-    logStore.write("app", "info", "pre", "第二个项目里的事");
+    logStore.write("app", "info", "pre", "第二个目录里的事");
     await logStore.flushAll();
-    const secondAfter = await readFile(path.join(second, ".pi-desktop", "logs", "app.log"), "utf8").catch(() => "");
-    assert.ok(secondAfter.includes("第二个项目里的事"), "切换后应写到新项目目录");
+    assert.ok(
+      (await readFile(path.join(second, "app.log"), "utf8")).includes("第二个目录里的事"),
+      "切换后应写到新目录",
+    );
+
+    // 可写探测：正常目录要 true；用「文件」当目录必须 false（安装目录不可写时走这条路）
+    const filePath = path.join(first, "not-a-dir");
+    await writeFile(filePath, "x");
+    assert.equal(await isWritableDir(first), true, "可写目录应判定为可写");
+    assert.equal(await isWritableDir(path.join(filePath, "logs")), false, "不可写目录应判定为不可写");
   } finally {
     await rm(first, { recursive: true, force: true });
     await rm(second, { recursive: true, force: true });
   }
 }
-console.log("logger.check ok 跟着项目走 / 早期日志补写 / 切换刷盘");
+console.log("logger.check ok 固定日志目录 / 早期日志补写 / 切换刷盘 / 可写探测");

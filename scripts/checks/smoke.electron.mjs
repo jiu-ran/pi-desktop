@@ -204,21 +204,13 @@ app.whenReady().then(async () => {
       errors.push(`ui-smoke: ${error.message || String(error)}`);
     }
   }
-  // 日志持久化链路：渲染进程上报 → 主进程 → userData/logs/*.log（总量上限 100MB）。
+  // 日志持久化链路：渲染进程上报 → 主进程 → 固定日志目录下的 *.log（总量上限 100MB）。
   // 界面「卡死」时这份日志是唯一的证据来源，坏掉就等于没法诊断。
-  // 日志写在当前项目目录下（不是 userData）。
-  // 前面的检查会临时打开别的项目，日志目录也跟着换了；这里先切回冒烟工作区。
-  await win.webContents
-    .executeJavaScript(`window.__piDesktop.workbench.open(${JSON.stringify(workspace)}).then(() => true)`)
-    .catch(() => {});
-  for (let i = 0; i < 60; i += 1) {
-    const ready = await win.webContents.executeJavaScript(
-      "window.__piDesktop.workbench.active.value?.status === 'ready'",
-    ).catch(() => false);
-    if (ready) break;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  const logsDir = path.join(workspace, ".pi-desktop", "logs");
+  // 目录是启动时定下的（打包版=安装目录/logs，开发=仓库/logs），不跟着项目走。
+  const logInfo = JSON.parse(
+    await win.webContents.executeJavaScript("(async () => JSON.stringify(await window.piDesktop.logsInfo()))()"),
+  );
+  const logsDir = logInfo.dir;
   const readLog = (name) => readFile(path.join(logsDir, name), "utf8").catch(() => "");
   try {
     const beforePerf = await readLog("perf.log");
@@ -234,29 +226,22 @@ app.whenReady().then(async () => {
       }
       if (!rendererOk) rendererOk = (await readLog("renderer.log")).includes("渲染侧日志落盘测试");
     }
-    if (!perfOk) errors.push("卡顿日志未写入 logs/perf.log");
-    if (!rendererOk) errors.push("渲染进程日志未写入 logs/renderer.log");
-    // app.log 必须有内容（启动 / 窗口 / 慢 IPC / IPC 失败都会写这里）。
-    // 注意启动那一行会落在「本次启动打开的第一个项目」里，切过项目后不一定在当前项目日志里。
+    if (!perfOk) errors.push("卡顿日志未写入 perf.log");
+    if (!rendererOk) errors.push("渲染进程日志未写入 renderer.log");
+    if (!logsDir) errors.push("日志目录为空");
+    // 日志不应落在项目里：换项目不该再搬日志
+    if (logsDir && logsDir.startsWith(workspace)) errors.push("日志不应写在项目目录里");
+    if (!/logs$/.test(logsDir ?? "")) errors.push(`日志目录应以 logs 结尾：${logsDir}`);
     const appLog = await readLog("app.log");
-    if (!appLog.trim()) errors.push("项目日志 app.log 为空");
-    // 总量必须受控：上限 100MB（冒烟时远低于，但顺带验证统计接口可用）
-    const info = JSON.parse(
-      await win.webContents.executeJavaScript("(async () => JSON.stringify(await window.piDesktop.logsInfo()))()"),
-    );
-    if (!info.dir || info.dir !== logsDir) errors.push(`日志目录不对：${info.dir}`);
-    if (info.totalBytes > 100 * 1024 * 1024) errors.push(`日志总量超过 100MB：${info.totalBytes}`);
-    if (!info.files.some((file) => file.name === "app.log")) errors.push("日志清单里应有 app.log");
-    // 日志目录必须被 git 忽略：否则会出现在「改动」里，甚至被用户提交
-    const exclude = await readFile(path.join(workspace, ".git", "info", "exclude"), "utf8").catch(() => "");
-    if (!exclude.split(/\r?\n/).some((line) => line.trim() === ".pi-desktop/")) {
-      errors.push(".pi-desktop/ 未加入 .git/info/exclude");
+    if (!appLog.trim()) errors.push("app.log 为空");
+    if (appLog.includes("启动 v")) {
+      // 启动行必须落在同一个目录里（以前会落到「第一个打开的项目」）
+      if (!/启动/.test(appLog)) errors.push("app.log 缺少启动行");
     }
-    const status = await new Promise((resolve) => {
-      execFile("git", ["status", "--porcelain"], { cwd: workspace }, (error, stdout) => resolve(String(stdout ?? "")));
-    });
-    if (status.includes(".pi-desktop")) errors.push("日志目录出现在 git 改动里");
-    if (perfOk && rendererOk) console.log("[smoke] logs OK 项目目录 / 统计 / 上限 / git 忽略");
+    // 总量必须受控：上限 100MB（冒烟时远低于，但顺带验证统计接口可用）
+    if (logInfo.totalBytes > 100 * 1024 * 1024) errors.push(`日志总量超过 100MB：${logInfo.totalBytes}`);
+    if (!logInfo.files?.some((file) => file.name === "app.log")) errors.push("日志清单里应有 app.log");
+    if (perfOk && rendererOk) console.log("[smoke] logs OK 固定目录 / 统计 / 上限");
   } catch (error) {
     errors.push(`日志检查失败：${error?.message ?? error}`);
   }

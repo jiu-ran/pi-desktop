@@ -36,12 +36,13 @@ contextBridge.exposeInMainWorld("piDesktop", {
   /** 渲染进程卡顿上报（>1s 才记日志），用来定位「界面卡住」发生在哪一侧 */
   reportLongTask: (ms: number, label = "") => ipcRenderer.send("perf:long-task", { ms, label }),
   /** 前端日志持久化（console.warn/error、Vue 错误、未捕获异常） */
-  logEvent: (level: string, scope: string, message: string) => ipcRenderer.send("app:log-event", { level, scope, message }),
+  logEvent: (level: string, scope: string, message: string) => ipcRenderer.send("app:log-event", { level, scope, message }),
+
   logsInfo: () => ipcRenderer.invoke("app:logs-info"),
   logsClear: () => ipcRenderer.invoke("app:logs-clear"),
   logsOpen: () => ipcRenderer.invoke("app:logs-open"),
   logsReveal: () => ipcRenderer.invoke("app:logs-reveal"),
-  useProjectLogs: (cwd: string) => ipcRenderer.invoke("app:use-project-logs", cwd),
+
   listDirectory: (cwd: string, relative: string) => ipcRenderer.invoke("pi:list-directory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => ipcRenderer.invoke("pi:read-workspace-file", cwd, relative),
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => ipcRenderer.invoke("pi:write-workspace-file", cwd, relative, content, revision),

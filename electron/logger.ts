@@ -15,7 +15,7 @@
  *   项目还没选中时先攒在内存里，选中第一个项目时再落盘。
  * - 所有内容先脱敏（密钥 / Bearer / 密码 / 长 base64），避免把秘密写进文件。
  */
-import { appendFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -291,15 +291,34 @@ class LogStore {
 
 export const logStore = new LogStore();
 
-/** 直接设置日志目录（测试用；应用走 useProjectLogs）。 */
+/** 直接设置日志目录（测试用；应用走 useAppLogs）。 */
 export function configureLogs(dir: string): void {
   logStore.configure(dir);
 }
 
 /** 切换当前项目的日志目录：`<项目>/.pi-desktop/logs`。 */
-export function useProjectLogs(cwd: string): Promise<void> {
-  if (!cwd) return Promise.resolve();
-  return logStore.switchTo(path.join(cwd, ".pi-desktop", "logs"));
+/**
+ * 设置日志目录。
+ *
+ * 应用把日志放在安装目录下的 `logs/`（跟着程序走，好找、好打包发给别人）；
+ * 安装目录不可写时（Program Files 这类整机安装）回落到 userData。
+ */
+export function useAppLogs(dir: string): Promise<void> {
+  if (!dir) return Promise.resolve();
+  return logStore.switchTo(dir);
+}
+
+/** 目录能不能写：建目录 + 写一个探针文件再删掉。 */
+export async function isWritableDir(dir: string): Promise<boolean> {
+  const probe = path.join(dir, ".write-probe");
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(probe, "1");
+    await rm(probe, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 写一条日志（不 await：慢磁盘不应拖住调用方）。 */

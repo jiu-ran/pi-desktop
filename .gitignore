@@ -4,3 +4,6 @@ packages/ui/dist
 dist-electron
 dist
 *.tsbuildinfo
+
+# 开发时日志目录（打包版写在安装目录下）
+logs/
