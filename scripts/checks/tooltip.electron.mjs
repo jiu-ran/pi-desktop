@@ -158,9 +158,77 @@ export async function checkTooltipInElectron(win) {
       await wait(300);
     }
 
+    // 父元素有提示、子元素自己也有提示：必须切到子元素并摘掉它的 title，
+    // 否则父级浮层一直挂着，子元素会弹原生白底提示（排队卡片的编辑/撤回按钮就是这样）。
+    // 先把上一阶段可能还挂着的浮层收干净（mousedown 是提示层的强制收起路径）
+    document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await wait(250);
+
+    const outer = document.createElement('div');
+    outer.id = 'pi-tooltip-nested';
+    outer.style.cssText = 'position:fixed;left:140px;top:220px;width:200px;height:60px;z-index:20000;padding:8px';
+    outer.setAttribute('title', '父级提示：整张卡片');
+    const inner = document.createElement('button');
+    inner.type = 'button';
+    inner.id = 'pi-tooltip-nested-child';
+    inner.textContent = '子按钮';
+    inner.setAttribute('title', '子级提示：撤回这条');
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    await wait(50);
+    const atOuter = () => {
+      const box = outer.getBoundingClientRect();
+      return { clientX: Math.round(box.left + 8), clientY: Math.round(box.top + 8) };
+    };
+    let outerTip = "";
+    let outerTrace = null;
+    // 注意：重复派发 mouseover 会重置排队的 380ms 延迟，所以每次尝试之间要留够时间。
+    for (let attempt = 0; attempt < 4 && !outerTip; attempt += 1) {
+      outer.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atOuter() }));
+      for (let i = 0; i < 6 && !outerTip; i += 1) {
+        await wait(120);
+        const node = document.querySelector('.pi-tooltip');
+        const text = node?.textContent ?? "";
+        outerTrace = {
+          attempt,
+          step: i,
+          tips: document.querySelectorAll('.pi-tooltip').length,
+          text: text.slice(0, 20),
+          outerTitle: outer.getAttribute('title'),
+        };
+        if (text) outerTip = text;
+      }
+    }
+    let nestedChildTitle = null;
+    let nestedTip = "";
+    if (inner.isConnected) {
+      const box = inner.getBoundingClientRect();
+      const atInner = { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
+      // 断言的核心是「子元素自己的 title 被摘掉了」：只要它还在，浏览器迟早弹原生白底提示。
+      // 浮层文案是否随即出现受 380ms 延迟 + 页面滚动影响，能读到就一起校验。
+      for (let i = 0; i < 20; i += 1) {
+        inner.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atInner }));
+        await wait(120);
+        if (!inner.isConnected) break;
+        const tipText = document.querySelector('.pi-tooltip')?.textContent ?? "";
+        if (tipText) nestedTip = tipText;
+        if (inner.getAttribute('title') === null) break;
+      }
+      nestedChildTitle = inner.isConnected ? inner.getAttribute('title') : null;
+      inner.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 0, relatedTarget: document.body }));
+      await wait(200);
+    }
+    outer.remove();
+
     el.remove();
     replacement.remove();
     return {
+      nested_outer_tip: outerTip,
+      nested_debug: { trace: outerTrace, visibility: document.visibilityState },
+      nested_child_title: nestedChildTitle,
+      nested_child_tip: nestedTip,
+      // title 可能在 mouseout 时被还原，这里取「移出前是否已被摘掉」的布尔值
+      nested_child_intercepted: nestedChildTitle === null,
       count_first: first.length,
       replaced_stripped: replacedStripped,
       replaced_tip: replacedTip,
@@ -196,6 +264,17 @@ export async function checkTooltipInElectron(win) {
     throw new Error("真实界面元素的 title 未被接管");
   }
   if (result.bar_intercepted === false) throw new Error("活动栏图标的 title 未被接管");
+  if (result.nested_outer_tip) {
+    assert.match(result.nested_outer_tip, /父级提示/, `父级浮层应显示父级文案，实际「${result.nested_outer_tip}」`);
+  }
+  assert.equal(
+    result.nested_child_intercepted,
+    true,
+    "子元素自己的 title 也必须被接管，否则父级浮层挂着的同时会弹原生白底提示",
+  );
+  if (result.nested_child_tip) {
+    assert.match(result.nested_child_tip, /子级提示/, `浮层应切换到子元素文案，实际「${result.nested_child_tip}」`);
+  }
   assert.equal(
     result.replaced_stripped,
     true,

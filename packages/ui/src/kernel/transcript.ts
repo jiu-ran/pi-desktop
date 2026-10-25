@@ -477,6 +477,20 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     if (index >= 0) blocks.splice(index, 1);
   }
 
+  /**
+   * 把某个块挪到时间线末尾。
+   *
+   * 排队中的消息是「入队时」就乐观插进 blocks 的，位置停在那一轮输出的中间；
+   * 等它真的被发出去（队列里不再有它）要挪到末尾，否则重开会话前后顺序对不上。
+   */
+  function moveBlockToEnd(id: string): boolean {
+    const index = blocks.findIndex((block) => block.id === id);
+    if (index < 0 || index === blocks.length - 1) return false;
+    const [block] = blocks.splice(index, 1);
+    blocks.push(block);
+    return true;
+  }
+
   function pushNotice(level: string, text: string): void {
     blocks.push({ kind: "notice", id: uid("n"), level, text, local: true });
   }
@@ -536,5 +550,5 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     blocks.unshift(...newBlocks);
   }
 
-  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages, removeBlock };
+  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages, removeBlock, moveBlockToEnd };
 }

@@ -155,6 +155,28 @@ function saveQuoteEditor(patch: { name: string; customText: string | null }): vo
   if (ok) closeQuoteEditor();
 }
 
+/** 撤回单条排队消息（不放进输入框，直接丢掉）。 */
+async function withdrawQueued(item: { mode: "steer" | "followUp"; text: string }): Promise<void> {
+  if (queueBusy.value) return;
+  queueBusy.value = true;
+  try {
+    const ok = await workbench.withdrawQueued({ mode: item.mode, text: item.text });
+    if (!ok) return;
+    // 正在编辑这条的话，把编辑框一起收起
+    if (queueEdit.value && normalizePrompt(queueEdit.value.prompt) === normalizePrompt(item.text)) {
+      closeQueueEdit();
+    }
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
+}
+
+function normalizePrompt(value: string): string {
+  return String(value ?? "").replace(/\r\n/g, "\n").trim();
+}
+
 async function recallQueue(): Promise<void> {
   if (queueBusy.value) return;
   queueBusy.value = true;
@@ -918,19 +940,30 @@ const argHint = computed(() => {
           <button
             type="button"
             class="queue-card-text"
-            title="点击编辑这条消息"
+            :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
             @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
           >
             {{ queuePreview(item.text, 160) }}
           </button>
-          <button
-            type="button"
-            class="queue-card-edit"
-            title="编辑这条消息"
-            @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
-          >
-            编辑
-          </button>
+          <span class="queue-card-actions">
+            <button
+              type="button"
+              class="queue-card-edit"
+              aria-label="编辑这条消息"
+              @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
+            >
+              编辑
+            </button>
+            <button
+              type="button"
+              class="queue-card-withdraw"
+              :disabled="queueBusy"
+              :aria-label="`撤回这条消息：${queuePreview(item.text, 40)}`"
+              @click="withdrawQueued(item)"
+            >
+              撤回
+            </button>
+          </span>
         </div>
       </div>
 

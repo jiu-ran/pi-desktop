@@ -140,6 +140,54 @@ export function planQueueEdit(
   };
 }
 
+/** 撤回单条排队消息：只在它所属的那一列里去掉第一条匹配项。 */
+export function planQueueWithdraw(queue: QueueState, target: QueuedEntry): QueueState {
+  const normalizeText = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const wanted = normalizeText(target.text);
+  const drop = (list: string[]): string[] => {
+    const index = list.findIndex((item) => normalizeText(item) === wanted);
+    if (index < 0) return [...list];
+    return [...list.slice(0, index), ...list.slice(index + 1)];
+  };
+  return {
+    steering: target.mode === "steer" ? drop(queue.steering) : [...queue.steering],
+    followUp: target.mode === "followUp" ? drop(queue.followUp) : [...queue.followUp],
+  };
+}
+
+/**
+ * 已经离开队列的乐观气泡要挪到时间线末尾。
+ *
+ * 排队期间这条气泡是隐藏的（内容在输入框上方），但它在 blocks 里的位置停在
+ * 「入队那一刻」——上一轮还在继续输出，后面的块都排在它下面。等它真正被 Pi 取走、
+ * 重新显示出来时，就会插在上一轮输出的中间（用户看到的就是「顺序乱了」）。
+ *
+ * 返回需要移动到末尾的气泡 id（已在末尾的不动）。只处理队列刚发出的那批：
+ * 队列还存在气泡按 queueText 对不上；发出去的则一定对得上。
+ */
+export function planQueuedFlush(
+  blocks: QueueBlockLike[],
+  previous: QueueState | null | undefined,
+  next: QueueState | null | undefined,
+): string[] {
+  const before = [...(previous?.steering ?? []), ...(previous?.followUp ?? [])].map(normalize);
+  const after = new Set([...(next?.steering ?? []), ...(next?.followUp ?? [])].map(normalize));
+  // 只有「上一轮队列里有、这一轮没了」的那几条才是刚被取走发出去的。
+  // 不能用「不在当前队列里的 queueText」来判断：历史消息也带 queueText，会被一起重排。
+  const sent = new Set(before.filter((text) => !after.has(text)));
+  if (!sent.size) return [];
+  const lastIndex = (blocks?.length ?? 0) - 1;
+  const ids: string[] = [];
+  (blocks ?? []).forEach((block, index) => {
+    if (block.kind !== undefined && block.kind !== "user") return;
+    const key = normalize(block.queueText ?? "");
+    if (!key || !sent.has(key)) return;
+    if (index === lastIndex) return;
+    ids.push(block.id);
+  });
+  return ids;
+}
+
 /** 撤回后放回输入框的文本：只留人写的那部分，别把附件 XML 塞回去。 */
 export function queueDraftText(input: string): string {
   return stripQueueMarkers(input).replace(/\n{3,}/g, "\n\n").trim();

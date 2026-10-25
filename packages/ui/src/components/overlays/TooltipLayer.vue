@@ -203,11 +203,19 @@ function show(element: HTMLElement, title: string): void {
 function scheduleShow(element: HTMLElement): void {
   if (active === element) return;
   clearHideTimer();
-  if (active) hideNow();
-  cancelPending();
   const raw = element.getAttribute("title");
   // 空 title 无需接管，否则会被白丢。
   if (raw === null || !raw.trim()) return;
+  // 已经在显示浮层（在相邻元素之间移动）：立刻换文案，不再等 380ms。
+  // 否则旧浮层还挂着、新元素带着原生 title，浏览器会先弹出白底提示。
+  if (tip.visible && active) {
+    element.removeAttribute("title");
+    hideNow();
+    show(element, raw);
+    return;
+  }
+  if (active) hideNow();
+  cancelPending();
   element.removeAttribute("title");
   pending = element;
   pendingTitle = raw;
@@ -369,11 +377,23 @@ function onMouseOver(event: MouseEvent): void {
   if (!(target instanceof Element)) return;
   hovered = target;
   if (event.buttons !== 0) return;
+  // 指针进入了当前锚点的子元素：如果那个子元素自己也有 title（例如排队卡片里的
+  // 编辑/撤回按钮），必须切过去接管，否则父级浮层一直挂着、子元素的原生白底提示照样弹。
   if (active?.contains(target)) {
+    const inner = target.closest<HTMLElement>("[title]");
+    if (inner && inner !== active && !inner.closest(".pi-tooltip")) {
+      scheduleShow(inner);
+      return;
+    }
     clearHideTimer();
     return;
   }
   if (pending?.contains(target)) {
+    const inner = target.closest<HTMLElement>("[title]");
+    if (inner && inner !== pending && !inner.closest(".pi-tooltip")) {
+      scheduleShow(inner);
+      return;
+    }
     // 指针仍在待展示元素内：保持原计时器，不因内部子元素移动而重置延迟。
     clearHideTimer();
     return;

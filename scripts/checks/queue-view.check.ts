@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   planQueueView,
+  planQueueWithdraw,
+  planQueuedFlush,
   queueDraftText,
   queuePreview,
   stripQueueMarkers,
@@ -203,4 +205,65 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   const fromRenderer = buildSessionBlock({ file: "C:\a\b.jsonl", title: "标题 & 特殊字符 <x>", body, messages: messages.length });
   assert.equal(fromRenderer.trimEnd(), fromMain.trimEnd(), "两侧拼出的会话块必须一致");
   console.log("session block parity OK 主进程 / 渲染进程一致");
+}
+
+// ---------- 单条撤回 ----------
+{
+  const queue = { steering: ["插话一", "插话二"], followUp: ["排队一", "排队二"] };
+  const afterSteer = planQueueWithdraw(queue, { mode: "steer", text: "插话一" });
+  assert.deepEqual(afterSteer.steering, ["插话二"], "撤回插话只去掉那一条");
+  assert.deepEqual(afterSteer.followUp, ["排队一", "排队二"], "撤回插话不能动排队列表");
+  const afterFollow = planQueueWithdraw(queue, { mode: "followUp", text: "排队二" });
+  assert.deepEqual(afterFollow.followUp, ["排队一"], "撤回排队只去掉那一条");
+  assert.deepEqual(afterFollow.steering, ["插话一", "插话二"]);
+  // 同样的文字排了两次：只删一条
+  const twice = planQueueWithdraw({ steering: [], followUp: ["再说一次", "再说一次"] }, { mode: "followUp", text: "再说一次" });
+  assert.deepEqual(twice.followUp, ["再说一次"], "重复文字只撤回一条");
+  // 找不到时保持原样（不能让别的消息消失）
+  const missing = planQueueWithdraw(queue, { mode: "followUp", text: "不存在" });
+  assert.deepEqual(missing.followUp, ["排队一", "排队二"]);
+  // CRLF 也要对得上
+  const crlf = planQueueWithdraw({ steering: [], followUp: ["第一行\r\n第二行"] }, { mode: "followUp", text: "第一行\n第二行" });
+  assert.deepEqual(crlf.followUp, [], "CRLF 与 LF 视为同一条");
+  console.log("queue withdraw OK 单条撤回 / 只删一条 / 找不到不动");
+}
+
+// ---------- 发出后把乐观气泡挪到末尾 ----------
+{
+  // 典型现场：入队时气泡插在中间，上一轮输出还在它下面继续追加
+  const blocks = [
+    block("u0", "上一轮的问题", "上一轮的问题"),
+    block("u1", "排队的那条", "排队的那条"),
+    { id: "a1", kind: "text", text: "上一轮还在输出……" },
+    { id: "a2", kind: "text", text: "上一轮结束" },
+  ];
+  const queued = { steering: [], followUp: ["排队的那条"] };
+  const drained = { steering: [], followUp: [] };
+  assert.deepEqual(planQueuedFlush(blocks, queued, queued), [], "队列没变化：不动");
+  assert.deepEqual(planQueuedFlush(blocks, null, drained), [], "没有上一轮队列：不知道谁刚发出，别乱动");
+  assert.deepEqual(
+    planQueuedFlush(blocks, queued, drained),
+    ["u1"],
+    "刚被取走的那条：气泡要挪到末尾，否则会插在上一轮输出中间",
+  );
+  // 历史消息也带 queueText，但它不在「刚发出」的集合里，不能跟着重排
+  assert.deepEqual(
+    planQueuedFlush(blocks, { steering: [], followUp: ["排队的那条", "另一条"] }, drained),
+    ["u1"],
+    "只挪真正刚发出去的那条",
+  );
+  // 已经在末尾就不动
+  const tail = [
+    { id: "a1", kind: "text", text: "输出" },
+    { id: "a2", kind: "text", text: "结束" },
+    block("u9", "刚发出去的", "刚发出去的"),
+  ];
+  assert.deepEqual(planQueuedFlush(tail, { steering: [], followUp: ["刚发出去的"] }, drained), [], "已在末尾不重复移动");
+  // 插话与排队都要处理
+  const mix = [
+    block("u1", "插话那条", "插话那条"),
+    { id: "a1", kind: "text", text: "输出" },
+  ];
+  assert.deepEqual(planQueuedFlush(mix, { steering: ["插话那条"], followUp: [] }, drained), ["u1"], "插话被取走同样要挪");
+  console.log("queue flush OK 只挪刚发出的那条");
 }

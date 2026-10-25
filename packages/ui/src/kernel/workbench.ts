@@ -5,7 +5,7 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { planQueueEdit, queueDraftText, replacePromptMessage } from "../shared/queue-view.ts";
+import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, replacePromptMessage } from "../shared/queue-view.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -617,7 +617,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         break;
       case "agent_settled":
         thread.streaming = false;
-        thread.queue = { steering: [], followUp: [] };
+        applyQueue(thread, { steering: [], followUp: [] });
         if (thread.historyStart < 0) {
           // 兜底：打开时没能从文件补齐（比如正好在流式开始的一瞬），本轮结束后补
           // 补齐会重建块，所以用量条要在补齐完成后再挂回去。
@@ -628,7 +628,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         scheduleSessionsRefresh(ws);
         break;
       case "queue_update":
-        thread.queue = { steering: event.steering ?? [], followUp: event.followUp ?? [] };
+        applyQueue(thread, { steering: event.steering, followUp: event.followUp });
         break;
       case "message_update":
         // 流式增量里的 usage 可能仍是 provider 初始化的全 0 快照；
@@ -1337,7 +1337,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const thread = ensureThread(ws, targetSessionFile);
     const queued = await rpc(ws.cwd, "clearQueue", [], targetSessionFile);
     await rpc(ws.cwd, "abort", [], targetSessionFile);
-    thread.queue = { steering: [], followUp: [] };
+    applyQueue(thread, { steering: [], followUp: [] });
     return [...(queued?.steering ?? []), ...(queued?.followUp ?? [])].join("\n");
   }
 
@@ -1496,13 +1496,66 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 撤回还排在 Pi 队列里的消息：清空队列，并把对应的乐观气泡删掉
    * （它们并没有真正发出去，留着会让人以为已经发出）。返回放回输入框的文字。
    */
+  /**
+   * 更新队列状态，并把「已经离开队列」的乐观气泡挪到时间线末尾。
+   *
+   * 排队期间气泡是隐藏的，但位置停在入队那一刻（上一轮输出还在它下面继续追加），
+   * 发出后重新显示就会插在中间。这里统一在队列变化后把这类气泡挪到最后。
+   */
+  function applyQueue(thread: { queue: { steering: string[]; followUp: string[] }; blocks: TranscriptBlock[]; transcript: { moveBlockToEnd: (id: string) => boolean } }, next: { steering?: string[]; followUp?: string[] }): void {
+    const queue = { steering: [...(next.steering ?? [])], followUp: [...(next.followUp ?? [])] };
+    const previous = thread.queue;
+    thread.queue = queue;
+    for (const id of planQueuedFlush(thread.blocks, previous, queue)) thread.transcript.moveBlockToEnd(id);
+  }
+
+  /**
+   * 撤回单条排队消息。
+   *
+   * Pi 的队列只能整体清空（clearQueue 返回全部文本），所以先清空、再把其余消息
+   * 按原顺序重新入队、最后删掉这一条的乐观气泡。重新入队失败时把内容放回输入框，
+   * 不能把用户排队的话弄丢。
+   */
+  async function withdrawQueued(target: { mode: "steer" | "followUp"; text: string }): Promise<boolean> {
+    const ws = active.value;
+    if (!ws || !target?.text) return false;
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const wanted = normalize(target.text);
+    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    const planned = planQueueWithdraw(current, target);
+    try {
+      for (const text of planned.steering) await rpc(ws.cwd, "steer", [text], thread.sessionFile);
+      for (const text of planned.followUp) await rpc(ws.cwd, "followUp", [text], thread.sessionFile);
+    } catch (error: any) {
+      applyQueue(thread, current);
+      bus.emit("notify", {
+        level: "error",
+        text: `撤回失败，其余排队消息已保留：${error?.message ?? String(error)}`,
+      });
+      return false;
+    }
+    applyQueue(thread, planned);
+    for (const block of [...thread.blocks]) {
+      if (block.kind !== "user") continue;
+      if (normalize(block.queueText ?? "") !== wanted) continue;
+      thread.transcript.removeBlock(block.id);
+      break;
+    }
+    return true;
+  }
+
   async function recallQueued(): Promise<string> {
     const ws = active.value;
     if (!ws) return "";
     const thread = ws.activeThread;
     const queued = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
     const texts: string[] = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])];
-    thread.queue = { steering: [], followUp: [] };
+    applyQueue(thread, { steering: [], followUp: [] });
     if (texts.length) {
       const wanted = new Set(texts.map((text) => String(text ?? "").replace(/\r\n/g, "\n").trim()));
       for (const block of [...thread.blocks]) {
@@ -1545,7 +1598,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       for (const text of planned.followUp) await rpc(ws.cwd, "followUp", [text], thread.sessionFile);
     } catch (error: any) {
       // 重新入队失败：把没排上的内容交回输入框，并刷新队列状态
-      thread.queue = { steering: [], followUp: [] };
+      applyQueue(thread, { steering: [], followUp: [] });
       bus.emit("notify", {
         level: "error",
         text: `排队消息重新提交失败，内容已放回输入框：${error?.message ?? String(error)}`,
@@ -1556,7 +1609,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       block.text = next;
       block.queueText = nextPrompt;
     }
-    thread.queue = planned;
+    applyQueue(thread, planned);
     // 目标消息可能带图片：编辑不丢图，但 Pi 的队列只能按文本恢复，这里保留在气泡上
     if (images.length && block) block.imageItems = images;
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
@@ -2103,6 +2156,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     addFiles,
     addSessionAttachment,
     recallQueued,
+    withdrawQueued,
     editQueued,
     previewSessionQuote,
     setSessionQuote,

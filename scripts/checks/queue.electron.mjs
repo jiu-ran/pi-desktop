@@ -188,6 +188,68 @@ export async function checkQueueInElectron(win) {
   await evaluate("[...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes('取消'))?.click(); true");
   await wait(200);
 
+  // ---- 单条撤回 ----
+  await evaluate(`(() => {
+    window.__queueWithdrawCalls = [];
+    const workbench = window.__piDesktop.workbench;
+    window.__queueWithdrawOriginal = workbench.withdrawQueued;
+    workbench.withdrawQueued = async (target) => {
+      window.__queueWithdrawCalls.push({ target });
+      return true;
+    };
+    return true;
+  })()`);
+  {
+    const buttons = JSON.parse(await evaluate(`(() => JSON.stringify(
+      [...document.querySelectorAll('.queue-card')].map((card) => ({
+        text: card.querySelector('.queue-card-text')?.textContent.trim().slice(0, 12) ?? '',
+        actions: [...card.querySelectorAll('.queue-card-actions button')].map((n) => n.textContent.trim()),
+      })),
+    ))()`));
+    assert.ok(buttons.length >= 1, "应有待发送卡片");
+    for (const card of buttons) {
+      assert.ok(card.actions.includes("编辑"), `每条都要有「编辑」：${card.text}`);
+      assert.ok(card.actions.includes("撤回"), `每条都要有「撤回」：${card.text}`);
+    }
+  }
+  // 点第二条的「撤回」：只撤回那一条，参数带原始提示词
+  await evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.queue-card')];
+    const card = cards.find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    if (!card) return false;
+    card.querySelector('.queue-card-withdraw')?.click();
+    return true;
+  })()`).then((ok) => assert.ok(ok, "应能找到那条待发送卡片"));
+  await wait(300);
+  {
+    const calls = JSON.parse(await evaluate("JSON.stringify(window.__queueWithdrawCalls)"));
+    assert.equal(calls.length, 1, `应只撤回一条，实际 ${calls.length}`);
+    assert.equal(calls[0].target.text, "只存在于队列里的消息", "撤回要带上原始提示词用于定位");
+    assert.equal(calls[0].target.mode, "followUp", "模式要对");
+  }
+  await evaluate(`(() => {
+    window.__piDesktop.workbench.withdrawQueued = window.__queueWithdrawOriginal;
+    return true;
+  })()`);
+
+  // ---- 发出后气泡挪到末尾（顺序回归）----
+  {
+    const order = JSON.parse(await evaluate(`(() => {
+      const thread = window.__piDesktop.workbench.active.value.activeThread;
+      for (const block of [...thread.blocks]) thread.transcript.removeBlock(block.id);
+      const queuedBlock = thread.transcript.pushUser("排队的那条", 0, { queueText: "排队的那条" });
+      thread.transcript.pushUser("上一轮输出", 0, { queueText: "" });
+      const beforeIds = thread.blocks.map((b) => b.id);
+      const moved = thread.transcript.moveBlockToEnd(queuedBlock.id);
+      const afterIds = thread.blocks.map((b) => b.id);
+      for (const block of [...thread.blocks]) thread.transcript.removeBlock(block.id);
+      return JSON.stringify({ moved, beforeIds, afterIds, queuedId: queuedBlock.id });
+    })()`));
+    assert.equal(order.moved, true, "不在末尾的块应该被移动");
+    assert.equal(order.afterIds.at(-1), order.queuedId, `移动后应该排在最后：${JSON.stringify(order.afterIds)}`);
+    assert.equal(order.beforeIds.at(-1), order.beforeIds[1], "初始时排队气泡不在末尾");
+  }
+
   // 还原 editQueued
   await evaluate(`(() => {
     window.__piDesktop.workbench.editQueued = window.__queueEditOriginal;

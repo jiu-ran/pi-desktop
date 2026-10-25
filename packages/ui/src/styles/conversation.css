@@ -1404,9 +1404,16 @@
   width: 5px;
   height: 5px;
 }
-.queue-card-edit {
+.queue-card-actions {
+  display: flex;
   flex: none;
+  gap: 2px;
   align-self: center;
+  align-items: center;
+}
+.queue-card-edit,
+.queue-card-withdraw {
+  flex: none;
   padding: 1px 6px;
   border: 0;
   border-radius: 5px;
@@ -1419,6 +1426,11 @@
   background: var(--hover);
   color: var(--fg);
 }
+.queue-card-withdraw:hover {
+  background: color-mix(in srgb, var(--del-fg) 14%, transparent);
+  color: var(--del-fg);
+}
+.queue-card-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
 .queue-card-tag {
   flex: none;
   padding: 0 5px;
