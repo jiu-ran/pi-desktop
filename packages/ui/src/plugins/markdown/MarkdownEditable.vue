@@ -4,8 +4,9 @@ import MarkdownBody from "./MarkdownBody.vue";
 import { replaceMarkdownBlock, rendersBlock, splitMarkdownBlocks, type MarkdownBlock } from "../../shared/markdown-blocks.ts";
 
 /**
- * Typora 式混合预览：默认就是渲染后的样子，点某一处时**只把那一块**换成可编辑的
- * 源码（其它块保持渲染结果），改完（失焦 / Ctrl+Enter）写回整篇。
+ * Typora / Obsidian 式的混合预览：平时就是渲染后的文档，点某一段时**只有那一段**
+ * 换成源码来改，但排版、字号、位置都和渲染结果完全一致，不加边框、不加底色、
+ * 也不脱离文档流——看着就像直接在文档里打字，改完失焦即写回。
  *
  * 对齐方式：markstream 每个顶层节点渲染成一个 `.node-slot`，顺序与
  * `splitMarkdownBlocks` 一致；数量对不上（罕见的扩展语法）就退化成纯预览，
@@ -19,10 +20,12 @@ const root = ref<HTMLElement | null>(null);
 const blocks = computed<MarkdownBlock[]>(() => splitMarkdownBlocks(props.content).filter(rendersBlock));
 const slotCount = ref(0);
 const aligned = computed(() => slotCount.value > 0 && slotCount.value === blocks.value.length);
+const editingIndex = ref<number | null>(null);
 
-const editing = ref<{ index: number; draft: string; top: number; left: number; width: number; height: number } | null>(null);
-const editor = ref<HTMLTextAreaElement | null>(null);
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let editor: HTMLTextAreaElement | null = null;
+let editorHost: HTMLDivElement | null = null;
+let editingBlock: MarkdownBlock | null = null;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 给渲染结果的顶层节点打上块序号（对不上就全部清掉，保持不可编辑） */
 function syncSlots(): void {
@@ -41,17 +44,17 @@ function syncSlots(): void {
 }
 
 function scheduleSync(): void {
-  if (retryTimer) clearTimeout(retryTimer);
+  if (syncTimer) clearTimeout(syncTimer);
   // markstream 渲染是异步的（代码高亮 / mermaid 会晚一点），多对几次
   void nextTick(syncSlots);
-  retryTimer = setTimeout(() => {
-    retryTimer = null;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
     syncSlots();
   }, 120);
 }
 
 watch(() => props.content, () => {
-  if (editing.value) closeEditor();
+  if (editingIndex.value !== null) closeEditor();
   scheduleSync();
 });
 watch(blocks, scheduleSync, { immediate: true });
@@ -60,90 +63,152 @@ function slotOf(index: number): HTMLElement | null {
   return root.value?.querySelector<HTMLElement>(`[data-md-block="${index}"]`) ?? null;
 }
 
-function startEdit(index: number): void {
-  const block = blocks.value[index];
-  const slot = slotOf(index);
-  const container = root.value;
-  if (!block || !slot || !container) return;
-  const rect = slot.getBoundingClientRect();
-  const base = container.getBoundingClientRect();
-  // 容器本身就是滚动区：绝对定位坐标要加上已滚动的距离，否则滚过一段后编辑框会跑偏
-  editing.value = {
-    index,
-    draft: block.text,
-    top: rect.top - base.top + container.scrollTop,
-    left: rect.left - base.left + container.scrollLeft,
-    width: rect.width,
-    height: Math.max(rect.height, 24),
-  };
-  slot.style.visibility = "hidden";
-  void nextTick(() => {
-    const node = editor.value;
-    if (!node) return;
-    node.focus();
-    node.setSelectionRange(node.value.length, node.value.length);
-    resizeEditor();
-  });
+/**
+ * 渲染结果里真正带文字排版的元素（h2 / p / pre / ul …），拿来继承字号与间距。
+ * 节点外面还套着 node-content 之类的 wrapper，取第一层子元素会拿到正文样式。
+ */
+function contentOf(slot: HTMLElement): HTMLElement {
+  const pick = slot.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6, p, blockquote, pre, table, ul, ol");
+  if (pick) return pick;
+  const first = slot.firstElementChild;
+  return first instanceof HTMLElement ? first : slot;
 }
 
-function resizeEditor(): void {
-  const node = editor.value;
-  if (!node || !editing.value) return;
-  node.style.height = "auto";
-  const next = Math.min(node.scrollHeight + 2, 520);
-  node.style.height = `${next}px`;
-  editing.value.height = next;
+function grow(): void {
+  if (!editor) return;
+  // 先把高度压到 0 再读 scrollHeight：textarea 默认 rows=2，用 auto 量出来会是两行
+  editor.style.height = "0px";
+  editor.style.height = `${Math.max(editor.scrollHeight, 20)}px`;
+}
+
+/** 点击位置 → 光标位置（按渲染区域里的相对位置近似，多行块也不会跳到末尾） */
+function caretFromPoint(node: HTMLTextAreaElement, block: MarkdownBlock, event: MouseEvent): number {
+  const rect = node.getBoundingClientRect();
+  const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 1;
+  const offset = Math.min(Math.max(ratio, 0), 1);
+  return Math.round(block.text.length * offset);
+}
+
+function startEdit(index: number, event: MouseEvent): void {
+  const block = blocks.value[index];
+  const slot = slotOf(index);
+  if (!block || !slot || !slot.parentElement) return;
+  closeEditor();
+
+  const rendered = contentOf(slot);
+  const style = getComputedStyle(rendered);
+  const node = document.createElement("textarea");
+  node.className = "md-block-editor";
+  node.value = block.text;
+  node.spellcheck = false;
+  node.rows = 1;
+  node.setAttribute("data-md-editor", String(index));
+  node.setAttribute("data-md-kind", block.kind);
+  // 关键：把渲染结果的字号/字体/行高/颜色搬过来，看起来还是文档本身
+  node.style.fontFamily = style.fontFamily;
+  node.style.fontSize = style.fontSize;
+  node.style.fontWeight = style.fontWeight;
+  node.style.fontStyle = style.fontStyle;
+  node.style.lineHeight = style.lineHeight;
+  node.style.letterSpacing = style.letterSpacing;
+  node.style.color = style.color;
+  node.style.textAlign = style.textAlign === "start" ? "left" : style.textAlign;
+
+  // 外面包一层块级容器承接原来的外边距：textarea 是替换元素、外边距不合并，
+  // 直接把 h1 的 margin 挪到它身上会让后面整篇内容往下跳。
+  const host = document.createElement("div");
+  host.className = "md-block-editor-host";
+  host.style.marginTop = style.marginTop;
+  host.style.marginBottom = style.marginBottom;
+  host.style.marginLeft = style.marginLeft;
+  host.style.marginRight = style.marginRight;
+  host.appendChild(node);
+
+  slot.style.display = "none";
+  slot.parentElement.insertBefore(host, slot);
+  editorHost = host;
+  editor = node;
+  editingBlock = block;
+  editingIndex.value = index;
+
+  node.addEventListener("input", grow);
+  node.addEventListener("blur", () => commit());
+  node.addEventListener("keydown", (kev: KeyboardEvent) => {
+    if (kev.key === "Escape") {
+      kev.preventDefault();
+      closeEditor();
+      return;
+    }
+    if (kev.key === "Enter" && (kev.ctrlKey || kev.metaKey)) {
+      kev.preventDefault();
+      commit();
+    }
+  });
+
+  // 点到编辑区外面（工具栏、别的面板）也要提交：有些情况 textarea 抢不到焦点，
+  // 光靠 blur 会一直挂在编辑态
+  document.addEventListener("pointerdown", onOutsidePointerDown, true);
+
+  grow();
+  node.focus();
+  const caret = caretFromPoint(node, block, event);
+  node.setSelectionRange(caret, caret);
+}
+
+function onOutsidePointerDown(event: Event): void {
+  if (!editorHost) return;
+  const target = event.target;
+  if (target instanceof Node && editorHost.contains(target)) return;
+  commit();
 }
 
 function closeEditor(): void {
-  const current = editing.value;
-  editing.value = null;
-  if (!current) return;
-  const slot = slotOf(current.index);
-  if (slot) slot.style.visibility = "";
+  document.removeEventListener("pointerdown", onOutsidePointerDown, true);
+  const node = editor;
+  const host = editorHost;
+  editor = null;
+  editorHost = null;
+  editingBlock = null;
+  const index = editingIndex.value;
+  editingIndex.value = null;
+  if (host) host.remove();
+  else if (node) node.remove();
+  const slot = index === null ? null : root.value?.querySelector<HTMLElement>(`[data-md-block="${index}"]`) ?? null;
+  if (slot) slot.style.display = "";
+  scheduleSync();
 }
 
 function commit(): void {
-  const current = editing.value;
-  if (!current) return;
-  const block = blocks.value[current.index];
-  const next = current.draft.replace(/\r\n/g, "\n");
+  const node = editor;
+  const block = editingBlock;
+  if (!node || !block) return;
+  const next = node.value.replace(/\r\n/g, "\n");
   closeEditor();
-  if (!block || next === block.text) return;
+  if (next === block.text) return;
   emit("update:content", replaceMarkdownBlock(props.content, block, next));
 }
 
-function cancel(): void {
-  closeEditor();
-}
-
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    cancel();
-    return;
-  }
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    event.preventDefault();
-    commit();
-  }
-}
-
 function onRootClick(event: MouseEvent): void {
-  if (editing.value) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
+  // 正在改的时候点别处：先提交，再按新点击处理
+  if (editor) {
+    const inside = editor.contains(target);
+    if (!inside) commit();
+    if (inside || editor) return;
+  }
+  // 链接、按钮、代码块工具栏保持原有行为
+  if (target.closest("a, button, input, textarea, summary, .code-block-wrapper")) return;
   const slot = target.closest<HTMLElement>("[data-md-block]");
   if (!slot) return;
   const index = Number(slot.dataset.mdBlock);
   if (!Number.isInteger(index)) return;
-  // 让链接、按钮保持原有行为（点击链接不该进入编辑）
-  if (target.closest("a, button, input, summary, .code-block-wrapper")) return;
-  startEdit(index);
+  startEdit(index, event);
 }
 
 onBeforeUnmount(() => {
-  if (retryTimer) clearTimeout(retryTimer);
+  if (syncTimer) clearTimeout(syncTimer);
+  closeEditor();
 });
 </script>
 
@@ -153,55 +218,26 @@ onBeforeUnmount(() => {
     class="md-preview md-editable"
     :class="{ 'can-edit': aligned }"
     :data-aligned="aligned ? '1' : '0'"
+    :data-editing="editingIndex === null ? '0' : '1'"
     @click="onRootClick"
   >
     <MarkdownBody :content="content" mode="docs" />
-    <textarea
-      v-if="editing"
-      ref="editor"
-      v-model="editing.draft"
-      class="md-block-editor"
-      spellcheck="false"
-      :style="{ top: `${editing.top}px`, left: `${editing.left}px`, width: `${editing.width}px`, height: `${editing.height}px` }"
-      @input="resizeEditor"
-      @blur="commit"
-      @keydown="onKeydown"
-    />
   </div>
 </template>
 
 <style scoped>
-/* 排版与滚动沿用 .md-preview（内边距、max-width 860、正文 14.5px/1.78），
-   这里只补「可作为定位参照的滚动容器」这一点 */
+/* 排版与滚动沿用 .md-preview（内边距、max-width 860、正文 14.5px/1.78） */
 .md-editable {
   position: relative;
   overflow-anchor: none;
 }
 .md-editable.can-edit [data-md-block] {
-  border-radius: var(--radius-sm);
   cursor: text;
+  border-radius: 3px;
   transition: background 0.12s;
 }
+/* 悬停只给一点极淡的底色，暗示「这块可以点」，不画框 */
 .md-editable.can-edit [data-md-block]:hover {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  box-shadow: -2px 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
-}
-/* 就地编辑框：和源码同款字体，宽度贴合原来那一块 */
-.md-block-editor {
-  position: absolute;
-  z-index: 2;
-  margin: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  outline: none;
-  background: var(--input-bg);
-  color: var(--fg);
-  font: var(--code-font-size, 12.5px)/1.65 var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  overflow: hidden;
-  resize: none;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 </style>

@@ -373,6 +373,37 @@
 .file-editor-state.conflict span { flex: 1; min-width: 220px; text-align: left; line-height: 1.5; }
 .file-view-toggle { flex: none; }
 
+/* ---------- .md 就地编辑框（Typora 观感：不画框，看起来还是文档本身） ---------- */
+/* 这两个节点由 MarkdownEditable 直接创建，拿不到 scoped 属性，所以样式放全局 */
+.md-block-editor-host {
+  display: block;
+}
+.md-block-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 1.2em;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  caret-color: var(--accent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+  font-variant-ligatures: none;
+}
+.md-block-editor::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+/* 代码块里编辑就是等宽字体，正文块跟着渲染结果走 */
+.md-block-editor[data-md-kind="code"] {
+  font-family: var(--mono);
+}
+
 /* ---------- .md 阅读视图排版（对齐 Obsidian / Typora 的观感） ---------- */
 .md-preview {
   flex: 1;
