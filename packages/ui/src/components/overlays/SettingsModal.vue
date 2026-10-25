@@ -269,19 +269,19 @@ const appUpdateStatus = computed(() => {
   if (state.appUpdate.phase === "installing") return { tone: "warn", label: "等待安装" };
   if (state.appUpdate.checking) return { tone: "muted", label: "检查中" };
   if (state.appUpdate.updateAvailable) return { tone: "warn", label: `有更新 ${state.appUpdate.latest}` };
+  // 检查失败时保持「未知」，否则限流/断网会被误显示成「已是最新」
+  if (state.appUpdate.error) return { tone: "warn", label: "检查失败" };
   if (state.appUpdate.checkedAt) return { tone: "ok", label: "已是最新" };
   return { tone: "muted", label: "未检查" };
 });
 
 async function checkAppUpdateNow(): Promise<void> {
-  const result = await workbench.checkAppUpdate();
-  if (!result.current && !result.latest) return;
-  bus.emit("notify", {
-    level: "info",
-    text: result.updateAvailable
-      ? `发现 Pi Desktop ${result.latest}（当前 ${result.current}）`
-      : `Pi Desktop 已是最新版本（${result.current}）`,
-  });
+  const result = await workbench.checkAppUpdate({ manual: true });
+  // 失败（限流 / 断网）与「有更新」workbench 已经提示过，这里只补「确实是最新」；
+  // 以前把检查失败也说成「已是最新版本」，用户会以为真的没有新版本。
+  if (result.error || result.updateAvailable) return;
+  if (!result.current) return;
+  bus.emit("notify", { level: "info", text: `Pi Desktop 已是最新版本（${result.current}）` });
 }
 
 async function downloadAppUpdateNow(): Promise<void> {

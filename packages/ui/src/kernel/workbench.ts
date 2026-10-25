@@ -177,6 +177,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       phase: "idle" as "idle" | "checking" | "available" | "downloading" | "ready" | "installing",
       checking: false,
       checkedAt: 0,
+      /** 上次检查失败的原因（限流 / 断网）；有值时不能显示「已是最新」 */
+      error: "",
     },
     recent: [] as string[],
     activeCwd: "",
@@ -1673,24 +1675,45 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
    * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
    */
-  async function checkAppUpdate(): Promise<{ current: string; latest: string; updateAvailable: boolean; url: string }> {
+  async function checkAppUpdate(options: { manual?: boolean } = {}): Promise<{
+    current: string;
+    latest: string;
+    updateAvailable: boolean;
+    url: string;
+    error?: string;
+  }> {
     const current = state.appUpdate;
     if (!host?.checkAppUpdate || current.checking) {
       return { current: current.current, latest: current.latest, updateAvailable: current.updateAvailable, url: current.url };
     }
     state.appUpdate.checking = true;
     try {
-      const result = await host.checkAppUpdate();
+      const result = await host.checkAppUpdate(options);
       state.appUpdate.current = result.current ?? "";
       state.appUpdate.latest = result.latest ?? "";
       state.appUpdate.updateAvailable = Boolean(result.updateAvailable);
       state.appUpdate.url = result.url ?? "";
       state.appUpdate.assetName = result.assetName ?? "";
-      state.appUpdate.phase = result.updateAvailable ? "available" : "idle";
-      state.appUpdate.checkedAt = Date.now();
-      if (result.error) bus.emit("notify", { level: "warning", text: result.error });
-      else if (result.updateAvailable) bus.emit("notify", { level: "info", text: `Pi Desktop ${result.latest} 已发布，当前版本 ${result.current}` });
-      return { current: state.appUpdate.current, latest: state.appUpdate.latest, updateAvailable: state.appUpdate.updateAvailable, url: state.appUpdate.url };
+      // 检查失败时不能把状态标成「已是最新」：以前会把限流/断网说成最新版本，
+      // 结果用户以为没新版本，其实只是没查到。
+      if (result.error) {
+        state.appUpdate.error = result.error;
+        bus.emit("notify", { level: "warning", text: `检查更新失败：${result.error}` });
+      } else {
+        state.appUpdate.error = "";
+        state.appUpdate.phase = result.updateAvailable ? "available" : "idle";
+        state.appUpdate.checkedAt = Date.now();
+        if (result.updateAvailable) {
+          bus.emit("notify", { level: "info", text: `Pi Desktop ${result.latest} 已发布，当前版本 ${result.current}` });
+        }
+      }
+      return {
+        current: state.appUpdate.current,
+        latest: state.appUpdate.latest,
+        updateAvailable: state.appUpdate.updateAvailable,
+        url: state.appUpdate.url,
+        error: state.appUpdate.error,
+      };
     } catch (error: any) {
       bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
       return { current: current.current, latest: current.latest, updateAvailable: false, url: current.url };

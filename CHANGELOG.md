@@ -5,6 +5,47 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.7] - 2026-10-25
+
+
+这一版修的是「卡死」的**具体成因**——上一版加的抓栈机制在真机上抓到了调用栈，定位到提示浮层的全局监听在大批量写回 `title` 时会把主线程占住几十秒到几分钟。
+
+## 修复
+
+- **批量写回 title 会把界面卡死（本次卡死的直接原因）**：日志里抓到的栈始终停在提示浮层的 `MutationObserver` 回调上。大列表重渲染（长会话、插件列表刷新、主题切换）会一次性写回成百上千个 `title`，每条都算一次 mutation：
+  - 以前对每条记录都做 `:hover` 匹配与 `getBoundingClientRect()`，还逐条进入「安排显示浮层」的流程（各自排定时器、各自接管属性）——叠起来就是几分钟的主线程占用，界面完全不动，ping 也停了。
+  - 现在改成：一批记录里只做 **一次** 指针命中测量（`elementFromPoint`），其余用树上的包含关系判断；每批最多安排 **2 次** 浮层显示；一批记录数封顶。实测 3000 个 `title` 写回从**数十秒降到 20ms 出头**。
+
+## 改进
+
+- **检查更新不再谎报「已是最新」**：之前请求被 GitHub 限流（每 IP 每小时 60 次）时会提示「Pi Desktop 已是最新版本」，同时弹「服务器限制请求频率」——用户以为真没新版本，其实只是没查到。现在失败显示「检查失败」并说明原因；成功结果缓存 6 小时（手动检查最多复用 5 分钟）；识别 `x-ratelimit-reset`，提示「约 HH:MM 恢复」，恢复前不再发请求；4xx 也不再重试（以前一次检查会连打 3 次，把配额耗得更快）。
+
+## 技术细节
+
+- `packages/ui/src/components/overlays/TooltipLayer.vue`：`onGlobalMutations` 增加每批几何测量上限（`elementFromPoint` 缓存）、显示安排上限（`MAX_SHOW_PER_BATCH = 2`）、记录数上限（`MAX_RECORDS_PER_BATCH`）；只处理 `attributeName === "title"` 的记录。
+- `electron/network/rate-limit.ts`（新）：`shouldRetryStatus` / `rateLimitMessage` / `RateLimitError`，不依赖 electron 便于单测。
+- `electron/network/errors.ts`（新）：`normalizeNetworkError` 抽成纯函数。
+- `electron/network/update.ts`：成功的检查结果缓存、限流恢复时间记忆（`blockedUntil`）。
+- `electron/network/http.ts`：识别 `x-ratelimit-*`，4xx 立即失败不重试。
+
+## 校验
+
+- ✅ 新回归：`tooltip.electron.mjs` 里一次写回 3000 个 `title`，断言主线程耗时 < 2000ms（实测 21–23ms；修复前该用例会直接把检查拖到超时）
+- ✅ 反向验证：把「每条记录都量几何」改回去后，日志里同样出现 `target closed while handling command` 与检查超时，说明这条用例确实能拦住这个回归
+- ✅ Electron 冒烟连跑 3 次 PASS（10 项检查，含新增的批量写回用例）
+- ✅ `npm run check` 全绿；新增 `network.check`（4xx 不重试 / 限流提示带恢复时间 / 错误文案）
+
+## 附：这次是怎么定位的
+
+0.2.6 加的抓栈机制在真机卡死 15 秒后自动 `Debugger.pause`，把 V8 调用栈写进 `<安装目录>/logs/app.log`：
+
+```text
+渲染进程卡在（ping 15s 无响应）：
+  #0 V (inline):302:1230
+```
+
+`#0` 只有一个帧、列号每次不同，说明是「一个函数在同一个任务里循环/长时间工作」。用打包后的 bundle 反查该行的列号，落在提示浮层的 mutation 回调上，再按「一次写回 N 个 title」做压测复现——问题就确定了。
+
 ## [0.2.6] - 2026-10-25
 
 这一版聚焦「卡死」：先把现场看清楚——界面卡死时现在会自动留下 V8 调用栈；同时把运行日志搬到程序旁边，卡在「启动中」也不会再无限停留。

@@ -240,9 +240,36 @@ function underPointer(element: Element): boolean {
  * 这时不会再有 mouseover，浏览器照旧弹原生白底提示。这里按指针位置接管，
  * 把「指针下面新出现的 title」也走主题化浮层。
  */
+/**
+ * 一次回调里最多做几次「几何测量」。
+ *
+ * 大列表重渲染会一次性写回成百上千个 title（每条都是一个 MutationRecord），
+ * 而 underPointer 里的 :hover 匹配与 getBoundingClientRect 都会强制重排：
+ * 逐条做就是 O(n) 次同步重排，主线程被占住几分钟——这就是「界面卡死」的成因
+ * （日志里抓到的栈正是这个回调）。现在只对「指针悬停链上」的元素做几何测量，
+ * 其余交给 300ms 的指针探测，爆量时不会再把主线程拖死。
+ */
+/** 一批记录最多处理多少条，超出的丢弃（后面的 300ms 探测会补上） */
+const MAX_RECORDS_PER_BATCH = 4000;
+/**
+ * 一批记录里最多安排几次「显示浮层」。
+ *
+ * 一次重渲染可能同时写回成百上千个 title，逐个走 scheduleShow 会各自排一个
+ * 定时器、各自接管属性，叠起来就是几十秒的主线程占用。指针下面同时只会有一个
+ * 元素，多出来的没有意义。
+ */
+const MAX_SHOW_PER_BATCH = 2;
+
 function onGlobalMutations(records: MutationRecord[]): void {
-  for (const record of records) {
+  // 指针下到底是谁：每批只量一次（elementFromPoint 会触发一次布局），
+  // 之后都用树上的包含关系判断，不再逐条 getBoundingClientRect。
+  let hit: Element | null | undefined;
+  let shows = 0;
+  const limit = Math.min(records.length, MAX_RECORDS_PER_BATCH);
+  for (let index = 0; index < limit; index += 1) {
+    const record = records[index];
     if (record.type === "attributes") {
+      if (record.attributeName && record.attributeName !== "title") continue;
       const element = record.target;
       if (!(element instanceof Element)) continue;
       const title = element.getAttribute("title");
@@ -252,7 +279,20 @@ function onGlobalMutations(records: MutationRecord[]): void {
         continue;
       }
       if (element.closest(".pi-tooltip")) continue;
-      if (!underPointer(element)) continue;
+      // 先做不触发布局的判断：命中指针本身，或命中它的祖先容器（容器被写回 title）。
+      // 不能反过来用 hovered.contains(element)：hovered 可能是 body，那样整批元素
+      // 都会被当成「在悬停链上」，又退回逐条量几何。
+      if (element !== hovered && !element.contains(hovered as Node)) {
+        if (hit === undefined) {
+          hit = null;
+          if (!Number.isNaN(pointerX) && !Number.isNaN(pointerY)) {
+            const node = document.elementFromPoint(pointerX, pointerY);
+            hit = node instanceof Element ? node : null;
+          }
+        }
+        const under = Boolean(hit && (hit === element || hit.contains(element) || element.contains(hit)));
+        if (!under) continue;
+      }
       if (element === active) {
         takeTitle(element);
         activeTitle = title;
@@ -265,7 +305,10 @@ function onGlobalMutations(records: MutationRecord[]): void {
         pendingTitle = title;
         continue;
       }
-      if (element instanceof HTMLElement) scheduleShow(element);
+      if (element instanceof HTMLElement && shows < MAX_SHOW_PER_BATCH) {
+        shows += 1;
+        scheduleShow(element);
+      }
     }
   }
 }

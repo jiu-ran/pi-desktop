@@ -4,7 +4,7 @@ import { mkdir, stat, chmod } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { downloadFileStream, normalizeNetworkError } from "./http.ts";
+import { RateLimitError, downloadFileStream, normalizeNetworkError, rateLimitMessage } from "./http.ts";
 import { pruneUpdateDir } from "../maintenance.ts";
 import {
   fetchStableRelease,
@@ -25,7 +25,14 @@ export interface AppUpdateCheckResult {
   assetName: string;
   sha256?: string;
   error?: string;
+  /** 结果来自缓存（没有真的发请求） */
+  cached?: boolean;
 }
+
+/** 自动检查（启动时）复用多久以内的结果 */
+const AUTO_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
+/** 手动点「检查更新」时最多复用多久以内的结果：避免连点把配额打光 */
+export const MANUAL_CHECK_CACHE_MS = 5 * 60 * 1000;
 
 /**
  * 已准备的应用更新
@@ -48,6 +55,10 @@ export class AppUpdateManager {
   private readonly repo: string;
   private readonly preparedUpdates: Map<string, PreparedAppUpdate> = new Map();
   private downloadInProgress: boolean = false;
+  /** 最近一次成功的检查结果（用于避免被 GitHub 限流） */
+  private lastSuccess: { at: number; current: string; result: AppUpdateCheckResult } | null = null;
+  /** 被限流时的恢复时间：恢复前不再发请求，免得一直踩同一个坑 */
+  private blockedUntil = 0;
   private downloadController: AbortController | null = null;
   private installing = false;
 
@@ -57,10 +68,29 @@ export class AppUpdateManager {
   }
 
   /**
-   * 检查应用更新
+   * 检查应用更新。
+   *
+   * GitHub 的匿名 API 每个 IP 每小时只有 60 次，每次启动都查一遍很容易被限流；
+   * 限流时返回的是「检查失败」，绝不能当成「已是最新」。这里缓存最近一次成功的结果：
+   * 自动检查（启动）复用 6 小时内的结果，手动点检查最多复用 5 分钟。
    */
-  async check(): Promise<AppUpdateCheckResult> {
+  async check({ maxAgeMs }: { maxAgeMs?: number } = {}): Promise<AppUpdateCheckResult> {
     const current = app.getVersion();
+    const ttl = Math.max(0, maxAgeMs ?? AUTO_CHECK_CACHE_MS);
+    const cached = this.lastSuccess;
+    if (cached && ttl > 0 && Date.now() - cached.at < ttl && cached.current === current) {
+      return { ...cached.result, cached: true };
+    }
+    if (Date.now() < this.blockedUntil) {
+      return {
+        current,
+        latest: "",
+        updateAvailable: false,
+        url: "",
+        assetName: "",
+        error: rateLimitMessage(this.blockedUntil),
+      };
+    }
 
     try {
       const release = await fetchStableRelease(this.owner, this.repo);
@@ -88,8 +118,11 @@ export class AppUpdateManager {
         sha256: extractSha256FromDigest(asset?.digest),
       };
 
+      // 只缓存成功结果：失败（限流、断网）不能当作「最近查过」
+      this.lastSuccess = { at: Date.now(), current, result };
       return result;
     } catch (error) {
+      if (error instanceof RateLimitError) this.blockedUntil = error.retryAt;
       return {
         current,
         latest: "",

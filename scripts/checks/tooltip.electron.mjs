@@ -86,11 +86,8 @@ export async function checkTooltipInElectron(win) {
         replacedStripped = true;
         break;
       }
-      const box = replacement.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0) continue;
-      const at = { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
-      // 只报指针位置：再补 mouseover 会让浮层重新走一遍显示流程，数量断言就会闪一下。
-      replacement.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, ...at }));
+      // 不额外补指针/悬停事件：元素位置没变，浮层自己的 300ms 探测就能命中；
+      // 多派发一次会重走显示流程，把「浮层个数」数到中间态。
     }
     // 让浮层的插入/替换落定再数，否则正好数在「旧的收起、新的还没插进来」的中间态
     await wait(350);
@@ -185,7 +182,33 @@ export async function checkTooltipInElectron(win) {
   assert.equal(result.replaced_count, 1, "重渲染后仍只能有一个主题化浮层");
   assert.match(result.replaced_tip, /重渲染后的提示文本/, "重渲染后浮层文案应为新 title");
 
+  // 批量写回 title 不能在主线程里做 O(n) 次强制重排：日志里抓到的卡死栈正是
+  // 这个 MutationObserver 回调，一次重渲染写回上千个 title 就把界面拖住几分钟。
+  const burstMs = await win.webContents.executeJavaScript(`(() => new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.id = 'pi-tooltip-burst';
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:200px';
+    document.body.appendChild(host);
+    const rows = [];
+    for (let i = 0; i < 3000; i += 1) {
+      const row = document.createElement('div');
+      row.textContent = 'row ' + i;
+      host.appendChild(row);
+      rows.push(row);
+    }
+    const started = performance.now();
+    for (const row of rows) row.setAttribute('title', '批量标题 ' + Date.now());
+    // MutationObserver 的回调在微任务里、timer 之前跑：这个 setTimeout 的耗时包含它
+    setTimeout(() => {
+      const elapsed = Math.round(performance.now() - started);
+      host.remove();
+      resolve(elapsed);
+    }, 0);
+  }))()`);
+  console.log(`[tooltip] 3000 个 title 写回耗时 ${burstMs}ms`);
+  assert.ok(burstMs < 2000, `批量写回 title 不能把主线程占住（${burstMs}ms，标准 < 2000ms）`);
+
   console.log(
-    `[tooltip] PASS 主题色 / 单浮层 / 属性写回接管 / 重渲染接管 / 收起还原（真实元素接管=${result.real_intercepted}）`,
+    `[tooltip] PASS 主题色 / 单浮层 / 属性写回接管 / 重渲染接管 / 收起还原 / 批量写回不卡（${burstMs}ms）`,
   );
 }

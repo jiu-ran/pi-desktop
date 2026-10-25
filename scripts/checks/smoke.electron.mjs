@@ -207,9 +207,14 @@ app.whenReady().then(async () => {
   // 日志持久化链路：渲染进程上报 → 主进程 → 固定日志目录下的 *.log（总量上限 100MB）。
   // 界面「卡死」时这份日志是唯一的证据来源，坏掉就等于没法诊断。
   // 目录是启动时定下的（打包版=安装目录/logs，开发=仓库/logs），不跟着项目走。
-  const logInfo = JSON.parse(
-    await win.webContents.executeJavaScript("(async () => JSON.stringify(await window.piDesktop.logsInfo()))()"),
-  );
+  if (win.isDestroyed() || win.webContents.isDestroyed()) {
+    errors.push("窗口在检查过程中被关闭了（后面几项无法验证）");
+  }
+  const logInfo = win.isDestroyed()
+    ? { dir: "", totalBytes: 0, files: [] }
+    : JSON.parse(
+        await win.webContents.executeJavaScript("(async () => JSON.stringify(await window.piDesktop.logsInfo()))()"),
+      );
   const logsDir = logInfo.dir;
   const readLog = (name) => readFile(path.join(logsDir, name), "utf8").catch(() => "");
   try {

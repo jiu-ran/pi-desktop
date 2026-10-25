@@ -404,7 +404,7 @@ export interface PiDesktopBridge {
   locate: (customPath?: string) => Promise<PiLocation>;
   setZoomFactor: (factor: number) => Promise<number>;
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
-  checkAppUpdate: () => Promise<AppUpdateCheck>;
+  checkAppUpdate: (options?: { manual?: boolean }) => Promise<AppUpdateCheck>;
   downloadAppUpdate: () => Promise<PreparedAppUpdate>;
   cancelAppUpdate: () => boolean;
   /** 读取系统剪贴板文本（终端 Ctrl+V 粘贴用，主进程读取避免渲染进程权限差异）。 */

@@ -36,3 +36,29 @@ assert.equal(hostCalls, 0, "取消时不能调用宿主移除项目");
 guarded.dispose();
 workbench.dispose();
 console.log("update-state OK");
+
+// 检查失败不能被当成「已是最新」：以前限流（服务器限制请求频率）会显示成最新版本
+{
+  const { readFile } = await import("node:fs/promises");
+  const workbench = await readFile("packages/ui/src/kernel/workbench.ts", "utf8");
+  assert.ok(
+    /if \(result\.error\) \{[\s\S]*?state\.appUpdate\.error = result\.error/.test(workbench),
+    "检查失败必须记录 error，不能记 checkedAt",
+  );
+  assert.ok(
+    /state\.appUpdate\.error = "";[\s\S]*?state\.appUpdate\.checkedAt = Date\.now\(\);/.test(workbench),
+    "只有成功才更新 checkedAt",
+  );
+  const settings = await readFile("packages/ui/src/components/overlays/SettingsModal.vue", "utf8");
+  assert.ok(
+    /if \(state\.appUpdate\.error\) return \{ tone: "warn", label: "检查失败" \}/.test(settings),
+    "状态文案要区分「检查失败」和「已是最新」",
+  );
+  assert.ok(
+    /if \(result\.error \|\| result\.updateAvailable\) return;/.test(settings),
+    "失败时不能再弹「已是最新版本」",
+  );
+  const update = await readFile("electron/network/update.ts", "utf8");
+  assert.ok(/AUTO_CHECK_CACHE_MS/.test(update) && /lastSuccess/.test(update), "成功结果要缓存，避免被限流");
+  console.log("app update error OK 失败不报最新 / 成功才记时间 / 结果缓存");
+}

@@ -4,17 +4,10 @@ import { createWriteStream } from "node:fs";
 import { rename, unlink } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { RateLimitError, rateLimitMessage } from "./rate-limit.ts";
 
-export function normalizeNetworkError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/[\u3400-\u9fff]/.test(message)) return message;
-  if (/timeout|超时/i.test(message)) return "请求超时，请检查网络连接";
-  if (/aborted|aborterror/i.test(message)) return "操作已取消或请求超时";
-  if (/ssl|certificate/i.test(message)) return "SSL 证书验证失败，请检查网络环境";
-  if (/HTTP (403|429)/.test(message)) return "服务器限制请求频率，请稍后重试";
-  if (/HTTP 404/.test(message)) return "下载资源不存在或已被删除";
-  return "网络请求失败，请检查网络或代理设置";
-}
+export { RateLimitError, rateLimitMessage, shouldRetryStatus } from "./rate-limit.ts";
+export { normalizeNetworkError } from "./errors.ts";
 
 export interface RequestOptions {
   headers?: Record<string, string>;
@@ -50,11 +43,25 @@ export async function requestJson<T = any>(url: string, options: RequestJsonOpti
     const timer = setTimeout(abort, timeout);
     try {
       const response = await net.fetch(url, { headers: { "User-Agent": "Pi-Desktop", ...options.headers }, signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (!response.ok) {
+        if (response.status === 403 || response.status === 429) {
+          const reset = Number(response.headers.get("x-ratelimit-reset") ?? 0);
+          const retryAt = Number.isFinite(reset) && reset > 0 ? reset * 1000 : 0;
+          if (response.headers.get("x-ratelimit-remaining") === "0" || retryAt > Date.now()) {
+            throw new RateLimitError(response.status, retryAt, rateLimitMessage(retryAt));
+          }
+        }
+        const error: any = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        error.status = response.status;
+        throw error;
+      }
       return await response.json() as T;
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
+      // 4xx 立刻失败：限流时重试只会让配额更快打光
+      const status = Number((error as any)?.status ?? 0);
+      if (status >= 400 && status < 500) throw error;
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
     if (attempt < maxRetries) await delay(retryDelay * (attempt + 1), signal);
   }

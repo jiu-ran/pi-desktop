@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
 import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
-import { createAppUpdateManager } from "./network/update.ts";
+import { createAppUpdateManager, MANUAL_CHECK_CACHE_MS } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
 import { logPerfLine } from "./perf-log.ts";
 import { isWritableDir, log, logEvent, logStore, useAppLogs } from "./logger.ts";
@@ -614,7 +614,9 @@ app.whenReady().then(() => {
   if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => locatePi(customPath));
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
-  handle("app:check-update", () => appUpdateManager.check());
+  handle("app:check-update", (options: { manual?: boolean } = {}) =>
+    appUpdateManager.check({ maxAgeMs: options?.manual ? MANUAL_CHECK_CACHE_MS : undefined }),
+  );
   handle("app:download-update", () => appUpdateManager.download());
   handle("app:cancel-update", () => appUpdateManager.cancelDownload());
   // 终端 Ctrl+V 读取系统剪贴板；渲染进程的 navigator.clipboard.readText 在部分平台上需要额外权限。
