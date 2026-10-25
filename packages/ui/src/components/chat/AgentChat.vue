@@ -7,6 +7,7 @@ import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
 import { planQueueView } from "../../shared/queue-view.ts";
+import { FOLLOW_THRESHOLD_PX, isAtBottom, isSelfScroll, shouldRunFollowFrame, wantsToPauseFollow } from "../../shared/autoscroll.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
 import { searchableText } from "../../shared/search-text.ts";
@@ -28,9 +29,14 @@ let searchFocusToken = 0;
 const activityOverrides = ref<Record<string, boolean>>({});
 let scrollFrame = 0;
 let scrollForce = false;
-let ignoreScroll = false;
-let ignoreScrollTimer = 0;
 let settleTimer = 0;
+/** 我们上一次程序化设置的 scrollTop：用来区分「自己滚的」和「用户滚的」 */
+let lastAutoScrollTop = Number.NaN;
+/**
+ * 用户「想停下来看历史」的版本号。上滑一次就 +1，
+ * 让已经排队的贴底帧作废（否则那一帧仍会把画面拉回底部）。
+ */
+let followEpoch = 0;
 const userScrolled = ref(false);
 // 用户上翻后记录已看过的块数，用于「N 条新消息」提示。
 const seenBlocks = ref(0);
@@ -153,26 +159,23 @@ const canLoadMore = computed(() => {
 });
 
 function setScrollTop(el: HTMLElement, top: number): void {
-  // 程序化滚动也会触发 scroll 事件，不能让 onScroll 把“贴底”误判成用户上翻，
-  // 否则首屏还没滚到底就被标记成 stick=false。
-  ignoreScroll = true;
   el.scrollTop = top;
-  if (ignoreScrollTimer) window.clearTimeout(ignoreScrollTimer);
-  ignoreScrollTimer = window.setTimeout(() => {
-    ignoreScroll = false;
-    ignoreScrollTimer = 0;
-  }, 120);
+  // 记下「实际生效的值」（可能被 clamp）：程序化滚动同样会触发 scroll 事件，
+  // 用计时器屏蔽会误伤用户的上滑（流式输出时几乎一直处于屏蔽窗口内）。
+  lastAutoScrollTop = el.scrollTop;
 }
 
 function onScroll(): void {
   const el = scroller.value;
   if (!el) return;
-  if (ignoreScroll) return;
+  // 位置还停在我们上次设置的地方 → 这次事件是自己滚出来的，不算用户意图。
+  if (isSelfScroll(el.scrollTop, lastAutoScrollTop)) return;
   // 刚打开会话时 hydrate / DOM 替换会触发非用户滚动，不能据此放弃贴底。
   // 用户一旦用滚轮、触摸、滚动条或键盘滚动，userScrolled 才置真。
   if (!userScrolled.value) return;
-  
-  stick.value = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+
+  stick.value = isAtBottom(el.scrollTop, el.scrollHeight, el.clientHeight, FOLLOW_THRESHOLD_PX);
+  if (!stick.value) cancelPendingFollow();
   syncOutline();
   
   // 检测是否滚到顶部，触发加载更多
@@ -182,17 +185,29 @@ function onScroll(): void {
   }
 }
 
+/** 用户已经决定停下看历史：让排队中的贴底帧作废。 */
+function cancelPendingFollow(): void {
+  followEpoch += 1;
+}
+
 function scrollToBottom(force = false): void {
   if (force) stick.value = true;
   if (!force && !stick.value) return;
   scrollForce ||= force;
   if (scrollFrame) return;
+  const epochAtSchedule = followEpoch;
   const schedule = typeof requestAnimationFrame === "function"
     ? requestAnimationFrame
     : (callback: FrameRequestCallback) => window.setTimeout(callback, 16);
   scrollFrame = schedule(() => {
     scrollFrame = 0;
-    const shouldScroll = scrollForce || stick.value;
+    // 排上这一帧之后用户可能刚上滑过：那一帧不能再把画面拉回底部
+    const shouldScroll = shouldRunFollowFrame({
+      forced: scrollForce,
+      stick: stick.value,
+      epochAtSchedule,
+      epoch: followEpoch,
+    });
     scrollForce = false;
     if (!shouldScroll) return;
     void nextTick(() => {
@@ -217,6 +232,21 @@ function settleAtBottom(): void {
 
 function markUserScroll(): void {
   userScrolled.value = true;
+}
+
+/**
+ * 滚轮：向上滚立刻停止跟随。
+ *
+ * 不能等 scroll 事件 —— 流式输出时内容还在长高，那一次 scroll 事件可能落在
+ * 我们自己滚动之后的位置上，看起来像「自己滚的」而被忽略，画面于是又弹回底部。
+ */
+function onWheel(event: WheelEvent): void {
+  userScrolled.value = true;
+  const el = scroller.value;
+  if (!el) return;
+  if (!wantsToPauseFollow(event.deltaY, el.scrollTop, el.scrollHeight, el.clientHeight)) return;
+  stick.value = false;
+  cancelPendingFollow();
 }
 
 /** 只把“点在滚动条上”当成用户滚动，避免点卡片/复制按钮也取消自动贴底。 */
@@ -352,7 +382,7 @@ function clearHistoryFeedback(): void {
 function bindScroller(el: HTMLElement | null): void {
   if (boundScroller === el) return;
   if (boundScroller) {
-    boundScroller.removeEventListener("wheel", markUserScroll);
+    boundScroller.removeEventListener("wheel", onWheel);
     boundScroller.removeEventListener("touchmove", markUserScroll);
     boundScroller.removeEventListener("pointerdown", onPointerDown);
   }
@@ -360,7 +390,7 @@ function bindScroller(el: HTMLElement | null): void {
   resizeObserver = null;
   boundScroller = el;
   if (!el) return;
-  el.addEventListener("wheel", markUserScroll, { passive: true });
+  el.addEventListener("wheel", onWheel, { passive: true });
   el.addEventListener("touchmove", markUserScroll, { passive: true });
   el.addEventListener("pointerdown", onPointerDown);
   const inner = el.firstElementChild;
@@ -381,6 +411,14 @@ watch(scroller, (el) => bindScroller((el as HTMLElement | null) ?? null), {
   immediate: true,
   flush: "post",
 });
+
+// 空会话时 .timeline 里还没有内容容器，高度观察者挂不上；等内容出现后重新挂一次，
+// 否则这个会话的「自动贴底」会一直是哑的（首条消息到达后就不再跟随）。
+watch(
+  () => ws.value?.blocks.length ?? 0,
+  () => nextTick(() => bindScroller((scroller.value as HTMLElement | null) ?? null)),
+  { flush: "post" },
+);
 
 let overviewTimer: number | null = null;
 function scheduleOverviewRefresh(): void {
@@ -426,7 +464,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onScrollKey);
   window.removeEventListener("focus", onWindowFocus);
   bindScroller(null);
-  if (ignoreScrollTimer) window.clearTimeout(ignoreScrollTimer);
   if (settleTimer) window.clearTimeout(settleTimer);
   clearHistoryFeedback();
   if (scrollFrame) {
