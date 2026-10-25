@@ -13,10 +13,18 @@ import { useKernel } from "../../kernel/use-kernel.ts";
 import {
   appSettings,
   closeSettingsModal,
+  DEFAULT_SETTINGS,
   resetSettingsToDefault,
   settingsModalState,
   type SettingsTabId,
 } from "../../services/settings.ts";
+import {
+  ACCENTS,
+  COLUMN_WIDTHS,
+  RADIUS_PRESETS,
+  THEME_MODES,
+  type ThemeMode,
+} from "../../shared/appearance.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
 import { DEFAULT_LOG_MAX_BYTES, LOG_MAX_CHOICES_MB } from "../../shared/log-limit.ts";
 import { formatBytes as formatSize } from "../../shared/attachments.ts";
@@ -37,7 +45,7 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
     id: "appearance",
     label: "外观与布局",
     icon: icons.palette,
-    desc: "深浅色主题、字号排版与各工作区面板默认宽度调节",
+    desc: "配色模式、强调色、圆角、字号排版与各工作区面板宽度",
   },
   {
     id: "terminal",
@@ -217,6 +225,38 @@ const pluginAreaLabels: Record<PluginArea, string> = {
 
 function togglePlugin(id: string): void {
   plugins.toggle(id);
+}
+
+const themeModeHint = computed(() => {
+  const mode = THEME_MODES.find((item) => item.id === appSettings.themeMode) ?? THEME_MODES[0];
+  const actual = state.theme === "light" ? "浅色" : "深色";
+  return mode.id === "system" ? `${mode.hint} · 当前 ${actual}` : mode.hint;
+});
+const accentLabel = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).label);
+const accentColor = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).color);
+const radiusLabel = computed(() => (RADIUS_PRESETS.find((item) => item.id === appSettings.radius) ?? RADIUS_PRESETS[1]).label);
+const columnWidthLabel = computed(
+  () => (COLUMN_WIDTHS.find((item) => item.id === appSettings.columnWidth) ?? COLUMN_WIDTHS[1]).label,
+);
+
+/** 「恢复默认外观」只还原外观相关项：不动终端、Agent、MCP 等设置。 */
+const APPEARANCE_KEYS = [
+  "themeMode",
+  "accent",
+  "radius",
+  "columnWidth",
+  "reduceMotion",
+  "messageDensity",
+  "uiFontSize",
+  "codeFontSize",
+  "uiZoom",
+] as const satisfies ReadonlyArray<keyof typeof DEFAULT_SETTINGS>;
+
+function resetAppearanceNow(): void {
+  for (const key of APPEARANCE_KEYS) {
+    (appSettings as any)[key] = DEFAULT_SETTINGS[key];
+  }
+  bus.emit("notify", { level: "info", text: "已恢复默认外观" });
 }
 
 function resetAreaWidths(): void {
@@ -1013,63 +1053,202 @@ onBeforeUnmount(() => {
 
           <!-- 2. 外观与布局 -->
           <template v-else-if="settingsModalState.tab === 'appearance'">
+                        <div class="settings-group">
+              <div class="settings-group-head">
+                <span class="settings-group-title">主题</span>
+                <button type="button" class="btn ghost small" @click="resetAppearanceNow">
+                  <span class="settings-inline-icon" v-html="icons.refresh" />恢复默认外观
+                </button>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>配色模式</strong>
+                  <span>{{ themeModeHint }}</span>
+                </div>
+                <div class="settings-theme-tiles">
+                  <button
+                    v-for="item in THEME_MODES"
+                    :key="item.id"
+                    type="button"
+                    class="settings-theme-tile"
+                    :class="{ active: appSettings.themeMode === item.id }"
+                    :title="item.hint"
+                    @click="appSettings.themeMode = item.id"
+                  >
+                    <span class="settings-theme-art" :data-scheme="item.id">
+                      <span class="settings-theme-art-head" />
+                      <span class="settings-theme-art-line" />
+                      <span class="settings-theme-art-line short" />
+                    </span>
+                    {{ item.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>强调色</strong>
+                  <span>按钮、选中态、链接与高亮块的主色 · 当前 {{ accentLabel }}</span>
+                </div>
+                <div class="settings-swatches">
+                  <button
+                    v-for="item in ACCENTS"
+                    :key="item.id"
+                    type="button"
+                    class="settings-swatch"
+                    :class="{ active: appSettings.accent === item.id }"
+                    :style="{ background: item.color }"
+                    :title="item.label"
+                    :aria-label="item.label"
+                    @click="appSettings.accent = item.id"
+                  />
+                </div>
+              </div>
+
+              <!-- 实时预览：这层在同一个文档里，强调色 / 圆角 / 字号一变它立刻跟着变 -->
+              <div class="settings-preview">
+                <div class="settings-preview-head">
+                  <span>实时预览</span>
+                  <span class="settings-preview-hint">改任何一项都会立即生效并保存</span>
+                </div>
+                <div class="settings-preview-body">
+                  <div class="settings-preview-row">
+                    <span class="settings-preview-bubble">对话里的用户消息长这样</span>
+                  </div>
+                  <div class="settings-preview-row">
+                    <span class="settings-preview-chip">accent</span>
+                    <code>const accent = "{{ accentColor }}"</code>
+                    <span class="settings-preview-pill">就绪</span>
+                  </div>
+                  <div class="settings-preview-row">
+                    <span class="settings-preview-card">工具调用卡片 · 圆角、边框与字号跟随设置</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="settings-group">
-              <div class="settings-group-title">主题与视觉排版</div>
+              <div class="settings-group-title">排版</div>
 
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>界面主题</strong>
-                  <span>在深色（JetBrains Dark）与浅色模式之间切换</span>
+                  <strong>界面字号</strong>
+                  <span>全局界面与对话正文字号 · 当前 {{ appSettings.uiFontSize }}px</span>
                 </div>
-                <select class="settings-select" :value="state.theme" @change="workbench.setTheme(($event.target as HTMLSelectElement).value as 'dark' | 'light')">
-                  <option value="dark">深色模式</option>
-                  <option value="light">浅色模式</option>
-                </select>
+                <div class="settings-segments">
+                  <button
+                    v-for="sz in [12, 13, 14, 15]"
+                    :key="sz"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.uiFontSize === sz }"
+                    @click="appSettings.uiFontSize = sz"
+                  >{{ sz }}</button>
+                </div>
               </div>
 
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>对话排版紧凑度</strong>
-                  <span>调整 Agent 对话区消息流与工具卡片的垂直间距</span>
+                  <strong>代码字号</strong>
+                  <span>代码块、Diff 视图与命令输出字号 · 当前 {{ appSettings.codeFontSize }}px</span>
                 </div>
-                <select v-model="appSettings.messageDensity" class="settings-select">
-                  <option value="comfortable">舒适</option>
-                  <option value="compact">紧凑</option>
-                </select>
+                <div class="settings-segments">
+                  <button
+                    v-for="sz in [11.5, 12.5, 13.5, 14.5]"
+                    :key="sz"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.codeFontSize === sz }"
+                    @click="appSettings.codeFontSize = sz"
+                  >{{ sz }}</button>
+                </div>
               </div>
 
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>界面字体大小</strong>
-                  <span>全局界面与对话正文字号（当前 {{ appSettings.uiFontSize }}px）</span>
+                  <strong>消息密度</strong>
+                  <span>调整对话区消息与工具卡片的垂直间距</span>
                 </div>
-                <select v-model.number="appSettings.uiFontSize" class="settings-select">
-                  <option v-for="sz in [12, 13, 14, 15]" :key="sz" :value="sz">{{ sz }}px</option>
-                </select>
+                <div class="settings-segments">
+                  <button
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.messageDensity === 'comfortable' }"
+                    @click="appSettings.messageDensity = 'comfortable'"
+                  >舒适</button>
+                  <button
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.messageDensity === 'compact' }"
+                    @click="appSettings.messageDensity = 'compact'"
+                  >紧凑</button>
+                </div>
               </div>
 
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>代码与终端字体大小</strong>
-                  <span>代码块、Diff 视图与 Bash 输出字号（当前 {{ appSettings.codeFontSize }}px）</span>
+                  <strong>圆角</strong>
+                  <span>卡片、输入框、弹层的圆角大小 · 当前 {{ radiusLabel }}</span>
                 </div>
-                <select v-model.number="appSettings.codeFontSize" class="settings-select">
-                  <option v-for="sz in [11.5, 12.5, 13.5, 14.5]" :key="sz" :value="sz">{{ sz }}px</option>
-                </select>
+                <div class="settings-segments">
+                  <button
+                    v-for="item in RADIUS_PRESETS"
+                    :key="item.id"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.radius === item.id }"
+                    @click="appSettings.radius = item.id"
+                  >{{ item.label }}</button>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>对话列宽</strong>
+                  <span>消息正文与输入框的最大宽度，窗口更宽时留白更多 · 当前 {{ columnWidthLabel }}</span>
+                </div>
+                <div class="settings-segments">
+                  <button
+                    v-for="item in COLUMN_WIDTHS"
+                    :key="item.id"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.columnWidth === item.id }"
+                    @click="appSettings.columnWidth = item.id"
+                  >{{ item.label }}</button>
+                </div>
               </div>
 
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>界面缩放</strong>
-                  <span>整体界面缩放比例，替代快捷键缩放（当前 {{ Math.round(appSettings.uiZoom * 100) }}%）</span>
+                  <span>整体缩放比例，替代快捷键缩放 · 当前 {{ Math.round(appSettings.uiZoom * 100) }}%</span>
                 </div>
-                <select v-model.number="appSettings.uiZoom" class="settings-select">
-                  <option v-for="z in [0.8, 0.9, 1, 1.1, 1.25, 1.5]" :key="z" :value="z">{{ Math.round(z * 100) }}%</option>
-                </select>
+                <div class="settings-segments">
+                  <button
+                    v-for="z in [0.9, 1, 1.1, 1.25]"
+                    :key="z"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: Math.abs(appSettings.uiZoom - z) < 0.001 }"
+                    @click="appSettings.uiZoom = z"
+                  >{{ Math.round(z * 100) }}%</button>
+                </div>
               </div>
             </div>
 
             <div class="settings-group">
+              <div class="settings-group-title">动效</div>
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>关闭界面动效</strong>
+                  <span>去掉弹层过渡、加载动画与平滑滚动；系统开了「减少动态效果」时建议打开</span>
+                </div>
+                <input v-model="appSettings.reduceMotion" type="checkbox" class="settings-switch" />
+              </label>
+            </div>
+<div class="settings-group">
               <div class="settings-group-head">
                 <span class="settings-group-title">工作区面板布局宽度</span>
                 <button type="button" class="btn ghost small" @click="resetAreaWidths">恢复默认宽度</button>

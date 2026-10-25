@@ -118,11 +118,18 @@ export const THEMES: ThemeSpec[] = [
   },
 ];
 
-export function setupTheme(workbench: { state: { theme: string }; setTheme: (id: string) => void }, host?: any) {
+export function setupTheme(
+  workbench: { state: { theme: string }; setTheme: (id: string) => void },
+  host?: any,
+  onThemePinned?: (mode: "dark" | "light") => void,
+) {
   let stopWatch: (() => void) | null = null;
 
   function toggleTheme(): void {
     workbench.setTheme(workbench.state.theme === "dark" ? "light" : "dark");
+    // 标题栏切换等同于「强制深色/浅色」：设置页里的主题模式要跟着走，
+    // 否则外观 watcher 会把用户刚切的主题又改回去
+    onThemePinned?.(workbench.state.theme === "dark" ? "dark" : "light");
   }
 
   function currentTheme(): ThemeSpec {

@@ -1,8 +1,20 @@
-import { reactive, watch, watchEffect } from "vue";
+import { reactive, ref, watch, watchEffect } from "vue";
 import type { EventBus } from "../kernel/event-bus.ts";
 import type { Workbench } from "../kernel/workbench.ts";
-import { writeStorage } from "../shared/storage.ts";
+import { readStorage, writeStorage } from "../shared/storage.ts";
 import { normalizeLogMaxBytes } from "../shared/log-limit.ts";
+import {
+  appearanceStyle,
+  normalizeAccent,
+  normalizeColumnWidth,
+  normalizeRadius,
+  normalizeThemeMode,
+  resolveScheme,
+  type AccentId,
+  type ColumnWidthId,
+  type RadiusId,
+  type ThemeMode,
+} from "../shared/appearance.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
@@ -61,6 +73,16 @@ export interface AppSettings {
   uiZoom: number;
   /** 运行日志总量上限（字节），设置页给几档可选 */
   logMaxBytes: number;
+  /** 主题模式：跟随系统 / 强制深色 / 强制浅色 */
+  themeMode: ThemeMode;
+  /** 强调色预设 */
+  accent: AccentId;
+  /** 圆角风格 */
+  radius: RadiusId;
+  /** 对话正文列宽 */
+  columnWidth: ColumnWidthId;
+  /** 关闭界面动效（弹层、过渡、动画） */
+  reduceMotion: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -85,6 +107,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   messageDensity: "comfortable",
   uiZoom: 1,
   logMaxBytes: 8 * 1024 * 1024,
+  // 默认仍是深色（沿用产品原本的样子）；想跟系统走由用户自己选「跟随系统」
+  themeMode: "dark",
+  accent: "default",
+  radius: "default",
+  columnWidth: "default",
+  reduceMotion: false,
 }
 
 function loadSavedSettings(): AppSettings {
@@ -124,6 +152,15 @@ function loadSavedSettings(): AppSettings {
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
       uiZoom: Math.min(3, Math.max(0.5, Number(parsed.uiZoom) || DEFAULT_SETTINGS.uiZoom)),
       logMaxBytes: normalizeLogMaxBytes(parsed.logMaxBytes),
+      // 老版本只存了 "pi-desktop.theme"（dark/light），没有 themeMode：
+      // 迁移成「锁定当时那套配色」，别让升级后突然跟着系统变成浅色
+      themeMode: parsed.themeMode
+        ? normalizeThemeMode(parsed.themeMode)
+        : normalizeThemeMode(readStorage("pi-desktop.theme") ?? "dark"),
+      accent: normalizeAccent(parsed.accent),
+      radius: normalizeRadius(parsed.radius),
+      columnWidth: normalizeColumnWidth(parsed.columnWidth),
+      reduceMotion: parsed.reduceMotion === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -168,6 +205,48 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
       root.style.setProperty("--ui-font-size", `${appSettings.uiFontSize}px`);
       root.style.setProperty("--code-font-size", `${appSettings.codeFontSize}px`);
       root.dataset.density = appSettings.messageDensity;
+    }));
+  }
+
+  // ---------- 外观：主题模式 / 强调色 / 圆角 / 列宽 / 动效 ----------
+  /** 系统深色偏好；跟随系统时要跟着它一起变。 */
+  const prefersDark = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+  // 必须是 ref：系统偏好变化要能触发下面重新计算主题
+  const systemDark = ref(prefersDark?.matches ?? true);
+
+  if (typeof document !== "undefined") {
+    // 主题模式决定实际配色；切到「跟随系统」时监听系统偏好变化
+    disposers.push(watchEffect(() => {
+      const scheme = resolveScheme(appSettings.themeMode, systemDark.value);
+      if (workbench.state.theme !== scheme) workbench.setTheme(scheme);
+    }));
+    const onSystemSchemeChange = (event: MediaQueryListEvent) => {
+      systemDark.value = event.matches;
+    };
+    prefersDark?.addEventListener?.("change", onSystemSchemeChange);
+    disposers.push(() => prefersDark?.removeEventListener?.("change", onSystemSchemeChange));
+    // 兜底轮询：个别环境下 matchMedia 的 change 事件不触发（CDP 模拟、
+    // 某些 Linux 桌面），跟随系统仍然要能切过去。系统偏好变化很慢，1.5s 一次足够。
+    const pollSystemScheme = setInterval(() => {
+      if (!prefersDark) return;
+      if (prefersDark.matches !== systemDark.value) systemDark.value = prefersDark.matches;
+    }, 1500);
+    disposers.push(() => clearInterval(pollSystemScheme));
+
+    disposers.push(watchEffect(() => {
+      const root = document.documentElement;
+      const style = appearanceStyle({
+        themeMode: appSettings.themeMode,
+        accent: appSettings.accent,
+        radius: appSettings.radius,
+        columnWidth: appSettings.columnWidth,
+        reduceMotion: appSettings.reduceMotion,
+        scheme: workbench.state.theme === "light" ? "light" : "dark",
+      });
+      for (const [key, value] of Object.entries(style.vars)) root.style.setProperty(key, value);
+      for (const [key, value] of Object.entries(style.dataset)) root.dataset[key] = value;
     }));
   }
 

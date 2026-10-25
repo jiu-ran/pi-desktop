@@ -56,7 +56,9 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
       customArgs: [...appSettings.terminalCustomArgs],
     }),
   });
-  const theme = setupTheme(workbench, host);
+  const theme = setupTheme(workbench, host, (mode) => {
+    appSettings.themeMode = mode;
+  });
   const settings = setupSettings(workbench, bus);
   const commandRegistry = createCommandRegistry();
   const stopExtensionUi = setupExtensionUi(bus, host);

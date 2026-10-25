@@ -70,6 +70,16 @@
   color-scheme: dark;
 }
 
+/* 外观设置里的「关闭界面动效」：弹层过渡、加载动画、平滑滚动一并停掉 */
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
 * { box-sizing: border-box; }
 
 html, body, #app {

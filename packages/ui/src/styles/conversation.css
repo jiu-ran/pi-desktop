@@ -1,6 +1,7 @@
 /* 对话舞台：尺寸与配色对照 JetBrains Air 实际界面 */
 .conversation, .area-chat {
-  --column: 760px;
+  /* 外观设置里的「对话列宽」写 --chat-column；没设置时回落到 760px */
+  --column: var(--chat-column, 760px);
   position: relative;
   display: flex;
   flex-direction: column;

@@ -8,6 +8,7 @@ import { checkNetworkInElectron } from "./network.electron.mjs";
 import { checkEditorInElectron } from "./editor.electron.mjs";
 import { checkGitUiInElectron } from "./git-ui.electron.mjs";
 import { checkTooltipInElectron } from "./tooltip.electron.mjs";
+import { checkAppearanceInElectron } from "./appearance.electron.mjs";
 import { checkArgHintInElectron } from "./arg-hint.electron.mjs";
 import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
 import { checkSubagentInElectron } from "./subagent.electron.mjs";
@@ -200,6 +201,7 @@ app.whenReady().then(async () => {
       await runCheck("tooltip", () => checkTooltipInElectron(win));
       await runCheck("composer-draft", () => checkComposerDraftInElectron(win));
       await runCheck("arg-hint", () => checkArgHintInElectron(win));
+      await runCheck("appearance", () => checkAppearanceInElectron(win));
       await runCheck("subagent", () => checkSubagentInElectron(win));
       await runCheck("session-quote", () => checkSessionQuoteInElectron(win));
       await runCheck("queue", () => checkQueueInElectron(win));
