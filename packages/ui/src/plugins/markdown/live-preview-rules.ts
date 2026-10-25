@@ -88,16 +88,22 @@ function linkHasTarget(node: SyntaxNode): boolean {
  * 去掉首尾包裹标记后的内容范围（给加粗/斜体/链接这类套样式用）。
  * 只取「非标记子节点」的首尾，避免样式范围和收起装饰重叠。
  */
-function innerRange(node: SyntaxNode): { from: number; to: number } {
-  let from = -1;
-  let to = -1;
+function innerRange(node: SyntaxNode, name: string): { from: number; to: number } {
+  const marks: SyntaxNode[] = [];
+  const content: SyntaxNode[] = [];
   for (let child = node.firstChild; child; child = child.nextSibling) {
-    if (WRAP_MARKS.has(child.name)) continue;
-    if (from < 0) from = child.from;
-    to = child.to;
+    if (WRAP_MARKS.has(child.name)) marks.push(child);
+    else content.push(child);
   }
-  if (from < 0 || to <= from) return { from: node.from, to: node.to };
-  return { from, to };
+  if (content.length > 0) return { from: content[0].from, to: content[content.length - 1].to };
+  // 链接 / 图片：标签在开头标记和紧跟着的 `]` 之间
+  if (name === "Link" || name === "Image") {
+    if (marks.length >= 2) return { from: marks[0].to, to: marks[1].from };
+    return { from: node.from, to: node.to };
+  }
+  // 强调 / 行内代码 / 删除线：内容不会解析成子节点，取首尾标记之间
+  if (marks.length >= 2) return { from: marks[0].to, to: marks[marks.length - 1].from };
+  return { from: node.from, to: node.to };
 }
 
 /** 标记后面紧跟的空格一并收起，避免行首留白 */
@@ -181,7 +187,7 @@ export function collectLiveSpans(tree: Tree, ctx: LiveRulesContext): LiveSpan[] 
       // 没解析到地址的 [xxx] 是普通文字：既不变蓝、也不收方括号
       if ((name === "Link" || name === "Image") && !linkHasTarget(node)) return false;
       if (styled[name]) {
-        const inner = innerRange(node);
+        const inner = innerRange(node, name);
         if (inner.to > inner.from) spans.push(span({ from: inner.from, to: inner.to, cls: styled[name] }));
       }
 
@@ -203,7 +209,10 @@ export function collectLiveSpans(tree: Tree, ctx: LiveRulesContext): LiveSpan[] 
           spans.push(span({ from: ref.from, to: ref.to, cls: "cm-md-mark" }));
           return undefined;
         }
-        spans.push(span({ from: ref.from, to: widenOverSpace(ctx, ref.from, ref.to), hide: true }));
+        // 行首标记（#、>、-）后面的空格一并收起，避免行首留白；
+        // 行内收尾标记后面的空格要留着，否则「粗体 斜体」会粘成一个词
+        const leading = name === "HeaderMark" || name === "QuoteMark" || name === "ListMark";
+        spans.push(span({ from: ref.from, to: leading ? widenOverSpace(ctx, ref.from, ref.to) : ref.to, hide: true }));
       }
       return undefined;
     },

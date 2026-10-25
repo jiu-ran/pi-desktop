@@ -203,7 +203,8 @@ async function renderMermaid(code: string, host: HTMLElement): Promise<void> {
 
 function buildDecorations(state: EditorState): DecorationSet {
   const ranges = state.selection.ranges;
-  const text = state.doc.toString();
+  // 不整篇 toString：大文档里每次移动光标都复制一遍太浪费
+  const doc = state.doc;
   const spans = collectLiveSpans(syntaxTree(state), {
     isActiveLine: (pos) => {
       const line = state.doc.lineAt(pos);
@@ -214,14 +215,14 @@ function buildDecorations(state: EditorState): DecorationSet {
       const line = state.doc.lineAt(pos);
       return { from: line.from, to: line.to };
     },
-    charAt: (pos) => (pos >= 0 && pos < text.length ? text[pos] : ""),
-    slice: (from, to) => text.slice(from, to),
+    charAt: (pos) => (pos >= 0 && pos < doc.length ? doc.sliceString(pos, pos + 1) : ""),
+    slice: (from, to) => doc.sliceString(from, to),
   });
 
   const decorations: Range<Decoration>[] = [];
   for (const span of spans) {
     if (span.block || span.widget) {
-      const widget = widgetFor(span, text.slice(span.from, span.to));
+      const widget = widgetFor(span, doc.sliceString(span.from, span.to));
       if (widget) decorations.push(widget.range(span.from, span.to));
       continue;
     }
