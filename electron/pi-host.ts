@@ -2079,7 +2079,14 @@ export class PiHost {
     if (method === "switchSession") {
       const targetFile = String(restored[0] ?? "");
       if (!targetFile) throw new Error("未指定要切换的会话文件");
-      assertSessionFile(cwd, targetFile);
+      try {
+        assertSessionFile(cwd, targetFile);
+      } catch {
+        // 会话文件不在这个项目的会话目录里：说明它属于另一个项目。
+        // 这里必须给出能照着做的提示（原来复用了删除的守卫文案，用户完全看不懂）。
+        const owner = path.basename(path.dirname(String(targetFile)));
+        throw new Error(`这个会话属于另一个项目（${owner}），请从左侧对应的项目里打开`);
+      }
       const existing = pool.workers.get(normSessionFile(targetFile));
       if (existing) {
         pool.client = existing.client;

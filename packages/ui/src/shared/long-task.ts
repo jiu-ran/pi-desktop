@@ -30,6 +30,55 @@ export function longTaskLabel(entry: { name?: string }): string {
   return name === "" || name === "self" || name === "unknown" ? "" : name.slice(0, 60);
 }
 
+/** 两次心跳间隔超过该值，说明渲染进程有一段时间根本没跑定时器（卡住或接近卡住）。 */
+export const LAG_THRESHOLD_MS = 3000;
+/** 同一次卡顿只记一条：恢复后补记，用来定位「什么时候开始卡的」。 */
+export const LAG_MIN_INTERVAL_MS = 10_000;
+
+/** 该不该记录这次停摆：低于阈值不报，和上一条太近也不报。 */
+export function shouldReportLag(
+  drift: number,
+  lastReportAt: number,
+  now: number,
+  threshold = LAG_THRESHOLD_MS,
+  minInterval = LAG_MIN_INTERVAL_MS,
+): boolean {
+  if (!Number.isFinite(drift) || drift < threshold) return false;
+  return now - lastReportAt >= minInterval;
+}
+
+/**
+ * 心跳看门狗：每秒比对一次「应该过去多久」与「实际过去多久」。
+ *
+ * 用于死循环是没用的（定时器不会触发），但能抓到「卡了 3–30 秒又自己恢复」
+ * 或者「主进程被阻塞」这类间歇卡顿，并在恢复后立刻留一条带时间戳的记录。
+ */
+export function installLagWatchdog(options: {
+  report: (driftMs: number, at: string) => void;
+  intervalMs?: number;
+  threshold?: number;
+  minInterval?: number;
+}): () => void {
+  const interval = options.intervalMs ?? 1000;
+  const threshold = options.threshold ?? LAG_THRESHOLD_MS;
+  const minInterval = options.minInterval ?? LAG_MIN_INTERVAL_MS;
+  let expected = Date.now() + interval;
+  let lastReportAt = 0;
+  const timer = setInterval(() => {
+    const now = Date.now();
+    const drift = now - expected;
+    expected = now + interval;
+    if (!shouldReportLag(drift, lastReportAt, now, threshold, minInterval)) return;
+    lastReportAt = now;
+    try {
+      options.report(drift, new Date(now - drift).toISOString());
+    } catch {
+      // 记录失败不能影响界面
+    }
+  }, interval);
+  return () => clearInterval(timer);
+}
+
 export interface LongTaskReporterOptions {
   report: (ms: number, label: string) => void;
   threshold?: number;

@@ -426,6 +426,7 @@ export interface PiDesktopBridge {
   reportLongTask?: (ms: number, label?: string) => void;
   /** 前端日志持久化（logs/renderer.log） */
   logEvent?: (level: "debug" | "info" | "warn" | "error", scope: string, message: string) => void;
+
   logsInfo?: () => Promise<LogSummary>;
   logsClear?: () => Promise<LogSummary>;
   logsOpen?: () => Promise<boolean>;

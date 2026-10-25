@@ -334,6 +334,137 @@ function isAllowedSender(event: Electron.IpcMainInvokeEvent): boolean {
   return isAllowedRendererUrl(frame.url);
 }
 
+/** 渲染进程卡死时抓调用栈：CDP 的 Debugger.pause 能中断同步死循环。 */
+let dumpingRendererStack = false;
+
+/**
+ * 主动 ping 渲染进程：卡死时 ping 不会返回。
+ *
+ * 不用 Chromium 的 unresponsive 事件，也不用自己的 IPC 心跳——前者在某些环境
+ * （窗口被遮挡、无 GPU）不触发，后者卡死时同样发不出去，出问题就查不出所以然。
+ * 这里每 5 秒发一个 executeJavaScript("1")，15 秒没回应就当作卡死。
+ */
+const PING_INTERVAL_MS = 5000;
+const PING_STALE_MS = 15_000;
+const PING_DUMP_INTERVAL_MS = 60_000;
+const rendererPing = { pendingAt: 0, lastDumpAt: 0 };
+
+export function startRendererWatchdog(win: BrowserWindow): () => void {
+  const timer = setInterval(() => {
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+    // 页面还在加载时不判卡死：加载本身慢，否则日志里会全是误报。
+    if (win.webContents.isLoading()) return;
+    const now = Date.now();
+    if (rendererPing.pendingAt) {
+      const waited = now - rendererPing.pendingAt;
+      if (waited < PING_STALE_MS) return;
+      if (now - rendererPing.lastDumpAt >= PING_DUMP_INTERVAL_MS) {
+        rendererPing.lastDumpAt = now;
+        log.error("renderer", `渲染进程 ${Math.round(waited / 1000)} 秒没有响应 ping（界面卡死），抓取调用栈`);
+        void dumpRendererStack(win, `ping ${Math.round(waited / 1000)}s 无响应`);
+      }
+      rendererPing.pendingAt = 0;
+      return;
+    }
+    if (win.webContents.isLoading()) return;
+    rendererPing.pendingAt = now;
+    const startedAt = now;
+    win.webContents
+      .executeJavaScript("0")
+      .then(() => {
+        const took = Date.now() - startedAt;
+        if (took > 2000) log.warn("renderer", `ping 耗时 ${took}ms（界面可能正在卡）`);
+      })
+      .catch(() => {})
+      .finally(() => {
+        rendererPing.pendingAt = 0;
+      });
+  }, PING_INTERVAL_MS);
+  (timer as any).unref?.();
+  return () => clearInterval(timer);
+}
+/**
+ * 提前把调试器挂上（只 enable，不 pause）。
+ *
+ * 这一条是抓栈能成功的关键：如果等卡死之后才 attach + Debugger.enable，
+ * 那两个命令本身也要排队等渲染进程回应，永远回不来。启动时就挂好，
+ * 卡死时只剩一个 Debugger.pause —— 它走 V8 中断，能在死循环里停下来。
+ */
+let rendererDebuggerArmed = false;
+async function armRendererDebugger(win: BrowserWindow): Promise<void> {
+  if (rendererDebuggerArmed) return;
+  // 挂在调试器上会挡住 DevTools（同一个 target 只能有一个调试器），
+  // 开发版默认不挂；打包版没有 DevTools，默认就挂。
+  if (!app.isPackaged && !process.env.PI_DESKTOP_TRACE_HANG) return;
+  const dbg = win.webContents.debugger;
+  try {
+    if (!dbg.isAttached()) await dbg.attach("1.3");
+    await dbg.sendCommand("Debugger.enable");
+    rendererDebuggerArmed = true;
+  } catch (error: any) {
+    log.warn("renderer", `调试器挂载失败，卡死时将只能拿到「无法暂停」：${error?.message ?? error}`);
+  }
+}
+
+async function dumpRendererStack(win: BrowserWindow, reason: string): Promise<void> {
+  if (dumpingRendererStack) return;
+  dumpingRendererStack = true;
+  const dbg = win.webContents.debugger;
+  // 正常情况下启动时已挂好（见 armRendererDebugger）；没挂上就临时补挂，尽力而为。
+  const attachedHere = !dbg.isAttached();
+  // 卡死的渲染进程不会回应任何调试命令（Debugger.enable 也可能一直挂着），
+  // 所以每条命令都要有超时；pause 靠 V8 中断实现，即使 JS 在死循环里也能暂停。
+  const send = (method: string, ms: number) =>
+    Promise.race([
+      dbg.sendCommand(method),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${method} 超时 ${ms}ms`)), ms)),
+    ]);
+  try {
+    if (attachedHere) await Promise.race([
+      dbg.attach("1.3"),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("attach 超时")), 4000)),
+    ]);
+    const paused = new Promise<any>((resolve) => {
+      const onMessage = (_event: unknown, method: string, params: any) => {
+        if (method !== "Debugger.paused") return;
+        dbg.removeListener("message", onMessage);
+        resolve(params);
+      };
+      dbg.on("message", onMessage);
+    });
+    if (!rendererDebuggerArmed) {
+      await send("Debugger.enable", 4000).catch((error: any) => log.warn("renderer", `${error.message}`));
+    }
+    await send("Debugger.pause", 4000).catch((error: any) => log.warn("renderer", `${error.message}`));
+    const params = await Promise.race([paused, new Promise((r) => setTimeout(() => r(null), 8000))]);
+    if (!params) {
+      log.warn("renderer", `渲染进程无响应且无法暂停（${reason}）：可能是原生死循环`);
+      return;
+    }
+    const frames = (params.callFrames ?? []).slice(0, 24).map((frame: any, index: number) => {
+      const file = String(frame.url || "").split("/").filter(Boolean).pop() || "(inline)";
+      const name = frame.functionName || "(anonymous)";
+      return `  #${index} ${name} ${file}:${frame.location.lineNumber + 1}:${frame.location.columnNumber + 1}`;
+    });
+    log.error("renderer", `渲染进程卡在（${reason}）：\n${frames.join("\n")}`);
+    await send("Debugger.resume", 3000).catch(() => {});
+  } catch (error: any) {
+    log.warn("renderer", `抓取渲染进程调用栈失败：${error?.message ?? error}`);
+    return;
+  } finally {
+    // 挂好的调试器要留着：下一次卡死还要靠它抓栈。
+    if (attachedHere) {
+      try {
+        dbg.detach();
+      } catch {
+        // 已经断开
+      }
+      rendererDebuggerArmed = false;
+    }
+    dumpingRendererStack = false;
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -353,6 +484,20 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+  // 渲染进程卡死时没有任何日志（不重绘、不跑定时器），只有调用栈能说明它在转什么。
+  // 卡死是偶发的，所以必须自动抓：Chromium 判定无响应后暂停 V8 并把栈写进日志。
+  mainWindow.webContents.on("unresponsive", () => {
+    log.warn("renderer", "渲染进程无响应（unresponsive），开始抓取调用栈");
+    void dumpRendererStack(mainWindow!, "unresponsive");
+  });
+  mainWindow.webContents.on("responsive", () => {
+    log.info("renderer", "渲染进程已恢复响应");
+  });
+  startRendererWatchdog(mainWindow);
+  void armRendererDebugger(mainWindow);
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    log.error("renderer", `渲染进程退出：${details?.reason ?? "unknown"}（exitCode=${details?.exitCode ?? "?"}）`);
   });
   mainWindow.webContents.on("will-prevent-unload", (event) => {
     const choice = dialog.showMessageBoxSync(mainWindow!, {

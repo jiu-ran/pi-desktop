@@ -28,6 +28,15 @@ import type {
 } from "../env.d.ts";
 
 const THEME_KEY = "pi-desktop.theme";
+
+/** 界面侧日志：走主进程落盘（logs/renderer.log）。日志失败绝不影响工作区。 */
+function logUi(level: "debug" | "info" | "warn" | "error", message: string): void {
+  try {
+    (window as any).piDesktop?.logEvent?.(level, "workbench", message);
+  } catch {
+    // 忽略
+  }
+}
 /** 每页加载的历史消息条数 */
 const PAGE_SIZE = 8;
 /** 每页至少渲染多少个块（8 条原始消息在长工具链里可能只渲染成 4 行） */
@@ -672,6 +681,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
     ws.status = "starting";
     ws.error = "";
+    // 启动看门狗：open 有可能永不返回（IPC 丢了、渲染进程半挂），那样工作区会一直
+    // 停在「启动中」且日志里什么都没有。到点先记一条，再给一个可重试的错误。
+    const startupTimers = [
+      setTimeout(() => {
+        if (disposed || ws!.status !== "starting") return;
+        logUi("warn", `工作区 ${target} 启动超过 30 秒仍未就绪（open 尚未返回）`);
+      }, 30_000),
+      setTimeout(() => {
+        if (disposed || ws!.status !== "starting") return;
+        logUi("error", `工作区 ${target} 启动超时，已重置为可重试状态`);
+        ws!.status = "error";
+        ws!.error = "启动超时：Pi 进程没有在一分钟内就绪，点一下这个项目可重新启动";
+      }, 90_000),
+    ] as const;
     const task = (async () => {
       try {
         const snap = await host.open(target);
@@ -684,6 +707,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         ws!.status = "error";
         ws!.error = error?.message ?? String(error);
       } finally {
+        for (const timer of startupTimers) clearTimeout(timer);
         opens.delete(target);
       }
       return ws!;

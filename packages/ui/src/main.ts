@@ -3,7 +3,7 @@ import App from "./App.vue";
 import { createKernel, KERNEL_KEY } from "./kernel/index.ts";
 import { builtinPlugins } from "./plugins/index.ts";
 import { localizeNotification } from "./shared/notify-text.ts";
-import { installLongTaskReporter } from "./shared/long-task.ts";
+import { installLagWatchdog, installLongTaskReporter } from "./shared/long-task.ts";
 import { installRenderLogReporter } from "./shared/render-log.ts";
 import "./styles/base.css";
 import "./styles/shell.css";
@@ -29,6 +29,18 @@ async function boot(): Promise<void> {
   // 前端 warn / error 与未捕获异常也落盘（logs/renderer.log），
   // 否则主进程侧看不到前端到底报了什么错。
   installRenderLogReporter({ logEvent: (level, scope, message) => (window as any).piDesktop?.logEvent?.(level, scope, message) });
+  // 心跳看门狗：界面卡住几秒又自己恢复时，恢复后补一条带时间的记录，
+  // 否则这种情况在日志里完全看不出来（长任务回调本身也不会触发）。
+  installLagWatchdog({
+    report: (driftMs, at) =>
+      (window as any).piDesktop?.logEvent?.(
+        "warn",
+        "renderer",
+        `界面卡顿 ${Math.round(driftMs)}ms（起于 ${at}），可能正在死循环或被主进程阻塞`,
+      ),
+  });
+  // 这行是「渲染进程到底启动过没有」的分界线：卡死时日志里有没有它一目了然。
+  (window as any).piDesktop?.logEvent?.("info", "renderer", "界面已就绪");
   window.addEventListener("beforeunload", (event) => {
     if (!kernel.stage.allTabs.value.some(tab => tab.dirty || (tab.data as any)?.saving)) return;
     event.preventDefault();

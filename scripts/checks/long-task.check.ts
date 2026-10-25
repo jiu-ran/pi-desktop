@@ -35,3 +35,13 @@ assert.equal(typeof dispose, "function", "总要返回一个可调用的卸载�
 dispose();
 
 console.log("long-task.check ok 阈值 / 节流 / 标签 / 无环境兜底");
+
+// 心跳看门狗：卡 3 秒以上才记，且 10 秒内不重复记
+{
+  const { shouldReportLag } = await import("../../packages/ui/src/shared/long-task.ts");
+  assert.equal(shouldReportLag(200, 0, 1e12), false, "低于阈值不报");
+  assert.equal(shouldReportLag(3200, 0, 1e12), true, "卡 3.2 秒要报");
+  assert.equal(shouldReportLag(3200, 1e12 - 5000, 1e12), false, "10 秒内不重复");
+  assert.equal(shouldReportLag(NaN, 0, 1e12), false, "非法值不报");
+  console.log("lag watchdog OK 阈值 / 去重");
+}
