@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import MarkdownBody from "./MarkdownBody.vue";
-import { replaceMarkdownBlock, splitMarkdownBlocks, type MarkdownBlock } from "../../shared/markdown-blocks.ts";
+import { replaceMarkdownBlock, rendersBlock, splitMarkdownBlocks, type MarkdownBlock } from "../../shared/markdown-blocks.ts";
 
 /**
  * Typora 式混合预览：默认就是渲染后的样子，点某一处时**只把那一块**换成可编辑的
@@ -15,7 +15,8 @@ const props = defineProps<{ content: string }>();
 const emit = defineEmits<{ "update:content": [value: string] }>();
 
 const root = ref<HTMLElement | null>(null);
-const blocks = computed<MarkdownBlock[]>(() => splitMarkdownBlocks(props.content));
+// 链接引用定义（`[标签]: url`）渲染结果是空的，不占节点，对齐时跳过
+const blocks = computed<MarkdownBlock[]>(() => splitMarkdownBlocks(props.content).filter(rendersBlock));
 const slotCount = ref(0);
 const aligned = computed(() => slotCount.value > 0 && slotCount.value === blocks.value.length);
 
@@ -66,13 +67,13 @@ function startEdit(index: number): void {
   if (!block || !slot || !container) return;
   const rect = slot.getBoundingClientRect();
   const base = container.getBoundingClientRect();
-  const width = rect.width;
+  // 容器本身就是滚动区：绝对定位坐标要加上已滚动的距离，否则滚过一段后编辑框会跑偏
   editing.value = {
     index,
     draft: block.text,
-    top: rect.top - base.top,
-    left: rect.left - base.left,
-    width,
+    top: rect.top - base.top + container.scrollTop,
+    left: rect.left - base.left + container.scrollLeft,
+    width: rect.width,
     height: Math.max(rect.height, 24),
   };
   slot.style.visibility = "hidden";
@@ -149,7 +150,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="root"
-    class="md-editable"
+    class="md-preview md-editable"
     :class="{ 'can-edit': aligned }"
     :data-aligned="aligned ? '1' : '0'"
     @click="onRootClick"
@@ -170,9 +171,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 排版与滚动沿用 .md-preview（内边距、max-width 860、正文 14.5px/1.78），
+   这里只补「可作为定位参照的滚动容器」这一点 */
 .md-editable {
   position: relative;
-  min-height: 0;
+  overflow-anchor: none;
 }
 .md-editable.can-edit [data-md-block] {
   border-radius: var(--radius-sm);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  rendersBlock,
   replaceMarkdownBlock,
   splitMarkdownBlocks,
 } from "../../packages/ui/src/shared/markdown-blocks.ts";
@@ -64,10 +65,26 @@ const texts = (source: string) => splitMarkdownBlocks(source).map((block) => blo
   assert.deepEqual(kinds(doc), ["list", "heading"], `列表后跟标题应断开：${kinds(doc).join("/")}`);
 }
 
-// front matter 单独一块
+// 文档开头的 --- 是分割线，紧跟着的 --- 对上一行是 setext（和渲染器一致：
+// markstream 不解析 YAML front matter，会渲染成「分割线 + 标题」）
 {
   const doc = ["---", "title: 文档", "---", "", "# 正文标题"].join("\n");
-  assert.deepEqual(kinds(doc), ["frontmatter", "heading"], `front matter 切错了：${kinds(doc).join("/")}`);
+  assert.deepEqual(kinds(doc), ["hr", "heading", "heading"], `开头 front matter 该按渲染器切：${kinds(doc).join("/")}`);
+}
+
+// 链接引用定义：连续几条算一块，且标记为「渲染结果里不占节点」
+{
+  const doc = ["正文见 [文档][d1]。", "", "[d1]: https://example.com", "[d2]: https://example.com/2", ""].join("\n");
+  const blocks = splitMarkdownBlocks(doc);
+  assert.deepEqual(blocks.map((block) => block.kind), ["paragraph", "linkref"], `链接定义切错了：${kinds(doc)}`);
+  assert.equal(rendersBlock(blocks[0]), true, "正文块要参与对齐");
+  assert.equal(rendersBlock(blocks[1]), false, "链接引用定义不占渲染节点，必须跳过");
+  // 脚注定义是内容（会渲染成脚注区），不能被当成链接定义
+  const footnote = ["正文[^1]。", "", "[^1]: 脚注内容"].join("\n");
+  assert.deepEqual(splitMarkdownBlocks(footnote).map((block) => block.kind), ["paragraph", "paragraph"], "脚注定义不该被当成链接定义");
+  // 链接定义夹在段落中间时仍属于同一块（渲染器也把它并进段落里去掉）
+  const inline = ["正文一行", "[d3]: https://example.com/3", "", "下一段"].join("\n");
+  assert.equal(splitMarkdownBlocks(inline).length, 2, "段落中间的链接定义不该切开段落");
 }
 
 // 段落内的软换行（没有空行）属于同一块
@@ -103,4 +120,4 @@ assert.deepEqual(splitMarkdownBlocks("\n\n  \n"), []);
   assert.ok(next.endsWith("\r\n"), "块外的换行不能被吃掉");
 }
 
-console.log("markdown-blocks OK 切块 / setext / loose list / front matter / 替换");
+console.log("markdown-blocks OK 切块 / setext / loose list / 链接引用定义 / 替换");

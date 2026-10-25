@@ -9,11 +9,13 @@
  * - 围栏代码块里的空行不能当块分隔；
  * - setext 标题（下一行是 === / ---）属于上一个块；
  * - 列表/引用中间的单个空行不算新块（loose list、多段引用）；
- * - front matter（--- 开头到 --- 结束）单独算一块。
+ * - 链接引用定义（`[标签]: url`）渲染出来是**空**的，单独一种 kind，对齐时跳过；
+ * - 不特殊对待 YAML front matter：markstream 不支持，`---` 会渲染成分割线，
+ *   这里也照同样规则切（否则文档一开头就错位）。
  */
 
 export type MarkdownBlockKind =
-  | "frontmatter"
+  | "linkref"
   | "heading"
   | "code"
   | "table"
@@ -37,6 +39,8 @@ const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 const HEADING = /^\s{0,3}#{1,6}\s+/;
 const HR = /^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/;
 const TABLE_SEPARATOR = /^\s*\|?[\s:|-]{3,}\|?\s*$/;
+/** 链接引用定义：`[标签]: url "标题"`（脚注 `[^1]: 内容` 不算） */
+const LINK_REF = /^\s{0,3}\[(?!\^)[^\]]+\]:\s*\S/;
 
 /** 计算每一行的起止偏移 */
 function lineSpans(source: string): Array<{ start: number; end: number; text: string }> {
@@ -53,9 +57,9 @@ function lineSpans(source: string): Array<{ start: number; end: number; text: st
   return spans;
 }
 
-function kindOf(lines: string[], isFirst: boolean): MarkdownBlockKind {
+function kindOf(lines: string[], _isFirst: boolean): MarkdownBlockKind {
   const first = lines[0] ?? "";
-  if (isFirst && /^---\s*$/.test(first)) return "frontmatter";
+  if (LINK_REF.test(first)) return "linkref";
   if (FENCE.test(first)) return "code";
   if (HEADING.test(first)) return "heading";
   if (HR.test(first)) return "hr";
@@ -66,6 +70,11 @@ function kindOf(lines: string[], isFirst: boolean): MarkdownBlockKind {
 }
 
 /** 判断某一行是否「延续当前块」（用来处理 loose list / 多段引用） */
+/** 有些块在渲染结果里不占节点（目前只有链接引用定义），对齐时要跳过。 */
+export function rendersBlock(block: MarkdownBlock): boolean {
+  return block.kind !== "linkref";
+}
+
 function continuesBlock(kind: MarkdownBlockKind, line: string): boolean {
   if (!line.trim()) return false;
   if (kind === "list") return LIST_MARKER.test(line) || /^\s{2,}\S/.test(line);
@@ -92,12 +101,11 @@ export function splitMarkdownBlocks(source: string): MarkdownBlock[] {
     const startLine = index;
     const first = spans[index].text;
 
-    // front matter：--- 开头，直到下一条 ---
-    if (isFirst && /^---\s*$/.test(first)) {
+    // 链接引用定义：连续的几条算一块，渲染结果里看不到它们
+    if (LINK_REF.test(first)) {
       let end = index + 1;
-      while (end < spans.length && !/^---\s*$/.test(spans[end].text)) end += 1;
-      end = Math.min(end + 1, spans.length);
-      blocks.push(makeBlock(spans, startLine, end, "frontmatter"));
+      while (end < spans.length && LINK_REF.test(spans[end].text)) end += 1;
+      blocks.push(makeBlock(spans, startLine, end, "linkref"));
       index = end;
       isFirst = false;
       continue;

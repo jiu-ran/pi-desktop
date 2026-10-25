@@ -19,6 +19,11 @@ const cases: Array<[string, string, string]> = [
   ],
   ["EISDIR: illegal operation on a directory, read", "error", "目标是一个目录，无法作为文件打开"],
   ["net::ERR_CONNECTION_REFUSED", "error", "网络请求失败，请检查网络或代理设置后重试"],
+  // 这几个分支此前因为 /s+/g 的笔误（把字母 s 也删掉）永远匹配不上
+  ["Connection error.", "error", "网络连接失败"],
+  ["Connection reset", "error", "网络连接失败"],
+  ["connection refused.", "error", "网络连接失败"],
+  ["Socket hang up", "error", "网络连接失败"],
   ["Unknown error", "error", "未知错误，请稍后重试"],
 ];
 

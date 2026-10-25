@@ -79,7 +79,8 @@ export function localizeNotification(value: unknown, level = "info"): string {
   }
 
   // Pi / 模型网关最常见的英文报错：Connection error.
-  if (/^connection (error|reset|closed|refused).?$/i.test(raw.replace(/s+/g, ""))) return "网络连接失败";
+  // 去掉空白再匹配（原写成 /s+/g，把字母 s 也删了，导致 reset/refused 这类永远匹配不上）
+  if (/^connection ?(error|reset|closed|refused).?$/i.test(raw.replace(/\s+/g, " ").trim())) return "网络连接失败";
   if (/socket hang up|econnrefused/i.test(raw)) return "网络连接失败";
   if (/net::ERR_|failed to fetch|networkerror|fetch failed|econnreset|etimedout/i.test(raw)) {
     return "网络请求失败，请检查网络或代理设置后重试";
