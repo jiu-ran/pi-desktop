@@ -13,6 +13,7 @@ import { atomicWriteText } from "./atomic-file.ts";
 import { logPerfLine } from "./perf-log.ts";
 import { isWritableDir, log, logEvent, logStore, useAppLogs } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
+import { cleanLegacyProjectArtifacts } from "./project-cleanup.ts";
 import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -738,6 +739,8 @@ app.whenReady().then(() => {
   });
   handle("pi:open", async (cwd: string) => {
     const authorized = await host.authorizeWorkspace(cwd);
+    // 把旧版本写进项目的日志目录与 .git/info/exclude 忽略行清掉（只清能确认是自己留的）
+    void cleanLegacyProjectArtifacts(authorized);
     const result = await host.open(authorized);
     await writeRecent(recentFile(), authorized);
     return result;
