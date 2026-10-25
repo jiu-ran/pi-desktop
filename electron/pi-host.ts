@@ -914,9 +914,14 @@ export async function listCrossProjectSessions(limit = 40): Promise<CrossProject
   }
   picked.sort((a, b) => b.mtimeMs - a.mtimeMs);
   const items: CrossProjectSessionSummary[] = [];
+  let index = 0;
   for (const candidate of picked.slice(0, limit)) {
     const summary = await summarizeSessionFile(candidate.file);
     if (summary && !summary.empty) items.push(summary);
+    // 每解析几个就让出一次事件循环：解析是同步的（读头 + 找名称 + 解析 JSON），
+    // 一次性连做几十个会让主线程连续阻塞上百毫秒到一秒多（实测 5 个会话 700ms）。
+    index += 1;
+    if (index % 3 === 0) await new Promise((resolve) => setImmediate(resolve));
   }
   crossProjectCache.set(root, { at: Date.now(), items });
   return items;

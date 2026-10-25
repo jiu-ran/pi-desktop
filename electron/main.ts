@@ -10,7 +10,7 @@ import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager, MANUAL_CHECK_CACHE_MS } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
-import { logPerfLine } from "./perf-log.ts";
+import { activity, logPerfLine, withActivity } from "./perf-log.ts";
 import { isWritableDir, log, logEvent, logStore, useAppLogs } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
 import { cleanLegacyProjectArtifacts } from "./project-cleanup.ts";
@@ -561,7 +561,7 @@ function handle(channel: string, fn: (...args: any[]) => any) {
         args[0] = await authorizedCwd(args[0]);
       }
       phase = "执行";
-      return plain(await fn(...args));
+      return plain(await withActivity(channel, () => fn(...args)));
     } catch (error: any) {
       // IPC 失败也要留痕：界面上只看到一句提示，真正的原因经常只在日志里。
       log.error("ipc", `${channel} 失败（${phase}）：${error?.message ?? String(error)}`);
@@ -605,7 +605,8 @@ function startLagWatchdog(): void {
     const lag = now - last - 1000;
     last = now;
     if (lag < 1000) return;
-    logPerfLine(`主进程阻塞 ${lag}ms`);
+    const label = activity();
+    logPerfLine(label ? `主进程阻塞 ${lag}ms（${label}）` : `主进程阻塞 ${lag}ms`);
   }, 1000);
   (timer as any).unref?.();
 }
