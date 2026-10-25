@@ -18,7 +18,7 @@ const props = defineProps<{
 }>();
 
 const settled = computed(() => props.block.status !== "running" && props.block.status !== "pending");
-const summary = computed(() => summarizeSubagent(props.block.details, settled.value));
+const summary = computed(() => summarizeSubagent(props.block.details, settled.value, props.block.args));
 const rows = computed(() => summary.value?.rows ?? []);
 
 /** 打开第 N 个子任务的对话；null 表示关闭。 */
@@ -49,8 +49,9 @@ const task = computed(() => {
 const title = computed(() => {
   const list = rows.value;
   if (list.length > 1) return `子代理 · ${subagentModeLabel(summary.value?.mode ?? "") || "并行"} ${list.length} 个子任务`;
-  const agent = list[0]?.agent || String(props.block.args?.agent ?? "").trim() || "子代理";
-  return `子代理 · ${agent}`;
+  // 工作流没有 agent，退化成「子代理 · 子代理」就毫无信息量
+  const agent = list[0]?.agent || String(props.block.args?.agent ?? "").trim() || "";
+  return agent && agent !== "子代理" ? `子代理 · ${agent}` : "子代理";
 });
 
 /** 卡片整体状态取「最需要关注」的那个：失败 > 超时 > 停止 > 运行中 > 完成。 */
@@ -60,12 +61,17 @@ const state = computed<SubagentState>(() => {
   if (states.includes("timeout")) return "timeout";
   if (states.includes("stopped")) return "stopped";
   if (states.includes("running") || !settled.value) return "running";
+  // 只是派发到后台：工具调用结束了，但任务还在跑，别显示成「完成」
+  if (states.includes("dispatched")) return "dispatched";
   return "ok";
 });
 
 const meta = computed(() => {
   const list = rows.value;
   const parts: string[] = [];
+  // 后台派发：显示并发配额，比「完成 419ms」有用
+  const budget = list[0]?.budget;
+  if (budget) parts.push(`并发 ${budget.used}/${budget.limit}`);
   const tools = list.reduce((sum, row) => sum + (row.tools ?? 0), 0);
   const tokens = list.reduce((sum, row) => sum + (row.tokens ?? 0), 0);
   if (tools) parts.push(`${tools} 工具`);
@@ -86,13 +92,25 @@ const errors = computed(() =>
     .map((row) => ({ agent: row.agent, error: row.error, state: row.state })),
 );
 
+/** 后台派发：工具结果正文是写给模型看的英文说明，界面只留一句人话。 */
+const dispatched = computed(() => summary.value?.dispatched === true && rows.value.length === 1);
+const dispatchHint = computed(() => {
+  if (!dispatched.value) return "";
+  const row = rows.value[0];
+  const id = row.asyncId.slice(0, 8);
+  return row.budget
+    ? `已在后台运行（${id}），完成时会自动叫醒我；并发 ${row.budget.used}/${row.budget.limit}`
+    : `已在后台运行（${id}），完成时会自动叫醒我`;
+});
+
 /** 没有结构化结果时的原始输出：截断成一小块，避免整段结果把对话撑长。 */
 const rawOutput = computed(() => {
+  if (dispatched.value) return "";
   const text = props.block.output ?? "";
   if (!text.trim()) return "";
   return text.length > 1200 ? `${text.slice(0, 1200).trimEnd()}\n… 已截断，共 ${text.length} 字符` : text;
 });
-const canOpen = computed(() => rows.value.length > 0);
+const canOpen = computed(() => rows.value.some((row) => row.sessionFile || row.finalOutput));
 </script>
 
 <template>
@@ -119,8 +137,10 @@ const canOpen = computed(() => rows.value.length > 0);
       <span class="subagent-card-error-agent">{{ item.agent }}</span>
       <span class="subagent-card-error-text">{{ item.error }}</span>
     </p>
+    <!-- 后台派发：一句话说明，别贴扩展写给模型看的英文说明 -->
+    <p v-if="dispatched" class="subagent-card-hint">{{ dispatchHint }}</p>
     <!-- 没有结构化结果（老版本扩展 / 还没回传进度）时，给一小块原始输出，别把整段结果铺满。 -->
-    <pre v-if="!canOpen && rawOutput" class="subagent-card-raw" :class="{ err: block.isError }"><SearchHighlight :text="rawOutput" :query="query" /></pre>
+    <pre v-if="!dispatched && !canOpen && rawOutput" class="subagent-card-raw" :class="{ err: block.isError }"><SearchHighlight :text="rawOutput" :query="query" /></pre>
   </section>
 
   <SubagentDialog

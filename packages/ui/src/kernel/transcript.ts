@@ -333,7 +333,9 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         return true;
       }
       case "tool_execution_end": {
-        const block = pushTool(event.toolCallId, event.toolName, null, "done");
+        // 事件里带 args 就先用上：少了流式 toolcall 的事件序列时（回放、子代理内部调用），
+        // 卡片就只剩工具名，标题会退化成「子代理 · 子代理」。
+        const block = pushTool(event.toolCallId, event.toolName, event.args ?? null, "done");
         applyToolResult(block, event.result);
         block.details = event.result?.details ?? null;
         block.isError = Boolean(event.isError);

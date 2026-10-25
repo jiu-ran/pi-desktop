@@ -9,7 +9,7 @@
  * 不同版本会增删字段，所以这里全部按可选读取，缺字段就降级，不假设固定结构。
  */
 
-export type SubagentState = "running" | "ok" | "failed" | "timeout" | "stopped";
+export type SubagentState = "running" | "ok" | "failed" | "timeout" | "stopped" | "dispatched";
 
 export interface SubagentRow {
   agent: string;
@@ -31,6 +31,12 @@ export interface SubagentRow {
   task: string;
   model: string;
   exitCode: number | null;
+  /** 异步派发（还在后台跑）时的运行 ID，点了能跟进 */
+  asyncId: string;
+  /** true = 这次工具调用只是把任务丢到后台，并没有等它跑完 */
+  dispatched: boolean;
+  /** 并发配额使用情况（扩展给的 runFanoutBudget） */
+  budget: { used: number; limit: number; remaining: number } | null;
 }
 
 export interface SubagentSummary {
@@ -41,6 +47,8 @@ export interface SubagentSummary {
   failed: number;
   running: number;
   tasks: string[];
+  /** 至少有一个结果只是后台派发，还没回传进度 */
+  dispatched: boolean;
 }
 
 /** 单个结果的输出可能很长；列表里只留摘要，完整内容仍走原来的「结果」区。 */
@@ -79,13 +87,39 @@ function stateOf(result: any, settled: boolean): SubagentState {
   return settled ? "ok" : "running";
 }
 
-/** `details` 不可用时返回 null，调用方回退到普通工具卡片。 */
-export function summarizeSubagent(details: unknown, settled = true): SubagentSummary | null {
+function budgetOf(raw: any): { used: number; limit: number; remaining: number } | null {
+  const budget = raw?.runFanoutBudget;
+  const used = num(budget?.used);
+  const limit = num(budget?.limit);
+  if (used === null || limit === null) return null;
+  return { used, limit, remaining: num(budget?.remaining) ?? Math.max(0, limit - used) };
+}
+
+/**
+ * 异步派发的默认标签：优先工具参数里的 agent / label，
+ * 工作流没有 agent 时显示「工作流」，别再退化成「子代理 · 子代理」。
+ */
+function dispatchedLabel(raw: any, args: any): string {
+  const explicit = text(args?.agent) || text(args?.label) || text(args?.name);
+  if (explicit) return explicit;
+  if (raw?.mode === "workflow" || args?.workflow) return "工作流";
+  if (raw?.mode === "parallel") return "并行子代理";
+  if (Array.isArray(args?.tasks)) return "并行子代理";
+  return "子代理";
+}
+
+/**
+ * `details` 不可用时返回 null，调用方回退到普通工具卡片。
+ *
+ * 常见形态：`results` 为空但有 `asyncId` —— 工具只是把任务丢到后台就返回了，
+ * 这时补一条「已派发」行，卡片才不会退化成贴原始英文说明。
+ */
+export function summarizeSubagent(details: unknown, settled = true, args: any = null): SubagentSummary | null {
   if (!details || typeof details !== "object") return null;
   const raw = details as any;
   const results: any[] = Array.isArray(raw.results) ? raw.results : [];
   const mode = text(raw.mode) || (raw.workflowGraph ? "workflow" : "");
-  if (!results.length && !mode) return null;
+  if (!results.length && !mode && !text(raw.asyncId)) return null;
 
   const rows: SubagentRow[] = results.map((result: any) => {
     const progress = result?.progress ?? {};
@@ -106,8 +140,36 @@ export function summarizeSubagent(details: unknown, settled = true): SubagentSum
       task: text(result?.task),
       model: text(result?.model),
       exitCode: num(result?.exitCode),
+      asyncId: "",
+      dispatched: false,
+      budget: null,
     };
   });
+
+  // 后台派发：没有 results，只有 asyncId / missionId，补一条占位行
+  const asyncId = text(raw.asyncId);
+  if (!rows.length && asyncId) {
+    rows.push({
+      agent: dispatchedLabel(raw, args),
+      state: "dispatched",
+      durationMs: null,
+      tools: null,
+      turns: null,
+      tokens: null,
+      currentTool: "",
+      error: "",
+      output: "",
+      truncated: false,
+      sessionFile: "",
+      finalOutput: "",
+      task: text(args?.task) || text(args?.prompt) || text(args?.script),
+      model: "",
+      exitCode: null,
+      asyncId,
+      dispatched: true,
+      budget: budgetOf(raw),
+    });
+  }
 
   const agents = [...new Set(rows.map((row) => row.agent))];
   const tasks = results.map((result: any) => text(result?.task)).filter(Boolean);
@@ -120,6 +182,7 @@ export function summarizeSubagent(details: unknown, settled = true): SubagentSum
     failed: rows.filter((row) => row.state === "failed" || row.state === "timeout").length,
     running: rows.filter((row) => row.state === "running").length,
     tasks,
+    dispatched: rows.some((row) => row.dispatched),
   };
 }
 
@@ -143,6 +206,7 @@ export function subagentStateLabel(state: SubagentState): string {
     failed: "失败",
     timeout: "超时",
     stopped: "已停止",
+    dispatched: "已派发",
   };
   return labels[state];
 }

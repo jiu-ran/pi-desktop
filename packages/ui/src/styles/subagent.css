@@ -5,6 +5,8 @@
 .subagent-dot[data-state="timeout"] { background: var(--del-fg); }
 .subagent-dot[data-state="running"] { background: var(--accent); }
 .subagent-dot[data-state="stopped"] { background: var(--warn); }
+/* 只是派发到后台：任务在跑，但这张卡片对应的调用已经结束 */
+.subagent-dot[data-state="dispatched"] { background: var(--accent); opacity: 0.55; }
 
 /* ── 子代理对话弹窗 ───────────────────────────────────────── */
 .subagent-modal {
@@ -250,6 +252,7 @@
 .subagent-card-state[data-state="timeout"] { color: var(--del-fg); }
 .subagent-card-state[data-state="running"] { color: var(--accent); }
 .subagent-card-state[data-state="stopped"] { color: var(--warn); }
+.subagent-card-state[data-state="dispatched"] { color: var(--fg-2); }
 .subagent-card-task {
   flex: 1;
   min-width: 0;
@@ -302,3 +305,13 @@
   word-break: break-word;
 }
 .subagent-card-raw.err { border-left-color: var(--del-fg); color: var(--del-fg); }
+/* 后台派发的一句话说明 */
+.subagent-card-hint {
+  margin: 0;
+  padding: 5px 10px 7px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-1);
+  color: var(--fg-3);
+  font-size: 11.5px;
+}

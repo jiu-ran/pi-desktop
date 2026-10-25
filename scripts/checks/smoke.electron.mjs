@@ -12,6 +12,7 @@ import { checkAppearanceInElectron } from "./appearance.electron.mjs";
 import { checkArgHintInElectron } from "./arg-hint.electron.mjs";
 import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
 import { checkSubagentInElectron } from "./subagent.electron.mjs";
+import { checkSubagentAsyncInElectron } from "./subagent-async.electron.mjs";
 import { checkSessionQuoteInElectron } from "./session-quote.electron.mjs";
 import { checkQueueInElectron } from "./queue.electron.mjs";
 import { checkCrossProjectQuoteInElectron } from "./cross-quote.electron.mjs";
@@ -203,6 +204,7 @@ app.whenReady().then(async () => {
       await runCheck("arg-hint", () => checkArgHintInElectron(win));
       await runCheck("appearance", () => checkAppearanceInElectron(win));
       await runCheck("subagent", () => checkSubagentInElectron(win));
+      await runCheck("subagent-async", () => checkSubagentAsyncInElectron(win));
       await runCheck("session-quote", () => checkSessionQuoteInElectron(win));
       await runCheck("queue", () => checkQueueInElectron(win));
       await runCheck("cross-quote", () => checkCrossProjectQuoteInElectron(win));

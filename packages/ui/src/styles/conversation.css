@@ -1861,6 +1861,29 @@
 .ext-widget-key { color: var(--fg-3); font: 10.5px var(--mono); }
 .ext-widget pre { margin: 2px 0 0; color: var(--fg-2); font-size: 12px; white-space: pre-wrap; }
 
+/* 子代理后台状态 widget：一行一个任务，状态用颜色区分，原始 JSON 折进 details */
+.ext-subagent-runs { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+.ext-subagent-run { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 12px; }
+.ext-subagent-label { color: var(--fg); font-weight: 600; }
+.ext-subagent-detail { color: var(--fg-3); font-size: 11px; }
+.ext-subagent-state {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: 10.5px;
+}
+.ext-subagent-state[data-tone="run"] { color: var(--accent); background: var(--accent-soft); }
+.ext-subagent-state[data-tone="ok"] { color: var(--ok-fg); }
+.ext-subagent-state[data-tone="warn"] { color: var(--warn); }
+.ext-subagent-state[data-tone="err"] { color: var(--del-fg); }
+.ext-subagent-children { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; padding-left: 2px; }
+.ext-subagent-child { display: inline-flex; gap: 5px; align-items: center; color: var(--fg-3); font-size: 11px; }
+.ext-widget-raw { margin-top: 4px; color: var(--fg-3); font-size: 11px; }
+.ext-widget-raw summary { cursor: pointer; user-select: none; }
+.ext-widget-raw pre { max-height: 160px; overflow: auto; font-size: 11px; }
+
 /* 欢迎页 */
 .welcome {
   position: relative;

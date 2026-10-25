@@ -147,3 +147,46 @@ assert.equal(formatDuration(125_000), "2m 05s");
 assert.equal(formatDuration(null), "");
 
 console.log("subagent OK");
+
+// ---------- 异步派发（results 为空、只有 asyncId）----------
+// 真实日志：工具只是把任务丢到后台就返回，正文是写给模型看的英文说明。
+const dispatched = summarizeSubagent(
+  {
+    mode: "single",
+    runId: "8fcf1559-3f7b-429a-a5d6-51a762800f60",
+    asyncId: "8fcf1559-3f7b-429a-a5d6-51a762800f60",
+    results: [],
+    runFanoutBudget: { used: 1, limit: 64, remaining: 63 },
+  },
+  true,
+  { agent: "delegate", task: "只读任务：读取 README 并总结" },
+);
+assert.ok(dispatched, "有 asyncId 时不能退回通用工具卡片");
+assert.equal(dispatched!.dispatched, true);
+assert.equal(dispatched!.rows.length, 1, "派发也要有一条行，否则标题会退化成「子代理 · 子代理」");
+assert.equal(dispatched!.rows[0].agent, "delegate");
+assert.equal(dispatched!.rows[0].state, "dispatched");
+assert.equal(subagentStateLabel("dispatched"), "已派发");
+assert.deepEqual(dispatched!.rows[0].budget, { used: 1, limit: 64, remaining: 63 });
+assert.equal(dispatched!.rows[0].task, "只读任务：读取 README 并总结");
+
+// 工作流没有 agent：标签取「工作流」，不能是「子代理」
+const workflowDispatch = summarizeSubagent(
+  {
+    mode: "workflow",
+    asyncId: "8b6cc47e-b4b3-4d1a-92f1-3b821daa1523",
+    results: [],
+    workflow: { trace: [], emits: [], console: [], args: {} },
+    runFanoutBudget: { used: 0, limit: 64, remaining: 64 },
+  },
+  true,
+  { workflow: true },
+);
+assert.equal(workflowDispatch!.rows[0].agent, "工作流");
+assert.equal(workflowDispatch!.rows[0].dispatched, true);
+
+// 同步完成的结果不受影响：没有 asyncId 就不该多出占位行
+assert.equal(bare!.dispatched, false);
+assert.equal(bare!.rows.length, 1);
+
+console.log("subagent 异步派发 OK");
