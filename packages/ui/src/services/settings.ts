@@ -2,6 +2,7 @@ import { reactive, watch, watchEffect } from "vue";
 import type { EventBus } from "../kernel/event-bus.ts";
 import type { Workbench } from "../kernel/workbench.ts";
 import { writeStorage } from "../shared/storage.ts";
+import { normalizeLogMaxBytes } from "../shared/log-limit.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
@@ -58,6 +59,8 @@ export interface AppSettings {
   messageDensity: "comfortable" | "compact";
   /** 界面缩放倍率（Chromium zoom factor），由设置页控制，不设快捷键 */
   uiZoom: number;
+  /** 运行日志总量上限（字节），设置页给几档可选 */
+  logMaxBytes: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -81,6 +84,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalCustomArgs: [],
   messageDensity: "comfortable",
   uiZoom: 1,
+  logMaxBytes: 8 * 1024 * 1024,
 }
 
 function loadSavedSettings(): AppSettings {
@@ -119,6 +123,7 @@ function loadSavedSettings(): AppSettings {
         ? parsed.terminalCustomArgs.filter((arg: unknown) => typeof arg === "string" && !arg.includes("\0")).slice(0, 64).map((arg: string) => arg.slice(0, 4000)) : [],
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
       uiZoom: Math.min(3, Math.max(0.5, Number(parsed.uiZoom) || DEFAULT_SETTINGS.uiZoom)),
+      logMaxBytes: normalizeLogMaxBytes(parsed.logMaxBytes),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -219,6 +224,15 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     },
   ));
   void workbench.setAppZoom(appSettings.uiZoom);
+
+  // 日志总量上限：启动时同步一次，改动即时生效（主进程会顺手清一次超量文件）
+  void workbench.setLogLimit(appSettings.logMaxBytes);
+  disposers.push(watch(
+    () => appSettings.logMaxBytes,
+    (bytes) => {
+      void workbench.setLogLimit(bytes);
+    },
+  ));
 
   if (appSettings.appUpdateCheck) void workbench.checkAppUpdate();
 

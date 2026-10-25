@@ -1675,6 +1675,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 全局更新 Pi CLI 到 latest。成功后刷新定位与版本，记录 lastUpdate 并通知，
    * 设置页据此展示“更新后做了什么”（版本变化 + 时间 + 安装日志）。
    */
+  /** 调整运行日志总量上限（设置页用）。 */
+  async function setLogLimit(bytes: number): Promise<void> {
+    try {
+      await host?.setLogLimit?.(bytes);
+    } catch {
+      // 日志上限调整失败不影响使用
+    }
+  }
+
   async function checkAppUpdate(options: { manual?: boolean } = {}): Promise<{
     current: string;
     latest: string;
@@ -2124,6 +2133,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     refreshPi,
     checkPiUpdate,
     checkAppUpdate,
+    setLogLimit,
     downloadAppUpdate,
     cancelAppUpdate,
     installAppUpdate,

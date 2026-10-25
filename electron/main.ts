@@ -657,6 +657,8 @@ app.whenReady().then(() => {
     log.renderer(level, scope, message);
   });
   handle("app:logs-info", async () => logStore.summary());
+  // 设置页调整日志总量上限：立刻生效并顺手清一次超量文件
+  handle("app:set-log-limit", async (bytes: number) => logStore.setLimits(bytes));
   handle("app:logs-clear", async () => {
     await logStore.clear();
     log.info("logs", "日志已清空");

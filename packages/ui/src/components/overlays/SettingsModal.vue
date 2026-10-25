@@ -18,6 +18,7 @@ import {
   type SettingsTabId,
 } from "../../services/settings.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
+import { DEFAULT_LOG_MAX_BYTES, LOG_MAX_CHOICES_MB } from "../../shared/log-limit.ts";
 import { formatBytes as formatSize } from "../../shared/attachments.ts";
 
 const TerminalSettings = defineAsyncComponent(() => import("../terminal/TerminalSettings.vue"));
@@ -111,11 +112,20 @@ const visibleGroups = computed(() => {
 const visibleTabs = computed(() => visibleGroups.value.flatMap((group) => group.items));
 
 // ---------- 运行日志 ----------
-const LOG_CAP = 100 * 1024 * 1024;
-const logSummary = reactive<{ dir: string; totalBytes: number; files: Array<{ name: string; size: number; mtimeMs: number }> }>({
+const logSummary = reactive<{
+  dir: string;
+  totalBytes: number;
+  files: Array<{ name: string; size: number; mtimeMs: number }>;
+  limitBytes: number;
+  fileBytes: number;
+  keepFiles: number;
+}>({
   dir: "",
   totalBytes: 0,
   files: [],
+  limitBytes: DEFAULT_LOG_MAX_BYTES,
+  fileBytes: DEFAULT_LOG_MAX_BYTES / 4,
+  keepFiles: 4,
 });
 const logBusy = ref(false);
 
@@ -134,6 +144,9 @@ async function loadLogs(): Promise<void> {
     logSummary.dir = info.dir ?? "";
     logSummary.totalBytes = info.totalBytes ?? 0;
     logSummary.files = info.files ?? [];
+    logSummary.limitBytes = Number(info.limitBytes) || DEFAULT_LOG_MAX_BYTES;
+    logSummary.fileBytes = Number(info.fileBytes) || DEFAULT_LOG_MAX_BYTES / 4;
+    logSummary.keepFiles = Number(info.keepFiles) || 4;
   } catch {
     // 读不到日志目录不影响设置界面
   }
@@ -1907,7 +1920,7 @@ onBeforeUnmount(() => {
               <div class="settings-group-title">日志目录</div>
               <div class="settings-row">
                 <div class="settings-row-info">
-                  <strong>占用 {{ formatSize(logSummary.totalBytes) }} / 上限 {{ formatSize(LOG_CAP) }}</strong>
+                  <strong>占用 {{ formatSize(logSummary.totalBytes) }} / 上限 {{ formatSize(logSummary.limitBytes) }}</strong>
                   <span>{{ logSummary.dir || "尚未初始化" }}</span>
                 </div>
                 <div style="display: flex; gap: 6px; flex: none;">
@@ -1917,11 +1930,21 @@ onBeforeUnmount(() => {
               </div>
               <div class="settings-row">
                 <div class="settings-row-info">
+                  <strong>总量上限</strong>
+                  <span>给日志留多少空间：超了就按时间删最旧的。默认 {{ formatSize(DEFAULT_LOG_MAX_BYTES) }}，需要排查问题时可以临时调大。</span>
+                </div>
+                <select v-model.number="appSettings.logMaxBytes" class="settings-select">
+                  <option v-for="mb in LOG_MAX_CHOICES_MB" :key="mb" :value="mb * 1024 * 1024">{{ mb }} MB</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-info">
                   <strong>记录内容</strong>
                   <span>
                     日志写在安装目录下的 logs/（安装目录不可写时回落到用户数据目录，例如装在 Program Files 里）。<br />app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error 与未捕获异常；
                     pi.log 会话与压缩事件；perf.log 卡顿（主进程阻塞、慢 IPC、渲染进程长任务）。
-                    单文件 8MB 轮转，超过 100MB 会按时间删最旧的，正在写的文件不会被删。
+                    单文件 {{ formatSize(logSummary.fileBytes) }} 轮转（最多留 {{ logSummary.keepFiles }} 个），
+                    总量超过上限后按时间删最旧的，正在写的文件不会被删。
                   </span>
                 </div>
               </div>

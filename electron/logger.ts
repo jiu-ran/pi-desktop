@@ -21,15 +21,60 @@ import path from "node:path";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogStream = "app" | "renderer" | "pi" | "perf";
 
-/** 日志总量上限：100MB（用户要求）。 */
-export const LOG_MAX_TOTAL_BYTES = 100 * 1024 * 1024;
-/** 单个文件上限：8MB，轮转一次就换新文件，方便翻最近的记录。 */
+/**
+ * 日志总量上限：默认 8MB，用户可以在设置里改（4 / 8 / 16 / 32 / 64 / 128MB）。
+ *
+ * 默认给小的：这份日志只在排查问题时有价值，平时留着几个 G 没意义。
+ */
+export const DEFAULT_LOG_TOTAL_BYTES = 8 * 1024 * 1024;
+/** 可选的几档上限（设置页下拉）。 */
+export const LOG_TOTAL_CHOICES_MB = [4, 8, 16, 32, 64, 128] as const;
+/** 单文件硬上限：再大翻起来就不方便了。 */
 export const LOG_MAX_FILE_BYTES = 8 * 1024 * 1024;
-/** 最多保留多少个历史文件：12 × 8MB = 96MB，留一点余量给正在写的文件。 */
+/** 单个文件下限：太小会疯狂轮转。 */
+export const LOG_MIN_FILE_BYTES = 512 * 1024;
+/** 最多保留多少个文件（跨四个流合计）。 */
 export const LOG_KEEP_FILES = 12;
+
+export interface LogSizing {
+  totalBytes: number;
+  fileBytes: number;
+  keepFiles: number;
+}
+
+/**
+ * 由「总量上限」推出单文件上限与保留个数。
+ *
+ * 单个文件取总量的 1/4（限制在 512KB–8MB），这样四个流都各有一个历史文件也不会
+ * 立刻超总量；保留个数按「总量 / 单文件」算，最多 12 个。
+ */
+export function logSizing(totalBytes = DEFAULT_LOG_TOTAL_BYTES): LogSizing {
+  const total = Math.max(LOG_MIN_FILE_BYTES, Math.min(1024 * 1024 * 1024, Math.floor(Number(totalBytes) || DEFAULT_LOG_TOTAL_BYTES)));
+  const fileBytes = Math.max(LOG_MIN_FILE_BYTES, Math.min(LOG_MAX_FILE_BYTES, Math.floor(total / 4)));
+  const keepFiles = Math.max(2, Math.min(LOG_KEEP_FILES, Math.ceil(total / fileBytes)));
+  return { totalBytes: total, fileBytes, keepFiles };
+}
+
+/** 把任意输入收敛到合法上限（设置页 / 配置文件都可能被手改）。 */
+export function normalizeLogTotalBytes(value: unknown): number {
+  const mb = Math.round(Number(value) / (1024 * 1024));
+  const allowed = LOG_TOTAL_CHOICES_MB.some((choice) => choice === mb) ? mb : 0;
+  if (allowed) return allowed * 1024 * 1024;
+  const raw = Math.floor(Number(value));
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_LOG_TOTAL_BYTES;
+  return Math.max(1024 * 1024, Math.min(128 * 1024 * 1024, raw));
+}
 /** flush 间隔与单次缓冲上限 */
 const FLUSH_MS = 400;
 const MAX_BUFFER_BYTES = 256 * 1024;
+
+export interface LogLimits {
+  /** 总量上限（注意与 summary 里的「当前占用」区分） */
+  limitBytes: number;
+  fileBytes: number;
+  keepFiles: number;
+  choicesMb: number[];
+}
 
 export interface LogFileEntry {
   name: string;
@@ -38,7 +83,7 @@ export interface LogFileEntry {
 }
 
 /** 文件到上限了吗 */
-export function shouldRotate(size: number, maxFileBytes = LOG_MAX_FILE_BYTES): boolean {
+export function shouldRotate(size: number, maxFileBytes: number = LOG_MAX_FILE_BYTES): boolean {
   return size >= maxFileBytes;
 }
 
@@ -50,8 +95,8 @@ export function shouldRotate(size: number, maxFileBytes = LOG_MAX_FILE_BYTES): b
 export function pickExpiredLogs(
   files: LogFileEntry[],
   activeNames: string[] = [],
-  maxTotalBytes = LOG_MAX_TOTAL_BYTES,
-  keepFiles = LOG_KEEP_FILES,
+  maxTotalBytes = DEFAULT_LOG_TOTAL_BYTES,
+  keepFiles = logSizing(DEFAULT_LOG_TOTAL_BYTES).keepFiles,
 ): string[] {
   const active = new Set(activeNames);
   const candidates = files
@@ -121,6 +166,8 @@ class LogStore {
   private streams = new Map<LogStream, StreamState>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private rotating = false;
+  /** 当前上限（总量 / 单文件 / 保留个数），可由设置页调整 */
+  private sizing: LogSizing = logSizing(DEFAULT_LOG_TOTAL_BYTES);
   /** 还没有项目目录时的缓冲区：启动早期的日志不能丢，也不能写到项目外面 */
   private pending: Array<{ stream: LogStream; line: string }> = [];
   private pendingBytes = 0;
@@ -217,7 +264,7 @@ class LogStore {
         // 每次 flush 前看真实大小：外部追加、日志被手动清空都能正确处理。
         // 一次 stat 的成本远低于写完发现文件已经 8MB。
         state.size = await stat(state.file).then((info) => info.size).catch(() => 0);
-        if (shouldRotate(state.size)) await this.rotate(stream, state);
+        if (shouldRotate(state.size, this.sizing.fileBytes)) await this.rotate(stream, state);
         await appendFile(state.file, text, "utf8");
         state.size += Buffer.byteLength(text, "utf8");
       } catch {
@@ -255,7 +302,7 @@ class LogStore {
         if (info?.isFile()) entries.push({ name, size: info.size, mtimeMs: info.mtimeMs });
       }
       const active = [...this.streams.keys()].map((stream) => this.activeName(stream));
-      const expired = pickExpiredLogs(entries, active);
+      const expired = pickExpiredLogs(entries, active, this.sizing.totalBytes, this.sizing.keepFiles);
       await Promise.all(expired.map((name) => rm(path.join(this.dir, name), { force: true }).catch(() => {})));
       return expired;
     } catch {
@@ -263,9 +310,25 @@ class LogStore {
     }
   }
 
+  /** 调整总量上限（设置页改完立刻生效，并顺手清一次超量文件）。 */
+  async setLimits(totalBytes: number): Promise<LogLimits> {
+    this.sizing = logSizing(normalizeLogTotalBytes(totalBytes));
+    await this.prune().catch(() => {});
+    return this.limits();
+  }
+
+  limits(): LogLimits {
+    return {
+      limitBytes: this.sizing.totalBytes,
+      fileBytes: this.sizing.fileBytes,
+      keepFiles: this.sizing.keepFiles,
+      choicesMb: [...LOG_TOTAL_CHOICES_MB],
+    };
+  }
+
   /** 统计总量（上限检查 / 设置页展示用）。 */
-  async summary(): Promise<{ dir: string; totalBytes: number; files: LogFileEntry[] }> {
-    if (!this.dir) return { dir: "", totalBytes: 0, files: [] };
+  async summary(): Promise<{ dir: string; totalBytes: number; files: LogFileEntry[] } & LogLimits> {
+    if (!this.dir) return { dir: "", totalBytes: 0, files: [], ...this.limits() };
     const names = await readdir(this.dir).catch(() => [] as string[]);
     const files: LogFileEntry[] = [];
     for (const name of names) {
@@ -274,7 +337,12 @@ class LogStore {
       if (info?.isFile()) files.push({ name, size: info.size, mtimeMs: info.mtimeMs });
     }
     files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return { dir: this.dir, totalBytes: files.reduce((sum, file) => sum + file.size, 0), files };
+    return {
+      dir: this.dir,
+      totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+      files,
+      ...this.limits(),
+    };
   }
 
   async clear(): Promise<void> {

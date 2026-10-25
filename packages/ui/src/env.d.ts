@@ -80,6 +80,14 @@ export interface LogSummary {
   dir: string;
   totalBytes: number;
   files: Array<{ name: string; size: number; mtimeMs: number }>;
+  /** 当前总量上限（字节） */
+  limitBytes?: number;
+  /** 单文件上限（字节） */
+  fileBytes?: number;
+  /** 最多保留多少个文件 */
+  keepFiles?: number;
+  /** 可选档位（MB） */
+  choicesMb?: number[];
 }
 
 /** @ 引用对话时，主进程回传的会话上下文条目 */
@@ -428,6 +436,8 @@ export interface PiDesktopBridge {
   logEvent?: (level: "debug" | "info" | "warn" | "error", scope: string, message: string) => void;
 
   logsInfo?: () => Promise<LogSummary>;
+  /** 调整运行日志总量上限（字节），立刻生效 */
+  setLogLimit?: (bytes: number) => Promise<LogSummary>;
   logsClear?: () => Promise<LogSummary>;
   logsOpen?: () => Promise<boolean>;
   logsReveal?: () => Promise<boolean>;

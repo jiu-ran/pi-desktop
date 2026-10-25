@@ -5,7 +5,8 @@ import path from "node:path";
 import {
   LOG_KEEP_FILES,
   LOG_MAX_FILE_BYTES,
-  LOG_MAX_TOTAL_BYTES,
+  DEFAULT_LOG_TOTAL_BYTES,
+  LOG_TOTAL_CHOICES_MB,
   configureLogs,
   formatLogLine,
   log,
@@ -15,10 +16,28 @@ import {
   shouldRotate,
 } from "../../electron/logger.ts";
 
-// 上限就是用户要求的 100MB
-assert.equal(LOG_MAX_TOTAL_BYTES, 100 * 1024 * 1024, "总量上限必须是 100MB");
+// 默认上限给小的：8MB（用户可在设置里改）
+assert.equal(DEFAULT_LOG_TOTAL_BYTES, 8 * 1024 * 1024, "默认总量上限应为 8MB");
+assert.deepEqual([...LOG_TOTAL_CHOICES_MB], [4, 8, 16, 32, 64, 128], "可选档位固定");
 assert.equal(LOG_MAX_FILE_BYTES, 8 * 1024 * 1024);
-assert.ok(LOG_KEEP_FILES * LOG_MAX_FILE_BYTES <= LOG_MAX_TOTAL_BYTES, "保留文件总量不能超过 100MB");
+// 由总量推出的单文件上限与保留个数必须自洽
+{
+  const { logSizing, normalizeLogTotalBytes } = await import("../../electron/logger.ts");
+  const small = logSizing(4 * 1024 * 1024);
+  assert.equal(small.totalBytes, 4 * 1024 * 1024);
+  assert.ok(small.fileBytes <= small.totalBytes / 2, `单文件不能占掉半个总量：${small.fileBytes}`);
+  assert.ok(small.fileBytes >= 512 * 1024, "单文件不低于 512KB");
+  const big = logSizing(128 * 1024 * 1024);
+  assert.equal(big.fileBytes, LOG_MAX_FILE_BYTES, "大额度下单文件封顶 8MB");
+  assert.ok(big.keepFiles <= LOG_KEEP_FILES, "保留个数不超过上限");
+  // 手改配置文件 / 传非法值时收敛到合法区间
+  assert.equal(normalizeLogTotalBytes(16 * 1024 * 1024), 16 * 1024 * 1024);
+  assert.equal(normalizeLogTotalBytes(0), DEFAULT_LOG_TOTAL_BYTES);
+  assert.equal(normalizeLogTotalBytes("abc"), DEFAULT_LOG_TOTAL_BYTES);
+  assert.equal(normalizeLogTotalBytes(9999 * 1024 * 1024), 128 * 1024 * 1024, "超大值收敛到 128MB");
+  assert.equal(normalizeLogTotalBytes(1000), 1024 * 1024, "过小值抬到 1MB");
+}
+assert.equal(LOG_KEEP_FILES, 12);
 
 // 单文件轮转判定
 assert.equal(shouldRotate(LOG_MAX_FILE_BYTES - 1), false);
@@ -82,8 +101,9 @@ try {
   assert.ok(text.includes("(test) 第一条"), `应写入 app.log，实际：${text}`);
   assert.ok(text.includes("INFO"), "行内要有级别");
 
-  // 直接塞一个超过 8MB 的文件，下一次写入应触发轮转
-  await appendFile(path.join(dir, "app.log"), "x".repeat(LOG_MAX_FILE_BYTES + 10));
+  // 直接塞一个超过「当前单文件上限」的文件，下一次写入应触发轮转
+  const fileBytes = logStore.limits().fileBytes;
+  await appendFile(path.join(dir, "app.log"), "x".repeat(fileBytes + 10));
   log.info("test", "轮转后的第一条");
   await logStore.flushAll();
   const names = await readdir(dir);
@@ -103,7 +123,8 @@ try {
   await utimes(huge, 1_500_000_000, 1_500_000_000);
   await logStore.prune();
   const summary = await logStore.summary();
-  assert.ok(summary.totalBytes <= LOG_MAX_TOTAL_BYTES, `清理后总量必须 ≤100MB，实际 ${(summary.totalBytes / 1024 / 1024).toFixed(1)}MB`);
+  assert.equal(typeof summary.limitBytes, "number", "统计里要带上限");
+  assert.ok(summary.limitBytes > 0, "上限要大于 0");
   assert.ok(!summary.files.some((file) => file.name === "app-2019-01-01T00-00-00Z.log"), "最旧的大文件应先被删");
   assert.ok(summary.files.some((file) => file.name === "app.log"), "当前文件不能被删");
 
@@ -115,7 +136,7 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("logger.check ok 100MB 上限 / 轮转 / 清理 / 脱敏 / 落盘");
+console.log("logger.check ok 默认上限 / 轮转 / 轮转 / 清理 / 脱敏 / 落盘");
 
 // 日志目录是启动时定的一个固定目录（安装目录下的 logs/）：切换目录要把旧缓冲刷干净，
 // 目录不可写时要能探测出来（打包版据此回落到 userData）。
@@ -158,3 +179,41 @@ console.log("logger.check ok 100MB 上限 / 轮转 / 清理 / 脱敏 / 落盘");
   }
 }
 console.log("logger.check ok 固定日志目录 / 早期日志补写 / 切换刷盘 / 可写探测");
+
+// 上限可调：设置页档位 → logStore 立刻生效并清理超量文件
+{
+  const { mkdtemp, writeFile, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const pathMod = await import("node:path");
+  const dir = await mkdtemp(pathMod.join(tmpdir(), "pi-logs-limit-"));
+  try {
+    const { configureLogs, normalizeLogTotalBytes } = await import("../../electron/logger.ts");
+    configureLogs(dir);
+    // 造 3 个各 2MB 的历史文件 + 一个当前文件
+    for (let i = 0; i < 3; i += 1) {
+      await writeFile(pathMod.join(dir, `app-2020-01-0${i + 1}T00-00-00Z.log`), "x".repeat(2 * 1024 * 1024));
+    }
+    await writeFile(pathMod.join(dir, "app.log"), "y".repeat(1024));
+    logStore.write("app", "info", "test", "当前文件");
+    await logStore.flushAll();
+
+    // 调到 4MB：总量必须落回上限内
+    const limits = await logStore.setLimits(4 * 1024 * 1024);
+    assert.equal(limits.limitBytes, 4 * 1024 * 1024, "上限要按设置生效");
+    assert.ok(limits.fileBytes <= 1024 * 1024, `4MB 额度下单文件上限应更小：${limits.fileBytes}`);
+    const summary = await logStore.summary();
+    assert.ok(summary.totalBytes <= 4 * 1024 * 1024, `调整后总量应 ≤4MB，实际 ${(summary.totalBytes / 1024 / 1024).toFixed(1)}MB`);
+    assert.ok(summary.files.some((file) => file.name === "app.log"), "正在写的文件不能被删");
+
+    // 再调回默认：上限跟着变
+    const back = await logStore.setLimits(DEFAULT_LOG_TOTAL_BYTES);
+    assert.equal(back.limitBytes, DEFAULT_LOG_TOTAL_BYTES);
+    assert.equal(normalizeLogTotalBytes(DEFAULT_LOG_TOTAL_BYTES), DEFAULT_LOG_TOTAL_BYTES);
+    assert.deepEqual([...(await logStore.summary()).choicesMb ?? []], [4, 8, 16, 32, 64, 128], "要给设置页可选档位");
+    const names = await readdir(dir);
+    assert.ok(names.includes("app.log"), "当前文件仍在");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+console.log("logger.check ok 上限可调 4MB/默认 / 调小即清理 / 当前文件保留");

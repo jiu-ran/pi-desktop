@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   logEvent: (level: string, scope: string, message: string) => ipcRenderer.send("app:log-event", { level, scope, message }),
 
   logsInfo: () => ipcRenderer.invoke("app:logs-info"),
+  setLogLimit: (bytes: number) => ipcRenderer.invoke("app:set-log-limit", bytes),
   logsClear: () => ipcRenderer.invoke("app:logs-clear"),
   logsOpen: () => ipcRenderer.invoke("app:logs-open"),
   logsReveal: () => ipcRenderer.invoke("app:logs-reveal"),
