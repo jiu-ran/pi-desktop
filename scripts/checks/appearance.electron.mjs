@@ -354,6 +354,37 @@ export async function checkAppearanceInElectron(win) {
   assert.equal(chrome.opened, "scrim-light", `设置打开时原生按钮区要跟着轻压暗（不能是原色、也不该用全屏的 45%），实际 ${chrome.opened}`);
   assert.equal(chrome.reopened, "plain", `关闭弹窗后要恢复原色，实际 ${chrome.reopened}`);
 
+  // 最关键的一条：原生按钮区的底色必须和网页标题栏（被遮罩压过之后）一致，
+  // 否则右上角会明显深一块。这里直接采样像素对比，而不是只信 dataset。
+  {
+    await evaluate("window.__piDesktop.settings.open('appearance'); true");
+    await wait(900);
+    const applied = JSON.parse(await evaluate("JSON.stringify({ color: document.documentElement.dataset.winChromeColor ?? '', alpha: document.documentElement.dataset.winChromeAlpha ?? '', state: document.documentElement.dataset.winChrome ?? '' })"));
+    assert.equal(applied.state, "scrim-light", `设置打开时原生按钮区应进入轻压暗状态，实际 ${applied.state}`);
+    const parse = (hex) => {
+      const value = Number.parseInt(String(hex).replace("#", ""), 16);
+      return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+    };
+    const expected = parse(applied.color);
+    const image = await win.webContents.capturePage();
+    const size = image.getSize();
+    const bitmap = image.getBitmap();
+    const sample = (x, y) => {
+      const index = (y * size.width + x) * 4;
+      return [bitmap[index + 2], bitmap[index + 1], bitmap[index]];
+    };
+    // 标题栏中间位置（避开左侧项目和右侧原生按钮区）
+    const pixel = sample(Math.round(size.width * 0.5), Math.round(size.height * 0.018));
+    const delta = expected.map((value, index) => Math.abs(value - pixel[index]));
+    assert.ok(
+      Math.max(...delta) <= 3,
+      `原生按钮底色要和标题栏一致：按钮区 ${applied.color} vs 标题栏像素 rgb(${pixel.join(",")})（差 ${delta.join("/")}）`,
+    );
+    console.log("[appearance] chrome color", JSON.stringify({ color: applied.color, alpha: applied.alpha, pixel }));
+    await evaluate("window.__piDesktop.settings.close(); true");
+    await wait(500);
+  }
+
   console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, emphasis: violet.emphasis, customAccent: "#12ab34", splitEmphasis: "#ff8800", radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));
   return { controls, violet, round, full, still };
 }

@@ -22,10 +22,20 @@ const SCRIM_SELECTORS = [
   ".overlay:not(.settings-overlay)",
 ];
 
-/** 设置是「浮动窗口 + 很淡的遮罩」，原生按钮只需要跟着淡一点点 */
+/** 设置是「浮动窗口 + 很淡的遮罩」 */
 const SETTINGS_SCRIM = ".settings-modal-position";
-const SETTINGS_ALPHA = 0.18;
-const FULL_ALPHA = 0.45;
+
+/** 从遮罩元素的背景色里读实际 alpha：原生按钮要和网页里的遮罩**完全一致**，
+ *  不能各写一份数值（曾经 CSS 用 0.10、这里固定 0.18，浅色下右上角就深一截）。 */
+function scrimAlphaOf(element: Element | null): number {
+  if (!element) return 0;
+  const value = element.ownerDocument.defaultView?.getComputedStyle(element).backgroundColor ?? "";
+  const match = /rgba?(([^)]+))/.exec(value);
+  if (!match) return 0;
+  const parts = match[1]!.split(",").map((item) => Number.parseFloat(item));
+  const alpha = parts.length >= 4 ? parts[3]! : 1;
+  return Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : 0;
+}
 
 export interface WindowChromeTheme {
   id: string;
@@ -43,6 +53,8 @@ export function setupWindowChrome(
 
   const delay = options.delayMs ?? 40;
   let scrimmed: "full" | "light" | "none" = "none";
+  /** 真正带着遮罩底色的元素（设置页是外层 .overlay，不是里面的定位容器） */
+  let scrimElement: Element | null = null;
   let last = "";
   let timer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
@@ -52,40 +64,60 @@ export function setupWindowChrome(
     // 压暗强度跟随遮罩：设置页只有 18%，其余全屏浮层 45%。
     // 固定 45% 会让设置页右上角比周围暗一截（截图里就是一块深色补丁）。
     const dim = scrimmed !== "none";
-    const alpha = scrimmed === "full" ? FULL_ALPHA : scrimmed === "light" ? SETTINGS_ALPHA : 0;
-    const color = dim ? dimmedColor(theme.titlebar.color, alpha) || theme.titlebar.color : theme.titlebar.color;
-    const symbolColor = dim
-      ? dimmedColor(theme.titlebar.symbolColor, alpha) || theme.titlebar.symbolColor
-      : theme.titlebar.symbolColor;
+    const alpha = dim ? scrimAlphaOf(scrimElement) : 0;
+    const color = dim && alpha > 0 ? dimmedColor(theme.titlebar.color, alpha) || theme.titlebar.color : theme.titlebar.color;
+    const symbolColor =
+      dim && alpha > 0
+        ? dimmedColor(theme.titlebar.symbolColor, alpha) || theme.titlebar.symbolColor
+        : theme.titlebar.symbolColor;
     // 供检查/排查用：原色 / 跟着设置页轻压暗 / 跟着全屏遮罩压暗
     doc.documentElement.dataset.winChrome = !dim ? "plain" : scrimmed === "light" ? "scrim-light" : "scrim";
+    // 排查用：原生按钮区实际用的底色（应当等于 titlebar 色 × (1 - 遮罩 alpha)）
+    doc.documentElement.dataset.winChromeColor = color;
+    doc.documentElement.dataset.winChromeAlpha = String(Math.round(alpha * 100) / 100);
     const key = `${color}|${symbolColor}`;
     if (key === last) return;
     last = key;
     void host.setTitleBar?.({ color, symbolColor });
   };
 
-  const shown = (selector: string): boolean =>
-    [...doc.querySelectorAll(selector)].some((element) => {
-      const rect = element.getBoundingClientRect();
+  /** 找出正在显示、且真的在画遮罩底色的元素（全屏遮罩优先） */
+  const findScrim = (): { level: "full" | "light"; element: Element } | null => {
+    for (const selector of SCRIM_SELECTORS) {
+      const element = [...doc.querySelectorAll(selector)].find((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      if (element) return { level: "full", element };
+    }
+    const position = [...doc.querySelectorAll(SETTINGS_SCRIM)].find((node) => {
+      const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     });
-
-  /** 全屏遮罩 > 设置浮层 > 没有 */
-  const visibleScrim = (): "full" | "light" | "none" => {
-    if (SCRIM_SELECTORS.some(shown)) return "full";
-    if (shown(SETTINGS_SCRIM)) return "light";
-    return "none";
+    if (!position) return null;
+    // 设置页的遮罩底色画在外层 .overlay 上，定位容器本身是透明的
+    return { level: "light", element: position.closest(".overlay") ?? position };
   };
 
   const schedule = (): void => {
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
-      const next = visibleScrim();
-      if (next === scrimmed) return;
+      const found = findScrim();
+      const next = found?.level ?? "none";
+      if (next === scrimmed) {
+        // 同一个遮罩换了元素也要跟上（例如先开设置再开子代理弹窗）
+        if (found && found.element !== scrimElement) {
+          scrimElement = found.element;
+          apply();
+        }
+        return;
+      }
       scrimmed = next;
+      scrimElement = found?.element ?? null;
       apply();
+      // 遮罩淡入 180ms：动画结束再按最终 alpha 对齐一次
+      setTimeout(apply, 260);
     }, delay);
   };
 
@@ -100,7 +132,9 @@ export function setupWindowChrome(
     apply();
   });
 
-  scrimmed = visibleScrim();
+  const initial = findScrim();
+  scrimmed = initial?.level ?? "none";
+  scrimElement = initial?.element ?? null;
   apply();
 
   return () => {
