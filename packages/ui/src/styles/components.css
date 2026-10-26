@@ -1771,13 +1771,13 @@ html[data-density="compact"] .tool-card {
 }
 .settings-modal {
   display: grid;
-  grid-template-columns: 232px 1fr;
-  width: min(960px, calc(95vw - 16px));
-  height: min(680px, calc(86vh - 16px));
+  grid-template-columns: 196px 1fr;
+  width: min(1020px, calc(95vw - 16px));
+  height: min(720px, calc(88vh - 16px));
   overflow: hidden;
   border: 1px solid var(--line-2);
-  border-radius: 14px;
-  background: var(--bg-1);
+  border-radius: var(--radius, 12px);
+  background: var(--bg);
   box-shadow: var(--shadow);
   opacity: 0;
   transform: translateY(18px) scale(0.985);
@@ -1832,11 +1832,12 @@ html[data-density="compact"] .tool-card {
   .settings-body { padding: 16px 16px 22px; }
 }
 
-/* ---------- 左侧导航 ---------- */
+/* ---------- 左侧导航（一级分区） ---------- */
 .settings-nav {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  gap: 10px;
   padding: 14px 10px 10px;
   border-right: 1px solid var(--line);
   background: var(--bg-2);
@@ -1845,15 +1846,15 @@ html[data-density="compact"] .tool-card {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 0 6px 12px;
+  padding: 0 6px;
 }
 .settings-brand-icon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 .settings-brand-text { min-width: 0; }
@@ -1874,11 +1875,11 @@ html[data-density="compact"] .tool-card {
   align-items: center;
   gap: 7px;
   flex: none;
-  height: 30px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
-  background: var(--bg-1);
+  border-radius: 7px;
+  background: var(--bg);
   color: var(--fg-3);
 }
 .settings-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }
@@ -1894,24 +1895,22 @@ html[data-density="compact"] .tool-card {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-height: 0;
-  margin-top: 10px;
   overflow-y: auto;
 }
 .settings-nav-group {
-  padding: 10px 8px 4px;
+  padding: 8px 8px 2px;
   color: var(--fg-3);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
-.settings-nav-list > .settings-nav-group:first-child { padding-top: 2px; }
 .settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 29px;
+  gap: 9px;
+  height: 32px;
   padding: 0 8px;
   border: 0;
   border-radius: 7px;
@@ -1924,10 +1923,9 @@ html[data-density="compact"] .tool-card {
 }
 .settings-nav-item:hover { background: var(--hover); color: var(--fg); }
 .settings-nav-item.active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
   color: var(--fg);
   font-weight: 600;
-  box-shadow: inset 2px 0 var(--accent);
 }
 .settings-nav-icon {
   display: grid;
@@ -1939,10 +1937,18 @@ html[data-density="compact"] .tool-card {
 .settings-nav-icon svg { display: block; }
 .settings-nav-item.active .settings-nav-icon { color: var(--accent); }
 .settings-nav-label {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 分区里的二级 tab 数量 / 搜索命中的分区名 */
+.settings-nav-count,
+.settings-nav-hint {
+  flex: none;
+  color: var(--fg-3);
+  font: 10.5px var(--mono);
 }
 .settings-nav-empty {
   padding: 12px 8px;
@@ -1954,7 +1960,6 @@ html[data-density="compact"] .tool-card {
   flex: none;
   flex-direction: column;
   gap: 3px;
-  margin-top: 8px;
   padding: 9px 8px 2px;
   border-top: 1px solid var(--line);
   color: var(--fg-3);
@@ -1978,15 +1983,39 @@ html[data-density="compact"] .tool-card {
   background: var(--bg-1);
 }
 .settings-head {
-  display: flex;
+  display: grid;
   flex: none;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 22px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 12px;
+  padding: 16px 22px 0;
   border-bottom: 1px solid var(--line);
 }
 .settings-head-text { min-width: 0; }
+/* 二级 tab：贴着标题下方的一条分段控件 */
+.settings-subtabs {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 2px;
+  margin-top: 10px;
+}
+.settings-subtab {
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.settings-subtab:hover { color: var(--fg); }
+.settings-subtab.active {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+  font-weight: 600;
+}
 .settings-title {
   margin: 0;
   color: var(--fg);
@@ -2000,22 +2029,14 @@ html[data-density="compact"] .tool-card {
   font-size: 11.5px;
   line-height: 1.5;
 }
-.settings-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  color: var(--fg-3);
-  font-size: 12px;
-}
 .settings-breadcrumb strong { color: var(--fg); font-weight: 600; }
 .settings-body {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   min-height: 0;
-  padding: 18px 22px 26px;
+  padding: 16px 22px 32px;
   overflow-y: auto;
 }
 /* 卡片化的配置组 */

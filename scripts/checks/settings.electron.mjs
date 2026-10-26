@@ -26,22 +26,45 @@ export async function checkSettingsInElectron(win) {
   await poll("Boolean(document.querySelector('.settings-modal'))", "设置弹窗应打开");
   await wait(300);
 
-  // 导航：分组 + 图标 + 高亮
+  /** 二级 tab 只在所属分区里渲染，点它之前先切分区 */
+  const SECTION_OF = { conversation: "chat", agents: "chat", skills: "power", mcp: "power", packages: "power", plugins: "power", appearance: "look", terminal: "desktop", environment: "desktop", logs: "desktop" };
+  const openTab = async (id) => {
+    await evaluate(`document.querySelector('[data-settings-section="${SECTION_OF[id]}"]')?.click() ?? null; true`);
+    await wait(180);
+    await evaluate(`document.querySelector('[data-settings-tab="${id}"]')?.click() ?? null; true`);
+    await wait(220);
+  };
+
+  // 上次退出时停在哪一页是持久的，先归位到「对话」再读导航
+  await evaluate(`document.querySelector('[data-settings-section="chat"]')?.click() ?? null; true`);
+  await wait(250);
+
+  // 导航：4 个一级分区（左栏）+ 二级 tab（内容区顶部）
   const nav = JSON.parse(await evaluate(`(() => {
-    const groups = [...document.querySelectorAll('.settings-nav-group')].map((n) => n.textContent.trim());
-    const items = [...document.querySelectorAll('.settings-nav-item')].map((n) => ({
+    const sections = [...document.querySelectorAll('.settings-nav-item')].map((n) => ({
       label: n.querySelector('.settings-nav-label')?.textContent.trim() ?? '',
-      tab: n.getAttribute('data-settings-tab') ?? '',
+      section: n.getAttribute('data-settings-section') ?? '',
       icon: Boolean(n.querySelector('.settings-nav-icon svg')),
+      count: n.querySelector('.settings-nav-count')?.textContent.trim() ?? '',
       active: n.classList.contains('active'),
     }));
-    return JSON.stringify({ groups, items });
+    const subtabs = [...document.querySelectorAll('.settings-subtabs .settings-subtab')].map((n) => ({
+      label: n.textContent.trim(),
+      tab: n.getAttribute('data-settings-tab') ?? '',
+      active: n.classList.contains('active'),
+    }));
+    return JSON.stringify({ sections, subtabs });
   })()`));
-  assert.ok(nav.groups.length >= 3, `导航应分组显示，实际 ${nav.groups.length} 组`);
-  assert.ok(nav.items.length >= 8, `导航项太少：${nav.items.length}`);
-  assert.ok(nav.items.every((item) => item.icon), "每个导航项都要有图标");
-  assert.equal(nav.items.filter((item) => item.active).length, 1, "只应有一个高亮项");
-  assert.ok(nav.groups.includes("对话与 Agent") && nav.groups.includes("桌面端"), `分组标题不对：${nav.groups.join("/")}`);
+  assert.deepEqual(
+    nav.sections.map((item) => item.label),
+    ["对话", "能力", "外观", "桌面"],
+    `左栏只留四个一级分区，实际 ${nav.sections.map((item) => item.label).join("/")}`,
+  );
+  assert.ok(nav.sections.every((item) => item.icon), "每个分区都要有图标");
+  assert.equal(nav.sections.filter((item) => item.active).length, 1, "只应有一个分区高亮");
+  assert.equal(nav.sections.map((item) => item.count).join(""), "2413", "分区右侧标出二级 tab 数量");
+  assert.ok(nav.subtabs.length >= 2, "对话分区下应有二级 tab");
+  assert.equal(nav.subtabs.filter((item) => item.active).length, 1, "只应有一个二级 tab 高亮");
 
   // 标题栏：标题 + 说明
   const head = JSON.parse(await evaluate(`(() => {
@@ -59,31 +82,49 @@ export async function checkSettingsInElectron(win) {
   assert.ok(head.hint.length > 0, "底部应说明改动会保存");
 
   // 逐个分区打开，检查横向溢出与卡片化
-  const tabs = nav.items.map((item) => item.tab);
   const problems = [];
-  for (const tab of tabs) {
-    await evaluate(`document.querySelector('[data-settings-tab="${tab}"]').click(); true`);
-    await wait(220);
-    const state = JSON.parse(await evaluate(`(() => {
-      const body = document.querySelector('.settings-body');
-      const modal = document.querySelector('.settings-modal');
-      return JSON.stringify({
-        title: document.querySelector('.settings-title')?.textContent.trim() ?? '',
-        groups: document.querySelectorAll('.settings-body .settings-group').length,
-        overflowX: body ? body.scrollWidth - body.clientWidth : -1,
-        modalOverflow: modal ? modal.scrollWidth - modal.clientWidth : -1,
-        rows: document.querySelectorAll('.settings-body .settings-row').length,
-      });
-    })()`));
-    if (!state.title) problems.push(`${tab} 没有标题`);
-    if (state.groups === 0) problems.push(`${tab} 没有配置分组`);
-    if (state.overflowX > 2) problems.push(`${tab} 内容横向溢出 ${state.overflowX}px`);
-    if (state.modalOverflow > 2) problems.push(`${tab} 弹窗横向溢出 ${state.modalOverflow}px`);
+  const sections = nav.sections.map((item) => item.section);
+  const visited = [];
+  for (const section of sections) {
+    await evaluate(`document.querySelector('[data-settings-section="${section}"]').click(); true`);
+    await wait(200);
+    const tabs = JSON.parse(
+      await evaluate(`JSON.stringify([...document.querySelectorAll('.settings-subtab')].map((n) => n.getAttribute('data-settings-tab')))`),
+    );
+    // 只有一个页的分区不画二级 tab 条，这时点分区本身就够了
+    for (const tab of tabs.length ? tabs : [null]) {
+      visited.push(tab ?? `section:${section}`);
+      if (tab) {
+        await evaluate(`document.querySelector('[data-settings-tab="${tab}"]').click(); true`);
+        await wait(220);
+      }
+      const state = JSON.parse(await evaluate(`(() => {
+        const body = document.querySelector('.settings-body');
+        const modal = document.querySelector('.settings-modal');
+        return JSON.stringify({
+          title: document.querySelector('.settings-title')?.textContent.trim() ?? '',
+          groups: document.querySelectorAll('.settings-body .settings-group').length,
+          overflowX: body ? body.scrollWidth - body.clientWidth : -1,
+          modalOverflow: modal ? modal.scrollWidth - modal.clientWidth : -1,
+          rows: document.querySelectorAll('.settings-body .settings-row').length,
+        });
+      })()`));
+      const label = tab ?? section;
+      if (!state.title) problems.push(`${label} 没有标题`);
+      if (state.groups === 0) problems.push(`${label} 没有配置分组`);
+      if (state.overflowX > 2) problems.push(`${label} 内容横向溢出 ${state.overflowX}px`);
+      if (state.modalOverflow > 2) problems.push(`${label} 弹窗横向溢出 ${state.modalOverflow}px`);
+    }
   }
   assert.deepEqual(problems, [], `分区渲染问题：${problems.join("；")}`);
+  assert.deepEqual(
+    visited.slice().sort(),
+    ["agents", "conversation", "environment", "logs", "mcp", "packages", "plugins", "section:look", "skills", "terminal"],
+    `四个分区要覆盖全部 10 个设置页，实际 ${visited.join("/")}`,
+  );
 
   // 全局提示词页：编辑器必须按主题铺开（曾因为 CSS 丢了只剩两行白底，读不出来）
-  await evaluate(`document.querySelector('[data-settings-tab="agents"]').click(); true`);
+  await openTab("agents");
   await wait(400);
   const agents = JSON.parse(await evaluate(`(() => {
     const area = document.querySelector('.settings-body .agents-editor');
@@ -114,7 +155,7 @@ export async function checkSettingsInElectron(win) {
   console.log("[settings] agents", JSON.stringify(agents));
 
   // 环境页：Pi 状态/路径/更新应该在同一张卡里（以前分成两张，内容还重复）
-  await evaluate(`document.querySelector('[data-settings-tab="environment"]').click(); true`);
+  await openTab("environment");
   await wait(350);
   const env = JSON.parse(await evaluate(`(() => {
     const groups = [...document.querySelectorAll('.settings-body .settings-group')].map((group) => ({
@@ -143,6 +184,8 @@ export async function checkSettingsInElectron(win) {
     items: [...document.querySelectorAll('.settings-nav-item .settings-nav-label')].map((n) => n.textContent.trim()),
   })`));
   assert.deepEqual(filtered.items, ["运行日志"], `搜索「日志」应只剩运行日志：${filtered.items.join("/")}`);
+  const hitHint = await evaluate(`document.querySelector('.settings-nav-item .settings-nav-hint')?.textContent.trim() ?? ''`);
+  assert.equal(hitHint, "桌面", `搜索命中要标出所属分区，实际「${hitHint}」`);
 
   // 清空搜索后恢复
   await evaluate(`(() => {
@@ -152,9 +195,10 @@ export async function checkSettingsInElectron(win) {
     return true;
   })()`);
   await wait(200);
-  assert.ok(
-    (await evaluate("document.querySelectorAll('.settings-nav-item').length")) >= 8,
-    "清空搜索后导航应恢复",
+  assert.equal(
+    await evaluate("document.querySelectorAll('.settings-nav-item').length"),
+    4,
+    "清空搜索后左栏应恢复成四个分区",
   );
 
   // 截图留档（调试协议，避免拿到旧帧）
@@ -176,7 +220,7 @@ export async function checkSettingsInElectron(win) {
     }
   };
   // 自动更新默认开启：环境页两个开关都在、都开着，且手动「检查更新」会自动下载
-  await evaluate(`document.querySelector('[data-settings-tab="environment"]').click(); true`);
+  await openTab("environment");
   await wait(400);
   const updateRows = JSON.parse(await evaluate(`(() => {
     const rows = [...document.querySelectorAll('.settings-row')].map((row) => ({
@@ -253,10 +297,10 @@ export async function checkSettingsInElectron(win) {
   assert.equal(persisted.off, false, "关掉自动下载要写进 localStorage");
   assert.equal(persisted.back, true, "重新打开要写回 true");
 
-  await evaluate(`document.querySelector('[data-settings-tab="appearance"]').click(); true`);
+  await openTab("appearance");
   await wait(300);
   console.log("[settings] shot", await shot("settings-dark.png"));
-  await evaluate(`document.querySelector('[data-settings-tab="agents"]').click(); true`);
+  await openTab("agents");
   await wait(300);
   console.log("[settings] shot", await shot("settings-dark-agents.png"));
   await evaluate("window.__piDesktop.workbench.setTheme('light'); true");
@@ -273,5 +317,5 @@ export async function checkSettingsInElectron(win) {
     "关闭后设置弹窗应消失",
   );
 
-  console.log("[settings] PASS 分组导航 / 图标 / 标题说明 / 全分区无溢出 / 搜索 / 精简底部");
+  console.log("[settings] PASS 四个一级分区 / 二级 tab / 图标 / 全页面无溢出 / 搜索 / 精简底部");
 }

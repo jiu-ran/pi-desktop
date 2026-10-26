@@ -104,24 +104,48 @@ const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string
 const currentTabMeta = computed(() => tabs.find((t) => t.id === settingsModalState.tab) ?? tabs[0]);
 const settingsQuery = ref("");
 
-/** 左侧导航分组：把「Ai 本体相关」和「桌面端能力」分开，避免一长串平铺 */
-const TAB_GROUPS: Array<{ id: string; label: string; tabs: SettingsTabId[] }> = [
-  { id: "agent", label: "对话与 Agent", tabs: ["conversation", "agents", "skills", "mcp", "packages"] },
-  { id: "ui", label: "界面", tabs: ["appearance", "plugins"] },
-  { id: "desktop", label: "桌面端", tabs: ["terminal", "environment", "logs"] },
+/**
+ * 一级分区：左侧只留 4 项，点进去在内容区顶部切换二级 tab。
+ *
+ * 10 个 tab 平铺在左栏时，找东西全靠搜索；分成「对话 / 能力 / 外观 / 桌面」后，
+ * 高频的对话与外观各占一项，低频的 Pi 本体配置收进「能力」。
+ */
+const SECTIONS: Array<{ id: string; label: string; icon: string; tabs: SettingsTabId[] }> = [
+  { id: "chat", label: "对话", icon: icons.chat, tabs: ["conversation", "agents"] },
+  { id: "power", label: "能力", icon: icons.puzzle, tabs: ["skills", "mcp", "packages", "plugins"] },
+  { id: "look", label: "外观", icon: icons.palette, tabs: ["appearance"] },
+  { id: "desktop", label: "桌面", icon: icons.terminal, tabs: ["terminal", "environment", "logs"] },
 ];
 
-const visibleGroups = computed(() => {
-  const query = settingsQuery.value.trim().toLocaleLowerCase();
-  return TAB_GROUPS.map((group) => ({
-    ...group,
-    items: group.tabs
+const query = computed(() => settingsQuery.value.trim().toLocaleLowerCase());
+
+const currentSection = computed(
+  () => SECTIONS.find((section) => section.tabs.includes(settingsModalState.tab)) ?? SECTIONS[0]!,
+);
+
+/** 当前分区下的二级 tab（只列真实存在的） */
+const currentSectionTabs = computed(() =>
+  currentSection.value.tabs
+    .map((id) => tabs.find((tab) => tab.id === id))
+    .filter((tab): tab is (typeof tabs)[number] => Boolean(tab)),
+);
+
+/** 搜索：跨分区平铺命中的二级 tab */
+const searchResults = computed(() => {
+  const needle = query.value;
+  if (!needle) return [];
+  return SECTIONS.flatMap((section) =>
+    section.tabs
       .map((id) => tabs.find((tab) => tab.id === id))
       .filter((tab): tab is (typeof tabs)[number] => Boolean(tab))
-      .filter((tab) => !query || `${tab.label} ${tab.desc}`.toLocaleLowerCase().includes(query)),
-  })).filter((group) => group.items.length);
+      .filter((tab) => `${tab.label} ${tab.desc} ${section.label}`.toLocaleLowerCase().includes(needle))
+      .map((tab) => ({ ...tab, sectionLabel: section.label })),
+  );
 });
-const visibleTabs = computed(() => visibleGroups.value.flatMap((group) => group.items));
+
+function openSection(section: { tabs: SettingsTabId[] }): void {
+  settingsModalState.tab = section.tabs[0]!;
+}
 
 // ---------- 运行日志 ----------
 const logSummary = reactive<{
@@ -946,10 +970,10 @@ onBeforeUnmount(() => {
         </label>
 
         <nav class="settings-nav-list">
-          <template v-for="group in visibleGroups" :key="group.id">
-            <div class="settings-nav-group">{{ group.label }}</div>
+          <template v-if="query">
+            <div class="settings-nav-group">搜索结果</div>
             <button
-              v-for="item in group.items"
+              v-for="item in searchResults"
               :key="item.id"
               type="button"
               class="settings-nav-item"
@@ -959,9 +983,25 @@ onBeforeUnmount(() => {
             >
               <span class="settings-nav-icon" v-html="item.icon" />
               <span class="settings-nav-label">{{ item.label }}</span>
+              <span class="settings-nav-hint">{{ item.sectionLabel }}</span>
+            </button>
+            <div v-if="!searchResults.length" class="settings-nav-empty">没有匹配的设置项</div>
+          </template>
+          <template v-else>
+            <button
+              v-for="section in SECTIONS"
+              :key="section.id"
+              type="button"
+              class="settings-nav-item"
+              :class="{ active: currentSection.id === section.id }"
+              :data-settings-section="section.id"
+              @click="openSection(section)"
+            >
+              <span class="settings-nav-icon" v-html="section.icon" />
+              <span class="settings-nav-label">{{ section.label }}</span>
+              <span class="settings-nav-count">{{ section.tabs.length }}</span>
             </button>
           </template>
-          <div v-if="!visibleGroups.length" class="settings-nav-empty">没有匹配的设置项</div>
         </nav>
 
         <div class="settings-nav-foot">
@@ -978,6 +1018,19 @@ onBeforeUnmount(() => {
             <p class="settings-desc">{{ currentTabMeta.desc }}</p>
           </div>
           <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
+          <div v-if="currentSectionTabs.length > 1" class="settings-subtabs">
+            <button
+              v-for="tab in currentSectionTabs"
+              :key="tab.id"
+              type="button"
+              class="settings-subtab"
+              :class="{ active: tab.id === settingsModalState.tab }"
+              :data-settings-tab="tab.id"
+              @click="settingsModalState.tab = tab.id"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
         </header>
 
         <div class="settings-body">
