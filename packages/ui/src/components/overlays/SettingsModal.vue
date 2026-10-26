@@ -8,7 +8,6 @@ import type {
   PiPackagesOverview,
   PiSkillsOverview,
 } from "../../env.d.ts";
-import { PLUGIN_AREAS, type PluginArea } from "../../kernel/plugin-manager.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import {
   appSettings,
@@ -30,205 +29,35 @@ import {
   type ThemeMode,
 } from "../../shared/appearance.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
-import { DEFAULT_LOG_MAX_BYTES, LOG_MAX_CHOICES_MB } from "../../shared/log-limit.ts";
-import { formatBytes as formatSize } from "../../shared/attachments.ts";
+import AgentSettings from "./settings/AgentSettings.vue";
+import AppearanceSettings from "./settings/AppearanceSettings.vue";
+import ConversationSettings from "./settings/ConversationSettings.vue";
+import LogSettings from "./settings/LogSettings.vue";
+import PluginSettings from "./settings/PluginSettings.vue";
+import {
+  SETTINGS_SECTIONS as SECTIONS,
+  findSettingsTab,
+  searchSettings,
+  sectionOfTab,
+  sectionTabs,
+} from "./settings/settings-tabs.ts";
 
 const TerminalSettings = defineAsyncComponent(() => import("../terminal/TerminalSettings.vue"));
 const { workbench, plugins, bus } = useKernel();
 const state = workbench.state;
 const ws = computed(() => workbench.active.value);
 
-const tabs: Array<{ id: SettingsTabId; label: string; icon: string; desc: string }> = [
-  {
-    id: "conversation",
-    label: "对话与并发",
-    icon: icons.chat,
-    desc: "多会话并行策略、发送方式、文件自动保存与 Agent 自动化配置",
-  },
-  {
-    id: "appearance",
-    label: "外观与布局",
-    icon: icons.palette,
-    desc: "配色模式、强调色、圆角、字号排版与各工作区面板宽度",
-  },
-  {
-    id: "terminal",
-    label: "终端",
-    icon: icons.terminal,
-    desc: "按需启用完整终端插件，配置系统默认 shell、pwsh、Git Bash 与自定义启动参数",
-  },
-  {
-    id: "mcp",
-    label: "MCP 服务配置",
-    icon: icons.mcp,
-    desc: "管理全局与项目级 Model Context Protocol 服务、暴露策略及工具状态",
-  },
-  {
-    id: "packages",
-    label: "Pi 软件包管理",
-    icon: icons.package,
-    desc: "安装、更新与卸载 Pi 扩展包（npm / Git / 本地目录）及技能、提示词与主题资源",
-  },
-  {
-    id: "agents",
-    label: "全局提示词",
-    icon: icons.file,
-    desc: "查看和管理 ~/.pi/agent/AGENTS.md",
-  },
-  {
-    id: "skills",
-    label: "Skills",
-    icon: icons.brain,
-    desc: "查看全局与项目级技能（Skills）的加载状态、作用域与调用方式",
-  },
-  {
-    id: "plugins",
-    label: "插件",
-    icon: icons.puzzle,
-    desc: "按界面区域管理插件：对话区域、文件区域与扩展工具的启用状态",
-  },
-  {
-    id: "environment",
-    label: "环境与快捷键",
-    icon: icons.terminal,
-    desc: "本机 Pi CLI 连接诊断、工作区进程池与全局快捷键",
-  },
-  {
-    id: "logs",
-    label: "运行日志",
-    icon: icons.text,
-    desc: "主进程 / 渲染进程 / Pi / 卡顿日志，总量上限 100MB，可打开目录或清理",
-  },
-];
-
-const currentTabMeta = computed(() => tabs.find((t) => t.id === settingsModalState.tab) ?? tabs[0]);
 const settingsQuery = ref("");
-
-/**
- * 一级分区：左侧只留 4 项，点进去在内容区顶部切换二级 tab。
- *
- * 10 个 tab 平铺在左栏时，找东西全靠搜索；分成「对话 / 能力 / 外观 / 桌面」后，
- * 高频的对话与外观各占一项，低频的 Pi 本体配置收进「能力」。
- */
-const SECTIONS: Array<{ id: string; label: string; icon: string; tabs: SettingsTabId[] }> = [
-  { id: "chat", label: "对话", icon: icons.chat, tabs: ["conversation", "agents"] },
-  { id: "power", label: "能力", icon: icons.puzzle, tabs: ["skills", "mcp", "packages", "plugins"] },
-  { id: "look", label: "外观", icon: icons.palette, tabs: ["appearance"] },
-  { id: "desktop", label: "桌面", icon: icons.terminal, tabs: ["terminal", "environment", "logs"] },
-];
-
 const query = computed(() => settingsQuery.value.trim().toLocaleLowerCase());
 
-const currentSection = computed(
-  () => SECTIONS.find((section) => section.tabs.includes(settingsModalState.tab)) ?? SECTIONS[0]!,
-);
-
-/** 当前分区下的二级 tab（只列真实存在的） */
-const currentSectionTabs = computed(() =>
-  currentSection.value.tabs
-    .map((id) => tabs.find((tab) => tab.id === id))
-    .filter((tab): tab is (typeof tabs)[number] => Boolean(tab)),
-);
-
-/** 搜索：跨分区平铺命中的二级 tab */
-const searchResults = computed(() => {
-  const needle = query.value;
-  if (!needle) return [];
-  return SECTIONS.flatMap((section) =>
-    section.tabs
-      .map((id) => tabs.find((tab) => tab.id === id))
-      .filter((tab): tab is (typeof tabs)[number] => Boolean(tab))
-      .filter((tab) => `${tab.label} ${tab.desc} ${section.label}`.toLocaleLowerCase().includes(needle))
-      .map((tab) => ({ ...tab, sectionLabel: section.label })),
-  );
-});
+const currentTabMeta = computed(() => findSettingsTab(settingsModalState.tab));
+const currentSection = computed(() => sectionOfTab(settingsModalState.tab));
+const currentSectionTabs = computed(() => sectionTabs(currentSection.value));
+const searchResults = computed(() => searchSettings(settingsQuery.value));
 
 function openSection(section: { tabs: SettingsTabId[] }): void {
   settingsModalState.tab = section.tabs[0]!;
 }
-
-// ---------- 运行日志 ----------
-const logSummary = reactive<{
-  dir: string;
-  totalBytes: number;
-  files: Array<{ name: string; size: number; mtimeMs: number }>;
-  limitBytes: number;
-  fileBytes: number;
-  keepFiles: number;
-}>({
-  dir: "",
-  totalBytes: 0,
-  files: [],
-  limitBytes: DEFAULT_LOG_MAX_BYTES,
-  fileBytes: DEFAULT_LOG_MAX_BYTES / 4,
-  keepFiles: 4,
-});
-const logBusy = ref(false);
-
-function formatLogTime(ms: number): string {
-  const date = new Date(ms);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-async function loadLogs(): Promise<void> {
-  const bridge = (window as any).piDesktop;
-  if (!bridge?.logsInfo) return;
-  try {
-    const info = await bridge.logsInfo();
-    if (!info) return;
-    logSummary.dir = info.dir ?? "";
-    logSummary.totalBytes = info.totalBytes ?? 0;
-    logSummary.files = info.files ?? [];
-    logSummary.limitBytes = Number(info.limitBytes) || DEFAULT_LOG_MAX_BYTES;
-    logSummary.fileBytes = Number(info.fileBytes) || DEFAULT_LOG_MAX_BYTES / 4;
-    logSummary.keepFiles = Number(info.keepFiles) || 4;
-  } catch {
-    // 读不到日志目录不影响设置界面
-  }
-}
-
-async function openLogs(): Promise<void> {
-  logBusy.value = true;
-  try {
-    await (window as any).piDesktop?.logsOpen?.();
-  } finally {
-    logBusy.value = false;
-  }
-}
-
-async function clearLogs(): Promise<void> {
-  logBusy.value = true;
-  try {
-    const info = await (window as any).piDesktop?.logsClear?.();
-    if (info) {
-      logSummary.dir = info.dir ?? logSummary.dir;
-      logSummary.totalBytes = info.totalBytes ?? 0;
-      logSummary.files = info.files ?? [];
-    } else {
-      await loadLogs();
-    }
-  } finally {
-    logBusy.value = false;
-  }
-}
-
-watch(
-  () => settingsModalState.tab,
-  (tab) => {
-    if (tab === "logs") void loadLogs();
-  },
-  { immediate: true },
-);
-
-const thinkingOptions: Array<{ value: typeof appSettings.defaultThinking; label: string }> = [
-  { value: "off", label: `${thinkingLabel("off")} (off)` },
-  { value: "minimal", label: `${thinkingLabel("minimal")} (minimal)` },
-  { value: "low", label: `${thinkingLabel("low")} (low)` },
-  { value: "medium", label: `${thinkingLabel("medium")} (medium)` },
-  { value: "high", label: `${thinkingLabel("high")} (high)` },
-  { value: "xhigh", label: `${thinkingLabel("xhigh")} (xhigh)` },
-];
 
 const exposureOptions: Array<{ value: McpExposureMode; label: string; hint: string }> = [
   { value: "codemode", label: "Codemode（推荐）", hint: "通过脚本按需检索并调用工具，节省上下文" },
@@ -237,116 +66,12 @@ const exposureOptions: Array<{ value: McpExposureMode; label: string; hint: stri
   { value: "hidden", label: "Hidden（隐藏）", hint: "仅注册服务但不向模型暴露工具" },
 ];
 
-const pluginGroups = computed(() =>
-  PLUGIN_AREAS.map((area) => ({
-    ...area,
-    plugins: plugins.records.filter((record) => record.area === area.id),
-  })).filter((group) => group.plugins.length),
-);
-
-const pluginAreaLabels: Record<PluginArea, string> = {
-  conversation: "对话区域",
-  files: "文件区域",
-  sidebar: "扩展工具",
-  shell: "工作台工具",
-};
-
-function togglePlugin(id: string): void {
-  plugins.toggle(id);
-}
-
-const themeModeHint = computed(() => {
-  const mode = THEME_MODES.find((item) => item.id === appSettings.themeMode) ?? THEME_MODES[0];
-  const actual = state.theme === "light" ? "浅色" : "深色";
-  return mode.id === "system" ? `${mode.hint} · 当前 ${actual}` : mode.hint;
-});
-const accentCustom = computed(() => normalizeHex(appSettings.accentCustom, ACCENTS[0].color));
-const accentColor = computed(() =>
-  appSettings.accent === "custom"
-    ? accentCustom.value
-    : (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).color,
-);
-const accentLabel = computed(() =>
-  appSettings.accent === "custom"
-    ? `自定义 ${accentCustom.value}`
-    : (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).label,
-);
-const EMPHASIS_MODES: Array<{ id: EmphasisMode; label: string; hint: string }> = [
-  { id: "follow", label: "跟随强调色", hint: "和主强调色保持一致" },
-  { id: "custom", label: "单独设置", hint: "对话里的强调文字用另一个颜色" },
-];
-const emphasisCustom = computed(() => normalizeHex(appSettings.emphasisCustom, appSettings.emphasis === "custom" ? accentColor.value : accentColor.value));
-const emphasisResolved = computed(() => emphasisColor(appSettings.emphasis, appSettings.emphasisCustom, appSettings.accent, appSettings.accentCustom));
-const emphasisLabel = computed(() => (appSettings.emphasis === "custom" ? `自定义 ${emphasisResolved.value}` : "跟随强调色"));
-
-/** 自定义颜色只接受 #rrggbb，非法输入保留原值，同时把「自定义」选中 */
-function onAccentCustom(event: Event): void {
-  const value = normalizeHex((event.target as HTMLInputElement)?.value, accentCustom.value);
-  appSettings.accentCustom = value;
-  appSettings.accent = "custom";
-}
-
-function onEmphasisCustom(event: Event): void {
-  const value = normalizeHex((event.target as HTMLInputElement)?.value, emphasisCustom.value);
-  appSettings.emphasisCustom = value;
-  appSettings.emphasis = "custom";
-}
-const radiusLabel = computed(() => (RADIUS_PRESETS.find((item) => item.id === appSettings.radius) ?? RADIUS_PRESETS[1]).label);
-
-const ACTIVITY_DETAILS = [
-  { id: "grouped", label: "时间线", hint: "按一次请求合成一行「执行了 N 步」，展开后按真实顺序列出每一步" },
-  { id: "compact", label: "紧凑", hint: "同上，但去掉步骤序号与耗时，行更矮" },
-  { id: "expanded", label: "展开", hint: "打开对话时直接展开每一步的细节" },
-] as const;
-const activityDetailLabel = computed(() => (ACTIVITY_DETAILS.find((item) => item.id === appSettings.activityDetail) ?? ACTIVITY_DETAILS[0]).label);
-const columnWidthLabel = computed(
-  () => (COLUMN_WIDTHS.find((item) => item.id === appSettings.columnWidth) ?? COLUMN_WIDTHS[1]).label,
-);
-
-/** 「恢复默认外观」只还原外观相关项：不动终端、Agent、MCP 等设置。 */
-const APPEARANCE_KEYS = [
-  "themeMode",
-  "accent",
-  "accentCustom",
-  "emphasis",
-  "emphasisCustom",
-  "radius",
-  "columnWidth",
-  "reduceMotion",
-  "messageDensity",
-  "uiFontSize",
-  "codeFontSize",
-  "uiZoom",
-] as const satisfies ReadonlyArray<keyof typeof DEFAULT_SETTINGS>;
-
-function resetAppearanceNow(): void {
-  for (const key of APPEARANCE_KEYS) {
-    (appSettings as any)[key] = DEFAULT_SETTINGS[key];
-  }
-  bus.emit("notify", { level: "info", text: "已恢复默认外观" });
-}
-
-function resetAreaWidths(): void {
+function handleResetAll(): void {
+  resetSettingsToDefault();
   workbench.setSidebarWidth(272);
   workbench.setStageWidth(520);
   workbench.setPanelWidth(320);
-  bus.emit("notify", { level: "info", text: "已恢复各工作区面板默认宽度" });
-}
-
-function handleResetAll(): void {
-  resetSettingsToDefault();
-  resetAreaWidths();
   bus.emit("notify", { level: "info", text: "已恢复默认偏好设置" });
-}
-
-async function applyDefaultThinkingNow(): Promise<void> {
-  if (ws.value && ws.value.status === "ready") {
-    try {
-      await workbench.setThinking(appSettings.defaultThinking);
-    } catch {
-      // ignore if current model doesn't support this level
-    }
-  }
 }
 
 async function restartActiveProcess(): Promise<void> {
@@ -801,37 +526,6 @@ const resourceTypeLabels: Record<string, string> = {
   themes: "主题",
 };
 
-// ==================== Skills 设置逻辑 ====================
-const agentsPath = ref("");
-const agentsContent = ref("");
-const agentsSaved = ref("");
-const agentsLoading = ref(false);
-const agentsSaving = ref(false);
-const agentsDirty = computed(() => agentsContent.value !== agentsSaved.value);
-
-async function loadGlobalAgents(): Promise<void> {
-  agentsLoading.value = true;
-  try {
-    const result = await window.piDesktop!.globalAgents();
-    agentsPath.value = result.path;
-    agentsContent.value = result.content;
-    agentsSaved.value = result.content;
-  } catch (error: any) {
-    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
-  } finally { agentsLoading.value = false; }
-}
-
-async function saveGlobalAgents(): Promise<void> {
-  agentsSaving.value = true;
-  try {
-    const result = await window.piDesktop!.saveGlobalAgents(agentsContent.value);
-    agentsSaved.value = result.content;
-    bus.emit("notify", { level: "info", text: "全局提示词已保存" });
-  } catch (error: any) {
-    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
-  } finally { agentsSaving.value = false; }
-}
-
 const skillsLoading = ref(false);
 const skillsData = ref<PiSkillsOverview | null>(null);
 const skillsFilter = ref<"all" | "user" | "project" | "temporary">("all");
@@ -865,8 +559,6 @@ watch(
       loadPackagesOverview();
     } else if (tab === "skills") {
       loadSkillsOverview();
-    } else if (tab === "agents") {
-      loadGlobalAgents();
     }
   },
   { immediate: true },
@@ -1034,445 +726,10 @@ onBeforeUnmount(() => {
         </header>
 
         <div class="settings-body">
-          <!-- 1. 对话与并发 -->
-          <template v-if="settingsModalState.tab === 'conversation'">
-            <div class="settings-group">
-              <div class="settings-group-title">消息发送与交互</div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>发送消息快捷键</strong>
-                  <span>选择输入框按下回车键时的默认发送方式</span>
-                </div>
-                <select v-model="appSettings.sendShortcut" class="settings-select">
-                  <option value="enter">Enter 发送</option>
-                  <option value="ctrl-enter">Ctrl+Enter 发送</option>
-                </select>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>运行中默认发送模式</strong>
-                  <span>当当前会话正在执行任务时，继续发送新消息的默认处理策略</span>
-                </div>
-                <select v-model="appSettings.streamingMode" class="settings-select">
-                  <option value="followUp">排队（结束后执行）</option>
-                  <option value="steer">引导（立即插入）</option>
-                </select>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>默认思考深度（Thinking Level）</strong>
-                  <span>新建会话或切换模型时优先采用的思考等级</span>
-                </div>
-                <select v-model="appSettings.defaultThinking" class="settings-select" @change="applyDefaultThinkingNow">
-                  <option v-for="opt in thinkingOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">文件编辑器与自动保存</div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>修改文件自动保存</strong>
-                  <span>控制在代码编辑器中修改项目文件后的自动落盘保存策略</span>
-                </div>
-                <select v-model="appSettings.autoSave" class="settings-select">
-                  <option value="off">关闭</option>
-                  <option value="afterDelay">延迟保存</option>
-                  <option value="onFocusChange">失焦时</option>
-                  <option value="onWindowChange">切窗口时</option>
-                </select>
-              </div>
-
-              <div class="settings-row" :class="{ 'is-disabled': appSettings.autoSave !== 'afterDelay' }">
-                <div class="settings-row-info">
-                  <strong>自动保存延迟时间</strong>
-                  <span>
-                    {{
-                      appSettings.autoSave === "afterDelay"
-                        ? `停止输入 ${appSettings.autoSaveDelay}ms 后自动写入磁盘`
-                        : "仅在「延迟保存」模式下生效"
-                    }}
-                  </span>
-                </div>
-                <select v-model.number="appSettings.autoSaveDelay" class="settings-select" :disabled="appSettings.autoSave !== 'afterDelay'">
-                  <option v-for="ms in [500, 1000, 2000, 3000]" :key="ms" :value="ms">
-                    {{ ms >= 1000 ? `${ms / 1000}s` : `${ms}ms` }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">同目录多会话并行与自动化</div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>单目录温备 Worker 进程上限</strong>
-                  <span>同一项目目录支持任意数量任务同时并行运行；此项控制任务结束后保留的空闲温备进程数（切换更快）</span>
-                </div>
-                <select v-model.number="appSettings.maxIdleWorkers" class="settings-select">
-                  <option v-for="num in [1, 2, 3, 5]" :key="num" :value="num">{{ num }} 个</option>
-                </select>
-              </div>
-
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>后台并行任务完成提醒</strong>
-                  <span>当同一目录或其他目录下的后台会话执行完毕时，弹出完成通知并点亮侧边栏「已完成」徽标</span>
-                </div>
-                <input v-model="appSettings.notifyOnBackgroundDone" type="checkbox" class="settings-switch" />
-              </label>
-
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>自动压缩上下文（Auto Compaction）</strong>
-                  <span>当会话 Token 接近模型上下文窗口上限时，自动总结并压缩历史消息</span>
-                </div>
-                <input v-model="appSettings.autoCompaction" type="checkbox" class="settings-switch" />
-              </label>
-
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>网络或模型请求异常自动重试（Auto Retry）</strong>
-                  <span>遇到临时速率限制或网络波动时由 Pi 进程自动退避重试</span>
-                </div>
-                <input v-model="appSettings.autoRetry" type="checkbox" class="settings-switch" />
-              </label>
-            </div>
-          </template>
+          <ConversationSettings v-if="settingsModalState.tab === 'conversation'" />
 
           <!-- 2. 外观与布局 -->
-          <template v-else-if="settingsModalState.tab === 'appearance'">
-                        <div class="settings-group">
-              <div class="settings-group-head">
-                <span class="settings-group-title">主题</span>
-                <button type="button" class="btn ghost small" @click="resetAppearanceNow">
-                  <span class="settings-inline-icon" v-html="icons.refresh" />恢复默认外观
-                </button>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>配色模式</strong>
-                  <span>{{ themeModeHint }}</span>
-                </div>
-                <div class="settings-theme-tiles">
-                  <button
-                    v-for="item in THEME_MODES"
-                    :key="item.id"
-                    type="button"
-                    class="settings-theme-tile"
-                    :class="{ active: appSettings.themeMode === item.id }"
-                    :title="item.hint"
-                    @click="appSettings.themeMode = item.id"
-                  >
-                    <span class="settings-theme-art" :data-scheme="item.id">
-                      <span class="settings-theme-art-head" />
-                      <span class="settings-theme-art-line" />
-                      <span class="settings-theme-art-line short" />
-                    </span>
-                    {{ item.label }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>强调色</strong>
-                  <span>按钮、选中态、链接与高亮块的主色 · 当前 {{ accentLabel }}</span>
-                </div>
-                <div class="settings-swatches">
-                  <button
-                    v-for="item in ACCENTS"
-                    :key="item.id"
-                    type="button"
-                    class="settings-swatch"
-                    :class="{ active: appSettings.accent === item.id }"
-                    :style="{ background: item.color }"
-                    :title="item.label"
-                    :aria-label="item.label"
-                    @click="appSettings.accent = item.id"
-                  />
-                  <!-- 自定义：色环上叠一个当前颜色，点一下开系统取色器 -->
-                  <label
-                    class="settings-swatch settings-swatch-custom"
-                    :class="{ active: appSettings.accent === 'custom' }"
-                    :title="`自定义颜色（当前 ${accentCustom}）`"
-                  >
-                    <span class="settings-swatch-chosen" :style="{ background: accentCustom }" />
-                    <input
-                      type="color"
-                      :value="accentCustom"
-                      aria-label="自定义强调色"
-                      @input="onAccentCustom"
-                      @click="appSettings.accent = 'custom'"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>对话强调色</strong>
-                  <span>对话里行内代码等强调文字的颜色，可以和上面的界面强调色不一样 · 当前 {{ emphasisLabel }}</span>
-                </div>
-                <div class="settings-emphasis-row">
-                  <div class="settings-segments">
-                    <button
-                      v-for="item in EMPHASIS_MODES"
-                      :key="item.id"
-                      type="button"
-                      class="settings-segment"
-                      :class="{ active: appSettings.emphasis === item.id }"
-                      :title="item.hint"
-                      @click="appSettings.emphasis = item.id"
-                    >{{ item.label }}</button>
-                  </div>
-                  <label
-                    v-if="appSettings.emphasis === 'custom'"
-                    class="settings-swatch settings-swatch-custom small"
-                    :style="{ background: emphasisCustom }"
-                    :class="{ active: true }"
-                    :title="`自定义对话强调色（当前 ${emphasisCustom}）`"
-                  >
-                    <input
-                      type="color"
-                      :value="emphasisCustom"
-                      aria-label="自定义对话强调色"
-                      @input="onEmphasisCustom"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <!-- 实时预览：这层在同一个文档里，强调色 / 圆角 / 字号一变它立刻跟着变 -->
-              <div class="settings-preview">
-                <div class="settings-preview-head">
-                  <span>实时预览</span>
-                  <span class="settings-preview-hint">改任何一项都会立即生效并保存</span>
-                </div>
-                <div class="settings-preview-body">
-                  <div class="settings-preview-row">
-                    <span class="settings-preview-bubble">对话里的用户消息长这样</span>
-                  </div>
-                  <div class="settings-preview-row">
-                    <span class="settings-preview-chip">强调色</span>
-                    <span class="settings-preview-emphasis">对话强调文字</span>
-                    <code>--emphasis: {{ emphasisResolved }}</code>
-                    <span class="settings-preview-pill">就绪</span>
-                  </div>
-                  <div class="settings-preview-row">
-                    <span class="settings-preview-card">工具调用卡片 · 圆角、边框与字号跟随设置</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">排版</div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>界面字号</strong>
-                  <span>全局界面与对话正文字号 · 当前 {{ appSettings.uiFontSize }}px</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="sz in [12, 13, 14, 15]"
-                    :key="sz"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.uiFontSize === sz }"
-                    @click="appSettings.uiFontSize = sz"
-                  >{{ sz }}</button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>代码字号</strong>
-                  <span>代码块、Diff 视图与命令输出字号 · 当前 {{ appSettings.codeFontSize }}px</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="sz in [11.5, 12.5, 13.5, 14.5]"
-                    :key="sz"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.codeFontSize === sz }"
-                    @click="appSettings.codeFontSize = sz"
-                  >{{ sz }}</button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>消息密度</strong>
-                  <span>调整对话区消息与工具卡片的垂直间距</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.messageDensity === 'comfortable' }"
-                    @click="appSettings.messageDensity = 'comfortable'"
-                  >舒适</button>
-                  <button
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.messageDensity === 'compact' }"
-                    @click="appSettings.messageDensity = 'compact'"
-                  >紧凑</button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>执行记录</strong>
-                  <span>对话里工具调用与思考的分组方式 · 当前 {{ activityDetailLabel }}</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="item in ACTIVITY_DETAILS"
-                    :key="item.id"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.activityDetail === item.id }"
-                    :title="item.hint"
-                    @click="appSettings.activityDetail = item.id"
-                  >{{ item.label }}</button>
-                </div>
-              </div>
-
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>合并连续同类步骤</strong>
-                  <span>连续几步只有参数不同（如 <code>npm run check -- 1/2/3</code>、同一模板写多个文件）时收成一行，点开再看每一步；关掉则只淡化相同前缀</span>
-                </div>
-                <input v-model="appSettings.activityMerge" type="checkbox" class="settings-switch" />
-              </label>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>圆角</strong>
-                  <span>卡片、输入框、弹层的圆角大小 · 当前 {{ radiusLabel }}</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="item in RADIUS_PRESETS"
-                    :key="item.id"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.radius === item.id }"
-                    @click="appSettings.radius = item.id"
-                  >{{ item.label }}</button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>对话列宽</strong>
-                  <span>消息正文与输入框的最大宽度，窗口更宽时留白更多 · 当前 {{ columnWidthLabel }}</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="item in COLUMN_WIDTHS"
-                    :key="item.id"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: appSettings.columnWidth === item.id }"
-                    @click="appSettings.columnWidth = item.id"
-                  >{{ item.label }}</button>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>界面缩放</strong>
-                  <span>整体缩放比例，替代快捷键缩放 · 当前 {{ Math.round(appSettings.uiZoom * 100) }}%</span>
-                </div>
-                <div class="settings-segments">
-                  <button
-                    v-for="z in [0.9, 1, 1.1, 1.25]"
-                    :key="z"
-                    type="button"
-                    class="settings-segment"
-                    :class="{ active: Math.abs(appSettings.uiZoom - z) < 0.001 }"
-                    @click="appSettings.uiZoom = z"
-                  >{{ Math.round(z * 100) }}%</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">动效</div>
-              <label class="settings-row clickable">
-                <div class="settings-row-info">
-                  <strong>关闭界面动效</strong>
-                  <span>去掉弹层过渡、加载动画与平滑滚动；系统开了「减少动态效果」时建议打开</span>
-                </div>
-                <input v-model="appSettings.reduceMotion" type="checkbox" class="settings-switch" />
-              </label>
-            </div>
-<div class="settings-group">
-              <div class="settings-group-head">
-                <span class="settings-group-title">工作区面板布局宽度</span>
-                <button type="button" class="btn ghost small" @click="resetAreaWidths">恢复默认宽度</button>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>项目与会话栏（左侧导航栏）</strong>
-                  <span>管理工作区目录与并行任务会话 · 范围 180px – 480px，当前 {{ state.sidebarWidth }}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="180"
-                  max="480"
-                  :value="state.sidebarWidth"
-                  class="settings-slider"
-                  @input="workbench.setSidebarWidth(Number(($event.target as HTMLInputElement).value))"
-                />
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>编辑器与详情视图（中部副舞台）</strong>
-                  <span>多标签代码编辑、变更 Diff 与提交详情 · 范围 240px – 1000px，当前 {{ state.stageWidth }}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="240"
-                  max="1000"
-                  :value="state.stageWidth"
-                  class="settings-slider"
-                  @input="workbench.setStageWidth(Number(($event.target as HTMLInputElement).value))"
-                />
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>扩展工具面板（右侧插件面板）</strong>
-                  <span>展示项目文件树、变更汇总、Git 树等插件列表 · 范围 290px – 640px，当前 {{ state.panelWidth }}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="200"
-                  max="640"
-                  :value="state.panelWidth"
-                  class="settings-slider"
-                  @input="workbench.setPanelWidth(Number(($event.target as HTMLInputElement).value))"
-                />
-              </div>
-            </div>
-          </template>
+          <AppearanceSettings v-else-if="settingsModalState.tab === 'appearance'" />
 
           <template v-else-if="settingsModalState.tab === 'terminal'">
             <TerminalSettings />
@@ -1972,20 +1229,7 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- 5. Skills 设置 -->
-          <template v-else-if="settingsModalState.tab === 'agents'">
-            <div class="settings-group fill">
-              <div class="settings-group-head">
-                <span class="settings-group-title">全局提示词</span>
-                <div class="settings-toolbar-actions">
-                  <button type="button" class="btn ghost small" @click="loadGlobalAgents">刷新</button>
-                  <button type="button" class="btn small" :disabled="!agentsDirty || agentsSaving" @click="saveGlobalAgents">保存</button>
-                </div>
-              </div>
-              <p class="settings-note">{{ agentsPath || 'C:\\Users\\<用户>\\.pi\\agent\\AGENTS.md' }}</p>
-              <textarea v-model="agentsContent" class="agents-editor" spellcheck="false" :disabled="agentsLoading" />
-            </div>
-          </template>
-
+          <AgentSettings v-else-if="settingsModalState.tab === 'agents'" />
           <template v-else-if="settingsModalState.tab === 'skills'">
             <div class="settings-group">
               <div class="settings-group-head">
@@ -2061,33 +1305,7 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- 6. 插件（按界面区域分组） -->
-          <template v-else-if="settingsModalState.tab === 'plugins'">
-            <div v-for="group in pluginGroups" :key="group.id" class="settings-group">
-              <div class="settings-group-title">{{ group.label }} · {{ group.plugins.length }}</div>
-
-              <div v-for="item in group.plugins" :key="item.id" class="settings-row">
-                <div class="settings-plugin-meta">
-                  <span class="settings-plugin-icon" v-html="item.icon" />
-                  <div class="settings-row-info">
-                    <strong>
-                      {{ item.name }}
-                      <span class="settings-plugin-ver">v{{ item.version }}</span>
-                      <span v-if="item.core" class="settings-plugin-tag">核心</span>
-                      <span class="settings-plugin-tag">{{ pluginAreaLabels[item.area] }}</span>
-                    </strong>
-                    <span>{{ item.description }}</span>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  class="settings-switch"
-                  :checked="item.enabled"
-                  :disabled="item.core"
-                  @change="togglePlugin(item.id)"
-                />
-              </div>
-            </div>
-          </template>
+          <PluginSettings v-else-if="settingsModalState.tab === 'plugins'" />
 
           <!-- 6. 环境与快捷键 -->
           <template v-else-if="settingsModalState.tab === 'environment'">
@@ -2263,54 +1481,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
-          <template v-else-if="settingsModalState.tab === 'logs'">
-            <div class="settings-group">
-              <div class="settings-group-title">日志目录</div>
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>占用 {{ formatSize(logSummary.totalBytes) }} / 上限 {{ formatSize(logSummary.limitBytes) }}</strong>
-                  <span>{{ logSummary.dir || "尚未初始化" }}</span>
-                </div>
-                <div style="display: flex; gap: 6px; flex: none;">
-                  <button type="button" class="btn ghost small" :disabled="logBusy || !logSummary.dir" @click="openLogs">打开目录</button>
-                  <button type="button" class="btn ghost small" :disabled="logBusy || !logSummary.files.length" @click="clearLogs">清理</button>
-                </div>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>总量上限</strong>
-                  <span>给日志留多少空间：超了就按时间删最旧的。默认 {{ formatSize(DEFAULT_LOG_MAX_BYTES) }}，需要排查问题时可以临时调大。</span>
-                </div>
-                <select v-model.number="appSettings.logMaxBytes" class="settings-select">
-                  <option v-for="mb in LOG_MAX_CHOICES_MB" :key="mb" :value="mb * 1024 * 1024">{{ mb }} MB</option>
-                </select>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-info">
-                  <strong>记录内容</strong>
-                  <span>
-                    日志写在安装目录下的 logs/（安装目录不可写时回落到用户数据目录，例如装在 Program Files 里）。<br />app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error 与未捕获异常；
-                    pi.log 会话与压缩事件；perf.log 卡顿（主进程阻塞、慢 IPC、渲染进程长任务）。
-                    单文件 {{ formatSize(logSummary.fileBytes) }} 轮转（最多留 {{ logSummary.keepFiles }} 个），
-                    总量超过上限后按时间删最旧的，正在写的文件不会被删。
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="settings-group-title">文件（最近在前）</div>
-              <div v-if="!logSummary.files.length" class="settings-row">
-                <div class="settings-row-info"><span>还没有日志文件</span></div>
-              </div>
-              <div v-for="file in logSummary.files" :key="file.name" class="settings-row">
-                <div class="settings-row-info">
-                  <strong>{{ file.name }}</strong>
-                  <span>{{ formatSize(file.size) }} · {{ formatLogTime(file.mtimeMs) }}</span>
-                </div>
-              </div>
-            </div>
-          </template>
+          <LogSettings v-else-if="settingsModalState.tab === 'logs'" />
         </div>
         <footer class="settings-footer">
           <span class="settings-footer-hint">改动会立即生效并保存</span>
