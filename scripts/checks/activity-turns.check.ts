@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildTurnSteps,
   deriveTurnItems,
+  editStat,
   isTurnStep,
   stepLabel,
   stepTarget,
@@ -143,6 +144,26 @@ const stamped = buildTurnSteps([
 ]);
 assert.deepEqual(stamped.map((step) => step.offsetMs), [0, 1_400, 12_000], "相对第一步算偏移");
 assert.deepEqual(stamped.map((step) => step.offsetLabel), ["", "+1 秒", "+12 秒"], "超过 1 秒才显示耗时");
+// 改动步骤带增删行数：时间线里的卡片没有头部，行上要能看到 +N / −N
+const stats = buildTurnSteps([
+  {
+    block: {
+      ...edit("e1", "src/a.ts"),
+      args: { path: "src/a.ts", edits: [{ oldText: "a", newText: "b" + String.fromCharCode(10) + "c" }] },
+    },
+    index: 0,
+  },
+  { block: { ...tool("w1", "write", { path: "src/b.ts", content: "x" + String.fromCharCode(10) + "y" }) }, index: 1 },
+  { block: bash("b9"), index: 2 },
+]);
+assert.equal(stats[0]!.added, 2, "edit 的新增行数");
+assert.equal(stats[0]!.removed, 1, "edit 的删除行数");
+assert.equal(stats[1]!.added, 2, "write 只报新增");
+assert.equal(stats[1]!.removed, null, "write 不报删除（整份文件都是新增）");
+assert.equal(stats[2]!.added, null, "命令步骤没有增删");
+assert.equal(editStat(bash("b10")), null, "非改动工具不算增删");
+assert.equal(editStat({ ...edit("e2"), args: { path: "src/a.ts" } }), null, "没有差异时不算增删");
+
 const unstamped = buildTurnSteps([{ block: { ...bash("n1"), ts: undefined }, index: 0 }]);
 assert.equal(unstamped[0]!.offsetLabel, "", "没有时间戳时不显示耗时");
 assert.equal(unstamped[0]!.offsetMs, -1);

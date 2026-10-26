@@ -8,7 +8,7 @@ import BashTool from "./tools/BashTool.vue";
 import DiffTool from "./tools/DiffTool.vue";
 import ReadTool from "./tools/ReadTool.vue";
 import GenericTool from "./tools/GenericTool.vue";
-import { computed, inject } from "vue";
+import { computed, inject, provide, toRef } from "vue";
 import { KERNEL_KEY } from "../../kernel/index.ts";
 
 /**
@@ -25,7 +25,7 @@ function pluginRendererFor(name: string) {
   return toolRenderers.value.find((item) => item.tools.includes(name))?.component;
 }
 
-defineProps<{
+const props = defineProps<{
   block: TranscriptBlock;
   query?: string;
   copyText?: string;
@@ -33,7 +33,12 @@ defineProps<{
   collapseLong?: boolean;
   /** 还在排队、没有真正发给模型 */
   queued?: boolean;
+  /** 在时间线步骤里渲染：工具卡片不再画自己的头部（上面那行已经写过） */
+  headless?: boolean;
 }>();
+
+// 时间线里展开的步骤：卡片与思考块都别再画自己的头部（上面那行已经写过）
+provide("piBlockHeadless", toRef(props, "headless"));
 </script>
 
 <template>

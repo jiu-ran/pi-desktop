@@ -21,6 +21,10 @@ export interface MatchableStep {
   target: string;
   failed: boolean;
   live: boolean;
+  /** 改动新增行数（非改动步骤为 null） */
+  added?: number | null;
+  /** 改动删除行数（write 或非改动步骤为 null） */
+  removed?: number | null;
 }
 
 export interface StepMatch {
@@ -33,7 +37,17 @@ export interface StepMatch {
 
 export type TimelineRow<T extends MatchableStep> =
   | { kind: "step"; step: T; match?: StepMatch; startIndex: number }
-  | { kind: "run"; steps: T[]; target: string; failed: boolean; live: boolean; startIndex: number };
+  | {
+      kind: "run";
+      steps: T[];
+      target: string;
+      failed: boolean;
+      live: boolean;
+      /** 合并行里所有改动的 +N / −N 之和 */
+      added: number | null;
+      removed: number | null;
+      startIndex: number;
+    };
 
 /** 合并需要的最少步数：两步相同的命令不值得多一次点击 */
 export const MERGE_MIN_STEPS = 3;
@@ -110,6 +124,20 @@ export function compactValues(values: string[]): string {
   return unique.length > 3 ? `${shown}|…` : shown;
 }
 
+/** 把一组步骤的增删行数加起来；全是 null 时返回 null（不显示） */
+export function sumStat(steps: MatchableStep[], field: "added" | "removed"): number | null {
+  let total = 0;
+  let seen = false;
+  for (const step of steps) {
+    const value = step[field];
+    if (typeof value === "number") {
+      total += value;
+      seen = true;
+    }
+  }
+  return seen ? total : null;
+}
+
 /** 一组合并后的显示摘要：`cat > …/_ap{1..4}.cjs` */
 export function runTarget(steps: MatchableStep[]): string {
   const { prefix, suffix, values } = runAffixes(steps);
@@ -143,6 +171,8 @@ export function buildTimelineRows<T extends MatchableStep>(
         target: runTarget(run),
         failed: run.some((step) => step.failed),
         live: run.some((step) => step.live),
+        added: sumStat(run, "added"),
+        removed: sumStat(run, "removed"),
         startIndex: cursor,
       });
       cursor += run.length - 1;

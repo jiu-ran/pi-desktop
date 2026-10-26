@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
 import { blockMatchesQuery } from "../../../shared/search-text.ts";
 
@@ -29,6 +29,12 @@ const props = withDefaults(
   },
 );
 
+/**
+ * 时间线里展开的步骤：上面那行已经把「运行 cat > …」写过了，
+ * 卡片再画一遍头部就是重复。由 BlockView 注入，头部直接不画、正文始终展开。
+ */
+const headless = inject<{ value: boolean } | null>("piBlockHeadless", null);
+const bare = computed(() => Boolean(headless?.value));
 const open = ref(Boolean(props.defaultOpen || props.block.isError));
 watch(
   () => props.block.isError,
@@ -53,8 +59,8 @@ const duration = computed(() => {
 </script>
 
 <template>
-  <div class="tool-card" :data-status="block.status" :data-block-id="block.id" :class="{ open }">
-    <button class="step-head" @click="open = !open">
+  <div class="tool-card" :data-status="block.status" :data-block-id="block.id" :class="{ open, 'is-bare': bare }">
+    <button v-if="!bare" class="step-head" @click="open = !open">
       <span class="step-caret" :class="{ open }">
         <span v-if="running" class="mini-spinner" />
         <svg v-else viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -70,7 +76,7 @@ const duration = computed(() => {
       <span v-if="duration" class="step-meta">{{ duration }}</span>
       <span v-if="block.isError" class="step-error">失败</span>
     </button>
-    <div v-if="open" class="tool-body">
+    <div v-if="open || bare" class="tool-body">
       <slot />
     </div>
   </div>

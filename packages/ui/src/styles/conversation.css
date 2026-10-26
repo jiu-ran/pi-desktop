@@ -869,58 +869,21 @@
 }
 .activity-duration { flex: none; color: var(--fg-3); font: 11px var(--mono); white-space: nowrap; }
 
-/* 执行时间线：一次请求内按真实顺序列出每一步（思考 / 运行 / 改动混排） */
+/* 执行时间线：一次请求内按真实顺序列出每一步（思考 / 运行 / 改动混排）。
+   只是一份有序列表：不加圆点、不画竖线，靠缩进与序号读顺序。 */
 .turn-timeline {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .turn-step {
-  position: relative;
-  display: grid;
-  grid-template-columns: 14px 1fr;
-  column-gap: 4px;
-  align-items: start;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
-/* 竖线画在每步左侧，最后一步不再往下延伸 */
-.turn-step-rail {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 6px;
-  width: 1px;
-  background: var(--line);
-}
-.turn-step:first-child .turn-step-rail { top: 11px; }
-.turn-step:last-child .turn-step-rail { bottom: calc(100% - 12px); }
-.turn-step-dot {
-  z-index: 1;
-  width: 7px;
-  height: 7px;
-  margin: 8px 0 0 3px;
-  border-radius: 50%;
-  background: var(--bg-0);
-  box-shadow: inset 0 0 0 1.5px var(--fg-3);
-  justify-self: center;
-}
-.turn-step.is-edit .turn-step-dot { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.turn-step.is-bash .turn-step-dot { box-shadow: inset 0 0 0 1.5px var(--fg-2); }
-.turn-step.is-thinking .turn-step-dot {
-  width: 5px;
-  height: 5px;
-  margin-top: 9px;
-  background: var(--fg-3);
-  box-shadow: none;
-  opacity: 0.75;
-}
-.turn-step.live .turn-step-dot {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.turn-step.failed .turn-step-dot { background: var(--err); box-shadow: none; }
-
 .turn-step-head {
   display: flex;
   grid-column: 2;
@@ -940,14 +903,6 @@
 .turn-step-head:hover { background: var(--bg-1); }
 .turn-step-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
-.turn-step-index {
-  flex: none;
-  width: 18px;
-  color: var(--fg-3);
-  font: 10.5px/1.6 var(--mono);
-  text-align: right;
-  opacity: 0.7;
-}
 .turn-step-label {
   flex: none;
   color: var(--fg-2);
@@ -977,11 +932,16 @@
   white-space: nowrap;
 }
 .turn-step-body {
-  grid-column: 2;
+  min-width: 0;
+  max-width: 100%;
   margin: 2px 0 6px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
+  overflow-x: auto;
 }
+/* 卡片正文里的长命令 / 输出不能把整页撑宽 */
+.turn-step-body :is(pre, code, .term-out, .diff-view) { max-width: 100%; }
+/* 时间线里的卡片是「裸的」：上面那行已经写过动作和命令，不再画自己的头部 */
+.tool-card.is-bare .tool-body { margin-left: 0; }
+.thinking.is-bare .thinking-body { margin-left: 0; padding-left: 0; border-left: 0; }
 
 /* 相同前缀淡成灰色，只留变化段（连续同类步骤的「降噪」） */
 .turn-step-same { color: var(--fg-3); opacity: 0.85; }
@@ -989,12 +949,6 @@
 .turn-step.is-edit .turn-step-diff { color: var(--accent); }
 
 /* 合并行：连续的同类步骤收成一行，右侧标 ×N，点开逐条看 */
-.turn-step-run .turn-step-index {
-  width: auto;
-  min-width: 18px;
-  color: var(--fg-3);
-  white-space: nowrap;
-}
 .turn-step-count {
   flex: none;
   color: var(--fg-3);
@@ -1039,7 +993,6 @@
 .turn-run-item.failed .turn-run-target { color: var(--err); }
 
 /* 紧凑：去掉序号与相对时间，行高再压一点 */
-.activity-compact .turn-step-index,
 .activity-compact .turn-step-time { display: none; }
 .activity-compact .turn-step-head { min-height: 20px; }
 @media (prefers-reduced-motion: reduce) { .turn-step-head { transition: none; } }

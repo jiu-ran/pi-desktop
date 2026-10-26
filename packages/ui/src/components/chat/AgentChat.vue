@@ -830,8 +830,6 @@ watch(searchMatches, () => {
                       :data-run="row.steps.length"
                       :data-block-id="row.steps[0]!.block.id"
                     >
-                      <span class="turn-step-rail" aria-hidden="true" />
-                      <span class="turn-step-dot" aria-hidden="true" />
                       <button
                         type="button"
                         class="turn-step-head"
@@ -839,10 +837,11 @@ watch(searchMatches, () => {
                         :title="`${row.steps.length} 步：${row.steps.map((step) => step.target).join(' · ')}`"
                         @click="toggleRun(item.group, row)"
                       >
-                        <span class="turn-step-index">{{ row.startIndex }}–{{ row.startIndex + row.steps.length - 1 }}</span>
                         <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
                         <span class="turn-step-count">×{{ row.steps.length }}</span>
                         <span class="turn-step-target">{{ row.target }}</span>
+                        <span v-if="row.added != null" class="stat-add">+{{ row.added }}</span>
+                        <span v-if="row.removed != null" class="stat-del">−{{ row.removed }}</span>
                         <span v-if="row.failed" class="turn-step-failed">失败</span>
                         <span v-else-if="row.live" class="mini-spinner turn-step-live" aria-hidden="true" />
                       </button>
@@ -866,7 +865,7 @@ watch(searchMatches, () => {
                             </button>
                             <div v-if="stepOpen(item.group, step.block.id)" class="turn-step-body">
                               <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === step.block.id }">
-                                <BlockView :block="step.block" :query="searchQuery" :copy-text="''" :collapse-long="false" />
+                                <BlockView :block="step.block" :query="searchQuery" :copy-text="''" :collapse-long="false" headless />
                               </div>
                             </div>
                           </li>
@@ -885,8 +884,6 @@ watch(searchMatches, () => {
                       :data-step-index="row.startIndex"
                       :data-step-kind="row.step.key"
                     >
-                      <span class="turn-step-rail" aria-hidden="true" />
-                      <span class="turn-step-dot" aria-hidden="true" />
                       <button
                         type="button"
                         class="turn-step-head"
@@ -894,14 +891,18 @@ watch(searchMatches, () => {
                         :title="row.step.failed ? `${row.step.label} ${row.step.target}（失败）` : undefined"
                         @click="toggleStep(item.group, row.step.block.id)"
                       >
-                        <span class="turn-step-index">{{ row.startIndex }}</span>
                         <span class="turn-step-label">{{ row.step.label }}</span>
-                        <span class="turn-step-target">
+                        <span
+                          v-if="row.step.kind !== 'thinking' || !stepOpen(item.group, row.step.block.id)"
+                          class="turn-step-target"
+                        >
                           <template v-if="row.match">
                             <span class="turn-step-same">{{ row.match.prefix }}</span><span class="turn-step-diff">{{ row.match.changed }}</span><span class="turn-step-same">{{ row.match.suffix }}</span>
                           </template>
                           <template v-else>{{ row.step.target }}</template>
                         </span>
+                        <span v-if="row.step.added != null" class="stat-add">+{{ row.step.added }}</span>
+                        <span v-if="row.step.removed != null" class="stat-del">−{{ row.step.removed }}</span>
                         <span v-if="row.step.failed" class="turn-step-failed">失败</span>
                         <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
                         <span v-if="row.step.offsetLabel" class="turn-step-time">{{ row.step.offsetLabel }}</span>
@@ -913,6 +914,7 @@ watch(searchMatches, () => {
                             :query="searchQuery"
                             :copy-text="''"
                             :collapse-long="false"
+                            headless
                           />
                         </div>
                       </div>

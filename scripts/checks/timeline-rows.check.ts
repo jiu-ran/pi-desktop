@@ -3,6 +3,7 @@ import {
   MERGE_MIN_STEPS,
   buildTimelineRows,
   canMergePair,
+  sumStat,
   compactValues,
   matchTarget,
   runAffixes,
@@ -15,6 +16,8 @@ type Step = {
   target: string;
   failed: boolean;
   live: boolean;
+  added?: number | null;
+  removed?: number | null;
   id: string;
 };
 
@@ -151,6 +154,32 @@ const screenshot = [
   ]);
   assert.equal(rows.length, 3, "三条互不相同的命令不该被合并");
   assert.ok(rows.every((row) => row.kind === "step"));
+}
+
+// ---- 改动行数：合并行累加，单步行透传 ----
+{
+  const statsRows = buildTimelineRows([
+    step("a", "src/a.ts", "edit", { added: 2, removed: 1 }),
+    step("b", "src/b.ts", "edit", { added: 3, removed: 0 }),
+    step("c", "src/c.ts", "edit", { added: 1, removed: 4 }),
+    step("d", "npm run check"),
+  ]);
+  assert.equal(statsRows[0]!.kind, "run", "三步改动合成一行");
+  if (statsRows[0]!.kind === "run") {
+    assert.equal(statsRows[0]!.added, 6, "合并行的新增行数是累加");
+    assert.equal(statsRows[0]!.removed, 5, "合并行的删除行数也是累加");
+  }
+  assert.equal(sumStat([], "added"), null, "没有改动时不显示增删");
+
+  const single = buildTimelineRows([
+    step("a", "npm run check"),
+    step("b", "src/a.ts", "edit", { added: 7, removed: 2 }),
+  ]);
+  assert.deepEqual(
+    single.map((row) => (row.kind === "step" ? [row.step.added, row.step.removed] : null)),
+    [[undefined, undefined], [7, 2]],
+    "单步行透传自己的增删行数",
+  );
 }
 
 console.log("timeline-rows OK 同前缀淡化 / 参数合并 / 阈值与打断 / 状态传递");

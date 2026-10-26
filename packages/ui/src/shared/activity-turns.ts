@@ -8,6 +8,7 @@ import {
   type ActivityBlockLike,
   type ActivityEntry,
 } from "./activity.ts";
+import { blockDiff, diffStat } from "./diff.ts";
 
 /**
  * 回合分组：一次用户请求 = 一条「执行记录」。
@@ -55,6 +56,10 @@ export interface TurnStep<T extends ActivityBlockLike = ActivityBlockLike> {
   target: string;
   failed: boolean;
   live: boolean;
+  /** 改动新增行数；非改动步骤为 null */
+  added: number | null;
+  /** 改动删除行数；写入（write）或非改动步骤为 null */
+  removed: number | null;
   /** 相对本轮第一步的偏移（毫秒）；没有时间戳时 -1 */
   offsetMs: number;
   /** 「+12 秒」；没有时间戳或不足 1 秒时为空串 */
@@ -132,6 +137,15 @@ export function turnDurationLabel(group: Pick<TurnGroup, "durationMs">): string 
   return formatDuration(group.durationMs);
 }
 
+/** 改动步骤的增删行数；非改动工具或没有差异时返回 null（写入只报新增） */
+export function editStat<T extends ActivityBlockLike>(block: T): { added: number; removed: number | null } | null {
+  if (!EDIT_TOOLS.has(block.name ?? "")) return null;
+  const lines = blockDiff(block);
+  if (!lines.length) return null;
+  const { added, removed } = diffStat(lines);
+  return { added, removed: block.name === "write" ? null : removed };
+}
+
 /**
  * 时间线：保持块的原始顺序，只补上展示用的动作名、摘要、失败/运行状态和相对时间。
  *
@@ -145,6 +159,8 @@ export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEnt
     const ts = typeof block.ts === "number" && block.ts > 0 ? block.ts : 0;
     const offsetMs = start && ts ? Math.max(0, ts - start) : -1;
     const offset = formatDuration(offsetMs);
+    // 改动步骤把 +N / −N 一起带出来：时间线里的卡片不再画头部，行上要能直接看到增删
+    const stat = editStat(block);
     return {
       block,
       index: entry.index,
@@ -154,6 +170,8 @@ export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEnt
       target: stepTarget(block),
       failed: isFailed(block),
       live: isLiveTool(block) || Boolean(block.streaming),
+      added: stat?.added ?? null,
+      removed: stat?.removed ?? null,
       offsetMs,
       offsetLabel: offset ? `+${offset}` : "",
     };

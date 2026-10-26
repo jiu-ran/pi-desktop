@@ -42,7 +42,7 @@ export async function checkActivityInElectron(win) {
       };
       for (let i = 0; i < 18; i += 1) run("act-bash-" + i, "bash", { command: "npm run check -- " + i });
       for (let i = 0; i < 3; i += 1) run("act-read-" + i, "read", { path: "src/file-" + i + ".ts" });
-      run("act-edit-0", "edit", { path: "src/file-0.ts" });
+      run("act-edit-0", "edit", { path: "src/file-0.ts", edits: [{ oldText: "a", newText: "b" + String.fromCharCode(10) + "c" }] });
       return true;
     })()`);
     await poll(`Boolean(${scope}?.querySelector(".activity-group"))`, "执行记录组渲染");
@@ -115,6 +115,9 @@ export async function checkActivityInElectron(win) {
     assert.equal(outline.titles.at(-1), "跑一下检查", `大纲提示应只有内容，实际「${outline.titles.at(-1)}」`);
 
     // 2) 展开组：连续同类步骤合并成一行（18 条命令 → 1 行，3 次读取 → 1 行），顺序不变
+    //    先把设置归位：上一次跑崩可能把 activityMerge 落成 false
+    await evaluate(`window.__piDesktop.settings.settings.activityMerge = true; true`);
+    await wait(150);
     await evaluate(`(() => { ${scope}.querySelector(".activity-group .activity-head").click(); return true; })()`);
     await poll(`Boolean(${scope}.querySelector(".turn-step"))`, "时间线出现");
     await wait(200);
@@ -125,6 +128,7 @@ export async function checkActivityInElectron(win) {
         count: rows.length,
         runs: rows.filter((node) => node.classList.contains("turn-step-run")).map((node) => ({
           label: node.querySelector(".turn-step-label")?.textContent ?? "",
+          added: node.querySelector(".stat-add")?.textContent ?? "",
           target: node.querySelector(".turn-step-target")?.textContent ?? "",
           count: node.querySelector(".turn-step-count")?.textContent ?? "",
           index: node.querySelector(".turn-step-index")?.textContent ?? "",
@@ -133,6 +137,8 @@ export async function checkActivityInElectron(win) {
         singles: rows.filter((node) => !node.classList.contains("turn-step-run")).map((node) => ({
           label: node.querySelector(".turn-step-label")?.textContent ?? "",
           target: node.querySelector(".turn-step-target")?.textContent ?? "",
+          added: node.querySelector(".stat-add")?.textContent ?? "",
+          removed: node.querySelector(".stat-del")?.textContent ?? "",
         })),
         rails: el.querySelectorAll(".turn-step-rail").length,
         toolCards: el.querySelectorAll(".tool-card").length,
@@ -144,12 +150,27 @@ export async function checkActivityInElectron(win) {
     assert.equal(timeline.runs[0].label, "运行", "第一条合并行是命令");
     assert.match(timeline.runs[0].target, /npm run check -- \{0\.\.17\}$/, `合并行要压成 {{0..17}}：${timeline.runs[0].target}`);
     assert.equal(timeline.runs[1].label, "读取", "第二条合并行是读取");
-    assert.equal(timeline.runs[1].index, "19–21", `合并行序号要接着上一条（原第 19–21 步），实际 ${timeline.runs[1].index}`);
     assert.match(timeline.runs[1].target, /src\/file-\{0\.\.2\}\.ts$/, `读取合并行也要压成区间：${timeline.runs[1].target}`);
-    assert.equal(timeline.runs[0].index, "1–18", `合并行序号显示区间，实际 ${timeline.runs[0].index}`);
     assert.deepEqual(timeline.singles.map((row) => row.label), ["改动"], `单步只剩改动：${JSON.stringify(timeline.singles)}`);
     assert.ok(timeline.singles[0].target.includes("file-0.ts"), `最后一步应是改动文件：${timeline.singles[0].target}`);
-    assert.equal(timeline.rails, 3, "每一行都要有竖线");
+    // 改动步骤要把 +N / −N 显示出来（卡片头部不再画，行上得有）
+    assert.equal(timeline.singles[0].added, "+2", `改动行要显示新增行数，实际「${timeline.singles[0].added}」`);
+    assert.equal(timeline.singles[0].removed, "−1", `改动行要显示删除行数，实际「${timeline.singles[0].removed}」`);
+    assert.equal(timeline.runs[0].added, "", "命令合并行没有增删");
+    // 只是有序列表：不画圆点、不画竖线（用户要求去掉时间线的额外标识）
+    const markers = JSON.parse(await evaluate(`(() => {
+      const el = ${scope};
+      return JSON.stringify({
+        dots: el.querySelectorAll(".turn-step-dot").length,
+        rails: el.querySelectorAll(".turn-step-rail").length,
+        numbers: el.querySelectorAll(".turn-step-index").length,
+        overflow: el.scrollWidth - el.clientWidth,
+      });
+    })()`));
+    assert.equal(markers.dots, 0, "不该再有步骤圆点");
+    assert.equal(markers.rails, 0, "不该再画时间线竖线");
+    assert.equal(markers.numbers, 0, "步骤前面不该再有数字");
+    assert.ok(markers.overflow <= 1, `执行记录不能横向溢出，实际多出 ${markers.overflow}px`);
     assert.equal(timeline.toolCards, 0, "合并行默认收起细节，不挂载卡片");
     await shotGroup("activity-merged.png");
 
@@ -183,6 +204,22 @@ export async function checkActivityInElectron(win) {
     assert.equal(openedRunItem.cards, 1, `只挂载点中的那一张卡片，实际 ${openedRunItem.cards}`);
     assert.equal(openedRunItem.bodies, 1, `只展开一条，实际 ${openedRunItem.bodies}`);
     assert.equal(openedRunItem.rows, 2, "展开内部不影响顶层行数");
+    {
+      const bare = JSON.parse(await evaluate(`(() => {
+        const card = ${scope}.querySelector(".turn-run-item .tool-card");
+        const body = card?.querySelector(".tool-body");
+        return JSON.stringify({
+          bare: Boolean(card?.classList.contains("is-bare")),
+          headers: ${scope}.querySelectorAll(".turn-step-body .tool-card .step-head").length,
+          hasContent: Boolean(body && body.textContent.trim().length > 0),
+          bodyOverflow: body ? body.scrollWidth - body.clientWidth : -1,
+        });
+      })()`));
+      assert.equal(bare.bare, true, "时间线里的卡片要标记成 is-bare");
+      assert.equal(bare.headers, 0, "上面那行已经写过动作，卡片不能再画一遍头部");
+      assert.equal(bare.hasContent, true, "完整内容（参数 / 输出）要照常显示");
+      assert.ok(bare.bodyOverflow <= 1, `卡片正文不能横向溢出，实际多出 ${bare.bodyOverflow}px`);
+    }
     await evaluate(`(() => { ${scope}.querySelector(".turn-step-run .turn-step-head").click(); return true; })()`);
     await wait(200);
 
@@ -294,6 +331,53 @@ export async function checkActivityInElectron(win) {
     const stepTimes = await evaluate(`${scope}.querySelectorAll(".turn-step-time").length`);
     assert.match(timing.duration, /分|秒/, `有耗时数据时应显示时长，实际「${timing.duration}」`);
     assert.ok(stepTimes >= 1, `时间线上应出现相对时间，实际 ${stepTimes}`);
+
+    // 7) 视觉核对：思考 / 长输出步骤展开后「直接看到内容」（没有多余头部、没有序号）
+    await evaluate(`(() => {
+      const t = window.__piDesktop.workbench.active.value.activeThread.transcript;
+      const NL = String.fromCharCode(10);
+      const think = "先把这一轮的问题拆一下：1) 时间线不要圆点；2) 展开后直接看到内容；3) 长输出不能把页面撑宽。";
+      t.applyEvent({ type: "message_start", message: { role: "assistant" } });
+      t.applyEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: think } });
+      t.applyEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: think }] } });
+      const args = { command: "sed -n 1,80p packages/ui/src/components/chat/tools/GenericTool.vue" };
+      const lines = ['<script setup lang="ts">', 'const props = defineProps<{', '  block: TranscriptBlock;', '  query?: string;', '}>();', 'const subtitle = computed(() => props.block.args?.command ?? "");', 'const longLine = "这一行很长很长，用来验证长命令与长输出都不会把页面撑宽";'];
+      t.applyEvent({ type: "tool_execution_start", toolCallId: "act-long", toolName: "bash", args });
+      t.applyEvent({ type: "tool_execution_end", toolCallId: "act-long", toolName: "bash", args, result: { content: [{ type: "text", text: lines.join(NL) }] } });
+      return true;
+    })()`);
+    await wait(600);
+    await evaluate(`(() => {
+      const rows = [...${scope}.querySelectorAll('.turn-step')];
+      for (const row of rows.slice(-2)) row.querySelector('.turn-step-head')?.click();
+      return rows.length;
+    })()`);
+    await wait(600);
+    {
+      const visual = JSON.parse(await evaluate(`(() => {
+        const el = ${scope};
+        const thinking = el.querySelector('.thinking');
+        return JSON.stringify({
+          numbers: el.querySelectorAll('.turn-step-index').length,
+          headers: el.querySelectorAll('.turn-step-body .step-head').length,
+          thinkingBare: Boolean(thinking?.classList.contains('is-bare')),
+          thinkingBody: Boolean(thinking?.querySelector('.thinking-body')),
+          cards: el.querySelectorAll('.turn-step-body .tool-card').length,
+          overflow: el.scrollWidth - el.clientWidth,
+        });
+      })()`));
+      assert.equal(visual.numbers, 0, "步骤前不该有数字");
+      assert.equal(visual.headers, 0, "展开后不该再有可点的头部（思考 / 工具都一样）");
+      assert.equal(visual.thinkingBare, true, "时间线里的思考块是裸的");
+      assert.equal(visual.thinkingBody, true, "思考正文要直接摊开");
+      assert.ok(visual.cards >= 1, "工具卡片照常显示内容");
+      assert.ok(visual.overflow <= 1, `展开后不能横向溢出，实际多出 ${visual.overflow}px`);
+    }
+    await shotGroup("activity-expanded.png");
+    await evaluate(`(() => {
+      window.__piDesktop.workbench.active.value.activeThread.transcript.removeBlock("act-long");
+      return true;
+    })()`);
 
     console.log("[activity]", JSON.stringify({ rows: top.rows, summary: top.summary, rowsShown: timeline.count, runs: timeline.runs.map((run) => run.count), cards: openedRunItem.cards, duration: timing.duration }));
   } finally {
