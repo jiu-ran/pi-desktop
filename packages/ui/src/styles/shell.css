@@ -3,7 +3,6 @@
  * 深色窗框 --frame 上浮着圆角“岛”：侧栏 / 主舞台 / 面板 / 右侧工具条，岛之间留 5px 间隙。
  */
 .shell {
-  --titlebar-h: 40px;
   --gap: 6px;
   display: flex;
   flex-direction: column;

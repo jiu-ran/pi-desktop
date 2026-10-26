@@ -6,6 +6,7 @@ import path from "node:path";
 import { checkTerminalInElectron } from "./terminal.smoke.mjs";
 import { checkNetworkInElectron } from "./network.electron.mjs";
 import { checkEditorInElectron } from "./editor.electron.mjs";
+import { checkLightboxInElectron } from "./lightbox.electron.mjs";
 import { checkMarkdownViewInElectron } from "./markdown-view.electron.mjs";
 import { checkComposerHeightInElectron } from "./composer-height.electron.mjs";
 import { checkGitUiInElectron } from "./git-ui.electron.mjs";
@@ -202,6 +203,7 @@ app.whenReady().then(async () => {
     try {
       await runCheck("terminal", () => checkTerminalInElectron(win));
       await runCheck("editor", () => checkEditorInElectron(win));
+      await runCheck("lightbox", () => checkLightboxInElectron(win));
       await runCheck("markdown-view", () => checkMarkdownViewInElectron(win));
       await runCheck("composer-height", () => checkComposerHeightInElectron(win));
       await runCheck("git-ui", () => checkGitUiInElectron(win));

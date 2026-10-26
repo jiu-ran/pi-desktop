@@ -1152,7 +1152,7 @@
   --scrim-alpha: 0.45;
   position: fixed;
   /* 从标题栏下方开始：原生窗口按钮区由系统绘制，压暗它永远慢一帧，干脆不压 */
-  inset: var(--titlebar-h) 0 0 0;
+  inset: var(--titlebar-h, 40px) 0 0 0;
   z-index: 100;
   display: grid;
   place-items: center;
@@ -1760,7 +1760,7 @@ html[data-density="compact"] .tool-card {
 .overlay {
   --scrim-alpha: 0.45;
   position: fixed;
-  inset: var(--titlebar-h) 0 0 0;
+  inset: var(--titlebar-h, 40px) 0 0 0;
   z-index: 100;
   display: grid;
   place-items: start center;

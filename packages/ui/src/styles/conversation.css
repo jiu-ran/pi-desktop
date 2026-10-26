@@ -443,7 +443,7 @@
 .image-lightbox {
   --scrim-alpha: 0.78;
   position: fixed;
-  inset: var(--titlebar-h) 0 0 0;
+  inset: var(--titlebar-h, 40px) 0 0 0;
   z-index: 90;
   display: grid;
   place-content: center;
