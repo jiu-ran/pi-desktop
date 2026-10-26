@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from "vue";
+import { createFrameScheduler } from "../../shared/frame-scheduler.ts";
 import PtyTerminal from "./PtyTerminal.vue";
 import TerminalSelect from "./TerminalSelect.vue";
 import type { TerminalSelectItem } from "./TerminalSelect.vue";
@@ -563,8 +564,11 @@ watch(
 
 onDeactivated(stopResize);
 let tabsObserver: ResizeObserver | null = null;
+// 回调里会改状态（= 可能改布局），推迟一帧避免 ResizeObserver loop 警告
+const tabsOverflowTick = createFrameScheduler(updateTabsOverflow);
 onBeforeUnmount(() => {
   stopResize();
+  tabsOverflowTick.cancel();
   tabsObserver?.disconnect();
   tabsObserver = null;
   if (copyTimer) clearTimeout(copyTimer);
@@ -575,7 +579,7 @@ onMounted(() => {
   void nextTick(() => detectPasswordPrompt());
   scrollLatest(true);
   if (typeof ResizeObserver === "function") {
-    tabsObserver = new ResizeObserver(updateTabsOverflow);
+    tabsObserver = new ResizeObserver(tabsOverflowTick.schedule);
     void nextTick(() => {
       if (tabsEl.value) tabsObserver?.observe(tabsEl.value);
       updateTabsOverflow();

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { createFrameScheduler } from "../../shared/frame-scheduler.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons } from "../../shared/util.ts";
 import { collectChanges } from "../../shared/diff.ts";
@@ -47,6 +48,11 @@ const userScrolled = ref(false);
 // 用户上翻后记录已看过的块数，用于「N 条新消息」提示。
 const seenBlocks = ref(0);
 let resizeObserver: ResizeObserver | null = null;
+// 在 RO 回调里直接滚会把布局再改一次，Chromium 会报 ResizeObserver loop 警告
+const scrollFollow = createFrameScheduler(() => {
+  if (!userScrolled.value) scrollToBottom(true);
+  else scrollToBottom();
+});
 let boundScroller: HTMLElement | null = null;
 
 // 分页加载状态
@@ -402,10 +408,7 @@ function bindScroller(el: HTMLElement | null): void {
   const inner = el.firstElementChild;
   if (inner && typeof ResizeObserver !== "undefined") {
     // 图片、代码高亮等异步撑高内容时也能继续贴底；用户上翻后 stick=false 则不打扰。
-    resizeObserver = new ResizeObserver(() => {
-      if (!userScrolled.value) scrollToBottom(true);
-      else scrollToBottom();
-    });
+    resizeObserver = new ResizeObserver(scrollFollow.schedule);
     resizeObserver.observe(inner);
   }
   if (!userScrolled.value) scrollToBottom(true);

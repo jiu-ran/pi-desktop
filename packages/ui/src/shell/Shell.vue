@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { createFrameScheduler } from "../shared/frame-scheduler.ts";
 import { useKernel } from "../kernel/use-kernel.ts";
 import TitleBar from "../components/titlebar/TitleBar.vue";
 import LeftSidebar from "../components/sidebar/LeftSidebar.vue";
@@ -61,6 +62,8 @@ let resizeStartSidebar = 0;
 let resizeStartStage = 0;
 let resizeStartPanel = 0;
 let workspaceObserver: ResizeObserver | null = null;
+// 回调里会写 CSS 变量（= 改布局），推迟一帧避免 ResizeObserver loop 警告
+const workspaceWidthTick = createFrameScheduler(updateWorkspaceWidth);
 
 function clamp(val: number, min: number, max: number): number {
   const safeMax = Math.max(min, max);
@@ -334,12 +337,13 @@ onMounted(() => {
   window.addEventListener("resize", updateWorkspaceWidth);
   window.addEventListener("keydown", onTerminalShortcut, true);
   if (typeof ResizeObserver !== "undefined" && workspaceEl.value) {
-    workspaceObserver = new ResizeObserver(updateWorkspaceWidth);
+    workspaceObserver = new ResizeObserver(workspaceWidthTick.schedule);
     workspaceObserver.observe(workspaceEl.value);
   }
 });
 
 onBeforeUnmount(() => {
+  workspaceWidthTick.cancel();
   stopSidebarResize();
   stopPanelResize();
   stopStageResize();
