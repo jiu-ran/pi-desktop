@@ -103,8 +103,8 @@ export async function checkQueueInElectron(win) {
     window.__queueEditCalls = [];
     const workbench = window.__piDesktop.workbench;
     window.__queueEditOriginal = workbench.editQueued;
-    workbench.editQueued = async (target, text) => {
-      window.__queueEditCalls.push({ target, text });
+    workbench.editQueued = async (target, next) => {
+      window.__queueEditCalls.push({ target, next });
       return true;
     };
     return true;
@@ -132,9 +132,139 @@ export async function checkQueueInElectron(win) {
     assert.ok(editor.actions.includes("保存并重新排队"), "要有保存按钮");
     assert.ok(editor.actions.includes("取消"), "要有取消按钮");
     assert.match(editor.hint, /排队/, "编辑框要标出模式");
+    assert.match(editor.hint, /Ctrl\+V/, "编辑框要提示可以粘贴图片");
+  }
+
+  // 1.5) 带图片附件的排队消息：编辑框里绝不能预填 [文件: …] 标签（否则保存后多一份路径）
+  // 先关掉上一个编辑框，等卡片重新渲染出来再点（v-else 分支要下一个 tick 才挂上）
+  await evaluate(`(() => {
+    [...document.querySelectorAll('.queue-editor-actions button')]
+      .find((n) => n.textContent.includes('取消'))?.click();
+    return true;
+  })()`);
+  await wait(250);
+  const openedAttached = await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('顺便看下日志'));
+    if (!card) return false;
+    card.querySelector('.queue-card-edit')?.click();
+    return true;
+  })()`);
+  assert.ok(openedAttached, "带附件的排队卡片上应有「编辑」按钮");
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "打开带附件的排队消息");
+  {
+    const attached = JSON.parse(await evaluate(`(() => {
+      const area = document.querySelector('.queue-editor textarea');
+      return JSON.stringify({
+        value: area.value,
+        chips: [...document.querySelectorAll('.queue-attach-chip')].map((n) => ({
+          name: n.querySelector('.queue-attach-name')?.textContent.trim() ?? '',
+          added: n.classList.contains('added'),
+        })),
+      });
+    })()`));
+    assert.equal(attached.value, "顺便看下日志", `带附件的消息只预填用户文字，实际「${attached.value}」`);
+    assert.equal(
+      attached.value.includes("[文件"),
+      false,
+      `编辑框里不能出现展示用的附件标签，实际「${attached.value}」`,
+    );
+    assert.deepEqual(attached.chips.map((chip) => chip.name), ["note.txt"], `附件要单独列出来：${JSON.stringify(attached.chips)}`);
+    assert.equal(attached.chips[0].added, false, "原有附件不是「新粘贴」状态");
+
+    // 截图留档：编辑框里的附件标签 + 提示（人工核对排版）
+    try {
+      const dbg = win.webContents.debugger;
+      if (!dbg.isAttached()) await dbg.attach("1.3");
+      const box = JSON.parse(await evaluate(`(() => {
+        const strip = document.querySelector('.queue-strip-editing');
+        const r = strip.getBoundingClientRect();
+        return JSON.stringify({ x: Math.round(r.left) - 8, y: Math.round(r.top) - 8, width: Math.round(r.width) + 16, height: Math.round(r.height) + 16 });
+      })()`));
+      const shot = await dbg.sendCommand("Page.captureScreenshot", { format: "png", clip: { ...box, scale: 2 } });
+      const { writeFile } = await import("node:fs/promises");
+      const nodePath = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      await writeFile(nodePath.join(tmpdir(), "queue-attach-editor.png"), Buffer.from(shot.data, "base64"));
+      console.log("[queue] shot queue-attach-editor.png");
+    } catch (error) {
+      console.log("[queue] shot queue-attach-editor.png（跳过）", error?.message ?? error);
+    } finally {
+      if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+    }
+  }
+
+  // 1.6) Ctrl+V 粘贴图片：先落盘（这里换成假实现），保存时带上新路径
+  await evaluate(`(() => {
+    window.__queuePasteCalls = [];
+    const workbench = window.__piDesktop.workbench;
+    window.__stageOriginal = workbench.stagePastedAttachment;
+    workbench.stagePastedAttachment = async (payload) => {
+      window.__queuePasteCalls.push({ name: payload?.name, mimeType: payload?.mimeType, bytes: String(payload?.data ?? '').length });
+      return { path: 'C:\\\\Temp\\\\pi-desktop-paste\\\\pasted-1.png', name: 'pasted-1.png' };
+    };
+    // 造一个带 png 文件的 paste 事件（Chromium 支持构造 File / DataTransfer）
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    const file = new File([bytes], 'clip.png', { type: 'image/png' });
+    const data = new DataTransfer();
+    data.items.add(file);
+    const area = document.querySelector('.queue-editor textarea');
+    area.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await poll("document.querySelectorAll('.queue-attach-chip.added').length === 1", "粘贴后应出现新附件标签");
+  {
+    const pasted = JSON.parse(await evaluate(`(() => {
+      const area = document.querySelector('.queue-editor textarea');
+      area.value = "顺便看下日志，再对比这张图";
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      return JSON.stringify({
+        chips: [...document.querySelectorAll('.queue-attach-chip')].map((n) => n.querySelector('.queue-attach-name')?.textContent.trim() ?? ''),
+        text: area.value,
+        pasteCalls: window.__queuePasteCalls,
+      });
+    })()`));
+    assert.deepEqual(pasted.pasteCalls.length, 1, "粘贴应调用一次落盘接口");
+    assert.equal(pasted.pasteCalls[0].mimeType, "image/png", "要带上图片类型");
+    assert.ok(pasted.pasteCalls[0].bytes > 20, "要带上图片数据（dataURL）");
+    assert.deepEqual(pasted.chips, ["note.txt", "pasted-1.png"], `原有 + 新粘贴的附件都要列出：${JSON.stringify(pasted.chips)}`);
+  }
+
+  // 1.7) 保存 → editQueued 收到「原提示词 + 新文字 + 新附件路径」，且文字里没有附件标记
+  await evaluate(`(() => {
+    [...document.querySelectorAll('.queue-editor-actions button')].find((n) => n.textContent.includes('保存'))?.click();
+    return true;
+  })()`);
+  await poll("!document.querySelector('.queue-editor')", "保存后编辑框应关闭");
+  {
+    const calls = JSON.parse(await evaluate("JSON.stringify(window.__queueEditCalls)"));
+    const last = calls.at(-1);
+    // 期望值直接取页面里注入的那条提示词：路径里的反斜杠不必在断言里再转义一遍
+    const expectedPrompt = await evaluate(`(() => {
+      const thread = window.__piDesktop.workbench.active.value.activeThread;
+      return thread.transcript.blocks.find((block) => block.id === "queue-a")?.queueText ?? "";
+    })()`);
+    assert.ok(expectedPrompt.includes("<file name="), `注入的提示词应带附件块：${expectedPrompt}`);
+    assert.equal(last.target.text, expectedPrompt, "要带上原来的完整提示词");
+    assert.equal(last.next.message, "顺便看下日志，再对比这张图", "保存的是新文字");
+    // 路径里的反斜杠在断言里再转义容易出错，这里只看个数与文件名
+    assert.equal(last.next.addPaths.length, 1, `新粘贴的附件要带给内核：${JSON.stringify(last.next.addPaths)}`);
+    assert.ok(last.next.addPaths[0].endsWith("pasted-1.png"), `附件路径要指向刚粘贴的图片：${last.next.addPaths[0]}`);
+    assert.equal(
+      String(last.next.message).includes("[文件"),
+      false,
+      "新文字里不能混进附件标签",
+    );
   }
 
   // 2) 保存 → editQueued 收到「原来的完整提示词 + 新文字」
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.queue-card')]
+      .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
+    card?.querySelector('.queue-card-text')?.click();
+    return Boolean(card);
+  })()`);
+  await poll("Boolean(document.querySelector('.queue-editor textarea'))", "再次打开编辑框");
   await evaluate(`(() => {
     const area = document.querySelector('.queue-editor textarea');
     area.value = "改过之后的消息";
@@ -146,10 +276,12 @@ export async function checkQueueInElectron(win) {
   await poll("!document.querySelector('.queue-editor')", "保存后编辑框应关闭");
   {
     const calls = JSON.parse(await evaluate("JSON.stringify(window.__queueEditCalls)"));
-    assert.equal(calls.length, 1, `应只提交一次编辑，实际 ${calls.length}`);
-    assert.equal(calls[0].text, "改过之后的消息", "保存的是新文字");
-    assert.equal(calls[0].target.text, "只存在于队列里的消息", "要带上原来的队列项用于定位");
-    assert.equal(calls[0].target.mode, "followUp", "模式要对");
+    assert.equal(calls.length, 2, `应只提交两次编辑（带附件那条 + 这条），实际 ${calls.length}`);
+    const last = calls.at(-1);
+    assert.equal(last.next.message, "改过之后的消息", "保存的是新文字");
+    assert.deepEqual(last.next.addPaths, [], "没有新粘贴附件时 addPaths 为空");
+    assert.equal(last.target.text, "只存在于队列里的消息", "要带上原来的队列项用于定位");
+    assert.equal(last.target.mode, "followUp", "模式要对");
   }
 
   // 3) Esc 取消不发请求
@@ -169,7 +301,7 @@ export async function checkQueueInElectron(win) {
   assert.equal(await evaluate("document.querySelectorAll('.queue-editor').length"), 0, "Esc 应关闭编辑框");
   assert.equal(
     JSON.parse(await evaluate("JSON.stringify(window.__queueEditCalls)")).length,
-    1,
+    2,
     "取消不应提交编辑",
   );
 
@@ -303,9 +435,13 @@ export async function checkQueueInElectron(win) {
   await poll("!document.querySelector('.queue-card')", "队列清空后「待发送」要消失");
   assert.equal(await evaluate("document.querySelectorAll('.queue-card').length"), 0, "队列清空后不应残留卡片");
 
-  // 清理注入的块
+  // 清理注入的块，并把被打桩的内核方法还原（后面的步骤还要用真的实现）
   await evaluate(`(() => {
-    const thread = window.__piDesktop.workbench.active.value.activeThread;
+    const workbench = window.__piDesktop.workbench;
+    if (window.__queueEditOriginal) workbench.editQueued = window.__queueEditOriginal;
+    if (window.__stageOriginal) workbench.stagePastedAttachment = window.__stageOriginal;
+    if (window.__queueWithdrawOriginal) workbench.withdrawQueued = window.__queueWithdrawOriginal;
+    const thread = workbench.active.value.activeThread;
     thread.transcript.removeBlock("queue-a");
     thread.transcript.removeBlock("queue-b");
     return true;

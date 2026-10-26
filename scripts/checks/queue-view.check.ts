@@ -88,8 +88,12 @@ assert.equal(queuePreview(""), "（无文字内容）");
 assert.equal(queuePreview("字".repeat(200), 10), "字".repeat(10) + "…");
 assert.equal(queuePreview('<session name="C:\\s.jsonl" title="t">\n摘要\n</session>'), "[对话: C:\\s.jsonl]");
 
-// 撤回后放回输入框的文本：不能带附件 XML
-assert.equal(queueDraftText('<file name="C:\\a\\b.txt">\n内容\n</file>\n看看这个'), "[文件: C:\\a\\b.txt]\n看看这个");
+// 编辑框 / 撤回文本：只留用户写的话；不能带附件 XML，也不能带展示用的 [文件: …] 标签
+// （带上标签再保存就会在提示词里多出一份图片路径 —— 气泡上看到两条重复路径）
+assert.equal(queueDraftText('<file name="C:\\a\\b.txt">\n内容\n</file>\n看看这个'), "看看这个");
+assert.equal(queueDraftText('<file name="C:\\a\\b.png"></file>\n看下图'), "看下图");
+assert.equal(queueDraftText('<file name="C:\\a\\b.png"></file>'), "", "纯附件消息没有用户文字");
+assert.equal(queueDraftText("普通的一句话"), "普通的一句话");
 
 console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览");
 
@@ -98,17 +102,49 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   const { replacePromptMessage, planQueueEdit } = await import("../../packages/ui/src/shared/queue-view.ts");
   const prompt = '<file name="C:\a\b.txt">\n内容\n</file>\n原来的话';
   assert.equal(
-    replacePromptMessage(prompt, "原来的话", "改过的话"),
+    replacePromptMessage(prompt, "改过的话"),
     '<file name="C:\a\b.txt">\n内容\n</file>\n改过的话',
     "编辑只替换末尾的用户文字",
   );
-  assert.equal(replacePromptMessage("原来的话", "原来的话", "改过的话"), "改过的话");
+  assert.equal(replacePromptMessage("原来的话", "改过的话"), "改过的话");
   assert.equal(
-    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "", "只有附件"),
+    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "只有附件"),
     '<file name="a.txt">\n内容\n</file>\n只有附件',
     "纯附件消息补充文字",
   );
-  assert.equal(replacePromptMessage("别的上下文", "找不到的老文字", "新文字"), "新文字", "对不上时退回新文字");
+  assert.equal(replacePromptMessage("别的上下文", "新文字"), "新文字", "没有附件时就是整段替换");
+
+  // 图片附件编辑：保存后提示词里只能有一份图片路径
+  {
+    const { rebuildPrompt, splitPromptBlocks } = await import("../../packages/ui/src/shared/queue-prompt.ts");
+    const imageBlock = '<file name="C:\\Temp\\pi-desktop-paste\\image-1.png"></file>';
+    const imagePrompt = imageBlock + "\n看这张图";
+    assert.deepEqual(
+      splitPromptBlocks(imagePrompt).blocks.map((block) => block.name),
+      ["image-1.png"],
+      "图片附件要能被识别成一个块",
+    );
+    assert.equal(splitPromptBlocks(imagePrompt).message, "看这张图", "块之外才是用户文字");
+
+    // 用编辑框的预填文字重建提示词：标记恰好一份，用户文字恰好一份
+    const rebuilt = rebuildPrompt(imagePrompt, queueDraftText(imagePrompt), undefined, "");
+    assert.equal(rebuilt, imagePrompt, "原样重建不能多出一份路径");
+    assert.equal(rebuilt.match(/<file name=/g)?.length, 1, "只能有一个附件标记");
+    assert.equal((rebuilt.match(/image-1\.png/g) ?? []).length, 1, "图片路径只能出现一次");
+
+    // 把展示用的 [文件: …] 标签当消息写回去，就会出现两份 —— 正是修掉的那个 bug
+    const buggy = rebuildPrompt(imagePrompt, stripQueueMarkers(imagePrompt), undefined, "");
+    assert.equal((buggy.match(/image-1\.png/g) ?? []).length, 2, "把展示标签写回提示词就会出现重复路径");
+
+    // 新粘贴的附件追加在后面，原有块保留
+    const withPasted = rebuildPrompt(imagePrompt, "看这两张图", undefined, '<file name="C:\\Temp\\p2.png"></file>');
+    assert.equal(withPasted.match(/<file name=/g)?.length, 2, "新粘贴的附件要追加");
+    assert.ok(withPasted.endsWith("看这两张图"), "用户文字在最后");
+
+    // 移除某个附件：按 keepPaths 过滤块
+    const dropped = rebuildPrompt(imagePrompt, "都不要了", [], "");
+    assert.equal(dropped, "都不要了", "全部移除后只剩文字");
+  }
 
   // 队列重排：目标换文字，其余保持原样与原顺序
   const queue = { steering: ["插话一", "插话二"], followUp: ["追加一"] };
@@ -177,17 +213,17 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   assert.equal(split.message, "原来的话", "应切出末尾的用户文字");
   assert.ok(split.prefix.endsWith("</session>"), "前缀应包含全部上下文");
   assert.equal(
-    replacePromptMessage(prompt, "原来的话", "改过的话"),
+    replacePromptMessage(prompt, "改过的话"),
     '<file name="a.txt">\n内容\n</file>\n<session name="s.jsonl" title="T">\n摘要\n</session>\n改过的话',
   );
   // 末尾文字对不上（比如消息里剥离了技能卡）也不能丢上下文
   assert.equal(
-    replacePromptMessage(prompt, "完全对不上的旧文字", "新文字"),
+    replacePromptMessage(prompt, "新文字"),
     '<file name="a.txt">\n内容\n</file>\n<session name="s.jsonl" title="T">\n摘要\n</session>\n新文字',
   );
   // 纯上下文（没有用户文字）时追加
   assert.equal(
-    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "", "补一句"),
+    replacePromptMessage('<file name="a.txt">\n内容\n</file>', "补一句"),
     '<file name="a.txt">\n内容\n</file>\n补一句',
   );
   console.log("queue edit keeps context OK 拆分 / 替换 / 兜底");

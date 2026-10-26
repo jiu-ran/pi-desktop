@@ -1615,6 +1615,60 @@
   resize: none;
 }
 .queue-editor textarea:focus { outline: none; }
+/* 编辑排队消息时把已有附件列出来：它们不在正文里，用户要能看见 */
+.queue-editor-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.queue-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 11.5px;
+}
+.queue-attach-chip.added {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--fg);
+}
+.queue-attach-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--fg-3);
+}
+.queue-attach-icon svg { width: 12px; height: 12px; }
+.queue-attach-chip.added .queue-attach-icon { color: var(--accent); }
+.queue-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-attach-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.queue-attach-remove:hover { background: var(--bg-2); color: var(--err); }
 .queue-editor-actions {
   display: flex;
   align-items: center;

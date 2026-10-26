@@ -10,6 +10,8 @@
  * 等它真正被 Pi 取走（队列里没有了），对话里的气泡才出现。
  */
 
+import { splitPromptMessage } from "./queue-prompt.ts";
+
 export interface QueueState {
   steering: string[];
   followUp: string[];
@@ -85,44 +87,15 @@ export function queuePreview(input: string, limit = 80): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }
 
-/**
- * 编辑排队中的消息：把「这一段提示词末尾的用户文字」换成新文字。
- *
- * Pi 的队列里存的是完整提示词（前面可能带 <file> / <session> 上下文），
- * 用户编辑的是自己写的那部分，所以只能替换末尾，前面原样保留。
- * 找不到对应文字时（例如纯附件消息）退回用新文字，避免把别人的上下文弄坏。
- */
-export function replacePromptMessage(prompt: string, oldMessage: string, newMessage: string): string {
-  const text = String(prompt ?? "");
-  const oldText = String(oldMessage ?? "");
-  const next = String(newMessage ?? "");
-  const { prefix, message } = splitPromptMessage(text);
-  const same = normalizeLine(message) === normalizeLine(oldText);
-  if (!prefix) return same || !message ? next : next;
-  // 附件 / 引用上下文原样保留，只替换后面那段用户文字
-  return `${prefix}\n${next}`;
-}
-
-function normalizeLine(value: string): string {
-  return String(value ?? "").replace(/\r\n/g, "\n").trim();
-}
-
-/**
- * 把提示词拆成「自动附带的上下文」与「用户写的文字」。
- *
- * Pi 的队列里存的是完整提示词，用户编辑的是后半段；之前直接按「末尾是否相等」判断，
- * 一旦带附件或引用（末尾对不上）就会整段丢掉上下文 —— 这里按最后一个
- * `</file>` / `</directory>` / `</session>` 切开，保证上下文永远保留。
- */
-export function splitPromptMessage(prompt: string): { prefix: string; message: string } {
-  const text = String(prompt ?? "");
-  let lastEnd = -1;
-  for (const match of text.matchAll(/<\/(?:file|directory|session)>/g)) {
-    lastEnd = (match.index ?? 0) + match[0].length;
-  }
-  if (lastEnd < 0) return { prefix: "", message: text.trim() };
-  return { prefix: text.slice(0, lastEnd), message: text.slice(lastEnd).trim() };
-}
+// 提示词拼装放在 queue-prompt.ts（纯函数、可单测）；这里转出去，调用方不用改 import。
+export {
+  joinPromptBlocks,
+  rebuildPrompt,
+  replacePromptMessage,
+  splitPromptBlocks,
+  splitPromptMessage,
+  type PromptBlock,
+} from "./queue-prompt.ts";
 
 /** 算出编辑后的队列（保持原顺序；插话与追加分开）。 */
 export function planQueueEdit(
@@ -222,6 +195,12 @@ export function queueImagesByPrompt(blocks: QueueImageBlockLike[]): Record<strin
 }
 
 /** 撤回后放回输入框的文本：只留人写的那部分，别把附件 XML 塞回去。 */
+/**
+ * 编辑框 / 退回输入框时用的「用户文字」：只取最后一段人写的话。
+ *
+ * 不能走 stripQueueMarkers —— 那会把附件块换成展示用的 `[文件: C:\…\a.png]` 标签，
+ * 预填进编辑框再保存就会在提示词里多出一份图片路径（气泡上看到两条重复路径）。
+ */
 export function queueDraftText(input: string): string {
-  return stripQueueMarkers(input).replace(/\n{3,}/g, "\n\n").trim();
+  return splitPromptMessage(String(input ?? "")).message.replace(/\n{3,}/g, "\n\n").trim();
 }

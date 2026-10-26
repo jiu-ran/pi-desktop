@@ -5,7 +5,7 @@ import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
-import { planQueueView, queuePreview, stripQueueMarkers } from "../../shared/queue-view.ts";
+import { planQueueView, queueDraftText, queuePreview, splitPromptBlocks, type PromptBlock } from "../../shared/queue-view.ts";
 import QuoteEditor from "./QuoteEditor.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
@@ -56,14 +56,23 @@ const queuePlan = computed(() =>
 const queuePending = computed(() => queuePlan.value.entries);
 const queueBusy = ref(false);
 
-/** 排队消息编辑：点气泡或卡片上的「编辑」，在上方展开一个内联编辑框。 */
-const queueEdit = ref<{ mode: "steer" | "followUp"; prompt: string; message: string } | null>(null);
+/** 排队消息编辑：预填「用户写的话」，附件单独列成标签，支持 Ctrl+V 粘贴图片。 */
+const queueEdit = ref<{
+  mode: "steer" | "followUp";
+  prompt: string;
+  blocks: PromptBlock[];
+} | null>(null);
 const queueEditDraft = ref("");
 const queueEditBusy = ref(false);
+/** 编辑期间新粘贴的附件（保存时由内核重新 prepare 成 <file> 标记） */
+const queueEditAdded = ref<Array<{ path: string; name: string }>>([]);
 
-function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string; message: string }): void {
-  queueEdit.value = entry;
-  queueEditDraft.value = entry.message;
+function startQueueEdit(mode: "steer" | "followUp", prompt: string): void {
+  // 预填只能取「用户写的话」：附件块单独列出来，否则 [文件: …] 标签会被写回提示词，
+  // 保存后气泡上就多出一条重复的图片路径。
+  queueEdit.value = { mode, prompt, blocks: splitPromptBlocks(prompt).blocks };
+  queueEditDraft.value = queueDraftText(prompt);
+  queueEditAdded.value = [];
   nextTick(() => {
     const area = document.querySelector<HTMLTextAreaElement>(".queue-editor textarea");
     area?.focus();
@@ -71,9 +80,14 @@ function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string; mess
   });
 }
 
+function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string }): void {
+  startQueueEdit(entry.mode, entry.prompt);
+}
+
 function closeQueueEdit(): void {
   queueEdit.value = null;
   queueEditDraft.value = "";
+  queueEditAdded.value = [];
 }
 
 /** 从队列里定位某条消息的模式（气泡只知道提示词文本）。 */
@@ -89,20 +103,48 @@ function queueModeOf(prompt: string): "steer" | "followUp" {
 function onQueueEditRequest(payload: { prompt?: string; message?: string } | undefined): void {
   const prompt = String(payload?.prompt ?? "");
   if (!prompt) return;
-  openQueueEdit({
-    mode: queueModeOf(prompt),
-    prompt,
-    message: String(payload?.message ?? stripQueueMarkers(prompt)),
-  });
+  startQueueEdit(queueModeOf(prompt), prompt);
+}
+
+/** 编辑框里 Ctrl+V 粘贴图片：先落盘，保存时统一 prepare 成附件标记。 */
+async function onQueueEditPaste(event: ClipboardEvent): Promise<void> {
+  const files = clipboardImageFiles(event.clipboardData);
+  if (!files.length) return; // 普通文本粘贴交给默认行为
+  event.preventDefault();
+  const picked = files.slice(0, PASTE_IMAGE_MAX);
+  if (files.length > PASTE_IMAGE_MAX) notifyError(new Error(`一次最多粘贴 ${PASTE_IMAGE_MAX} 张图片`));
+  for (const file of picked) {
+    try {
+      const data = await readAsDataUrl(file);
+      const staged = await workbench.stagePastedAttachment({ name: file.name || "pasted", mimeType: file.type, data });
+      if (!staged) continue;
+      const name = staged.name;
+      if (!queueEditAdded.value.some((item) => item.path === staged.path)) {
+        queueEditAdded.value = [...queueEditAdded.value, { path: staged.path, name }];
+      }
+    } catch (error) {
+      notifyError(pasteError(error));
+    }
+  }
+  await nextTick();
+  document.querySelector<HTMLTextAreaElement>(".queue-editor textarea")?.focus();
+}
+
+function removeQueueEditAdded(path: string): void {
+  queueEditAdded.value = queueEditAdded.value.filter((item) => item.path !== path);
 }
 
 async function saveQueueEdit(): Promise<void> {
   const entry = queueEdit.value;
   const text = queueEditDraft.value.trim();
-  if (!entry || !text || queueEditBusy.value) return;
+  if (!entry || queueEditBusy.value) return;
+  if (!text && !entry.blocks.length && !queueEditAdded.value.length) return;
   queueEditBusy.value = true;
   try {
-    const ok = await workbench.editQueued({ mode: entry.mode, text: entry.prompt }, text);
+    const ok = await workbench.editQueued(
+      { mode: entry.mode, text: entry.prompt },
+      { message: text, addPaths: queueEditAdded.value.map((item) => item.path) },
+    );
     if (ok) closeQueueEdit();
   } catch (error) {
     notifyError(error);
@@ -912,21 +954,51 @@ const argHint = computed(() => {
           编辑排队消息
         </span>
         <div class="queue-editor">
+          <!-- 附件单独列出来：提示词里已有的块不会被写进正文，避免重复出一份图片路径 -->
+          <div v-if="queueEdit.blocks.length || queueEditAdded.length" class="queue-editor-attachments">
+            <span
+              v-for="block in queueEdit.blocks"
+              :key="block.path"
+              class="queue-attach-chip"
+              :title="block.path"
+            >
+              <span class="queue-attach-icon" v-html="block.kind === 'session' ? icons.message : block.kind === 'directory' ? icons.folder : icons.file" />
+              <span class="queue-attach-name">{{ block.name }}</span>
+            </span>
+            <span
+              v-for="item in queueEditAdded"
+              :key="item.path"
+              class="queue-attach-chip added"
+              :title="item.path"
+            >
+              <span class="queue-attach-icon" v-html="icons.image" />
+              <span class="queue-attach-name">{{ item.name }}</span>
+              <button
+                type="button"
+                class="queue-attach-remove"
+                :aria-label="`移除附件：${item.name}`"
+                @click="removeQueueEditAdded(item.path)"
+              >×</button>
+            </span>
+          </div>
           <textarea
             v-model="queueEditDraft"
             rows="2"
             spellcheck="false"
-            placeholder="修改这条要发送的内容"
+            placeholder="修改这条要发送的内容（可 Ctrl+V 粘贴图片）"
             @keydown.enter.exact.prevent="saveQueueEdit"
             @keydown.esc.prevent="closeQueueEdit"
+            @paste="onQueueEditPaste"
           />
           <div class="queue-editor-actions">
-            <span class="queue-editor-hint">{{ queueEdit.mode === "steer" ? "插话" : "排队" }} · Enter 保存 · Esc 取消</span>
+            <span class="queue-editor-hint">
+              {{ queueEdit.mode === "steer" ? "插话" : "排队" }} · Enter 保存 · Esc 取消 · Ctrl+V 粘贴图片
+            </span>
             <button type="button" class="btn ghost small" @click="closeQueueEdit">取消</button>
             <button
               type="button"
               class="btn primary small"
-              :disabled="queueEditBusy || !queueEditDraft.trim()"
+              :disabled="queueEditBusy || (!queueEditDraft.trim() && !queueEdit.blocks.length && !queueEditAdded.length)"
               @click="saveQueueEdit"
             >
               保存并重新排队
@@ -958,7 +1030,7 @@ const argHint = computed(() => {
             type="button"
             class="queue-card-text"
             :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
-            @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
+            @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
           >
             {{ queuePreview(item.text, 160) }}
           </button>
@@ -967,7 +1039,7 @@ const argHint = computed(() => {
               type="button"
               class="queue-card-edit"
               aria-label="编辑这条消息"
-              @click="openQueueEdit({ mode: item.mode, prompt: item.text, message: stripQueueMarkers(item.text) })"
+              @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
             >
               编辑
             </button>

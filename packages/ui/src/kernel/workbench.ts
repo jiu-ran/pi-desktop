@@ -5,7 +5,8 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt, replacePromptMessage } from "../shared/queue-view.ts";
+import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt } from "../shared/queue-view.ts";
+import { rebuildPrompt } from "../shared/queue-prompt.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -1580,19 +1581,43 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 所以做法是：清空 → 按原顺序把其余消息重新入队 → 目标消息用新文字替换。
    * 重新入队失败时把内容放回输入框，绝不能把用户排队的话弄丢。
    */
-  async function editQueued(target: { mode: "steer" | "followUp"; text: string }, newText: string): Promise<boolean> {
+  /**
+   * 编辑一条排队中的消息。
+   *
+   * `message` 是用户写的话（不含附件标记）；附件标记永远从原提示词里原样保留，
+   * 所以不会出现「气泡上多一条 [文件: …]」这种重复路径。
+   * `addPaths` 是编辑框里新粘贴的附件，会重新 prepare 后追加到提示词末尾。
+   */
+  async function editQueued(
+    target: { mode: "steer" | "followUp"; text: string },
+    next: string | { message: string; keepPaths?: string[]; addPaths?: string[] },
+  ): Promise<boolean> {
     const ws = active.value;
-    const next = String(newText ?? "").trim();
-    if (!ws || !next || !target?.text) return false;
+    const request = typeof next === "string" ? { message: next } : (next ?? { message: "" });
+    const message = String(request.message ?? "").replace(/\r\n/g, "\n").trim();
+    const addPaths = (request.addPaths ?? []).filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+    if (!ws || !target?.text) return false;
+    if (!message && !addPaths.length) return false;
     const thread = ws.activeThread;
     const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
     const wanted = normalize(target.text);
     const block = thread.blocks.find(
       (item) => item.kind === "user" && normalize(item.queueText ?? "") === wanted,
     );
-    const images = (block?.imageItems ?? []) as Array<{ mimeType: string; data: string }>;
-    const oldMessage = block?.text ?? "";
-    const nextPrompt = replacePromptMessage(target.text, oldMessage, next);
+
+    // 新粘贴的图片：重新 prepare 一次，既拿到 <file> 标记，也拿到给模型的 base64
+    let addedText = "";
+    let addedImages: Array<{ mimeType: string; data: string }> = [];
+    if (addPaths.length && host?.prepareAttachments) {
+      const prepared = await host.prepareAttachments(ws.cwd, addPaths);
+      addedText = String(prepared?.text ?? "");
+      addedImages = (prepared?.items ?? [])
+        .filter((item: any) => item?.image && item?.data)
+        .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: String(item.data) }));
+    }
+    const nextPrompt = rebuildPrompt(target.text, message, request.keepPaths, addedText);
+    if (!nextPrompt.trim()) return false;
+
     const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
     const current = {
       steering: [...(cleared?.steering ?? [])],
@@ -1602,6 +1627,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     // 图片是单独一组数据（steer(message, images)），clearQueue 只回文本：
     // 重新入队时必须按提示词把各自的图片带回去，否则图片丢；也不能全塞同一组，否则会重复。
     const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
+    const keptImages = imagesByPrompt[normalize(target.text)] ?? [];
+    const nextImages = [...keptImages, ...addedImages];
+    if (nextImages.length) imagesByPrompt[normalize(nextPrompt)] = nextImages;
+    const images = block?.imageItems as Array<{ mimeType: string; data: string }> | undefined;
     try {
       for (const text of planned.steering) {
         await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
@@ -1619,15 +1648,30 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return false;
     }
     if (block) {
-      block.text = next;
+      block.text = message;
       block.queueText = nextPrompt;
+      if (addedImages.length) block.imageItems = [...(block.imageItems ?? []), ...addedImages];
+      block.images = block.imageItems?.length ?? block.images;
     }
     applyQueue(thread, planned);
-    // 气泡上的图片保持原样（不要重新赋值成新数组：重复赋值会让「已编辑」的
-    // 那张卡片看起来又多了一张图）
-    if (block && images.length) block.images = images.length;
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
     return true;
+  }
+
+  /**
+   * 编辑排队消息时粘贴图片：先落到磁盘，返回路径给编辑框当附件标签。
+   * 真正的标记与 base64 在保存（editQueued）时由 prepareAttachments 统一生成。
+   */
+  async function stagePastedAttachment(payload: {
+    name?: string;
+    mimeType?: string;
+    data: string;
+  }): Promise<{ path: string; name: string } | null> {
+    if (!host?.savePastedImage) throw new Error("当前环境不支持粘贴图片");
+    const file = await host.savePastedImage(payload);
+    if (!file) throw new Error("剪贴板图片保存失败");
+    const name = file.split(/[\\/]/).filter(Boolean).at(-1) ?? file;
+    return { path: file, name };
   }
 
   /** 重新生成某个会话引用的自动上下文（编辑框里「恢复自动」用）。 */
@@ -2179,6 +2223,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     recallQueued,
     withdrawQueued,
     editQueued,
+    stagePastedAttachment,
     previewSessionQuote,
     setSessionQuote,
     addPastedImage,
