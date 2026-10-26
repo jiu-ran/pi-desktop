@@ -435,6 +435,64 @@ export async function checkQueueInElectron(win) {
   await poll("!document.querySelector('.queue-card')", "队列清空后「待发送」要消失");
   assert.equal(await evaluate("document.querySelectorAll('.queue-card').length"), 0, "队列清空后不应残留卡片");
 
+  // 气泡里的顺序：附件（图片 / 文件）在文字上方，和输入框里的顺序一致
+  await evaluate(`(() => {
+    const thread = window.__piDesktop.workbench.active.value.activeThread;
+    const block = thread.transcript.pushUser("这条消息带图和文件", 1, {
+      imageItems: [{ mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==" }],
+      attachments: [{ path: "C:\\tmp\\note.txt", name: "note.txt", kind: "file", size: 12 }],
+    });
+    block.id = "order-a";
+    return true;
+  })()`);
+  await poll(`Boolean(document.querySelector('[data-block-id="order-a"] .msg-user-bubble'))`, "带附件的气泡应渲染");
+  {
+    const order = JSON.parse(await evaluate(`(() => {
+      const bubble = document.querySelector('[data-block-id="order-a"] .msg-user-bubble');
+      const pick = (selector) => bubble.querySelector(selector);
+      const top = (node) => (node ? Math.round(node.getBoundingClientRect().top) : null);
+      const text = pick(".msg-user-text");
+      const images = pick(".msg-user-images");
+      const files = pick(".msg-user-files");
+      return JSON.stringify({
+        hasText: Boolean(text),
+        hasImages: Boolean(images),
+        hasFiles: Boolean(files),
+        textTop: top(text),
+        imagesTop: top(images),
+        filesTop: top(files),
+        firstChild: bubble.firstElementChild?.className ?? "",
+      });
+    })()`));
+    assert.ok(order.hasImages && order.hasFiles && order.hasText, `附件与文字都要渲染：${JSON.stringify(order)}`);
+    assert.ok(order.imagesTop < order.filesTop, `图片应在文件上方：${JSON.stringify(order)}`);
+    assert.ok(order.filesTop < order.textTop, `附件必须在文字上方（与输入框一致）：${JSON.stringify(order)}`);
+  }
+  // 截图留档：气泡里附件在上、文字在下（人工核对排版）
+  try {
+    const dbg = win.webContents.debugger;
+    if (!dbg.isAttached()) await dbg.attach("1.3");
+    const box = JSON.parse(await evaluate(`(() => {
+      const bubble = document.querySelector('[data-block-id="order-a"] .msg-user-bubble');
+      const r = bubble.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.left) - 14, y: Math.round(r.top) - 14, width: Math.round(r.width) + 28, height: Math.round(r.height) + 28 });
+    })()`));
+    const shot = await dbg.sendCommand("Page.captureScreenshot", { format: "png", clip: { ...box, scale: 2 } });
+    const { writeFile } = await import("node:fs/promises");
+    const nodePath = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    await writeFile(nodePath.join(tmpdir(), "bubble-order.png"), Buffer.from(shot.data, "base64"));
+    console.log("[queue] shot bubble-order.png");
+  } catch (error) {
+    console.log("[queue] shot bubble-order.png（跳过）", error?.message ?? error);
+  } finally {
+    if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+  }
+  await evaluate(`(() => {
+    window.__piDesktop.workbench.active.value.activeThread.transcript.removeBlock("order-a");
+    return true;
+  })()`);
+
   // 清理注入的块，并把被打桩的内核方法还原（后面的步骤还要用真的实现）
   await evaluate(`(() => {
     const workbench = window.__piDesktop.workbench;

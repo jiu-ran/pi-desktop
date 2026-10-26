@@ -79,15 +79,10 @@ function openPreview(index: number): void {
           <div class="msg-skill-loc">{{ block.skill.location }}</div>
         </div>
       </div>
-      <div
-        v-if="text"
-        class="msg-user-text"
-        :class="{ clamped, 'is-expanded': clampable && expanded }"
-      ><SearchHighlight :text="text" :query="query" /></div>
-      <button v-if="clampable" type="button" class="msg-user-toggle" @click="expanded = !expanded">
-        {{ expanded ? "收起" : `展开全文（${text.length} 字）` }}
-      </button>
-
+      <!-- 附件（图片 / 文件 / 文件夹）统一放在文字上方：和输入框里的顺序一致，
+           粘贴时在上、发出去也在上，不用来回适应 -->
+      <!-- 附件（图片 / 文件 / 文件夹）统一放在文字上方：和输入框里的顺序一致，
+           粘贴时在上、发出去也在上，不用来回适应 -->
       <div v-if="images.length" class="msg-user-images" :class="{ single: images.length === 1 }">
         <button
           v-for="(item, index) in images"
@@ -125,6 +120,15 @@ function openPreview(index: number): void {
           <span class="msg-user-file-name">{{ fallbackCount }} 张图片</span>
         </span>
       </div>
+
+      <div
+        v-if="text"
+        class="msg-user-text"
+        :class="{ clamped, 'is-expanded': clampable && expanded }"
+      ><SearchHighlight :text="text" :query="query" /></div>
+      <button v-if="clampable" type="button" class="msg-user-toggle" @click="expanded = !expanded">
+        {{ expanded ? "收起" : `展开全文（${text.length} 字）` }}
+      </button>
 
       <div v-if="empty" class="msg-user-text msg-user-empty">（空消息）</div>
     </div>

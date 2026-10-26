@@ -357,9 +357,12 @@
   word-break: break-all;
 }
 
-/* 用户消息里的图片缩略图：单图限宽，多图九宫格 */
-.msg-user-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.msg-user-text + .msg-user-images { margin-top: 8px; }
+/* 用户消息里的图片缩略图：单图限宽，多图九宫格。
+   附件在文字上方（与输入框一致），所以间距走 margin-bottom。 */
+.msg-user-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.msg-user-images + .msg-user-files { margin-top: -2px; }
+.msg-user-images:last-child,
+.msg-user-files:last-child { margin-bottom: 0; }
 .msg-user-thumb {
   display: block;
   padding: 0;
@@ -377,8 +380,8 @@
 .msg-user-images.single .msg-user-thumb { width: auto; height: auto; max-width: min(320px, 60vw); max-height: 240px; }
 .msg-user-images.single .msg-user-thumb img { width: auto; height: auto; max-width: min(320px, 60vw); max-height: 240px; object-fit: contain; }
 
-/* 附件：图标 + 文件名 */
-.msg-user-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* 附件：图标 + 文件名（同样在文字上方） */
+.msg-user-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .msg-user-file {
   display: inline-flex;
   align-items: center;
