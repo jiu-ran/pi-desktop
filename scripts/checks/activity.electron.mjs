@@ -48,6 +48,31 @@ export async function checkActivityInElectron(win) {
     await poll(`Boolean(${scope}?.querySelector(".activity-group"))`, "执行记录组渲染");
     await wait(400);
 
+    /** 截图留档：把执行记录这一块截下来（人工核对合并行 / 淡化的效果） */
+    const shotGroup = async (name) => {
+      try {
+        const dbg = win.webContents.debugger;
+        if (!dbg.isAttached()) await dbg.attach("1.3");
+        const boxText = await evaluate(`(() => {
+          const node = ${scope}.querySelector('.activity-group');
+          if (!node) return 'null';
+          const r = node.getBoundingClientRect();
+          return JSON.stringify({ x: Math.round(r.left) - 8, y: Math.round(r.top) - 8, width: Math.round(r.width) + 16, height: Math.round(r.height) + 16 });
+        })()`);
+        if (boxText === "null" || boxText === null) return;
+        const shot = await dbg.sendCommand("Page.captureScreenshot", { format: "png", clip: { ...JSON.parse(boxText), scale: 2 } });
+        const { writeFile } = await import("node:fs/promises");
+        const nodePath = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        await writeFile(nodePath.join(tmpdir(), name), Buffer.from(shot.data, "base64"));
+        console.log("[activity] shot", name);
+      } catch (error) {
+        console.log("[activity] shot（跳过）", name, error?.message ?? error);
+      } finally {
+        if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+      }
+    };
+
     // 1) 顶层两行：用户消息 + 一条执行记录
     const top = JSON.parse(await evaluate(`(() => {
       const el = ${scope};
@@ -89,56 +114,77 @@ export async function checkActivityInElectron(win) {
     assert.equal(/第\s*\d+\s*轮/.test(outline.titles.join(" ")), false, `大纲提示里不该出现「第 N 轮」：${JSON.stringify(outline.titles)}`);
     assert.equal(outline.titles.at(-1), "跑一下检查", `大纲提示应只有内容，实际「${outline.titles.at(-1)}」`);
 
-    // 2) 展开组：22 步按注入顺序排列，卡片仍不挂载
+    // 2) 展开组：连续同类步骤合并成一行（18 条命令 → 1 行，3 次读取 → 1 行），顺序不变
     await evaluate(`(() => { ${scope}.querySelector(".activity-group .activity-head").click(); return true; })()`);
     await poll(`Boolean(${scope}.querySelector(".turn-step"))`, "时间线出现");
     await wait(200);
     const timeline = JSON.parse(await evaluate(`(() => {
       const el = ${scope};
-      const steps = [...el.querySelectorAll(".turn-step")];
+      const rows = [...el.querySelectorAll(".turn-step")];
       return JSON.stringify({
-        count: steps.length,
-        labels: [...new Set(steps.map((node) => node.querySelector(".turn-step-label")?.textContent ?? ""))],
-        kinds: steps.map((node) => node.dataset.stepKind),
-        texts: steps.slice(0, 3).map((node) => node.querySelector(".turn-step-target")?.textContent ?? ""),
-        numbers: steps.slice(0, 3).map((node) => node.querySelector(".turn-step-index")?.textContent ?? ""),
-        lastTarget: steps.at(-1)?.querySelector(".turn-step-target")?.textContent ?? "",
+        count: rows.length,
+        runs: rows.filter((node) => node.classList.contains("turn-step-run")).map((node) => ({
+          label: node.querySelector(".turn-step-label")?.textContent ?? "",
+          target: node.querySelector(".turn-step-target")?.textContent ?? "",
+          count: node.querySelector(".turn-step-count")?.textContent ?? "",
+          index: node.querySelector(".turn-step-index")?.textContent ?? "",
+          steps: Number(node.dataset.run ?? "0"),
+        })),
+        singles: rows.filter((node) => !node.classList.contains("turn-step-run")).map((node) => ({
+          label: node.querySelector(".turn-step-label")?.textContent ?? "",
+          target: node.querySelector(".turn-step-target")?.textContent ?? "",
+        })),
         rails: el.querySelectorAll(".turn-step-rail").length,
-        timeLabels: steps.filter((node) => (node.querySelector(".turn-step-time")?.textContent ?? "").trim()).length,
         toolCards: el.querySelectorAll(".tool-card").length,
       });
     })()`));
-    assert.equal(timeline.count, 22, `时间线应有 22 步，实际 ${timeline.count}`);
-    assert.deepEqual(timeline.labels, ["运行", "读取", "改动"], `动作名不对：${JSON.stringify(timeline.labels)}`);
-    // 关键：顺序必须是 18 条命令 → 3 次读取 → 1 次改动，而不是按类别归并后的分组
-    assert.deepEqual(
-      timeline.kinds.slice(0, 18),
-      Array.from({ length: 18 }, () => "bash"),
-      `前 18 步应连续是命令，实际 ${JSON.stringify(timeline.kinds.slice(0, 18))}`,
-    );
-    assert.deepEqual(timeline.kinds.slice(18), ["read", "read", "read", "edit"], `末尾应是读取 + 改动，实际 ${JSON.stringify(timeline.kinds.slice(18))}`);
-    assert.deepEqual(timeline.texts, ["npm run check -- 0", "npm run check -- 1", "npm run check -- 2"], `步骤摘要应是命令：${JSON.stringify(timeline.texts)}`);
-    assert.deepEqual(timeline.numbers, ["1", "2", "3"], `时间线要有序号：${JSON.stringify(timeline.numbers)}`);
-    assert.ok(timeline.lastTarget.includes("file-0.ts"), `最后一步应是改动文件：${timeline.lastTarget}`);
-    assert.equal(timeline.rails, 22, "每一步都要有竖线");
-    assert.equal(timeline.toolCards, 0, "时间线默认收起细节，不挂载卡片");
+    assert.equal(timeline.count, 3, `18 条命令 + 3 次读取应压成 3 行（2 个合并行 + 1 个单步），实际 ${timeline.count}`);
+    assert.equal(timeline.runs.length, 2, `应有两个合并行，实际 ${timeline.runs.length}`);
+    assert.deepEqual(timeline.runs.map((run) => run.count), ["×18", "×3"], `合并行要标出条数：${JSON.stringify(timeline.runs)}`);
+    assert.equal(timeline.runs[0].label, "运行", "第一条合并行是命令");
+    assert.match(timeline.runs[0].target, /npm run check -- \{0\.\.17\}$/, `合并行要压成 {{0..17}}：${timeline.runs[0].target}`);
+    assert.equal(timeline.runs[1].label, "读取", "第二条合并行是读取");
+    assert.equal(timeline.runs[1].index, "19–21", `合并行序号要接着上一条（原第 19–21 步），实际 ${timeline.runs[1].index}`);
+    assert.match(timeline.runs[1].target, /src\/file-\{0\.\.2\}\.ts$/, `读取合并行也要压成区间：${timeline.runs[1].target}`);
+    assert.equal(timeline.runs[0].index, "1–18", `合并行序号显示区间，实际 ${timeline.runs[0].index}`);
+    assert.deepEqual(timeline.singles.map((row) => row.label), ["改动"], `单步只剩改动：${JSON.stringify(timeline.singles)}`);
+    assert.ok(timeline.singles[0].target.includes("file-0.ts"), `最后一步应是改动文件：${timeline.singles[0].target}`);
+    assert.equal(timeline.rails, 3, "每一行都要有竖线");
+    assert.equal(timeline.toolCards, 0, "合并行默认收起细节，不挂载卡片");
+    await shotGroup("activity-merged.png");
 
-    // 3) 点某一步 → 只挂载那一步的卡片
-    await evaluate(`(() => { ${scope}.querySelectorAll(".turn-step-head")[5].click(); return true; })()`);
-    await poll(`Boolean(${scope}.querySelector(".turn-step-body .tool-card"))`, "步骤卡片出现");
-    const opened = JSON.parse(await evaluate(`(() => {
+    // 2.5) 点开合并行 → 逐条列出 18 步，卡片仍然不挂载
+    await evaluate(`(() => { ${scope}.querySelector(".turn-step-run .turn-step-head").click(); return true; })()`);
+    await poll(`Boolean(${scope}.querySelector(".turn-run-item"))`, "合并行展开出逐条清单");
+    const runOpen = JSON.parse(await evaluate(`(() => {
       const el = ${scope};
+      const items = [...el.querySelectorAll(".turn-run-item")];
       return JSON.stringify({
-        bodies: el.querySelectorAll(".turn-step-body").length,
-        cards: el.querySelectorAll(".turn-step-body .tool-card").length,
-        rows: el.children.length,
-        openIndex: [...el.querySelectorAll(".turn-step")].findIndex((node) => node.classList.contains("open")) + 1,
+        items: items.length,
+        targets: items.slice(0, 3).map((node) => node.querySelector(".turn-run-target")?.textContent ?? ""),
+        cards: el.querySelectorAll(".tool-card").length,
       });
     })()`));
-    assert.equal(opened.bodies, 1, `只展开点中的那一步，实际 ${opened.bodies}`);
-    assert.equal(opened.cards, 1, `只挂载一张卡片，实际 ${opened.cards}`);
-    assert.equal(opened.rows, 2, "展开内部不影响顶层行数");
-    assert.equal(opened.openIndex, 6, `展开的应是第 6 步，实际第 ${opened.openIndex} 步`);
+    assert.equal(runOpen.items, 18, `合并行展开后应有 18 条，实际 ${runOpen.items}`);
+    assert.deepEqual(runOpen.targets, ["npm run check -- 0", "npm run check -- 1", "npm run check -- 2"], `逐条清单应是原始命令：${JSON.stringify(runOpen.targets)}`);
+    assert.equal(runOpen.cards, 0, "逐条清单本身不挂载卡片");
+
+    // 3) 点清单里的某一条 → 只挂载那一条的卡片
+    await evaluate(`(() => { ${scope}.querySelectorAll(".turn-run-head")[5].click(); return true; })()`);
+    await poll(`Boolean(${scope}.querySelector(".turn-run-item .tool-card"))`, "单条卡片出现");
+    const openedRunItem = JSON.parse(await evaluate(`(() => {
+      const el = ${scope};
+      return JSON.stringify({
+        cards: el.querySelectorAll(".turn-run-item .tool-card").length,
+        bodies: el.querySelectorAll(".turn-run-item .turn-step-body").length,
+        rows: el.children.length,
+      });
+    })()`));
+    assert.equal(openedRunItem.cards, 1, `只挂载点中的那一张卡片，实际 ${openedRunItem.cards}`);
+    assert.equal(openedRunItem.bodies, 1, `只展开一条，实际 ${openedRunItem.bodies}`);
+    assert.equal(openedRunItem.rows, 2, "展开内部不影响顶层行数");
+    await evaluate(`(() => { ${scope}.querySelector(".turn-step-run .turn-step-head").click(); return true; })()`);
+    await wait(200);
 
     // 4) Ctrl+Shift+E 一键展开 / 收起
     const press = () =>
@@ -174,7 +220,7 @@ export async function checkActivityInElectron(win) {
       });
     })()`));
     assert.equal(expandedAll.open, "true", "再按一次应全部展开");
-    assert.equal(expandedAll.steps, 22, `展开后应看到 22 步时间线，实际 ${expandedAll.steps}`);
+    assert.equal(expandedAll.steps, 3, `展开后仍是 3 行（合并行不拆开），实际 ${expandedAll.steps}`);
 
     // 5) 切到「展开」模式：组与每一步的细节都默认打开
     await evaluate(`window.__piDesktop.settings.settings.activityDetail = "expanded"; true`);
@@ -190,6 +236,40 @@ export async function checkActivityInElectron(win) {
     assert.equal(flat.groups, 1, "「展开」模式仍然按请求分组");
     assert.equal(flat.rows, 2, `顶层仍是两行，实际 ${flat.rows}`);
     assert.ok(flat.cards >= 22, `「展开」模式应直接挂载 22 张卡片，实际 ${flat.cards}`);
+
+    // 6.5) 关掉「合并连续同类步骤」：恢复逐条时间线，但相同前缀被淡化、只留变化段
+    await evaluate(`window.__piDesktop.settings.settings.activityDetail = "grouped"; window.__piDesktop.settings.settings.activityMerge = false; true`);
+    await wait(600);
+    // 切换展示方式后组会回到默认收起，重新展开再数行
+    await evaluate(`(() => {
+      const head = ${scope}.querySelector(".activity-group .activity-head");
+      if (head && head.getAttribute("aria-expanded") !== "true") head.click();
+      return true;
+    })()`);
+    await poll(`Boolean(${scope}.querySelector(".turn-step"))`, "关掉合并后时间线仍在");
+    await wait(200);
+    const unmerged = JSON.parse(await evaluate(`(() => {
+      const el = ${scope};
+      const rows = [...el.querySelectorAll(".turn-step")];
+      const second = rows[1];
+      return JSON.stringify({
+        count: rows.length,
+        runs: el.querySelectorAll(".turn-step-run").length,
+        sameParts: el.querySelectorAll(".turn-step-same").length,
+        diffParts: [...el.querySelectorAll(".turn-step-diff")].map((node) => node.textContent),
+        secondText: second?.querySelector(".turn-step-target")?.textContent ?? "",
+        firstRowDiffs: rows[0]?.querySelectorAll(".turn-step-diff").length ?? -1,
+      });
+    })()`));
+    assert.equal(unmerged.count, 22, `关掉合并后应逐条显示 22 步，实际 ${unmerged.count}`);
+    assert.equal(unmerged.runs, 0, "关掉合并后不该再有合并行");
+    assert.ok(unmerged.sameParts >= 20, `相同前缀应被拆成淡化片段，实际 ${unmerged.sameParts}`);
+    assert.equal(unmerged.firstRowDiffs, 0, "第一步没有上一步可比，不该拆段");
+    assert.match(unmerged.secondText, /^npm run check -- 1$/, `淡化只是视觉，文本仍是完整命令：${unmerged.secondText}`);
+    await shotGroup("activity-unmerged.png");
+    await evaluate(`window.__piDesktop.settings.settings.activityMerge = true; true`);
+    await wait(400);
+    assert.equal(await evaluate(`${scope}.querySelectorAll(".turn-step").length`), 3, "重新打开合并后又回到 3 行");
 
     // 6) 回到时间线模式（默认），并补一条耗时断言
     await evaluate(`window.__piDesktop.settings.settings.activityDetail = "grouped"; true`);
@@ -215,10 +295,11 @@ export async function checkActivityInElectron(win) {
     assert.match(timing.duration, /分|秒/, `有耗时数据时应显示时长，实际「${timing.duration}」`);
     assert.ok(stepTimes >= 1, `时间线上应出现相对时间，实际 ${stepTimes}`);
 
-    console.log("[activity]", JSON.stringify({ rows: top.rows, summary: top.summary, steps: timeline.count, labels: timeline.labels, cards: opened.cards, duration: timing.duration }));
+    console.log("[activity]", JSON.stringify({ rows: top.rows, summary: top.summary, rowsShown: timeline.count, runs: timeline.runs.map((run) => run.count), cards: openedRunItem.cards, duration: timing.duration }));
   } finally {
     await evaluate(`(() => {
       window.__piDesktop.settings.settings.activityDetail = "grouped";
+      window.__piDesktop.settings.settings.activityMerge = true;
       const thread = window.__piDesktop.workbench.active.value.activeThread;
       thread.transcript.blocks.splice(0);
       return true;

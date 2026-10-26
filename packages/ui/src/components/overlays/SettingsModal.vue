@@ -1298,6 +1298,14 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>合并连续同类步骤</strong>
+                  <span>连续几步只有参数不同（如 <code>npm run check -- 1/2/3</code>、同一模板写多个文件）时收成一行，点开再看每一步；关掉则只淡化相同前缀</span>
+                </div>
+                <input v-model="appSettings.activityMerge" type="checkbox" class="settings-switch" />
+              </label>
+
               <div class="settings-row">
                 <div class="settings-row-info">
                   <strong>圆角</strong>

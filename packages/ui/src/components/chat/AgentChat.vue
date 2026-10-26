@@ -10,6 +10,7 @@ import { planQueueView } from "../../shared/queue-view.ts";
 import { FOLLOW_THRESHOLD_PX, isAtBottom, isSelfScroll, shouldRunFollowFrame, wantsToPauseFollow } from "../../shared/autoscroll.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveTurnItems, turnDurationLabel, type TurnGroup } from "../../shared/activity-turns.ts";
+import { buildTimelineRows, type TimelineRow } from "../../shared/timeline-rows.ts";
 import { appSettings } from "../../services/settings.ts";
 import { searchableText } from "../../shared/search-text.ts";
 import ActivityGroup from "./ActivityGroup.vue";
@@ -614,6 +615,44 @@ function toggleStep(group: { id: string; entries: Array<{ block: any }> }, block
   stepOverrides.value = { ...stepOverrides.value, [id]: !stepOpen(group, blockId) };
 }
 
+/** 时间线的显示行：连续同类步骤合并 / 相同前缀淡化（见 shared/timeline-rows.ts） */
+const timelineMerge = computed(() => appSettings.activityMerge);
+type TimelineStep = TurnGroup<any>["steps"][number];
+// 不缓存：合并开关一变就要立刻重算（一次最多几十步，字符串切分很便宜）
+function timelineRows(steps: TimelineStep[]): TimelineRow<TimelineStep>[] {
+  return buildTimelineRows(steps, { merge: timelineMerge.value });
+}
+
+function rowKey(row: { kind: "step" | "run"; step?: { block: { id: string } }; steps?: Array<{ block: { id: string } }> }): string {
+  return row.kind === "run" ? `run:${row.steps![0]!.block.id}` : `step:${row.step!.block.id}`;
+}
+
+/** 合并行的展开状态（key = 组 id | 首块 id） */
+const runOverrides = ref<Record<string, boolean>>({});
+function runKey(group: { id: string }, row: { steps: Array<{ block: { id: string } }> }): string {
+  return `${group.id}|run:${row.steps[0]!.block.id}`;
+}
+// 切换展示方式时清掉手动展开/收起的状态，否则「展开」模式会被旧的收起状态挡住
+watch(activityMode, () => {
+  activityOverrides.value = {};
+  stepOverrides.value = {};
+  runOverrides.value = {};
+});
+
+function runOpen(group: { id: string; entries: Array<{ block: any }> }, row: { steps: Array<{ block: { id: string } }> }): boolean {
+  if (groupHasSearchHit(group)) return true;
+  const override = runOverrides.value[runKey(group, row)];
+  if (override !== undefined) return override;
+  // 「展开」模式下把所有细节摊开，合并行也一样展开
+  return activityMode.value === "expanded";
+}
+function toggleRun(group: { id: string; entries: Array<{ block: any }> }, row: { steps: Array<{ block: { id: string } }> }): void {
+  if (groupHasSearchHit(group)) return;
+  const key = runKey(group, row);
+  runOverrides.value = { ...runOverrides.value, [key]: !runOpen(group, row) };
+}
+
+
 /** Ctrl+Shift+E：展开 / 收起全部执行记录 */
 function onActivityKey(event: KeyboardEvent): void {
   if (event.defaultPrevented || event.altKey) return;
@@ -782,45 +821,103 @@ watch(searchMatches, () => {
               >
                 <!-- 执行时间线：按真实发生顺序列出每一步，点某一步才挂载它的卡片 -->
                 <ol class="turn-timeline" :data-steps="item.group.steps.length">
-                  <li
-                    v-for="(step, stepIndex) in item.group.steps"
-                    :key="step.block.id"
-                    class="turn-step"
-                    :class="[
-                      `is-${step.key}`,
-                      { failed: step.failed, live: step.live, open: stepOpen(item.group, step.block.id) },
-                    ]"
-                    :data-block-id="step.block.id"
-                    :data-step-index="stepIndex + 1"
-                    :data-step-kind="step.key"
-                  >
-                    <span class="turn-step-rail" aria-hidden="true" />
-                    <span class="turn-step-dot" aria-hidden="true" />
-                    <button
-                      type="button"
-                      class="turn-step-head"
-                      :aria-expanded="stepOpen(item.group, step.block.id)"
-                      :title="step.failed ? `${step.label} ${step.target}（失败）` : undefined"
-                      @click="toggleStep(item.group, step.block.id)"
+                  <template v-for="row in timelineRows(item.group.steps)" :key="rowKey(row)">
+                    <!-- 合并行：连续的同类步骤（只有参数在变）收成一行，点开逐条看 -->
+                    <li
+                      v-if="row.kind === 'run'"
+                      class="turn-step turn-step-run"
+                      :class="{ failed: row.failed, live: row.live, open: runOpen(item.group, row) }"
+                      :data-run="row.steps.length"
+                      :data-block-id="row.steps[0]!.block.id"
                     >
-                      <span class="turn-step-index">{{ stepIndex + 1 }}</span>
-                      <span class="turn-step-label">{{ step.label }}</span>
-                      <span class="turn-step-target">{{ step.target }}</span>
-                      <span v-if="step.failed" class="turn-step-failed">失败</span>
-                      <span v-else-if="step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
-                      <span v-if="step.offsetLabel" class="turn-step-time">{{ step.offsetLabel }}</span>
-                    </button>
-                    <div v-if="stepOpen(item.group, step.block.id)" class="turn-step-body">
-                      <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === step.block.id }">
-                        <BlockView
-                          :block="step.block"
-                          :query="searchQuery"
-                          :copy-text="''"
-                          :collapse-long="false"
-                        />
+                      <span class="turn-step-rail" aria-hidden="true" />
+                      <span class="turn-step-dot" aria-hidden="true" />
+                      <button
+                        type="button"
+                        class="turn-step-head"
+                        :aria-expanded="runOpen(item.group, row)"
+                        :title="`${row.steps.length} 步：${row.steps.map((step) => step.target).join(' · ')}`"
+                        @click="toggleRun(item.group, row)"
+                      >
+                        <span class="turn-step-index">{{ row.startIndex }}–{{ row.startIndex + row.steps.length - 1 }}</span>
+                        <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
+                        <span class="turn-step-count">×{{ row.steps.length }}</span>
+                        <span class="turn-step-target">{{ row.target }}</span>
+                        <span v-if="row.failed" class="turn-step-failed">失败</span>
+                        <span v-else-if="row.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                      </button>
+                      <div v-if="runOpen(item.group, row)" class="turn-step-body turn-run-body">
+                        <ol class="turn-run-list">
+                          <li
+                            v-for="step in row.steps"
+                            :key="step.block.id"
+                            class="turn-run-item"
+                            :class="{ failed: step.failed }"
+                          >
+                            <button
+                              type="button"
+                              class="turn-run-head"
+                              :aria-expanded="stepOpen(item.group, step.block.id)"
+                              @click="toggleStep(item.group, step.block.id)"
+                            >
+                              <span class="turn-run-target">{{ step.target }}</span>
+                              <span v-if="step.failed" class="turn-step-failed">失败</span>
+                              <span v-if="step.offsetLabel" class="turn-step-time">{{ step.offsetLabel }}</span>
+                            </button>
+                            <div v-if="stepOpen(item.group, step.block.id)" class="turn-step-body">
+                              <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === step.block.id }">
+                                <BlockView :block="step.block" :query="searchQuery" :copy-text="''" :collapse-long="false" />
+                              </div>
+                            </div>
+                          </li>
+                        </ol>
                       </div>
-                    </div>
-                  </li>
+                    </li>
+                    <!-- 单步：与前一步只差一小段时，相同部分淡成灰色，只让变化段保持亮度 -->
+                    <li
+                      v-else
+                      class="turn-step"
+                      :class="[
+                        `is-${row.step.key}`,
+                        { failed: row.step.failed, live: row.step.live, open: stepOpen(item.group, row.step.block.id) },
+                      ]"
+                      :data-block-id="row.step.block.id"
+                      :data-step-index="row.startIndex"
+                      :data-step-kind="row.step.key"
+                    >
+                      <span class="turn-step-rail" aria-hidden="true" />
+                      <span class="turn-step-dot" aria-hidden="true" />
+                      <button
+                        type="button"
+                        class="turn-step-head"
+                        :aria-expanded="stepOpen(item.group, row.step.block.id)"
+                        :title="row.step.failed ? `${row.step.label} ${row.step.target}（失败）` : undefined"
+                        @click="toggleStep(item.group, row.step.block.id)"
+                      >
+                        <span class="turn-step-index">{{ row.startIndex }}</span>
+                        <span class="turn-step-label">{{ row.step.label }}</span>
+                        <span class="turn-step-target">
+                          <template v-if="row.match">
+                            <span class="turn-step-same">{{ row.match.prefix }}</span><span class="turn-step-diff">{{ row.match.changed }}</span><span class="turn-step-same">{{ row.match.suffix }}</span>
+                          </template>
+                          <template v-else>{{ row.step.target }}</template>
+                        </span>
+                        <span v-if="row.step.failed" class="turn-step-failed">失败</span>
+                        <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                        <span v-if="row.step.offsetLabel" class="turn-step-time">{{ row.step.offsetLabel }}</span>
+                      </button>
+                      <div v-if="stepOpen(item.group, row.step.block.id)" class="turn-step-body">
+                        <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === row.step.block.id }">
+                          <BlockView
+                            :block="row.step.block"
+                            :query="searchQuery"
+                            :copy-text="''"
+                            :collapse-long="false"
+                          />
+                        </div>
+                      </div>
+                    </li>
+                  </template>
                 </ol>
               </ActivityGroup>
             </template>
