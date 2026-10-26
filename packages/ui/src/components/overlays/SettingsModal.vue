@@ -12,6 +12,7 @@ import { PLUGIN_AREAS, type PluginArea } from "../../kernel/plugin-manager.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import {
   appSettings,
+  checkAppUpdateWithAutoDownload,
   closeSettingsModal,
   DEFAULT_SETTINGS,
   resetSettingsToDefault,
@@ -336,7 +337,8 @@ const appUpdateStatus = computed(() => {
 });
 
 async function checkAppUpdateNow(): Promise<void> {
-  const result = await workbench.checkAppUpdate({ manual: true });
+  // 走统一的入口：开着「自动下载更新」时，手动检查也会顺手下载
+  const result = (await checkAppUpdateWithAutoDownload({ manual: true })) ?? { current: "", latest: "", updateAvailable: false, url: "" };
   // 失败（限流 / 断网）与「有更新」workbench 已经提示过，这里只补「确实是最新」；
   // 以前把检查失败也说成「已是最新版本」，用户会以为真的没有新版本。
   if (result.error || result.updateAvailable) return;
@@ -2062,6 +2064,7 @@ onBeforeUnmount(() => {
                 <div class="settings-row-info">
                   <strong>软件版本</strong>
                   <span>当前 {{ state.appUpdate.current || "未知" }}{{ state.appUpdate.latest ? ` · 最新 ${state.appUpdate.latest}` : "" }}</span>
+                  <span v-if="state.appUpdate.error" class="settings-row-hint">上次检查失败：{{ state.appUpdate.error }}</span>
                 </div>
                 <span class="settings-status-pill" :class="appUpdateStatus.tone">{{ appUpdateStatus.label }}</span>
               </div>
@@ -2085,9 +2088,16 @@ onBeforeUnmount(() => {
               <label class="settings-row clickable">
                 <div class="settings-row-info">
                   <strong>启动时检查更新</strong>
-                  <span>只自动检查版本；下载、准备和安装都需要手动确认</span>
+                  <span>启动后自动查一次 GitHub 发布页（结果缓存 6 小时，不会反复请求）</span>
                 </div>
                 <input v-model="appSettings.appUpdateCheck" type="checkbox" class="settings-switch" />
+              </label>
+              <label class="settings-row clickable">
+                <div class="settings-row-info">
+                  <strong>自动下载更新</strong>
+                  <span>查到新版本就自动下载并校验安装包；安装仍要你点「安装并重启」</span>
+                </div>
+                <input v-model="appSettings.appUpdateAuto" type="checkbox" class="settings-switch" />
               </label>
             </div>
 

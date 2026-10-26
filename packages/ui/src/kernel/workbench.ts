@@ -1798,7 +1798,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
-  async function downloadAppUpdate(): Promise<boolean> {
+  /**
+   * 下载更新安装包。`background` 表示是自动更新自己发起的：失败只提示一次警告，
+   * 不要用红色错误 Toast 打断用户（他没点任何按钮）。
+   */
+  async function downloadAppUpdate(options: { background?: boolean } = {}): Promise<boolean> {
     if (!host?.downloadAppUpdate || state.appUpdate.phase === "downloading") return false;
     appUpdateCancelled = false;
     state.appUpdate.phase = "downloading";
@@ -1813,7 +1817,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     } catch (error: any) {
       state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
       if (appUpdateCancelled) bus.emit("notify", { level: "info", text: "已取消下载更新" });
-      else bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+      else bus.emit("notify", {
+        level: options.background ? "warning" : "error",
+        text: `${options.background ? "自动更新下载失败：" : ""}${error?.message ?? String(error)}`,
+      });
       appUpdateCancelled = false;
       return false;
     }

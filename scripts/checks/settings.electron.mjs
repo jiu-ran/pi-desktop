@@ -175,6 +175,84 @@ export async function checkSettingsInElectron(win) {
       if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
     }
   };
+  // 自动更新默认开启：环境页两个开关都在、都开着，且手动「检查更新」会自动下载
+  await evaluate(`document.querySelector('[data-settings-tab="environment"]').click(); true`);
+  await wait(400);
+  const updateRows = JSON.parse(await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.settings-row')].map((row) => ({
+      label: row.querySelector('.settings-row-info strong')?.textContent.trim() ?? '',
+      hint: row.querySelector('.settings-row-info > span')?.textContent.trim() ?? '',
+      on: row.querySelector('input.settings-switch')?.checked ?? null,
+    }));
+    return JSON.stringify(rows.filter((row) => row.on !== null));
+  })()`));
+  const autoRow = updateRows.find((row) => row.label === "自动下载更新");
+  const checkRow = updateRows.find((row) => row.label === "启动时检查更新");
+  assert.ok(autoRow, "设置页要有「自动下载更新」开关");
+  assert.equal(autoRow.on, true, "自动下载更新必须默认开启");
+  assert.ok(checkRow, "设置页要有「启动时检查更新」开关");
+  assert.equal(checkRow.on, true, "启动时检查更新必须默认开启");
+
+  // 手动检查也要触发下载：换掉 workbench 的检查和下载（宿主对象被 contextBridge 冻结，
+  // 改 window.piDesktop 上的方法不会生效），看调用链有没有连上
+  const wired = JSON.parse(await evaluate(`(async () => {
+    const workbench = window.__piDesktop.workbench;
+    const original = { check: workbench.checkAppUpdate, download: workbench.downloadAppUpdate };
+    const calls = [];
+    workbench.checkAppUpdate = async () => {
+      calls.push("check");
+      Object.assign(workbench.state.appUpdate, {
+        current: "0.3.2",
+        latest: "0.4.0",
+        updateAvailable: true,
+        url: "https://example.com/pi-desktop",
+        assetName: "Pi-Desktop-0.4.0.exe",
+        phase: "available",
+        error: "",
+      });
+      return { current: "0.3.2", latest: "0.4.0", updateAvailable: true, url: "https://example.com/pi-desktop" };
+    };
+    workbench.downloadAppUpdate = async () => {
+      calls.push("download");
+      workbench.state.appUpdate.phase = "ready";
+      return { version: "0.4.0", assetName: "Pi-Desktop-0.4.0.exe", url: "https://example.com/pi-desktop" };
+    };
+    // 必须点「检查软件更新」那一行的按钮：同页 Pi CLI 也有个「检查更新」
+    const checkRow = [...document.querySelectorAll('.settings-row')]
+      .find((row) => row.querySelector('.settings-row-info strong')?.textContent.trim() === "检查软件更新");
+    const checkButton = checkRow && [...checkRow.querySelectorAll('button')].find((b) => b.textContent.trim() === "检查更新");
+    if (!checkButton) return JSON.stringify({ error: "找不到检查更新按钮" });
+    checkButton.click();
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && !calls.includes("download")) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 400));
+    const installButton = [...document.querySelectorAll('button')].some((b) => b.textContent.includes("安装并重启"));
+    // 复位：别把假状态留在界面上
+    Object.assign(workbench.state.appUpdate, { phase: "idle", updateAvailable: false, latest: "", url: "", current: "" });
+    workbench.checkAppUpdate = original.check;
+    workbench.downloadAppUpdate = original.download;
+    await new Promise((r) => setTimeout(r, 300));
+    return JSON.stringify({ calls, installButton: Boolean(installButton) });
+  })()`));
+  assert.deepEqual(wired.calls, ["check", "download"], `手动检查更新后要自动下载，实际调用 ${JSON.stringify(wired.calls)}`);
+  assert.equal(wired.installButton, true, "下载完成后要出现「安装并重启」，安装仍需手动确认");
+
+  // 开关能持久化
+  const persisted = JSON.parse(await evaluate(`(async () => {
+    const row = [...document.querySelectorAll('.settings-row')]
+      .find((item) => item.querySelector('.settings-row-info strong')?.textContent.trim() === "自动下载更新");
+    const input = row.querySelector('input.settings-switch');
+    input.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const off = JSON.parse(localStorage.getItem("pi-desktop.settings") || "{}").appUpdateAuto;
+    input.click();
+    await new Promise((r) => setTimeout(r, 250));
+    const back = JSON.parse(localStorage.getItem("pi-desktop.settings") || "{}").appUpdateAuto;
+    return JSON.stringify({ off, back });
+  })()`));
+  assert.equal(persisted.off, false, "关掉自动下载要写进 localStorage");
+  assert.equal(persisted.back, true, "重新打开要写回 true");
+
   await evaluate(`document.querySelector('[data-settings-tab="appearance"]').click(); true`);
   await wait(300);
   console.log("[settings] shot", await shot("settings-dark.png"));

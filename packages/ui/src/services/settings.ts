@@ -3,6 +3,7 @@ import type { EventBus } from "../kernel/event-bus.ts";
 import type { Workbench } from "../kernel/workbench.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
 import { normalizeLogMaxBytes } from "../shared/log-limit.ts";
+import { shouldAutoDownloadUpdate } from "../shared/update-auto.ts";
 import {
   appearanceStyle,
   normalizeAccent,
@@ -59,6 +60,8 @@ export interface AppSettings {
   piCustomPath: string;
   /** 启动时检查 Pi Desktop 的 GitHub Release */
   appUpdateCheck: boolean;
+  /** 检查到新版本后自动下载并校验安装包（安装仍需手动确认） */
+  appUpdateAuto: boolean;
   /** 界面基础字号（px） */
   uiFontSize: number;
   /** 代码与终端字号（px） */
@@ -108,6 +111,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piUpdateScope: "self",
   piCustomPath: "",
   appUpdateCheck: true,
+  appUpdateAuto: true,
   uiFontSize: 13,
   codeFontSize: 12.5,
   terminalProfile: "system",
@@ -154,6 +158,7 @@ function loadSavedSettings(): AppSettings {
       piUpdateScope: parsed.piUpdateScope === "all" ? "all" : "self",
       piCustomPath: typeof parsed.piCustomPath === "string" ? parsed.piCustomPath.slice(0, 500) : DEFAULT_SETTINGS.piCustomPath,
       appUpdateCheck: typeof parsed.appUpdateCheck === "boolean" ? parsed.appUpdateCheck : DEFAULT_SETTINGS.appUpdateCheck,
+      appUpdateAuto: typeof parsed.appUpdateAuto === "boolean" ? parsed.appUpdateAuto : DEFAULT_SETTINGS.appUpdateAuto,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
       codeFontSize: Math.min(16, Math.max(11, Number(parsed.codeFontSize) || DEFAULT_SETTINGS.codeFontSize)),
       terminalProfile: typeof parsed.terminalProfile === "string" && /^[a-z0-9-]{1,80}$/.test(parsed.terminalProfile)
@@ -203,8 +208,30 @@ export function resetSettingsToDefault(): void {
   Object.assign(appSettings, { ...DEFAULT_SETTINGS, terminalCustomArgs: [] });
 }
 
+/** setupSettings 里记下来的 workbench：设置页手动检查更新时也要能触发自动下载。 */
+let settingsWorkbench: Workbench | null = null;
+
+/**
+ * 检查 Pi Desktop 更新；开着「自动下载更新」时顺手把安装包下下来。
+ *
+ * 启动检查和设置页的「检查更新」都走这里，行为保持一致：查到就下，
+ * 但安装永远要用户点「安装并重启」——安装器会替换正在运行的二进制。
+ */
+export async function checkAppUpdateWithAutoDownload(
+  options: { manual?: boolean } = {},
+): Promise<Awaited<ReturnType<Workbench["checkAppUpdate"]>> | null> {
+  const workbench = settingsWorkbench;
+  if (!workbench) return null;
+  const result = await workbench.checkAppUpdate(options);
+  if (!shouldAutoDownloadUpdate(appSettings, result)) return result;
+  if (workbench.state.appUpdate.phase !== "available") return result;
+  void workbench.downloadAppUpdate({ background: true });
+  return result;
+}
+
 export function setupSettings(workbench: Workbench, bus: EventBus) {
   const disposers: Array<() => void> = [];
+  settingsWorkbench = workbench;
   if (typeof localStorage !== "undefined") {
     disposers.push(watch(
       appSettings,
@@ -329,7 +356,18 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     },
   ));
 
-  if (appSettings.appUpdateCheck) void workbench.checkAppUpdate();
+  // 自动更新默认开启：启动时先查，查到就顺手把安装包下好，用户只需要点一下重启。
+  if (appSettings.appUpdateCheck) void checkAppUpdateWithAutoDownload();
+
+  // 用户后来打开「自动下载更新」时，不要等他再点一次检查才生效。
+  disposers.push(watch(
+    () => appSettings.appUpdateAuto,
+    (enabled) => {
+      if (!enabled) return;
+      const state = workbench.state.appUpdate;
+      if (state.updateAvailable && state.phase === "available") void workbench.downloadAppUpdate({ background: true });
+    },
+  ));
 
   // 后台并行会话完成时自动发送通知
   disposers.push(bus.on(
