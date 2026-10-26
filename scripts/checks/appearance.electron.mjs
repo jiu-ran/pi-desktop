@@ -18,6 +18,14 @@ export async function checkAppearanceInElectron(win) {
       return JSON.stringify({
         accent: style.getPropertyValue("--accent").trim(),
         accentSoft: style.getPropertyValue("--accent-soft").trim(),
+        emphasis: style.getPropertyValue("--emphasis").trim(),
+        emphasisId: root.dataset.emphasis,
+        accentCustom: root.dataset.accent === "custom" ? style.getPropertyValue("--accent").trim() : "",
+        emphasisCustom: root.dataset.emphasis === "custom" ? style.getPropertyValue("--emphasis").trim() : "",
+        inlineCode: (() => {
+          const node = document.querySelector(".settings-preview-emphasis");
+          return node ? getComputedStyle(node).color : "";
+        })(),
         radius: style.getPropertyValue("--radius").trim(),
         radiusSm: style.getPropertyValue("--radius-sm").trim(),
         column: style.getPropertyValue("--chat-column").trim(),
@@ -32,6 +40,9 @@ export async function checkAppearanceInElectron(win) {
           radius: settings.radius,
           columnWidth: settings.columnWidth,
           reduceMotion: settings.reduceMotion,
+          accentCustom: settings.accentCustom,
+          emphasis: settings.emphasis,
+          emphasisCustom: settings.emphasisCustom,
         },
       });
     })()`);
@@ -60,14 +71,15 @@ export async function checkAppearanceInElectron(win) {
   const controls = JSON.parse(
     await evaluate(`(() => JSON.stringify({
       tiles: [...document.querySelectorAll(".settings-theme-tile")].map((n) => n.textContent.trim()),
-      swatches: document.querySelectorAll(".settings-swatch").length,
+      swatches: document.querySelectorAll(".settings-swatches .settings-swatch").length,
+      emphasisSwatches: document.querySelectorAll(".settings-emphasis-row .settings-swatch").length,
       segments: document.querySelectorAll(".settings-segment").length,
       preview: Boolean(document.querySelector(".settings-preview")),
       reset: [...document.querySelectorAll(".settings-group-head .btn")].some((n) => n.textContent.includes("恢复默认外观")),
     }))()`),
   );
   assert.deepEqual(controls.tiles, ["跟随系统", "深色", "浅色"], `主题卡不对：${controls.tiles.join("/")}`);
-  assert.equal(controls.swatches, 7, `强调色应有 7 个预设，实际 ${controls.swatches}`);
+  assert.equal(controls.swatches, 8, `强调色应是 7 个预设 + 1 个自定义，实际 ${controls.swatches}`);
   assert.ok(controls.segments >= 15, `分段选项太少：${controls.segments}`);
   assert.ok(controls.preview, "外观页应有实时预览块");
   assert.ok(controls.reset, "外观页应有「恢复默认外观」");
@@ -89,6 +101,109 @@ export async function checkAppearanceInElectron(win) {
   assert.equal(violet.accent.toLowerCase(), "#8b5cf6", `--accent 应为紫罗兰色，实际 ${violet.accent}`);
   assert.match(violet.accentSoft, /^rgba\(139, 92, 246/, `--accent-soft 应跟着变，实际 ${violet.accentSoft}`);
   assert.equal(violet.accentId, "violet", "data-accent 应同步");
+
+  // 自定义强调色：任意颜色都能用（不是只有几个预设）
+  const customAccent = JSON.parse(await evaluate(`(() => {
+    const settings = JSON.parse(localStorage.getItem("pi-desktop.settings") || "{}");
+    return JSON.stringify({ customBefore: settings.accentCustom ?? null });
+  })()`));
+  assert.ok(customAccent.customBefore, "设置里应有 accentCustom 字段");
+  await evaluate(`(() => {
+    const input = document.querySelector('.settings-swatch-custom input[type="color"]');
+    if (!input) return false;
+    input.value = "#12ab34";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.click();
+    return true;
+  })()`);
+  await wait(350);
+  const custom = JSON.parse(await snapshot());
+  assert.equal(custom.accent.toLowerCase(), "#12ab34", `自定义强调色应直接生效，实际 ${custom.accent}`);
+  assert.equal(custom.accentId, "custom", "data-accent 要标成 custom");
+  assert.equal(custom.stored.accentCustom, "#12ab34", "自定义颜色要落盘");
+  assert.match(custom.accentSoft, /^rgba\(18, 171, 52/, `自定义色也要推淡底，实际 ${custom.accentSoft}`);
+
+  // 对话强调色：默认跟随强调色
+  assert.equal(violet.emphasis.toLowerCase(), "#8b5cf6", `默认情况下对话强调色跟随强调色，实际 ${violet.emphasis}`);
+  assert.equal(violet.emphasisId, "follow", "data-emphasis 默认是 follow");
+  assert.equal(violet.emphasisCustom, "", "跟随模式下不该用单独的颜色");
+
+  // 单独设置对话强调色：界面强调色不动，只有对话文字变
+  await evaluate(`(() => {
+    [...document.querySelectorAll(".settings-segment")].find((n) => n.textContent.trim() === "单独设置")?.click();
+    return true;
+  })()`);
+  await wait(350);
+  assert.ok(await evaluate(`Boolean(document.querySelector('.settings-emphasis-row input[type="color"]'))`), "选「单独设置」后要出现取色器");
+  await evaluate(`(() => {
+    const input = document.querySelector('.settings-emphasis-row input[type="color"]');
+    input.value = "#ff8800";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await wait(350);
+  const split = JSON.parse(await snapshot());
+  assert.equal(split.accent.toLowerCase(), "#12ab34", "对话强调色不该影响界面强调色");
+  assert.equal(split.emphasis.toLowerCase(), "#ff8800", `对话强调色应独立生效，实际 ${split.emphasis}`);
+  assert.equal(split.emphasisId, "custom", "data-emphasis 要标成 custom");
+  assert.equal(split.stored.emphasis, "custom", "独立设置要落盘");
+  assert.equal(split.stored.emphasisCustom, "#ff8800", "独立颜色要落盘");
+  assert.equal(split.inlineCode, "rgb(255, 136, 0)", `预览里的对话强调文字要用独立颜色，实际 ${split.inlineCode}`);
+
+  // 截图留档：强调色预设 + 自定义取色、对话强调色独立设置、实时预览
+  try {
+    const dbg = win.webContents.debugger;
+    if (!dbg.isAttached()) await dbg.attach("1.3");
+    const box = JSON.parse(await evaluate(`(() => {
+      const rows = [...document.querySelectorAll(".settings-group")];
+      const group = rows.find((node) => node.textContent.includes("强调色")) ?? document.querySelector(".settings-body");
+      const preview = document.querySelector(".settings-preview");
+      const r = group.getBoundingClientRect();
+      const p = preview ? preview.getBoundingClientRect() : r;
+      return JSON.stringify({
+        x: Math.round(r.left) - 8,
+        y: Math.round(r.top) - 8,
+        width: Math.round(r.width) + 16,
+        height: Math.round(Math.min(p.bottom - r.top, 1200)) + 16,
+      });
+    })()`));
+    const shot = await dbg.sendCommand("Page.captureScreenshot", { format: "png", clip: { ...box, scale: 2 } });
+    const { writeFile } = await import("node:fs/promises");
+    const nodePath = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    await writeFile(nodePath.join(tmpdir(), "appearance-emphasis.png"), Buffer.from(shot.data, "base64"));
+    console.log("[appearance] shot appearance-emphasis.png");
+  } catch (error) {
+    console.log("[appearance] shot（跳过）", error?.message ?? error);
+  } finally {
+    if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+  }
+
+  // 回到「跟随强调色」：又和界面强调色一致
+  await evaluate(`(() => {
+    [...document.querySelectorAll(".settings-segment")].find((n) => n.textContent.trim() === "跟随强调色")?.click();
+    return true;
+  })()`);
+  await wait(300);
+  const backToFollow = JSON.parse(await snapshot());
+  assert.equal(backToFollow.emphasis.toLowerCase(), "#12ab34", `跟随模式应回到界面强调色，实际 ${backToFollow.emphasis}`);
+  assert.equal(backToFollow.emphasisId, "follow", "data-emphasis 回到 follow");
+
+  // 恢复默认外观：两个颜色一起回到预设
+  await evaluate(`(() => {
+    [...document.querySelectorAll(".settings-group-head .btn")].find((n) => n.textContent.includes("恢复默认外观")).click();
+    return true;
+  })()`);
+  await wait(300);
+  const afterReset = JSON.parse(await snapshot());
+  assert.equal(afterReset.accentId, "default", "恢复默认后强调色回到默认");
+  assert.equal(afterReset.emphasisId, "follow", "恢复默认后对话强调色回到跟随");
+  await evaluate(`(() => {
+    [...document.querySelectorAll(".settings-swatch")].find((n) => n.getAttribute("aria-label") === "紫罗兰")?.click();
+    return true;
+  })()`);
+  await wait(250);
+
   assert.equal(violet.stored.accent, "violet", "强调色应持久化");
 
   // 圆角：圆润 → 12px / 9px
@@ -238,6 +353,6 @@ export async function checkAppearanceInElectron(win) {
   assert.equal(chrome.opened, "scrim", `打开弹窗后原生按钮区要跟着压暗，实际 ${chrome.opened}`);
   assert.equal(chrome.reopened, "plain", `关闭弹窗后要恢复原色，实际 ${chrome.reopened}`);
 
-  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));
+  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, emphasis: violet.emphasis, customAccent: "#12ab34", splitEmphasis: "#ff8800", radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));
   return { controls, violet, round, full, still };
 }

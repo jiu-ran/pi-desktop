@@ -7,11 +7,14 @@ import { shouldAutoDownloadUpdate } from "../shared/update-auto.ts";
 import {
   appearanceStyle,
   normalizeAccent,
+  normalizeEmphasisMode,
+  normalizeHex,
   normalizeColumnWidth,
   normalizeRadius,
   normalizeThemeMode,
   resolveScheme,
   type AccentId,
+  type EmphasisMode,
   type ColumnWidthId,
   type RadiusId,
   type ThemeMode,
@@ -87,6 +90,11 @@ export interface AppSettings {
   themeMode: ThemeMode;
   /** 强调色预设 */
   accent: AccentId;
+  /** accent = "custom" 时用的颜色（#rrggbb）；空串表示还没挑过 */
+  accentCustom: string;
+  /** 对话里的文字强调色：follow = 跟随强调色，custom = 用 emphasisCustom */
+  emphasis: EmphasisMode;
+  emphasisCustom: string;
   /** 圆角风格 */
   radius: RadiusId;
   /** 对话正文列宽 */
@@ -124,6 +132,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 默认仍是深色（沿用产品原本的样子）；想跟系统走由用户自己选「跟随系统」
   themeMode: "dark",
   accent: "default",
+  accentCustom: "#5b8def",
+  emphasis: "follow",
+  emphasisCustom: "#df8538",
   radius: "default",
   columnWidth: "default",
   reduceMotion: false,
@@ -177,6 +188,9 @@ function loadSavedSettings(): AppSettings {
         ? normalizeThemeMode(parsed.themeMode)
         : normalizeThemeMode(readStorage("pi-desktop.theme") ?? "dark"),
       accent: normalizeAccent(parsed.accent),
+      accentCustom: normalizeHex(parsed.accentCustom, DEFAULT_SETTINGS.accentCustom),
+      emphasis: normalizeEmphasisMode(parsed.emphasis),
+      emphasisCustom: normalizeHex(parsed.emphasisCustom, DEFAULT_SETTINGS.emphasisCustom),
       radius: normalizeRadius(parsed.radius),
       columnWidth: normalizeColumnWidth(parsed.columnWidth),
       reduceMotion: parsed.reduceMotion === true,
@@ -283,6 +297,9 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
       const style = appearanceStyle({
         themeMode: appSettings.themeMode,
         accent: appSettings.accent,
+        accentCustom: appSettings.accentCustom,
+        emphasis: appSettings.emphasis,
+        emphasisCustom: appSettings.emphasisCustom,
         radius: appSettings.radius,
         columnWidth: appSettings.columnWidth,
         reduceMotion: appSettings.reduceMotion,

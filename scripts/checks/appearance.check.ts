@@ -14,6 +14,9 @@ import {
   radiusVars,
   resolveScheme,
   dimmedColor,
+  emphasisColor,
+  normalizeEmphasisMode,
+  normalizeHex,
   withAlpha,
 } from "../../packages/ui/src/shared/appearance.ts";
 
@@ -80,6 +83,9 @@ assert.deepEqual(columnWidthVars("default"), { "--chat-column": "760px" });
 const style = appearanceStyle({
   themeMode: "system",
   accent: "teal",
+  accentCustom: "#123456",
+  emphasis: "follow",
+  emphasisCustom: "#abcdef",
   radius: "round",
   columnWidth: "wide",
   reduceMotion: true,
@@ -91,6 +97,7 @@ assert.equal(style.vars["--chat-column"], "980px");
 assert.deepEqual(style.dataset, {
   motion: "off",
   accent: "teal",
+  emphasis: "follow",
   radius: "round",
   column: "wide",
   themeMode: "system",
@@ -98,6 +105,9 @@ assert.deepEqual(style.dataset, {
 const quiet = appearanceStyle({
   themeMode: "dark",
   accent: "default",
+  accentCustom: "",
+  emphasis: "follow",
+  emphasisCustom: "",
   radius: "default",
   columnWidth: "default",
   reduceMotion: false,
@@ -110,5 +120,66 @@ assert.equal(resolveScheme("dark", false), "dark");
 assert.equal(resolveScheme("light", true), "light");
 assert.equal(resolveScheme("system", true), "dark");
 assert.equal(resolveScheme("system", false), "light");
+
+// 自定义强调色：`accent: "custom"` 时用用户挑的颜色；非法值退回预设
+{
+  const custom = appearanceStyle({
+    themeMode: "dark",
+    accent: "custom",
+    accentCustom: "#12ab34",
+    emphasis: "follow",
+    emphasisCustom: "",
+    radius: "default",
+    columnWidth: "default",
+    reduceMotion: false,
+    scheme: "dark",
+  });
+  assert.equal(custom.vars["--accent"], "#12ab34", "自定义强调色要直接生效");
+  assert.equal(custom.vars["--emphasis"], "#12ab34", "跟随模式：对话强调色等于强调色");
+  assert.match(custom.vars["--accent-soft"], /18, 171, 52, 0.18/, `自定义色也要推 soft：${custom.vars["--accent-soft"]}`);
+
+  const broken = appearanceStyle({
+    themeMode: "dark",
+    accent: "custom",
+    accentCustom: "not-a-color",
+    emphasis: "custom",
+    emphasisCustom: "also bad",
+    radius: "default",
+    columnWidth: "default",
+    reduceMotion: false,
+    scheme: "dark",
+  });
+  assert.equal(broken.vars["--accent"], "#2a7deb", "非法自定义色退回默认强调色");
+  assert.equal(broken.vars["--emphasis"], "#2a7deb", "对话强调色也一起退回");
+
+  // 对话强调色单独设置：两者互不影响
+  const split = appearanceStyle({
+    themeMode: "dark",
+    accent: "violet",
+    accentCustom: "",
+    emphasis: "custom",
+    emphasisCustom: "#ff8800",
+    radius: "default",
+    columnWidth: "default",
+    reduceMotion: false,
+    scheme: "dark",
+  });
+  assert.equal(split.vars["--accent"], "#8b5cf6", "界面强调色还是紫罗兰");
+  assert.equal(split.vars["--emphasis"], "#ff8800", "对话强调色用单独挑的颜色");
+  assert.equal(split.dataset.emphasis, "custom", "data 属性要标出独立设置");
+}
+
+// 取值归一化：只接受 #rrggbb，其余退回默认
+assert.equal(normalizeHex("#AABBCC"), "#aabbcc", "大小写统一");
+assert.equal(normalizeHex("red", "#000000"), "#000000", "非 #rrggbb 一律退回");
+assert.equal(normalizeHex("", "#123456"), "#123456");
+assert.equal(normalizeAccent("custom"), "custom", "自定义是合法取值");
+assert.equal(normalizeAccent("rainbow"), "default", "未知名还是回默认");
+assert.equal(normalizeEmphasisMode("custom"), "custom");
+assert.equal(normalizeEmphasisMode("nope"), "follow");
+assert.equal(emphasisColor("custom", "#00ff88", "violet", ""), "#00ff88", "单独设置时用自己的颜色");
+assert.equal(emphasisColor("follow", "#00ff88", "violet", ""), "#8b5cf6", "跟随模式忽略自定义值");
+assert.equal(emphasisColor("custom", "bad", "violet", ""), "#8b5cf6", "非法自定义值退回强调色");
+assert.equal(emphasisColor("follow", "", "custom", "#101010"), "#101010", "跟随模式要跟随自定义强调色");
 
 console.log("appearance.check 通过");

@@ -30,6 +30,8 @@ export const THEMES: ThemeSpec[] = [
       "--fg-3": "#6b6c70",
       "--accent": "#2a7deb",
       "--accent-fg": "#ffffff",
+      // 对话文字的强调色：默认跟随强调色，用户单独设置后会被覆盖
+      "--emphasis": "var(--accent)",
       "--accent-soft": "rgba(42, 125, 235, 0.16)",
       "--ok": "#169068",
       "--ok-fg": "#3fc28f",
@@ -83,6 +85,8 @@ export const THEMES: ThemeSpec[] = [
       "--fg-3": "#9a9da4",
       "--accent": "#2a7deb",
       "--accent-fg": "#ffffff",
+      // 对话文字的强调色：默认跟随强调色，用户单独设置后会被覆盖
+      "--emphasis": "var(--accent)",
       "--accent-soft": "rgba(42, 125, 235, 0.12)",
       "--ok": "#14845f",
       "--ok-fg": "#14845f",

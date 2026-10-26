@@ -609,14 +609,14 @@
 }
 .md table { border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
 .md table tbody tr:nth-child(2n) { background: transparent !important; }
-/* 对话里的行内代码就是「强调」：颜色跟随用户选的强调色（--accent），
-   而不是固定的橙色 --code。底色用同一强调色的淡底，深浅主题都成立。 */
+/* 对话里的行内代码就是「强调」：颜色用 --emphasis（默认跟随强调色，
+   也可以在设置里单独挑一个）。底色是同色淡底，深浅主题都成立。 */
 .md :is(code:not(pre code)) {
   padding: 0.04em 0.34em !important;
   border: 0 !important;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
-  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--emphasis) 14%, transparent) !important;
+  color: var(--emphasis) !important;
   font-family: var(--mono) !important;
   font-size: 0.95em !important;
 }

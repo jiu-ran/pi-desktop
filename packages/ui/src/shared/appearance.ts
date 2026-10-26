@@ -6,7 +6,11 @@
  */
 
 export type ThemeMode = "system" | "dark" | "light";
-export type AccentId = "default" | "violet" | "teal" | "green" | "amber" | "rose" | "slate";
+export type AccentPresetId = "default" | "violet" | "teal" | "green" | "amber" | "rose" | "slate";
+/** 强调色：预设 id 或 "custom"（用 accentCustom 里的任意颜色） */
+export type AccentId = AccentPresetId | "custom";
+/** 对话里文字（行内代码等）的强调色：跟随主强调色，或者单独指定 */
+export type EmphasisMode = "follow" | "custom";
 export type RadiusId = "sharp" | "default" | "round";
 export type ColumnWidthId = "narrow" | "default" | "wide" | "full";
 
@@ -17,7 +21,7 @@ export const THEME_MODES: Array<{ id: ThemeMode; label: string; hint: string }> 
 ];
 
 /** 强调色预设：只给主色，淡色底与前景色由 `accentVars` 推出来。 */
-export const ACCENTS: Array<{ id: AccentId; label: string; color: string }> = [
+export const ACCENTS: Array<{ id: AccentPresetId; label: string; color: string }> = [
   { id: "default", label: "默认蓝", color: "#2a7deb" },
   { id: "violet", label: "紫罗兰", color: "#8b5cf6" },
   { id: "teal", label: "青碧", color: "#0d9aa8" },
@@ -41,7 +45,7 @@ export const COLUMN_WIDTHS: Array<{ id: ColumnWidthId; label: string; max: strin
 ];
 
 const THEME_MODE_IDS = THEME_MODES.map((item) => item.id);
-const ACCENT_IDS = ACCENTS.map((item) => item.id);
+const ACCENT_IDS: AccentId[] = [...ACCENTS.map((item) => item.id), "custom"];
 const RADIUS_IDS = RADIUS_PRESETS.map((item) => item.id);
 const COLUMN_IDS = COLUMN_WIDTHS.map((item) => item.id);
 
@@ -50,6 +54,13 @@ const pick = <T extends string>(value: unknown, ids: T[], fallback: T): T =>
 
 export const normalizeThemeMode = (value: unknown): ThemeMode => pick(value, THEME_MODE_IDS, "system");
 export const normalizeAccent = (value: unknown): AccentId => pick(value, ACCENT_IDS, "default");
+export const normalizeEmphasisMode = (value: unknown): EmphasisMode => pick(value, ["follow", "custom"], "follow");
+
+/** 只接受 `#rrggbb`，其它一律退回 fallback（避免把任意字符串塞进 CSS 变量） */
+export function normalizeHex(value: unknown, fallback = ""): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : fallback;
+}
 export const normalizeRadius = (value: unknown): RadiusId => pick(value, RADIUS_IDS, "default");
 export const normalizeColumnWidth = (value: unknown): ColumnWidthId => pick(value, COLUMN_IDS, "default");
 
@@ -87,14 +98,32 @@ export function dimmedColor(hex: string, alpha = SCRIM_ALPHA): string {
  * 强调色变量。`--accent-soft` 在深色下更实一点、浅色下更淡一点，
  * 否则浅色主题里高亮块会显得脏。
  */
-export function accentVars(accent: AccentId, scheme: "dark" | "light"): Record<string, string> {
+export function accentVars(accent: AccentId, scheme: "dark" | "light", custom = ""): Record<string, string> {
   const preset = ACCENTS.find((item) => item.id === accent) ?? ACCENTS[0];
-  const soft = withAlpha(preset.color, scheme === "dark" ? 0.18 : 0.12);
-  const hover = withAlpha(preset.color, scheme === "dark" ? 0.3 : 0.22);
-  const vars: Record<string, string> = { "--accent": preset.color, "--accent-fg": "#ffffff" };
+  const color = accent === "custom" ? normalizeHex(custom, preset.color) : preset.color;
+  const soft = withAlpha(color, scheme === "dark" ? 0.18 : 0.12);
+  const hover = withAlpha(color, scheme === "dark" ? 0.3 : 0.22);
+  const vars: Record<string, string> = { "--accent": color, "--accent-fg": "#ffffff" };
   if (soft) vars["--accent-soft"] = soft;
   if (hover) vars["--accent-hover"] = hover;
   return vars;
+}
+
+/**
+ * 对话里文字（行内代码等）的强调色：`follow` 就跟着主强调色走，
+ * `custom` 用用户单独挑的颜色。自定义颜色非法时同样退回强调色。
+ */
+export function emphasisColor(
+  mode: EmphasisMode,
+  custom: string,
+  accent: AccentId,
+  accentCustom: string,
+): string {
+  if (mode === "custom") {
+    const value = normalizeHex(custom);
+    if (value) return value;
+  }
+  return accent === "custom" ? normalizeHex(accentCustom, ACCENTS[0].color) : (ACCENTS.find((item) => item.id === accent) ?? ACCENTS[0]).color;
 }
 
 export function radiusVars(radius: RadiusId): Record<string, string> {
@@ -110,6 +139,11 @@ export function columnWidthVars(width: ColumnWidthId): Record<string, string> {
 export interface AppearanceInput {
   themeMode: ThemeMode;
   accent: AccentId;
+  /** `accent === "custom"` 时用的颜色 */
+  accentCustom: string;
+  /** 对话文字强调色：跟随强调色 / 单独指定 */
+  emphasis: EmphasisMode;
+  emphasisCustom: string;
   radius: RadiusId;
   columnWidth: ColumnWidthId;
   reduceMotion: boolean;
@@ -126,13 +160,15 @@ export interface AppearanceStyle {
 export function appearanceStyle(input: AppearanceInput): AppearanceStyle {
   return {
     vars: {
-      ...accentVars(input.accent, input.scheme),
+      ...accentVars(input.accent, input.scheme, input.accentCustom),
+      "--emphasis": emphasisColor(input.emphasis, input.emphasisCustom, input.accent, input.accentCustom),
       ...radiusVars(input.radius),
       ...columnWidthVars(input.columnWidth),
     },
     dataset: {
       motion: input.reduceMotion ? "off" : "on",
       accent: input.accent,
+      emphasis: input.emphasis,
       radius: input.radius,
       column: input.columnWidth,
       themeMode: input.themeMode,

@@ -24,6 +24,9 @@ import {
   COLUMN_WIDTHS,
   RADIUS_PRESETS,
   THEME_MODES,
+  emphasisColor,
+  normalizeHex,
+  type EmphasisMode,
   type ThemeMode,
 } from "../../shared/appearance.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
@@ -233,8 +236,37 @@ const themeModeHint = computed(() => {
   const actual = state.theme === "light" ? "浅色" : "深色";
   return mode.id === "system" ? `${mode.hint} · 当前 ${actual}` : mode.hint;
 });
-const accentLabel = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).label);
-const accentColor = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).color);
+const accentCustom = computed(() => normalizeHex(appSettings.accentCustom, ACCENTS[0].color));
+const accentColor = computed(() =>
+  appSettings.accent === "custom"
+    ? accentCustom.value
+    : (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).color,
+);
+const accentLabel = computed(() =>
+  appSettings.accent === "custom"
+    ? `自定义 ${accentCustom.value}`
+    : (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).label,
+);
+const EMPHASIS_MODES: Array<{ id: EmphasisMode; label: string; hint: string }> = [
+  { id: "follow", label: "跟随强调色", hint: "和主强调色保持一致" },
+  { id: "custom", label: "单独设置", hint: "对话里的强调文字用另一个颜色" },
+];
+const emphasisCustom = computed(() => normalizeHex(appSettings.emphasisCustom, appSettings.emphasis === "custom" ? accentColor.value : accentColor.value));
+const emphasisResolved = computed(() => emphasisColor(appSettings.emphasis, appSettings.emphasisCustom, appSettings.accent, appSettings.accentCustom));
+const emphasisLabel = computed(() => (appSettings.emphasis === "custom" ? `自定义 ${emphasisResolved.value}` : "跟随强调色"));
+
+/** 自定义颜色只接受 #rrggbb，非法输入保留原值，同时把「自定义」选中 */
+function onAccentCustom(event: Event): void {
+  const value = normalizeHex((event.target as HTMLInputElement)?.value, accentCustom.value);
+  appSettings.accentCustom = value;
+  appSettings.accent = "custom";
+}
+
+function onEmphasisCustom(event: Event): void {
+  const value = normalizeHex((event.target as HTMLInputElement)?.value, emphasisCustom.value);
+  appSettings.emphasisCustom = value;
+  appSettings.emphasis = "custom";
+}
 const radiusLabel = computed(() => (RADIUS_PRESETS.find((item) => item.id === appSettings.radius) ?? RADIUS_PRESETS[1]).label);
 
 const ACTIVITY_DETAILS = [
@@ -251,6 +283,9 @@ const columnWidthLabel = computed(
 const APPEARANCE_KEYS = [
   "themeMode",
   "accent",
+  "accentCustom",
+  "emphasis",
+  "emphasisCustom",
   "radius",
   "columnWidth",
   "reduceMotion",
@@ -1112,6 +1147,55 @@ onBeforeUnmount(() => {
                     :aria-label="item.label"
                     @click="appSettings.accent = item.id"
                   />
+                  <!-- 自定义：色环上叠一个当前颜色，点一下开系统取色器 -->
+                  <label
+                    class="settings-swatch settings-swatch-custom"
+                    :class="{ active: appSettings.accent === 'custom' }"
+                    :title="`自定义颜色（当前 ${accentCustom}）`"
+                  >
+                    <span class="settings-swatch-chosen" :style="{ background: accentCustom }" />
+                    <input
+                      type="color"
+                      :value="accentCustom"
+                      aria-label="自定义强调色"
+                      @input="onAccentCustom"
+                      @click="appSettings.accent = 'custom'"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>对话强调色</strong>
+                  <span>对话里行内代码等强调文字的颜色，可以和上面的界面强调色不一样 · 当前 {{ emphasisLabel }}</span>
+                </div>
+                <div class="settings-emphasis-row">
+                  <div class="settings-segments">
+                    <button
+                      v-for="item in EMPHASIS_MODES"
+                      :key="item.id"
+                      type="button"
+                      class="settings-segment"
+                      :class="{ active: appSettings.emphasis === item.id }"
+                      :title="item.hint"
+                      @click="appSettings.emphasis = item.id"
+                    >{{ item.label }}</button>
+                  </div>
+                  <label
+                    v-if="appSettings.emphasis === 'custom'"
+                    class="settings-swatch settings-swatch-custom small"
+                    :style="{ background: emphasisCustom }"
+                    :class="{ active: true }"
+                    :title="`自定义对话强调色（当前 ${emphasisCustom}）`"
+                  >
+                    <input
+                      type="color"
+                      :value="emphasisCustom"
+                      aria-label="自定义对话强调色"
+                      @input="onEmphasisCustom"
+                    />
+                  </label>
                 </div>
               </div>
 
@@ -1126,8 +1210,9 @@ onBeforeUnmount(() => {
                     <span class="settings-preview-bubble">对话里的用户消息长这样</span>
                   </div>
                   <div class="settings-preview-row">
-                    <span class="settings-preview-chip">accent</span>
-                    <code>const accent = "{{ accentColor }}"</code>
+                    <span class="settings-preview-chip">强调色</span>
+                    <span class="settings-preview-emphasis">对话强调文字</span>
+                    <code>--emphasis: {{ emphasisResolved }}</code>
                     <span class="settings-preview-pill">就绪</span>
                   </div>
                   <div class="settings-preview-row">
