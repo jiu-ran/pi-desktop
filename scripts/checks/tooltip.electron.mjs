@@ -36,6 +36,15 @@ export async function checkTooltipInElectron(win) {
       const box = el.getBoundingClientRect();
       return { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
     };
+    // 快速划过（停不到 SHOW_DELAY=700ms）不该弹出提示
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, buttons: 0, ...at() }));
+    await wait(300);
+    const early = document.querySelector(".pi-tooltip");
+    // 移开：挂起的提示要取消，title 要写回去
+    el.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, buttons: 0, clientX: 8, clientY: 8 }));
+    await wait(250);
+    const afterLeave = { tooltip: Boolean(document.querySelector(".pi-tooltip")), title: el.getAttribute("title") };
+
     let shown = false;
     for (let attempt = 0; attempt < 12 && !shown; attempt += 1) {
       el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...at() }));
@@ -47,6 +56,10 @@ export async function checkTooltipInElectron(win) {
         }
       }
     }
+    if (early) throw new Error("快速划过不该弹出提示（SHOW_DELAY 应为 700ms）");
+    if (afterLeave.tooltip) throw new Error("移出后不该残留提示浮层");
+    if (!afterLeave.title) throw new Error("移出后要把 title 写回去");
+
     const first = [...document.querySelectorAll('.pi-tooltip')];
     const firstBg = first[0] ? getComputedStyle(first[0]).backgroundColor : '';
     const themedVar = getComputedStyle(document.documentElement).getPropertyValue('--bg-2').trim();

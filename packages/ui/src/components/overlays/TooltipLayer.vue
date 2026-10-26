@@ -8,7 +8,7 @@ import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
  * 注意 title 常来自响应式绑定（例如活动卡片的 :title="group.detail"）。
  * 流式更新时 Vue 会把属性重新写回；只在显示瞬间摘一次会让浏览器同时弹出
  * 系统白底提示，出现「白色 + 两个」的重复浮层。因此：
- *   1. 悬停立即摘掉 title（不等 380ms 延迟），不给原生提示留窗口；
+ *   1. 悬停立即摘掉 title（不等 SHOW_DELAY），不给原生提示留窗口；
  *   2. 展示期间用 MutationObserver 持续接管，属性被写回时再次摘掉并同步文案。
  */
 const tip = reactive({
@@ -19,8 +19,13 @@ const tip = reactive({
 });
 const layer = ref<HTMLElement | null>(null);
 
-const SHOW_DELAY = 380;
-const HIDE_DELAY = 120;
+/**
+ * 悬停多久才弹提示。380ms 太急，指针扫过去就冒出来；700ms 是「停一下才出现」的手感，
+ * 和系统原生 title（约 1s）接近但不至于等得久。
+ */
+const SHOW_DELAY = 700;
+/** 移开多久收起：留一点缓冲，指针擦过边缘时不闪。 */
+const HIDE_DELAY = 180;
 const GAP = 8;
 const EDGE = 8;
 const MAX_TEXT = 2000;
@@ -206,7 +211,7 @@ function scheduleShow(element: HTMLElement): void {
   const raw = element.getAttribute("title");
   // 空 title 无需接管，否则会被白丢。
   if (raw === null || !raw.trim()) return;
-  // 已经在显示浮层（在相邻元素之间移动）：立刻换文案，不再等 380ms。
+  // 已经在显示浮层（在相邻元素之间移动）：立刻换文案，不再等一轮延迟。
   // 否则旧浮层还挂着、新元素带着原生 title，浏览器会先弹出白底提示。
   if (tip.visible && active) {
     element.removeAttribute("title");
