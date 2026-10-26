@@ -107,12 +107,24 @@ export async function checkSettingsInElectron(win) {
           overflowX: body ? body.scrollWidth - body.clientWidth : -1,
           modalOverflow: modal ? modal.scrollWidth - modal.clientWidth : -1,
           rows: document.querySelectorAll('.settings-body .settings-row').length,
+        // 行标题被挤成一条竖排的表现是宽度只剩一两个字，高度却很大
+        squeezed: [...document.querySelectorAll('.settings-body .settings-row')]
+          .map((row) => {
+            const strong = row.querySelector('.settings-row-info > strong');
+            if (!strong) return null;
+            const rect = strong.getBoundingClientRect();
+            return { text: strong.textContent.trim().slice(0, 20), width: Math.round(rect.width), height: Math.round(rect.height) };
+          })
+          .filter((item) => item && item.text.length > 3 && item.width < 60),
         });
       })()`));
       const label = tab ?? section;
       if (!state.title) problems.push(`${label} 没有标题`);
       if (state.groups === 0) problems.push(`${label} 没有配置分组`);
       if (state.overflowX > 2) problems.push(`${label} 内容横向溢出 ${state.overflowX}px`);
+      if (state.squeezed.length) {
+        problems.push(`${label} 的行标题被挤成竖排：${state.squeezed.map((item) => item.text).join(" / ")}`);
+      }
       if (state.modalOverflow > 2) problems.push(`${label} 弹窗横向溢出 ${state.modalOverflow}px`);
     }
   }

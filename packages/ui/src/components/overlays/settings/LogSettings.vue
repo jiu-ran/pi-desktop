@@ -93,12 +93,10 @@ onMounted(load);
       </select>
     </SettingRow>
 
-    <SettingRow label="记录内容" hint="日志写在安装目录的 logs/（不可写时落到用户数据目录）">
-      <span class="settings-note inline">
-        app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error；pi.log 会话与压缩事件；
-        perf.log 卡顿。单文件 {{ formatSize(fileBytes) }} 轮转（最多 {{ keepFiles }} 个），超过总量按时间删最旧的。
-      </span>
-    </SettingRow>
+    <SettingRow
+      label="记录内容"
+      :hint="`app.log 启动 / 退出 / IPC 错误 / 未捕获异常；renderer.log 前端 warn / error；pi.log 会话与压缩事件；perf.log 卡顿（主进程阻塞、慢 IPC、渲染进程长任务）。日志写在安装目录的 logs/（安装目录不可写时回落到用户数据目录，例如装在 Program Files 里）；单文件 ${formatSize(fileBytes)} 轮转（最多留 ${keepFiles} 个），总量超过上限后按时间删最旧的，正在写的文件不会被删。`"
+    />
   </SettingGroup>
 
   <SettingGroup :title="`文件（最近在前）· ${files.length}`">

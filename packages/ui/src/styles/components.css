@@ -3060,12 +3060,5 @@ html[data-density="compact"] .tool-card {
   gap: 6px;
   align-items: center;
 }
-/* 说明性的长文本放在行右侧时按正常行高排，不再整体等宽 */
-.settings-note.inline {
-  margin: 0;
-  padding: 0;
-  color: var(--fg-3);
-  font: 11.5px/1.6 var(--sans);
-  text-align: right;
-  word-break: normal;
-}
+/* 行内说明：长文本也按正常行高折行，不会被右侧控件挤成一条竖排 */
+.settings-row-info > span { word-break: normal; overflow-wrap: break-word; }
