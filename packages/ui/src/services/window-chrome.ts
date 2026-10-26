@@ -16,11 +16,16 @@ import { dimmedColor } from "../shared/appearance.ts";
  */
 const SCRIM_SELECTORS = [
   ".modal-backdrop",
-  ".settings-modal-position",
   ".subagent-modal-scrim",
-  ".overlay",
   ".image-lightbox",
+  // 命令面板 / 快速打开 / 扩展弹窗用的是通用 .overlay（45% 遮罩）
+  ".overlay:not(.settings-overlay)",
 ];
+
+/** 设置是「浮动窗口 + 很淡的遮罩」，原生按钮只需要跟着淡一点点 */
+const SETTINGS_SCRIM = ".settings-modal-position";
+const SETTINGS_ALPHA = 0.18;
+const FULL_ALPHA = 0.45;
 
 export interface WindowChromeTheme {
   id: string;
@@ -37,31 +42,41 @@ export function setupWindowChrome(
   if (!doc || !host?.setTitleBar) return () => {};
 
   const delay = options.delayMs ?? 40;
-  let scrimmed = false;
+  let scrimmed: "full" | "light" | "none" = "none";
   let last = "";
   let timer: ReturnType<typeof setTimeout> | null = null;
   let observer: MutationObserver | null = null;
 
   const apply = (): void => {
     const theme = themeOf(workbench.state.theme);
-    const dim = scrimmed;
-    const color = dim ? dimmedColor(theme.titlebar.color) || theme.titlebar.color : theme.titlebar.color;
-    const symbolColor = dim ? dimmedColor(theme.titlebar.symbolColor) || theme.titlebar.symbolColor : theme.titlebar.symbolColor;
-    // 供检查/排查用：现在原生按钮区是「原色」还是「随遮罩压暗」
-    doc.documentElement.dataset.winChrome = dim ? "scrim" : "plain";
+    // 压暗强度跟随遮罩：设置页只有 18%，其余全屏浮层 45%。
+    // 固定 45% 会让设置页右上角比周围暗一截（截图里就是一块深色补丁）。
+    const dim = scrimmed !== "none";
+    const alpha = scrimmed === "full" ? FULL_ALPHA : scrimmed === "light" ? SETTINGS_ALPHA : 0;
+    const color = dim ? dimmedColor(theme.titlebar.color, alpha) || theme.titlebar.color : theme.titlebar.color;
+    const symbolColor = dim
+      ? dimmedColor(theme.titlebar.symbolColor, alpha) || theme.titlebar.symbolColor
+      : theme.titlebar.symbolColor;
+    // 供检查/排查用：原色 / 跟着设置页轻压暗 / 跟着全屏遮罩压暗
+    doc.documentElement.dataset.winChrome = !dim ? "plain" : scrimmed === "light" ? "scrim-light" : "scrim";
     const key = `${color}|${symbolColor}`;
     if (key === last) return;
     last = key;
     void host.setTitleBar?.({ color, symbolColor });
   };
 
-  const visibleScrim = (): boolean =>
-    SCRIM_SELECTORS.some((selector) =>
-      [...doc.querySelectorAll(selector)].some((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      }),
-    );
+  const shown = (selector: string): boolean =>
+    [...doc.querySelectorAll(selector)].some((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+
+  /** 全屏遮罩 > 设置浮层 > 没有 */
+  const visibleScrim = (): "full" | "light" | "none" => {
+    if (SCRIM_SELECTORS.some(shown)) return "full";
+    if (shown(SETTINGS_SCRIM)) return "light";
+    return "none";
+  };
 
   const schedule = (): void => {
     if (timer) return;

@@ -350,7 +350,8 @@ export async function checkAppearanceInElectron(win) {
   })()`));
   assert.equal(chrome.scrim, true, "设置弹窗应处于打开状态才能验证遮罩");
   assert.equal(chrome.closed, "plain", `没有弹窗时原生按钮区保持原色，实际 ${chrome.closed}`);
-  assert.equal(chrome.opened, "scrim", `打开弹窗后原生按钮区要跟着压暗，实际 ${chrome.opened}`);
+  // 设置是浮层窗口（遮罩 18%），原生按钮跟着轻压暗即可；全屏浮层（45%）仍然用 "scrim"
+  assert.equal(chrome.opened, "scrim-light", `设置打开时原生按钮区要跟着轻压暗（不能是原色、也不该用全屏的 45%），实际 ${chrome.opened}`);
   assert.equal(chrome.reopened, "plain", `关闭弹窗后要恢复原色，实际 ${chrome.reopened}`);
 
   console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, emphasis: violet.emphasis, customAccent: "#12ab34", splitEmphasis: "#ff8800", radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));

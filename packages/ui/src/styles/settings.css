@@ -6,17 +6,23 @@
    ========================================================================== */
 
 /* ---------- 遮罩与容器 ---------- */
+/* 设置是「可拖动的浮动窗口」而不是全屏拦截层：
+   遮罩很淡（浅色主题几乎透明），调外观时能直接看见后面的界面变化。 */
 .overlay.settings-overlay {
+  place-items: center;
+  padding-top: 0;
   z-index: 115;
-  padding-top: 7vh;
   animation: none;
   background: transparent;
   opacity: 0;
   transition: background 0.18s ease, opacity 0.18s ease;
 }
 .overlay.settings-overlay.open {
-  background: rgba(0, 0, 0, 0.46);
+  background: rgba(0, 0, 0, 0.18);
   opacity: 1;
+}
+:root[data-theme="light"] .overlay.settings-overlay.open {
+  background: rgba(0, 0, 0, 0.1);
 }
 .overlay.settings-overlay.leaving {
   background: transparent;
