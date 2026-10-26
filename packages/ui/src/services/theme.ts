@@ -23,6 +23,7 @@ export const THEMES: ThemeSpec[] = [
       "--bg-2": "#25262a",
       "--bg-3": "#2e3034",
       "--hover": "rgba(255, 255, 255, 0.06)",
+      "--press": "rgba(255, 255, 255, 0.12)",
       "--line": "#2a2b2f",
       "--line-2": "#393b40",
       "--fg": "#e0e1e4",
@@ -78,6 +79,7 @@ export const THEMES: ThemeSpec[] = [
       "--bg-2": "#eff0f3",
       "--bg-3": "#e4e6ea",
       "--hover": "rgba(0, 0, 0, 0.05)",
+      "--press": "rgba(0, 0, 0, 0.11)",
       "--line": "#e4e5e9",
       "--line-2": "#d3d5db",
       "--fg": "#1f2024",
@@ -150,7 +152,7 @@ export function setupTheme(
         root.style.setProperty(key, value);
       }
       root.classList.toggle("dark", theme.scheme === "dark");
-      host?.setTitleBar?.(theme.titlebar);
+      host?.setWindowBackground?.(theme.titlebar.color);
     });
   }
 

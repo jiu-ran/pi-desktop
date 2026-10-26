@@ -407,7 +407,16 @@ export type TerminalEvent =
 export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
-  setTitleBar: (colors: { color: string; symbolColor: string }) => Promise<boolean>;
+  /** 窗口底色（无边框窗口缩放 / 首帧会露出来） */
+  setWindowBackground: (color: string) => Promise<boolean>;
+  /** 自绘窗口按钮（Windows / Linux；macOS 用系统红绿灯，不暴露） */
+  windowControls: {
+    minimize: () => Promise<boolean>;
+    toggleMaximize: () => Promise<boolean>;
+    close: () => Promise<boolean>;
+    state: () => Promise<{ maximized: boolean; fullscreen: boolean }>;
+    onChange: (listener: (state: { maximized: boolean; fullscreen: boolean }) => void) => () => void;
+  };
   /** customPath 为空时只从 PATH 自动识别；传入则直接校验该路径 */
   locate: (customPath?: string) => Promise<PiLocation>;
   setZoomFactor: (factor: number) => Promise<number>;

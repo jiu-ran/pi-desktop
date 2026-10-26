@@ -3,7 +3,6 @@ import { createStage } from "./stage.ts";
 import { createPluginManager, type PluginCommand, type PluginContext, type SidebarPlugin } from "./plugin-manager.ts";
 import { createWorkbench } from "./workbench.ts";
 import { setupTheme } from "../services/theme.ts";
-import { setupWindowChrome } from "../services/window-chrome.ts";
 import { createBuiltinSlashCommands } from "../services/slash-commands.ts";
 import { setupExtensionUi } from "../services/extension-ui.ts";
 import { createCommandRegistry, paletteState } from "../services/command-palette.ts";
@@ -60,11 +59,6 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
   const theme = setupTheme(workbench, host, (mode) => {
     appSettings.themeMode = mode;
   });
-  // 主题切换时把标题栏颜色告诉主进程（遮罩从标题栏下方开始，不再需要跟着压暗）
-  const stopWindowChrome = setupWindowChrome(workbench, host, (id) => {
-    const current = theme.themes.find((item) => item.id === id) ?? theme.themes[0];
-    return { id: current.id, titlebar: current.titlebar };
-  });
   const settings = setupSettings(workbench, bus);
   const commandRegistry = createCommandRegistry();
   const stopExtensionUi = setupExtensionUi(bus, host);
@@ -73,7 +67,6 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
     () => terminal.dispose(),
     () => settings.dispose(),
     () => theme.dispose(),
-    stopWindowChrome,
     stopExtensionUi,
   ];
 

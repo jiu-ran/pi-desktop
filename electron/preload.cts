@@ -10,7 +10,18 @@ contextBridge.exposeInMainWorld("piDesktop", {
       return "";
     }
   },
-  setTitleBar: (colors: { color: string; symbolColor: string }) => ipcRenderer.invoke("pi:titlebar", colors),
+  setWindowBackground: (color: string) => ipcRenderer.invoke("app:window-background", color),
+  windowControls: {
+    minimize: () => ipcRenderer.invoke("app:window-minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("app:window-toggle-maximize"),
+    close: () => ipcRenderer.invoke("app:window-close"),
+    state: () => ipcRenderer.invoke("app:window-state"),
+    onChange: (listener: (state: { maximized: boolean; fullscreen: boolean }) => void) => {
+      const handler = (_event: IpcRendererEvent, state: { maximized: boolean; fullscreen: boolean }): void => listener(state);
+      ipcRenderer.on("app:window-state", handler);
+      return () => ipcRenderer.off("app:window-state", handler);
+    },
+  },
   locate: (customPath = "") => ipcRenderer.invoke("pi:locate", customPath),
   setZoomFactor: (factor: number) => ipcRenderer.invoke("pi:set-zoom", factor),
   checkPiUpdate: (customPath = "") => ipcRenderer.invoke("pi:check-update", customPath),

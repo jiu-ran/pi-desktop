@@ -286,8 +286,6 @@ async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promis
   return { ok: after.found, from, to: after.version || from, log: tail };
 }
 
-const TITLEBAR_HEIGHT = 40;
-
 function isAllowedExternalUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -457,8 +455,10 @@ function createWindow() {
     backgroundColor: "#111214",
     title: "Pi Desktop",
     icon: path.join(HERE, "../build/icon.png"),
-    titleBarStyle: "hidden",
-    titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#111214", symbolColor: "#a8adb5", height: TITLEBAR_HEIGHT },
+    // Windows / Linux 用自绘窗口按钮（系统按钮悬停没有任何反馈）；
+    // macOS 保留系统红绿灯，只把标题栏做透明。
+    frame: process.platform === "darwin",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition: { x: 14, y: 13 },
     webPreferences: {
       preload: path.join(HERE, "preload.cjs"),
@@ -467,6 +467,18 @@ function createWindow() {
       sandbox: true,
     },
   });
+  const pushWindowState = (): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("app:window-state", {
+      maximized: mainWindow.isMaximized(),
+      fullscreen: mainWindow.isFullScreen(),
+    });
+  };
+  mainWindow.on("maximize", pushWindowState);
+  mainWindow.on("unmaximize", pushWindowState);
+  mainWindow.on("enter-full-screen", pushWindowState);
+  mainWindow.on("leave-full-screen", pushWindowState);
+
   // 渲染进程卡死时没有任何日志（不重绘、不跑定时器），只有调用栈能说明它在转什么。
   // 卡死是偶发的，所以必须自动抓：Chromium 判定无响应后暂停 V8 并把栈写进日志。
   mainWindow.webContents.on("unresponsive", () => {
@@ -846,16 +858,35 @@ app.whenReady().then(() => {
     await atomicWriteText(agentsPath, content);
     return { path: agentsPath, content };
   });
-  handle("pi:titlebar", ({ color = "#111214", symbolColor = "#a8adb5" }: { color?: string; symbolColor?: string } = {}) => {
-    if (!mainWindow || process.platform === "darwin") return false;
+  /** 主题切换时同步窗口底色：无边框窗口在缩放 / 首帧时会露出来 */
+  handle("app:window-background", (color = "#111214") => {
     try {
-      mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
-      mainWindow.setBackgroundColor(color);
+      mainWindow?.setBackgroundColor(String(color));
       return true;
     } catch {
       return false;
     }
   });
+
+  /** 自绘窗口按钮：最小化 / 最大化切换 / 关闭 */
+  handle("app:window-minimize", () => {
+    mainWindow?.minimize();
+    return true;
+  });
+  handle("app:window-toggle-maximize", () => {
+    if (!mainWindow) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  handle("app:window-close", () => {
+    mainWindow?.close();
+    return true;
+  });
+  handle("app:window-state", () => ({
+    maximized: Boolean(mainWindow?.isMaximized()),
+    fullscreen: Boolean(mainWindow?.isFullScreen()),
+  }));
 
   log.info(
     "app",

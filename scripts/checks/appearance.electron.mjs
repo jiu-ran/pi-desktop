@@ -383,6 +383,90 @@ export async function checkAppearanceInElectron(win) {
     );
     console.log("[appearance] titlebar", JSON.stringify({ frame: closed.frame, titlebarH: closed.titlebarH, overlayTop: opened.top, pixel: after.pixel }));
 
+  // 自绘窗口按钮：系统按钮（titleBarOverlay）悬停没有任何反馈，所以改成自己画。
+  // 这里用 CDP 合成真实鼠标事件，断言「悬停 / 按下 / 关闭变红」都真的有视觉变化。
+  {
+    const dbg = win.webContents.debugger;
+    if (!dbg.isAttached()) await dbg.attach("1.3");
+    const rects = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll(".wc-btn")].map((b) => {
+      const rect = b.getBoundingClientRect();
+      return {
+        label: b.getAttribute("aria-label"),
+        x: Math.round(rect.x + rect.width / 2),
+        y: Math.round(rect.y + rect.height / 2),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+    }))`));
+    assert.equal(rects.length, 3, `窗口按钮应有 3 个（最小化 / 最大化 / 关闭），实际 ${rects.length}`);
+    assert.deepEqual(rects.map((item) => item.label), ["最小化", "最大化", "关闭"]);
+    const inner = Number(await evaluate("window.innerWidth"));
+    assert.equal(rects[2].right, inner, `关闭按钮要贴住窗口右缘（innerWidth=${inner}），实际 ${rects[2].right}`);
+    for (const rect of rects) {
+      assert.equal(rect.height, 40, `窗口按钮高度应铺满标题栏，实际 ${rect.height}`);
+      assert.equal(rect.width, 46, `窗口按钮宽度应为 46px，实际 ${rect.width}`);
+    }
+
+    const styleOf = async (index) =>
+      JSON.parse(await evaluate(`(() => {
+        const style = getComputedStyle(document.querySelectorAll(".wc-btn")[${index}]);
+        return JSON.stringify({ bg: style.backgroundColor, color: style.color });
+      })()`));
+    const move = async (x, y, buttons = 0, type = "mouseMoved") => {
+      await dbg.sendCommand("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+      await wait(140);
+    };
+
+    const idle = await styleOf(0);
+    for (const [index, rect] of rects.entries()) {
+      await move(rect.x, rect.y);
+      const hover = await styleOf(index);
+      assert.notEqual(hover.bg, idle.bg, `「${rect.label}」悬停要有背景反馈，实际仍是 ${hover.bg}`);
+      await move(rect.x, rect.y, 1, "mousePressed");
+      const press = await styleOf(index);
+      assert.notEqual(press.bg, hover.bg, `「${rect.label}」按下要比悬停更深，实际仍是 ${press.bg}`);
+      // 松手要在按钮外，避免真的触发点击（关闭按钮会把应用关掉）
+      await move(4, 4, 1);
+      await dbg.sendCommand("Input.dispatchMouseEvent", { type: "mouseReleased", x: 4, y: 4, button: "left", buttons: 0, clickCount: 1 });
+      await wait(120);
+    }
+
+    await move(rects[2].x, rects[2].y);
+    const closeHover = await styleOf(2);
+    assert.ok(
+      closeHover.bg.startsWith("rgb(196, 43, 28)"),
+      `关闭按钮悬停要是系统报警红 rgb(196, 43, 28)，实际 ${closeHover.bg}`,
+    );
+    assert.equal(closeHover.color, "rgb(255, 255, 255)", "关闭按钮悬停时字形要变白");
+    await move(4, 4);
+    // 标题栏空白处双击要能最大化 / 还原：无边框窗口系统不再提供这个行为
+    const doubleClickTitlebar = async () => {
+      const spot = JSON.parse(await evaluate(`(() => {
+        const rect = document.querySelector(".titlebar").getBoundingClientRect();
+        return JSON.stringify({ x: Math.round(rect.width / 2), y: Math.round(rect.height / 2) });
+      })()`));
+      for (const clickCount of [1, 2]) {
+        await dbg.sendCommand("Input.dispatchMouseEvent", { type: "mousePressed", x: spot.x, y: spot.y, button: "left", buttons: 1, clickCount });
+        await dbg.sendCommand("Input.dispatchMouseEvent", { type: "mouseReleased", x: spot.x, y: spot.y, button: "left", buttons: 0, clickCount });
+        await wait(120);
+      }
+      await wait(500);
+    };
+    const maximizeLabel = async () => evaluate("document.querySelectorAll('.wc-btn')[1]?.getAttribute('aria-label') ?? ''");
+    assert.equal(await maximizeLabel(), "最大化", "初始应为「最大化」");
+    await doubleClickTitlebar();
+    assert.equal(win.isMaximized(), true, "双击标题栏应最大化");
+    assert.equal(await maximizeLabel(), "向下还原", "最大化后图标要变成「向下还原」");
+    await doubleClickTitlebar();
+    assert.equal(win.isMaximized(), false, "再次双击应还原");
+    assert.equal(await maximizeLabel(), "最大化", "还原后图标要变回「最大化」");
+
+    console.log("[appearance] window-controls", JSON.stringify({ count: rects.length, idle: idle.bg, closeHover: closeHover.bg }));
+    if (dbg.isAttached()) dbg.detach();
+  }
+
+
     await evaluate("window.__piDesktop.settings.close(); true");
     await wait(500);
   }

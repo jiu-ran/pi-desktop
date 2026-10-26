@@ -4,12 +4,24 @@ import { useKernel } from "../../kernel/use-kernel.ts";
 import { extState } from "../../services/extension-ui.ts";
 import { openSettingsModal, settingsModalState } from "../../services/settings.ts";
 import { icons } from "../../shared/util.ts";
+import WindowControls from "./WindowControls.vue";
 
 /**
  * 顶部标题栏：
  * 左侧：应用徽标 · 项目与会话栏开关 · 新建任务 · 项目/分支/任务面包屑
  * 右侧：扩展状态 · Pi CLI 连接状态 · 主题切换 · 偏好设置 · 扩展工具面板开关
  */
+const platform = (globalThis as any).piDesktop?.platform ?? "web";
+const windowControls = (globalThis as any).piDesktop?.windowControls as
+  | { toggleMaximize: () => Promise<boolean> }
+  | undefined;
+
+/** 无边框窗口不再有系统标题栏，双击最大化要自己接（点按钮不算） */
+function onTitlebarDoubleClick(event: MouseEvent): void {
+  if (!windowControls) return;
+  if ((event.target as HTMLElement | null)?.closest("button")) return;
+  void windowControls.toggleMaximize();
+}
 const { workbench, plugins, theme, terminal } = useKernel();
 const state = workbench.state;
 const terminalRunning = terminal.runningCount;
@@ -70,7 +82,7 @@ const piTitle = computed(() => {
 </script>
 
 <template>
-  <header class="titlebar">
+  <header class="titlebar" @dblclick="onTitlebarDoubleClick">
     <div class="tb-left">
       <img class="tb-logo" src="../../assets/pi-icon.png" alt="Pi Desktop" title="Pi Desktop" />
       <button
@@ -158,5 +170,7 @@ const piTitle = computed(() => {
         v-html="icons.panel"
       />
     </div>
+
+    <WindowControls v-if="platform !== 'darwin'" />
   </header>
 </template>
