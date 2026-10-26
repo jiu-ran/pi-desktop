@@ -32,7 +32,7 @@ assert.equal(
 
 const settingsSource = await readFile("packages/ui/src/services/settings.ts", "utf8");
 // 环境页（检查更新 / 自动下载开关）已拆成独立组件
-const modalSource = await readFile("packages/ui/src/components/overlays/settings/EnvironmentSettings.vue", "utf8");
+const modalSource = await readFile("packages/ui/src/components/overlays/settings/PiDesktopSettings.vue", "utf8");
 const workbenchSource = await readFile("packages/ui/src/kernel/workbench.ts", "utf8");
 
 // 设置项本身：默认必须开启，并落进 localStorage（老用户缺字段时补成 true）

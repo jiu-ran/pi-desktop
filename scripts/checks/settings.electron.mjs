@@ -27,19 +27,44 @@ export async function checkSettingsInElectron(win) {
   await wait(300);
 
   /** 二级 tab 只在所属分区里渲染，点它之前先切分区 */
-  const SECTION_OF = { conversation: "chat", agents: "chat", skills: "power", mcp: "power", packages: "power", plugins: "power", appearance: "look", terminal: "desktop", environment: "desktop", logs: "desktop" };
+  const SECTION_OF = { conversation: "chat", agents: "chat", skills: "power", mcp: "power", packages: "power", plugins: "power", appearance: "look", "pi-cli": "pi-cli-section", "pi-desktop": "pi-desktop-section", terminal: "desktop", environment: "desktop", logs: "desktop" };
+  const TAB_LABEL = {
+    conversation: "对话与并发",
+    appearance: "外观与布局",
+    terminal: "终端",
+    mcp: "MCP 服务配置",
+    packages: "Pi 软件包管理",
+    agents: "全局提示词",
+    skills: "Skills",
+    plugins: "插件",
+    environment: "环境与快捷键",
+    logs: "运行日志",
+    "pi-cli": "Pi CLI",
+    "pi-desktop": "Pi Desktop",
+  };
+  /**
+   * 切到某一页并**确认真的到了**：只点一次然后 sleep 会让后面的断言读到上一页，
+   * 表现出来就是「明明没改过的东西突然报错」，很难查。
+   */
   const openTab = async (id) => {
     await evaluate(`document.querySelector('[data-settings-section="${SECTION_OF[id]}"]')?.click() ?? null; true`);
-    await wait(180);
+    await wait(160);
     await evaluate(`document.querySelector('[data-settings-tab="${id}"]')?.click() ?? null; true`);
-    await wait(220);
+    const expected = TAB_LABEL[id];
+    const end = Date.now() + 4000;
+    while (Date.now() < end) {
+      const title = await evaluate("document.querySelector('.settings-title')?.textContent?.trim() ?? ''");
+      if (title === expected) return;
+      await wait(120);
+    }
+    throw new Error(`切页失败：期望「${expected}」，实际停在「${await evaluate("document.querySelector('.settings-title')?.textContent?.trim() ?? ''")}」`);
   };
 
   // 上次退出时停在哪一页是持久的，先归位到「对话」再读导航
   await evaluate(`document.querySelector('[data-settings-section="chat"]')?.click() ?? null; true`);
   await wait(250);
 
-  // 导航：4 个一级分区（左栏）+ 二级 tab（内容区顶部）
+  // 导航：6 个一级分区（左栏）+ 二级 tab（内容区顶部）
   const nav = JSON.parse(await evaluate(`(() => {
     const sections = [...document.querySelectorAll('.settings-nav-item')].map((n) => ({
       label: n.querySelector('.settings-nav-label')?.textContent.trim() ?? '',
@@ -47,6 +72,8 @@ export async function checkSettingsInElectron(win) {
       icon: Boolean(n.querySelector('.settings-nav-icon svg')),
       count: n.querySelector('.settings-nav-count')?.textContent.trim() ?? '',
       active: n.classList.contains('active'),
+      current: n.getAttribute('aria-current') ?? '',
+      title: n.getAttribute('title') ?? '',
     }));
     const subtabs = [...document.querySelectorAll('.settings-subtabs .settings-subtab')].map((n) => ({
       label: n.textContent.trim(),
@@ -57,13 +84,19 @@ export async function checkSettingsInElectron(win) {
   })()`));
   assert.deepEqual(
     nav.sections.map((item) => item.label),
-    ["对话", "能力", "外观", "桌面"],
+    ["对话", "能力", "外观", "Pi CLI", "Pi Desktop", "桌面"],
     `左栏只留四个一级分区，实际 ${nav.sections.map((item) => item.label).join("/")}`,
   );
   assert.ok(nav.sections.every((item) => item.icon), "每个分区都要有图标");
   assert.equal(nav.sections.filter((item) => item.active).length, 1, "只应有一个分区高亮");
-  assert.equal(nav.sections.map((item) => item.count).join(""), "2413", "分区右侧标出二级 tab 数量");
+  assert.equal(nav.sections.filter((item) => item.current === "page").length, 1, "高亮的分区要带 aria-current=page");
+  assert.ok(nav.sections.every((item) => item.title.length > 4), `分区项要有 title（悬停能看到说明），实际：${JSON.stringify(nav.sections.map((item) => item.title))}`);
+  assert.equal(nav.sections.map((item) => item.count).join(""), "241113", "分区右侧标出二级 tab 数量");
   assert.ok(nav.subtabs.length >= 2, "对话分区下应有二级 tab");
+  // Pi CLI / Pi Desktop 是平级的一级分区，且只有一页 —— 所以没有二级 tab
+  const piSections = nav.sections.filter((item) => ["Pi CLI", "Pi Desktop"].includes(item.label));
+  assert.equal(piSections.length, 2, "Pi CLI 与 Pi Desktop 要各自出现在一级分区");
+  assert.ok(piSections.every((item) => item.count === "1"), "两个 Pi 分区各只有 1 页");
   assert.equal(nav.subtabs.filter((item) => item.active).length, 1, "只应有一个二级 tab 高亮");
 
   // 标题栏：标题 + 说明
@@ -131,8 +164,8 @@ export async function checkSettingsInElectron(win) {
   assert.deepEqual(problems, [], `分区渲染问题：${problems.join("；")}`);
   assert.deepEqual(
     visited.slice().sort(),
-    ["agents", "conversation", "environment", "logs", "mcp", "packages", "plugins", "section:look", "skills", "terminal"],
-    `四个分区要覆盖全部 10 个设置页，实际 ${visited.join("/")}`,
+    ["agents", "conversation", "environment", "logs", "mcp", "packages", "plugins", "section:look", "section:pi-cli-section", "section:pi-desktop-section", "skills", "terminal"],
+    `六个分区要覆盖全部 12 个设置页，实际 ${visited.join("/")}`,
   );
 
   // 全局提示词页：编辑器必须按主题铺开（曾因为 CSS 丢了只剩两行白底，读不出来）
@@ -166,22 +199,41 @@ export async function checkSettingsInElectron(win) {
   assert.equal(agents.noteMono, true, "路径要用等宽字体");
   console.log("[settings] agents", JSON.stringify(agents));
 
-  // 环境页：Pi 状态/路径/更新应该在同一张卡里（以前分成两张，内容还重复）
-  await openTab("environment");
-  await wait(350);
-  const env = JSON.parse(await evaluate(`(() => {
-    const groups = [...document.querySelectorAll('.settings-body .settings-group')].map((group) => ({
-      title: group.querySelector('.settings-group-title')?.textContent.trim() ?? '',
-      rows: [...group.querySelectorAll('.settings-row strong')].map((n) => n.textContent.trim()),
-    }));
-    const pi = groups.find((group) => group.title.includes('Pi CLI'));
-    return JSON.stringify({ titles: groups.map((g) => g.title), piRows: pi?.rows ?? [] });
-  })()`));
-  assert.ok(!env.titles.includes("Pi CLI 更新"), `不应再有单独的「Pi CLI 更新」卡：${env.titles.join("/")}`);
-  assert.ok(env.titles.includes("本机 Pi CLI"), `应有合并后的「本机 Pi CLI」卡：${env.titles.join("/")}`);
-  for (const label of ["Pi Coding Agent CLI", "Pi 路径", "检查并更新 Pi", "Pi 自动更新", "当前活动项目目录"]) {
-    assert.ok(env.piRows.includes(label), `合并后的卡片应包含「${label}」，实际：${env.piRows.join("/")}`);
+  // Pi CLI 与 Pi Desktop 升为一级分区后：各自一页，内容不重叠
+  const readGroups = async () =>
+    JSON.parse(await evaluate(`(() => {
+      const groups = [...document.querySelectorAll('.settings-body .settings-group')].map((group) => ({
+        title: group.querySelector('.settings-group-title')?.textContent.trim() ?? '',
+        rows: [...group.querySelectorAll('.settings-row strong')].map((n) => n.textContent.trim()),
+      }));
+      return JSON.stringify({ titles: groups.map((g) => g.title), rows: groups.flatMap((g) => g.rows) });
+    })()`));
+
+  await openTab("pi-cli");
+  await wait(400);
+  const piCli = await readGroups();
+  assert.ok(piCli.titles.includes("本机 Pi CLI"), `Pi CLI 页要有「本机 Pi CLI」分组：${piCli.titles.join("/")}`);
+  for (const label of ["Pi Coding Agent CLI", "Pi 路径", "检查并更新 Pi", "Pi 自动更新"]) {
+    assert.ok(piCli.rows.includes(label), `Pi CLI 页应包含「${label}」，实际：${piCli.rows.join("/")}`);
   }
+  assert.ok(!piCli.rows.includes("当前活动项目目录"), "项目目录属于「环境与快捷键」，不该混进 Pi CLI 页");
+
+  await openTab("pi-desktop");
+  await wait(400);
+  const piDesktop = await readGroups();
+  assert.ok(piDesktop.titles.some((title) => title.includes("Pi Desktop 更新")), `Pi Desktop 页要有更新分组：${piDesktop.titles.join("/")}`);
+  for (const label of ["软件版本", "检查软件更新", "启动时检查更新", "自动下载更新"]) {
+    assert.ok(piDesktop.rows.includes(label), `Pi Desktop 页应包含「${label}」，实际：${piDesktop.rows.join("/")}`);
+  }
+  assert.ok(!piDesktop.rows.includes("检查并更新 Pi"), "Pi 命令行工具的更新不该和桌面应用混在一页");
+
+  await openTab("environment");
+  await wait(400);
+  const env = await readGroups();
+  assert.ok(env.titles.includes("当前工作区"), `环境页要保留工作区分组：${env.titles.join("/")}`);
+  assert.ok(env.titles.includes("全局快捷键速查"), `环境页要保留快捷键速查：${env.titles.join("/")}`);
+  assert.ok(!env.rows.includes("检查并更新 Pi"), "Pi CLI 已独立成页，环境页不该再有它");
+  assert.ok(!env.rows.includes("启动时检查更新"), "Pi Desktop 更新已独立成页，环境页不该再有它");
   console.log("[settings] environment", JSON.stringify({ titles: env.titles }));
 
   // 搜索过滤
@@ -209,8 +261,8 @@ export async function checkSettingsInElectron(win) {
   await wait(200);
   assert.equal(
     await evaluate("document.querySelectorAll('.settings-nav-item').length"),
-    4,
-    "清空搜索后左栏应恢复成四个分区",
+    6,
+    "清空搜索后左栏应恢复成六个分区（对话 / 能力 / 外观 / Pi CLI / Pi Desktop / 桌面）",
   );
 
   // ---- 搜索：关键字命中 / ↑↓ + Enter / 空结果提示 ----
@@ -309,6 +361,54 @@ export async function checkSettingsInElectron(win) {
   await wait(420);
   assert.equal(await evaluate("Math.round(document.querySelector('.settings-body').scrollTop)"), 0, "换分区后滚动位置要归零");
 
+  // ---- 细节：页头滚动态阴影 + 二级 tab 方向键 ----
+  await openTab("appearance");
+  await wait(320);
+  assert.equal(
+    await evaluate("document.querySelector('.settings-head')?.classList.contains('scrolled') ?? null"),
+    false,
+    "没滚动时页头不应有滚动态",
+  );
+  await evaluate(`(() => {
+    const body = document.querySelector('.settings-body');
+    body.scrollTo({ top: 260, behavior: 'auto' });
+    body.dispatchEvent(new Event('scroll'));
+    return true;
+  })()`);
+  await wait(200);
+  assert.equal(
+    await evaluate("document.querySelector('.settings-head')?.classList.contains('scrolled') ?? null"),
+    true,
+    "内容滚动后页头要进入滚动态（补阴影，避免和内容糊在一起）",
+  );
+  // 换分区同样算「换页」，滚动状态要跟着复位
+  await evaluate(`document.querySelector('[data-settings-section="desktop"]')?.click() ?? null; true`);
+  await wait(320);
+  assert.equal(
+    await evaluate("document.querySelector('.settings-head')?.classList.contains('scrolled') ?? null"),
+    false,
+    "换页后滚动状态要复位",
+  );
+
+  await openTab("terminal");
+  const tabRole = await evaluate("document.querySelector('.settings-subtabs')?.getAttribute('role') ?? ''");
+  assert.equal(tabRole, "tablist", "二级 tab 条要有 role=tablist");
+  const beforeKey = await evaluate("document.querySelector('.settings-subtab.active')?.getAttribute('data-settings-tab') ?? ''");
+  await evaluate(`(() => {
+    const first = document.querySelector('.settings-subtab');
+    first?.focus();
+    first?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    return true;
+  })()`);
+  await wait(240);
+  const afterKey = await evaluate("document.querySelector('.settings-subtab.active')?.getAttribute('data-settings-tab') ?? ''");
+  assert.notEqual(afterKey, beforeKey, `←/→ 要能切换二级 tab（${beforeKey} → ${afterKey}）`);
+  assert.equal(
+    await evaluate("document.querySelector('.settings-subtab.active')?.getAttribute('aria-selected') ?? ''"),
+    "true",
+    "当前 tab 要带 aria-selected",
+  );
+
   // 回到默认分区，后面的断言按原顺序继续
   await evaluate(`document.querySelector('[data-settings-section="chat"]').click(); true`);
   await wait(220);
@@ -331,8 +431,8 @@ export async function checkSettingsInElectron(win) {
       if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
     }
   };
-  // 自动更新默认开启：环境页两个开关都在、都开着，且手动「检查更新」会自动下载
-  await openTab("environment");
+  // 自动更新默认开启：Pi Desktop 页两个开关都在、都开着，且手动「检查更新」会自动下载
+  await openTab("pi-desktop");
   await wait(400);
   const updateRows = JSON.parse(await evaluate(`(() => {
     const rows = [...document.querySelectorAll('.settings-row')].map((row) => ({
@@ -429,5 +529,5 @@ export async function checkSettingsInElectron(win) {
     "关闭后设置弹窗应消失",
   );
 
-  console.log("[settings] PASS 四个一级分区 / 二级 tab / 图标 / 全页面无溢出 / 搜索 / 精简底部");
+  console.log("[settings] PASS 6 个一级分区（含 Pi CLI / Pi Desktop）/ 12 个页面 / 二级 tab 方向键 / 页头滚动态 / 搜索关键字 / 改动计数");
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import {
   appSettings,
@@ -27,6 +27,8 @@ import ConversationSettings from "./settings/ConversationSettings.vue";
 import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
 import LogSettings from "./settings/LogSettings.vue";
 import McpSettings from "./settings/McpSettings.vue";
+import PiCliSettings from "./settings/PiCliSettings.vue";
+import PiDesktopSettings from "./settings/PiDesktopSettings.vue";
 import PackageSettings from "./settings/PackageSettings.vue";
 import PluginSettings from "./settings/PluginSettings.vue";
 import {
@@ -43,6 +45,11 @@ const state = workbench.state;
 const ws = computed(() => workbench.active.value);
 
 const searchShortcut = (globalThis as any).piDesktop?.platform === "darwin" ? "⌘K" : "Ctrl K";
+/** 内容区滚动后给页头补一条阴影（细节：否则长页面滚上去会和标题糊在一起） */
+const bodyScrolled = ref(false);
+function onBodyScroll(): void {
+  bodyScrolled.value = (bodyRef.value?.scrollTop ?? 0) > 4;
+}
 const settingsQuery = ref("");
 const query = computed(() => settingsQuery.value.trim().toLocaleLowerCase());
 const searchInput = ref<HTMLInputElement | null>(null);
@@ -77,6 +84,7 @@ watch(
   () => settingsModalState.tab,
   () => {
     bodyRef.value?.scrollTo({ top: 0 });
+    bodyScrolled.value = false;
   },
 );
 
@@ -88,6 +96,17 @@ function openSection(section: { tabs: SettingsTabId[] }): void {
 function selectResult(id: SettingsTabId): void {
   settingsModalState.tab = id;
   settingsQuery.value = "";
+}
+
+/** 二级 tab 用 ←/→ 切换（并保持焦点在 tab 条上） */
+function moveSubtab(delta: number): void {
+  const tabs = currentSectionTabs.value;
+  if (tabs.length < 2) return;
+  const index = tabs.findIndex((tab) => tab.id === settingsModalState.tab);
+  const next = tabs[Math.min(tabs.length - 1, Math.max(0, (index < 0 ? 0 : index) + delta))];
+  if (!next || next.id === settingsModalState.tab) return;
+  settingsModalState.tab = next.id;
+  void nextTick(() => document.querySelector<HTMLElement>(`.settings-subtab[data-settings-tab="${next.id}"]`)?.focus());
 }
 
 function focusSearch(): void {
@@ -278,6 +297,8 @@ onBeforeUnmount(() => {
               class="settings-nav-item"
               :class="{ active: currentSection.id === section.id }"
               :data-settings-section="section.id"
+              :aria-current="currentSection.id === section.id ? 'page' : undefined"
+              :title="`${section.label} · ${section.desc}`"
               @click="openSection(section)"
             >
               <span class="settings-nav-icon" v-html="section.icon" />
@@ -295,20 +316,30 @@ onBeforeUnmount(() => {
 
       <!-- 右侧内容区 -->
       <section class="settings-main">
-        <header class="settings-head">
+        <header class="settings-head" :class="{ scrolled: bodyScrolled }">
           <div class="settings-head-text">
             <h2 class="settings-title">{{ currentTabMeta.label }}</h2>
             <p class="settings-desc">{{ currentTabMeta.desc }}</p>
           </div>
           <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
-          <div v-if="currentSectionTabs.length > 1" class="settings-subtabs">
+          <div
+            v-if="currentSectionTabs.length > 1"
+            class="settings-subtabs"
+            role="tablist"
+            aria-label="本分区页面"
+            @keydown.left.prevent="moveSubtab(-1)"
+            @keydown.right.prevent="moveSubtab(1)"
+          >
             <button
               v-for="tab in currentSectionTabs"
               :key="tab.id"
               type="button"
+              role="tab"
               class="settings-subtab"
               :class="{ active: tab.id === settingsModalState.tab }"
               :data-settings-tab="tab.id"
+              :aria-selected="tab.id === settingsModalState.tab"
+              :tabindex="tab.id === settingsModalState.tab ? 0 : -1"
               @click="settingsModalState.tab = tab.id"
             >
               {{ tab.label }}
@@ -316,7 +347,7 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
-        <div ref="bodyRef" class="settings-body">
+        <div ref="bodyRef" class="settings-body" @scroll.passive="onBodyScroll">
           <ConversationSettings v-if="settingsModalState.tab === 'conversation'" />
 
           <!-- 2. 外观与布局 -->
@@ -334,6 +365,10 @@ onBeforeUnmount(() => {
 
           <!-- 6. 环境与快捷键 -->
           <EnvironmentSettings v-else-if="settingsModalState.tab === 'environment'" />
+
+          <PiCliSettings v-else-if="settingsModalState.tab === 'pi-cli'" />
+
+          <PiDesktopSettings v-else-if="settingsModalState.tab === 'pi-desktop'" />
 
           <LogSettings v-else-if="settingsModalState.tab === 'logs'" />
         </div>

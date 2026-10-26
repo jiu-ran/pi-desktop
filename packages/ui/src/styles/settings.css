@@ -304,6 +304,10 @@
   min-height: 0;
   background: var(--bg);
 }
+/* 内容滚起来之后页头下方补一条阴影，长页面才分得清「标题区」和「内容区」 */
+.settings-head.scrolled {
+  box-shadow: 0 8px 12px -12px rgba(0, 0, 0, 0.45), inset 0 -1px 0 color-mix(in srgb, var(--line) 70%, transparent);
+}
 .settings-head {
   display: grid;
   flex: none;
@@ -353,6 +357,10 @@
 }
 .settings-subtab:hover {
   color: var(--fg);
+}
+.settings-subtab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
 }
 .settings-subtab.active {
   background: var(--bg);

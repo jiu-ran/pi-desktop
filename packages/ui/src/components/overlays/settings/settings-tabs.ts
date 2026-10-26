@@ -93,6 +93,20 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
     keywords: ["路径", "安装", "版本", "更新", "渠道", "目录", "快捷键", "键盘", "可执行文件"],
   },
   {
+    id: "pi-cli",
+    label: "Pi CLI",
+    icon: icons.code,
+    desc: "本机 pi 命令的安装路径、版本检测与更新方式（与桌面应用无关）",
+    keywords: ["pi", "cli", "命令行", "路径", "版本", "更新", "安装", "npm", "pnpm", "可执行文件", "自动更新"],
+  },
+  {
+    id: "pi-desktop",
+    label: "Pi Desktop",
+    icon: icons.download,
+    desc: "这个桌面应用自己的版本、检查更新与安装包下载（不影响 pi 命令）",
+    keywords: ["pi desktop", "桌面", "应用", "版本", "更新", "下载", "安装包", "release", "重启"],
+  },
+  {
     id: "logs",
     label: "运行日志",
     icon: icons.text,
@@ -112,10 +126,24 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   },
   { id: "look", label: "外观", icon: icons.palette, desc: "配色、字号与面板宽度", tabs: ["appearance"] },
   {
+    id: "pi-cli-section",
+    label: "Pi CLI",
+    icon: icons.code,
+    desc: "本机 pi 命令：路径、版本与更新",
+    tabs: ["pi-cli"],
+  },
+  {
+    id: "pi-desktop-section",
+    label: "Pi Desktop",
+    icon: icons.download,
+    desc: "桌面应用的版本与安装包",
+    tabs: ["pi-desktop"],
+  },
+  {
     id: "desktop",
     label: "桌面",
     icon: icons.terminal,
-    desc: "终端、快捷键、本机 Pi 与日志",
+    desc: "终端、工作区、快捷键与日志",
     tabs: ["terminal", "environment", "logs"],
   },
 ];

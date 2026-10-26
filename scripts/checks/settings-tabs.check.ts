@@ -66,6 +66,16 @@ assert.equal(findSettingsTab("logs").label, "运行日志", "按 id 找页");
 assert.equal(findSettingsTab("nope" as any).id, SETTINGS_TABS[0]!.id, "找不到时退回第一页，界面不至于空白");
 assert.equal(sectionOfTab("logs").id, "desktop", "运行日志属于「桌面」分区");
 assert.equal(sectionOfTab("mcp").id, "power", "MCP 属于「能力」分区");
+// Pi CLI 与 Pi Desktop 是平级的一级分区（各自只有一页）
+assert.equal(sectionOfTab("pi-cli").id, "pi-cli-section", "Pi CLI 自己是一个一级分区");
+assert.equal(sectionOfTab("pi-desktop").id, "pi-desktop-section", "Pi Desktop 自己是一个一级分区");
+assert.equal(findSettingsTab("pi-cli").label, "Pi CLI");
+assert.equal(findSettingsTab("pi-desktop").label, "Pi Desktop");
+assert.deepEqual(
+  SETTINGS_SECTIONS.filter((section) => ["pi-cli-section", "pi-desktop-section"].includes(section.id)).map((section) => section.tabs.length),
+  [1, 1],
+  "两个 Pi 分区各自只放一页，不要塞别的",
+);
 assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conversation", "agents"], "分区内的页保持登记顺序");
 
 // 搜索：跨分区命中，并带上所属分区名

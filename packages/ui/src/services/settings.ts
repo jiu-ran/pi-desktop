@@ -32,6 +32,8 @@ export type SettingsTabId =
   | "skills"
   | "plugins"
   | "environment"
+  | "pi-cli"
+  | "pi-desktop"
   | "logs";
 
 export type AutoSaveMode = "off" | "afterDelay" | "onFocusChange" | "onWindowChange";
