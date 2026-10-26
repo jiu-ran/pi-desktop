@@ -11,6 +11,7 @@ import { checkComposerHeightInElectron } from "./composer-height.electron.mjs";
 import { checkGitUiInElectron } from "./git-ui.electron.mjs";
 import { checkTooltipInElectron } from "./tooltip.electron.mjs";
 import { checkAppearanceInElectron } from "./appearance.electron.mjs";
+import { checkActivityInElectron } from "./activity.electron.mjs";
 import { checkAutoScrollInElectron } from "./autoscroll.electron.mjs";
 import { checkArgHintInElectron } from "./arg-hint.electron.mjs";
 import { checkComposerDraftInElectron } from "./composer-draft.electron.mjs";
@@ -208,6 +209,7 @@ app.whenReady().then(async () => {
       await runCheck("composer-draft", () => checkComposerDraftInElectron(win));
       await runCheck("arg-hint", () => checkArgHintInElectron(win));
       await runCheck("appearance", () => checkAppearanceInElectron(win));
+      await runCheck("activity", () => checkActivityInElectron(win));
       await runCheck("autoscroll", () => checkAutoScrollInElectron(win));
       await runCheck("subagent", () => checkSubagentInElectron(win));
       await runCheck("subagent-async", () => checkSubagentAsyncInElectron(win));

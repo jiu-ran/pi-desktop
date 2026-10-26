@@ -12,6 +12,8 @@ export interface ActivityBlockLike {
   isError?: boolean;
   /** 工具结果里的图片数量；有图片时保留原卡片，避免折叠后看不到预览 */
   images?: number;
+  /** 块的创建时间（毫秒）；历史会话可能没有，用来算这一轮花了多久 */
+  ts?: number;
 }
 
 export interface ActivityEntry<T extends ActivityBlockLike = ActivityBlockLike> {
@@ -121,7 +123,7 @@ function shortPath(raw: string): string {
   return parts.slice(-2).join("/") || raw;
 }
 
-function targetOf(block: ActivityBlockLike): string {
+export function activityTarget(block: ActivityBlockLike): string {
   const args = block.args ?? {};
   const first = args.command ?? args.query ?? args.pattern ?? args.path ?? args.url ?? args.repo ?? args.code;
   if (typeof first === "string") {
@@ -143,7 +145,7 @@ export function activityVerb(block: ActivityBlockLike): string {
 export function describeActivityBlock(block: ActivityBlockLike): string {
   const verb = activityVerb(block);
   if (block.kind === "thinking") return verb;
-  const target = targetOf(block);
+  const target = activityTarget(block);
   return target ? clip(`${verb} ${target}`) : verb;
 }
 
@@ -160,8 +162,8 @@ function uniqueActions(entries: ActivityEntry[]): string[] {
   return actions;
 }
 
-const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";
-const isSettled = (block: ActivityBlockLike): boolean => block.status === "done" || block.status === "error";
+export const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";
+export const isSettled = (block: ActivityBlockLike): boolean => block.status === "done" || block.status === "error";
 
 export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup, "toolCount" | "thinkingCount" | "live" | "errored" | "failedCount" | "summary" | "detail"> {
   const tools = entries.filter((entry) => entry.block.kind === "tool");

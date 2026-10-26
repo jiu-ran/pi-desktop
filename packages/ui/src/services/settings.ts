@@ -69,6 +69,13 @@ export interface AppSettings {
   terminalCustomArgs: string[];
   /** 对话消息排版密度 */
   messageDensity: "comfortable" | "compact";
+  /**
+   * 执行记录（工具 / 思考）的分组方式：
+   * - grouped：按一次用户请求合成一行「执行了 N 步 …」（默认）
+   * - compact：只折叠连续 4 步以上的活动（旧行为）
+   * - expanded：全部展开，等同逐块显示
+   */
+  activityDetail: "grouped" | "compact" | "expanded";
   /** 界面缩放倍率（Chromium zoom factor），由设置页控制，不设快捷键 */
   uiZoom: number;
   /** 运行日志总量上限（字节），设置页给几档可选 */
@@ -107,6 +114,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalCustomPath: "",
   terminalCustomArgs: [],
   messageDensity: "comfortable",
+  activityDetail: "grouped",
   uiZoom: 1,
   logMaxBytes: 8 * 1024 * 1024,
   // 默认仍是深色（沿用产品原本的样子）；想跟系统走由用户自己选「跟随系统」
@@ -154,6 +162,8 @@ function loadSavedSettings(): AppSettings {
       terminalCustomArgs: Array.isArray(parsed.terminalCustomArgs)
         ? parsed.terminalCustomArgs.filter((arg: unknown) => typeof arg === "string" && !arg.includes("\0")).slice(0, 64).map((arg: string) => arg.slice(0, 4000)) : [],
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
+      activityDetail:
+        parsed.activityDetail === "compact" || parsed.activityDetail === "expanded" ? parsed.activityDetail : "grouped",
       uiZoom: Math.min(3, Math.max(0.5, Number(parsed.uiZoom) || DEFAULT_SETTINGS.uiZoom)),
       logMaxBytes: normalizeLogMaxBytes(parsed.logMaxBytes),
       // 老版本只存了 "pi-desktop.theme"（dark/light），没有 themeMode：

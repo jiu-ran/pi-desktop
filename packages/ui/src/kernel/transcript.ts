@@ -58,6 +58,8 @@ export interface TranscriptBlock {
   compaction?: CompactionNotice;
   /** 同一条提示连续出现时的合并次数（界面上显示 ×N） */
   count?: number;
+  /** 块创建时间（毫秒）：回合分组用它算「这一轮花了多久」 */
+  ts?: number;
 }
 
 /** 网络类英文报错压成短中文：重试提示里只留一句，不再整段英文堆着。 */
@@ -171,6 +173,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         durationMs: null,
         // 运行中要能显示「已经跑了多久」：卡住时至少看得出还在走。
         startedAt: status === "running" || status === "pending" ? Date.now() : null,
+        ts: Date.now(),
       });
       block = blocks[blocks.length - 1];
       tools.set(id, block);
@@ -197,9 +200,9 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     if (message.role === "assistant") {
       for (const part of message.content ?? []) {
         if (part.type === "thinking" && part.thinking?.trim()) {
-          blocks.push({ kind: "thinking", id: uid("th"), text: part.thinking, streaming: false });
+          blocks.push({ kind: "thinking", id: uid("th"), text: part.thinking, streaming: false, ts: Date.now() });
         } else if (part.type === "text" && part.text?.trim()) {
-          blocks.push({ kind: "text", id: uid("tx"), text: part.text, streaming: false });
+          blocks.push({ kind: "text", id: uid("tx"), text: part.text, streaming: false, ts: Date.now() });
         } else if (part.type === "toolCall") {
           pushTool(part.id, part.name, part.arguments, "done");
         }
@@ -223,7 +226,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     live ??= new Map();
     let block = live.get(index);
     if (!block) {
-      blocks.push({ kind, id: uid(kind === "text" ? "tx" : "th"), text: "", streaming: true });
+      blocks.push({ kind, id: uid(kind === "text" ? "tx" : "th"), text: "", streaming: true, ts: Date.now() });
       block = blocks[blocks.length - 1];
       live.set(index, block);
     }

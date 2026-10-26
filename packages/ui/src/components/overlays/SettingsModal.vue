@@ -235,6 +235,13 @@ const themeModeHint = computed(() => {
 const accentLabel = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).label);
 const accentColor = computed(() => (ACCENTS.find((item) => item.id === appSettings.accent) ?? ACCENTS[0]).color);
 const radiusLabel = computed(() => (RADIUS_PRESETS.find((item) => item.id === appSettings.radius) ?? RADIUS_PRESETS[1]).label);
+
+const ACTIVITY_DETAILS = [
+  { id: "grouped", label: "分组", hint: "按一次请求合成一行「执行了 N 步」，展开后按 思考/读取/运行/改动 分类" },
+  { id: "compact", label: "紧凑", hint: "只折叠连续 4 步以上的活动，其余逐块显示" },
+  { id: "expanded", label: "展开", hint: "全部展开，每个工具与思考各占一行" },
+] as const;
+const activityDetailLabel = computed(() => (ACTIVITY_DETAILS.find((item) => item.id === appSettings.activityDetail) ?? ACTIVITY_DETAILS[0]).label);
 const columnWidthLabel = computed(
   () => (COLUMN_WIDTHS.find((item) => item.id === appSettings.columnWidth) ?? COLUMN_WIDTHS[1]).label,
 );
@@ -1183,6 +1190,24 @@ onBeforeUnmount(() => {
                     :class="{ active: appSettings.messageDensity === 'compact' }"
                     @click="appSettings.messageDensity = 'compact'"
                   >紧凑</button>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <strong>执行记录</strong>
+                  <span>对话里工具调用与思考的分组方式 · 当前 {{ activityDetailLabel }}</span>
+                </div>
+                <div class="settings-segments">
+                  <button
+                    v-for="item in ACTIVITY_DETAILS"
+                    :key="item.id"
+                    type="button"
+                    class="settings-segment"
+                    :class="{ active: appSettings.activityDetail === item.id }"
+                    :title="item.hint"
+                    @click="appSettings.activityDetail = item.id"
+                  >{{ item.label }}</button>
                 </div>
               </div>
 

@@ -10,6 +10,8 @@ import { planQueueView } from "../../shared/queue-view.ts";
 import { FOLLOW_THRESHOLD_PX, isAtBottom, isSelfScroll, shouldRunFollowFrame, wantsToPauseFollow } from "../../shared/autoscroll.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
+import { deriveTurnItems, turnDurationLabel, type TurnGroup } from "../../shared/activity-turns.ts";
+import { appSettings } from "../../services/settings.ts";
 import { searchableText } from "../../shared/search-text.ts";
 import ActivityGroup from "./ActivityGroup.vue";
 import BlockView from "./BlockView.vue";
@@ -27,6 +29,10 @@ const searchIndex = ref(0);
 let searchFocusToken = 0;
 /** 用户手动展开/收起活动组的覆盖状态；未设置时默认折叠，搜索命中的组强制展开。 */
 const activityOverrides = ref<Record<string, boolean>>({});
+/** 回合组内「思考 / 读取 / 运行 / 改动」二级分组的展开状态 */
+const sectionOverrides = ref<Record<string, boolean>>({});
+/** 执行记录的分组方式：grouped（默认）/ compact（旧行为）/ expanded（全部展开） */
+const activityMode = computed(() => appSettings.activityDetail);
 let scrollFrame = 0;
 let scrollForce = false;
 let settleTimer = 0;
@@ -442,6 +448,7 @@ onMounted(() => {
   });
   stopGitFiles = bus.on("files:changed", scheduleOverviewRefresh);
   void refreshOverviewState(workbench);
+  window.addEventListener("keydown", onActivityKey);
   window.addEventListener("keydown", onSearchKey);
   window.addEventListener("keydown", onScrollKey);
   window.addEventListener("focus", onWindowFocus);
@@ -460,6 +467,7 @@ onBeforeUnmount(() => {
   stopGitEvents?.();
   stopGitFiles?.();
   if (overviewTimer) window.clearTimeout(overviewTimer);
+  window.removeEventListener("keydown", onActivityKey);
   window.removeEventListener("keydown", onSearchKey);
   window.removeEventListener("keydown", onScrollKey);
   window.removeEventListener("focus", onWindowFocus);
@@ -560,8 +568,17 @@ const copyTextByIndex = computed(() =>
   buildCopyTexts(visibleBlocks.value, Boolean(ws.value?.streaming)),
 );
 
-// 连续的工具 / 思考折叠成活动组；搜索命中时自动展开，错误组只用红色徽标提示。
-const activityItems = computed(() => deriveActivityItems(visibleBlocks.value));
+// 三种展示方式共用同一个列表：turns 是「执行记录」组，group 是旧的活动组，block 是独立卡片。
+type ChatRenderItem =
+  | { kind: "block"; block: any; index: number }
+  | { kind: "turn"; group: TurnGroup<any> }
+  | { kind: "activity"; group: ActivityGroupModel<any> };
+const activityItems = computed<ChatRenderItem[]>(() => {
+  const blocks = visibleBlocks.value;
+  if (activityMode.value === "expanded") return blocks.map((block, index) => ({ kind: "block" as const, block, index }));
+  if (activityMode.value === "compact") return deriveActivityItems(blocks) as ChatRenderItem[];
+  return deriveTurnItems(blocks) as ChatRenderItem[];
+});
 
 function openOutline(id: string): void {
   activeOutlineId.value = id;
@@ -574,22 +591,53 @@ const searchMatches = computed(() => {
   return (ws.value?.blocks ?? []).filter((block: any) => blockText(block).toLowerCase().includes(query));
 });
 
-function groupHasSearchHit(group: ActivityGroupModel): boolean {
+function groupHasSearchHit(group: { entries: Array<{ block: any }> }): boolean {
   // 只展开当前命中所在的组，避免一次搜索把整页几十个活动组全部撑开。
   const current = searchMatches.value[searchIndex.value];
   return Boolean(current && group.entries.some((entry) => entry.block.id === current.id));
 }
 
-function activityOpen(group: ActivityGroupModel): boolean {
+function activityOpen(group: { id: string; entries: Array<{ block: any }> }): boolean {
   // 搜索命中优先于手动折叠，保证上一个 / 下一个命中总能滚到目标块。
   if (groupHasSearchHit(group)) return true;
   const override = activityOverrides.value[group.id];
   if (override !== undefined) return override;
-  // 错误组默认也保持折叠，只在折叠头用红色「失败」提示，避免一次展开几十个工具。
+  // 默认收起：错误仍通过折叠头的红色徽标提示，避免一次展开几十个工具。
   return false;
 }
 
-function toggleActivity(group: ActivityGroupModel): void {
+/** 组内二级分组（思考 / 读取 / 运行 / 改动）是否展开；搜索命中时全开 */
+function sectionOpen(group: { id: string; entries: Array<{ block: any }> }, key: string): boolean {
+  if (groupHasSearchHit(group)) return true;
+  return sectionOverrides.value[`${group.id}|${key}`] === true;
+}
+
+function toggleSection(group: { id: string; entries: Array<{ block: any }> }, key: string): void {
+  if (groupHasSearchHit(group)) return;
+  const id = `${group.id}|${key}`;
+  sectionOverrides.value = { ...sectionOverrides.value, [id]: !sectionOpen(group, key) };
+}
+
+/** Ctrl+Shift+E：展开 / 收起全部执行记录 */
+function onActivityKey(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.altKey) return;
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+  if (event.key.toLowerCase() !== "e") return;
+  event.preventDefault();
+  toggleAllActivity();
+}
+
+/** 展开 / 收起全部执行记录（Ctrl+Shift+E） */
+function toggleAllActivity(): void {
+  const groups = activityItems.value.filter((item) => item.kind === "turn" || item.kind === "activity");
+  if (!groups.length) return;
+  const open = groups.every((item) => activityOpen(item.group));
+  const next = { ...activityOverrides.value };
+  for (const item of groups) next[item.group.id] = !open;
+  activityOverrides.value = next;
+}
+
+function toggleActivity(group: { id: string; entries: Array<{ block: any }> }): void {
   if (groupHasSearchHit(group)) return;
   activityOverrides.value = {
     ...activityOverrides.value,
@@ -725,24 +773,66 @@ watch(searchMatches, () => {
               <ActivityGroup
                 v-else
                 :group="item.group"
+                :label="item.kind === 'turn' ? '执行' : '活动'"
+                :duration="item.kind === 'turn' ? turnDurationLabel(item.group) : ''"
+                :show-counts="item.kind !== 'turn'"
                 :expanded="activityOpen(item.group)"
                 :search-hit="groupHasSearchHit(item.group)"
                 :class="{ 'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)) }"
                 @toggle="toggleActivity(item.group)"
               >
-                <div
-                  v-for="entry in item.group.entries"
-                  :key="entry.block.id"
-                  :data-block-id="entry.block.id"
-                  :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
-                >
-                  <BlockView
-                    :block="entry.block"
-                    :query="searchQuery"
-                    :copy-text="''"
-                    :collapse-long="false"
-                  />
-                </div>
+                <!-- 执行记录：先按 思考 / 读取 / 运行 / 改动 分类，点开某一类才挂载卡片 -->
+                <template v-if="item.kind === 'turn'">
+                  <div
+                    v-for="section in item.group.sections"
+                    :key="section.key"
+                    class="turn-section"
+                    :data-section="section.key"
+                  >
+                    <button
+                      type="button"
+                      class="turn-section-head"
+                      :aria-expanded="sectionOpen(item.group, section.key)"
+                      @click="toggleSection(item.group, section.key)"
+                    >
+                      <span class="turn-caret" :class="{ open: sectionOpen(item.group, section.key) }" v-html="icons.chevronRight" />
+                      <span class="turn-section-label">{{ section.label }}</span>
+                      <span class="turn-section-count">· {{ section.count }}</span>
+                      <span v-if="section.preview" class="turn-section-preview">{{ section.preview }}</span>
+                      <span v-if="section.failedCount" class="activity-error">失败 ×{{ section.failedCount }}</span>
+                    </button>
+                    <div v-if="sectionOpen(item.group, section.key)" class="turn-section-body">
+                      <div
+                        v-for="entry in section.entries"
+                        :key="entry.block.id"
+                        :data-block-id="entry.block.id"
+                        :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
+                      >
+                        <BlockView
+                          :block="entry.block"
+                          :query="searchQuery"
+                          :copy-text="''"
+                          :collapse-long="false"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div
+                    v-for="entry in item.group.entries"
+                    :key="entry.block.id"
+                    :data-block-id="entry.block.id"
+                    :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
+                  >
+                    <BlockView
+                      :block="entry.block"
+                      :query="searchQuery"
+                      :copy-text="''"
+                      :collapse-long="false"
+                    />
+                  </div>
+                </template>
               </ActivityGroup>
             </template>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">
