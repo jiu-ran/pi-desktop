@@ -137,6 +137,38 @@
 .settings-search input::placeholder {
   color: var(--fg-3);
 }
+.settings-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.settings-search-kbd {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  color: var(--fg-3);
+  font: 10px var(--mono);
+  line-height: 15px;
+  white-space: nowrap;
+}
+.settings-search-clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.settings-search-clear:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.settings-search-clear svg {
+  display: block;
+}
 
 .settings-nav-list {
   display: flex;
@@ -210,10 +242,40 @@
 .settings-nav-item.active .settings-nav-count {
   color: var(--fg-2);
 }
+.settings-result-item.keyboard {
+  border-color: var(--line-2);
+  background: var(--hover);
+  color: var(--fg);
+}
+.settings-nav-keyword {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 75%, var(--fg));
+  font-size: 10px;
+  font-weight: 600;
+}
 .settings-nav-empty {
   padding: 12px 8px;
-  color: var(--fg-3);
+  color: var(--fg-2);
   font-size: 12px;
+}
+.settings-nav-empty p {
+  margin: 0;
+}
+.settings-nav-suggest {
+  margin-top: 6px !important;
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.settings-nav-keyhint {
+  padding-top: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+  opacity: 0.75;
 }
 .settings-nav-foot {
   display: flex;

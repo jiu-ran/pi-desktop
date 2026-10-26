@@ -47,11 +47,18 @@ for (const section of SETTINGS_SECTIONS) {
   assert.ok(section.label && section.desc && section.icon.includes("<svg"), `分区「${section.id}」缺少名称 / 说明 / 图标`);
 }
 
-// ---- 3. 每页都有标题、说明与图标 ----
+// ---- 3. 每页都有标题、说明、图标与关键字 ----
 for (const tab of SETTINGS_TABS) {
   assert.ok(tab.label.length >= 2, `页「${tab.id}」缺少名称`);
   assert.ok(tab.desc.length >= 8, `页「${tab.id}」的说明太短：${tab.desc}`);
   assert.ok(tab.icon.includes("<svg"), `页「${tab.id}」缺少图标`);
+  // 关键字决定「搜设置项能不能搜到」：一页至少要举出几个用户会敲的词
+  assert.ok(Array.isArray(tab.keywords) && tab.keywords.length >= 3, `页「${tab.id}」的关键字太少`);
+  for (const word of tab.keywords) {
+    assert.equal(typeof word, "string", `页「${tab.id}」的关键字必须是字符串`);
+    assert.ok(word.length >= 1 && word.trim() === word, `页「${tab.id}」的关键字不能带空白：${JSON.stringify(word)}`);
+  }
+  assert.equal(new Set(tab.keywords).size, tab.keywords.length, `页「${tab.id}」的关键字有重复`);
 }
 
 // ---- 4. 查询 ----
@@ -65,6 +72,18 @@ assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conv
 const logHits = searchSettings("日志");
 assert.deepEqual(logHits.map((hit) => hit.id), ["logs"], `搜「日志」只应命中运行日志：${logHits.map((hit) => hit.id).join("/")}`);
 assert.equal(logHits[0]!.sectionLabel, "桌面", "命中结果要标出所属分区");
+
+// 具体的设置项：旧的「只匹配页名/说明」搜不到这些
+const darkHits = searchSettings("深色");
+assert.equal(darkHits[0]?.id, "appearance", `搜「深色」应命中外观页：${darkHits.map((hit) => hit.id).join("/")}`);
+assert.equal(darkHits[0]?.keyword, "深色", "命中关键字的结果要标出来，用户才知道为什么搜到这条");
+const fontHits = searchSettings("字体");
+assert.ok(fontHits.some((hit) => hit.id === "appearance"), "字号/字体属于外观页");
+assert.ok(fontHits.some((hit) => hit.id === "terminal"), "终端也能调字体");
+// 页名直接命中必须排在关键字命中前面
+assert.equal(searchSettings("终端")[0]?.id, "terminal", "搜「终端」时终端页要排第一");
+assert.deepEqual(searchSettings("zzzz"), [], "没有命中时返回空数组");
+assert.ok(searchSettings("快捷键").some((hit) => hit.id === "environment"), "搜「快捷键」应能找到环境页");
 
 const skillHits = searchSettings("SKILL");
 assert.ok(skillHits.some((hit) => hit.id === "skills"), "搜索不区分大小写");

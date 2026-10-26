@@ -42,16 +42,89 @@ const { workbench, plugins, bus } = useKernel();
 const state = workbench.state;
 const ws = computed(() => workbench.active.value);
 
+const searchShortcut = (globalThis as any).piDesktop?.platform === "darwin" ? "⌘K" : "Ctrl K";
 const settingsQuery = ref("");
 const query = computed(() => settingsQuery.value.trim().toLocaleLowerCase());
+const searchInput = ref<HTMLInputElement | null>(null);
+const bodyRef = ref<HTMLElement | null>(null);
+const searchIndex = ref(0);
 
 const currentTabMeta = computed(() => findSettingsTab(settingsModalState.tab));
 const currentSection = computed(() => sectionOfTab(settingsModalState.tab));
 const currentSectionTabs = computed(() => sectionTabs(currentSection.value));
 const searchResults = computed(() => searchSettings(settingsQuery.value));
 
+/** 改动计数：和默认值不同的字段（数组按内容比） */
+const changedCount = computed(() => {
+  const current = appSettings as unknown as Record<string, unknown>;
+  const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
+  return Object.keys(defaults).filter((key) => {
+    const left = current[key];
+    const right = defaults[key];
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return left.length !== right.length || left.some((item, index) => item !== right[index]);
+    }
+    return left !== right;
+  }).length;
+});
+
+watch(searchResults, () => {
+  searchIndex.value = 0;
+});
+
+/** 换页 / 换分区后回到顶部：否则会停在上一页滚到的位置 */
+watch(
+  () => settingsModalState.tab,
+  () => {
+    bodyRef.value?.scrollTo({ top: 0 });
+  },
+);
+
 function openSection(section: { tabs: SettingsTabId[] }): void {
   settingsModalState.tab = section.tabs[0]!;
+}
+
+/** 选中搜索结果：切到那一页并收起搜索，回到正常导航 */
+function selectResult(id: SettingsTabId): void {
+  settingsModalState.tab = id;
+  settingsQuery.value = "";
+}
+
+function focusSearch(): void {
+  searchInput.value?.focus();
+  searchInput.value?.select();
+}
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  const total = searchResults.value.length;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    searchIndex.value = total ? Math.min(total - 1, searchIndex.value + 1) : 0;
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    searchIndex.value = Math.max(0, searchIndex.value - 1);
+  } else if (event.key === "Enter") {
+    const target = searchResults.value[searchIndex.value];
+    if (target) {
+      event.preventDefault();
+      selectResult(target.id);
+    }
+  }
+}
+
+/** Esc 先收搜索、再关窗口；Ctrl/Cmd+K 聚焦搜索 */
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (!settingsModalState.open) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (settingsQuery.value) settingsQuery.value = "";
+    else requestCloseSettings();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+    event.preventDefault();
+    focusSearch();
+  }
 }
 
 function handleResetAll(): void {
@@ -117,6 +190,8 @@ watch(
     }
     settingsLeaving.value = false;
     settingsOffset.value = { x: 0, y: 0 };
+    settingsQuery.value = "";
+    searchIndex.value = 0;
     settingsVisible.value = false;
     requestAnimationFrame(() => {
       settingsVisible.value = true;
@@ -125,7 +200,9 @@ watch(
   { immediate: true },
 );
 
+onMounted(() => window.addEventListener("keydown", onWindowKeydown));
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onWindowKeydown);
   window.clearTimeout(settingsLeaveTimer);
 });
 </script>
@@ -156,26 +233,42 @@ onBeforeUnmount(() => {
         </div>
         <label class="settings-search">
           <span v-html="icons.search" />
-          <input v-model="settingsQuery" type="search" placeholder="搜索设置" />
+          <input
+            ref="searchInput"
+            v-model="settingsQuery"
+            type="search"
+            placeholder="搜索设置"
+            aria-label="搜索设置"
+            @keydown="onSearchKeydown"
+          />
+          <kbd v-if="!query" class="settings-search-kbd">{{ searchShortcut }}</kbd>
+          <button v-else type="button" class="settings-search-clear" title="清除搜索" aria-label="清除搜索" @click="settingsQuery = ''" v-html="icons.close" />
         </label>
 
         <nav class="settings-nav-list">
           <template v-if="query">
             <div class="settings-nav-group">搜索结果</div>
             <button
-              v-for="item in searchResults"
+              v-for="(item, index) in searchResults"
               :key="item.id"
               type="button"
-              class="settings-nav-item"
-              :class="{ active: settingsModalState.tab === item.id }"
+              class="settings-nav-item settings-result-item"
+              :class="{ active: settingsModalState.tab === item.id, keyboard: index === searchIndex }"
               :data-settings-tab="item.id"
-              @click="settingsModalState.tab = item.id"
+              :data-settings-result="item.id"
+              @click="selectResult(item.id)"
+              @pointermove="searchIndex = index"
             >
               <span class="settings-nav-icon" v-html="item.icon" />
               <span class="settings-nav-label">{{ item.label }}</span>
+              <span v-if="item.keyword" class="settings-nav-keyword">{{ item.keyword }}</span>
               <span class="settings-nav-hint">{{ item.sectionLabel }}</span>
             </button>
-            <div v-if="!searchResults.length" class="settings-nav-empty">没有匹配的设置项</div>
+            <div v-if="!searchResults.length" class="settings-nav-empty">
+              <p>没有匹配「{{ settingsQuery }}」的设置项</p>
+              <p class="settings-nav-suggest">试试：深色 · 字号 · 快捷键 · 日志 · MCP</p>
+            </div>
+            <div v-else class="settings-nav-group settings-nav-keyhint">↑↓ 选择 · Enter 打开</div>
           </template>
           <template v-else>
             <button
@@ -223,7 +316,7 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
-        <div class="settings-body">
+        <div ref="bodyRef" class="settings-body">
           <ConversationSettings v-if="settingsModalState.tab === 'conversation'" />
 
           <!-- 2. 外观与布局 -->
@@ -245,8 +338,11 @@ onBeforeUnmount(() => {
           <LogSettings v-else-if="settingsModalState.tab === 'logs'" />
         </div>
         <footer class="settings-footer">
-          <span class="settings-footer-hint">改动会立即生效并保存</span>
-          <button type="button" class="btn ghost small" @click="handleResetAll">恢复默认</button>
+          <span class="settings-footer-hint">
+            改动会立即生效并保存
+            <template v-if="changedCount"> · 已改动 {{ changedCount }} 项</template>
+          </span>
+          <button type="button" class="btn ghost small" :disabled="!changedCount" @click="handleResetAll">恢复默认</button>
           <button type="button" class="btn primary small" @click="requestCloseSettings">完成</button>
         </footer>
       </section>

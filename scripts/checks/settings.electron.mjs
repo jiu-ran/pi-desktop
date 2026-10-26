@@ -213,6 +213,106 @@ export async function checkSettingsInElectron(win) {
     "清空搜索后左栏应恢复成四个分区",
   );
 
+  // ---- 搜索：关键字命中 / ↑↓ + Enter / 空结果提示 ----
+  const typeSearch = async (text) => {
+    await evaluate(`(() => {
+      const input = document.querySelector('.settings-search input');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(text)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await wait(240);
+  };
+  const pressKey = async (key) => {
+    await evaluate(`document.querySelector('.settings-search input').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true })); true`);
+    await wait(180);
+  };
+
+  await typeSearch("深色");
+  const keywordHits = JSON.parse(await evaluate(`JSON.stringify([...document.querySelectorAll('.settings-result-item')].map((node) => ({
+    tab: node.getAttribute('data-settings-result') ?? '',
+    label: node.querySelector('.settings-nav-label')?.textContent?.trim() ?? '',
+    keyword: node.querySelector('.settings-nav-keyword')?.textContent?.trim() ?? '',
+  })))`));
+  assert.equal(keywordHits[0]?.tab, "appearance", `搜「深色」应命中外观页：${JSON.stringify(keywordHits)}`);
+  assert.equal(keywordHits[0]?.keyword, "深色", "命中关键字的行要标出关键字");
+  assert.ok(keywordHits.every((item) => item.label.length > 0), "搜索结果要能读出页名");
+
+  // ↑↓ 换选中项，Enter 打开并收搜索
+  await pressKey("ArrowDown");
+  const keyboardSelected = await evaluate("document.querySelector('.settings-result-item.keyboard')?.getAttribute('data-settings-result') ?? ''");
+  assert.ok(keyboardSelected.length > 0, "↑↓ 要能选中结果");
+  await pressKey("Enter");
+  await wait(320);
+  const afterEnter = JSON.parse(await evaluate(`JSON.stringify({
+    query: document.querySelector('.settings-search input').value,
+    title: document.querySelector('.settings-title')?.textContent.trim() ?? '',
+    section: document.querySelector('.settings-nav-item.active')?.getAttribute('data-settings-section') ?? '',
+  })`));
+  assert.equal(afterEnter.query, "", "Enter 打开结果后要清空搜索，回到正常导航");
+  assert.ok(afterEnter.title.length > 0, "Enter 之后要停在被打开的那一页");
+  assert.equal(afterEnter.section, "look", `「深色」打开的是外观分区，实际 ${afterEnter.section}`);
+
+  // 空结果：给出可试的关键字，而不是一句「没有」
+  await typeSearch("不存在的设置项");
+  const empty = JSON.parse(await evaluate(`JSON.stringify({
+    count: document.querySelectorAll('.settings-result-item').length,
+    text: document.querySelector('.settings-nav-empty')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+  })`));
+  assert.equal(empty.count, 0, "不存在的关键字不应有结果");
+  assert.ok(empty.text.includes("试试"), `空结果要给出可试的关键字：${empty.text}`);
+
+  // Esc：先清搜索，再关窗口
+  await pressKey("Escape");
+  assert.equal(await evaluate("document.querySelector('.settings-search input').value"), "", "Esc 先清空搜索");
+  assert.ok(await evaluate("Boolean(document.querySelector('.settings-modal'))"), "第一次 Esc 不应该关掉窗口");
+  await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true");
+  await wait(420);
+  assert.equal(await evaluate("Boolean(document.querySelector('.settings-modal'))"), false, "第二次 Esc 关闭设置");
+  await evaluate("window.__piDesktop.settings.open(); true");
+  await wait(320);
+
+  // ---- 底部：改动计数 + 恢复默认的可用状态 ----
+  const footerState = async () =>
+    JSON.parse(await evaluate(`JSON.stringify({
+      hint: document.querySelector('.settings-footer-hint')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      disabled: document.querySelector('.settings-footer .btn.ghost')?.disabled ?? null,
+    })`));
+  const beforeChange = await footerState();
+  assert.equal(
+    beforeChange.disabled,
+    !beforeChange.hint.includes("已改动"),
+    `「恢复默认」的可用状态要和改动计数一致：${beforeChange.hint} / disabled=${beforeChange.disabled}`,
+  );
+  await evaluate("window.__piDesktop.settings.settings.uiFontSize = 15; true");
+  await wait(280);
+  const changed = await footerState();
+  assert.ok(changed.hint.includes("已改动"), `改过设置后底部要显示改动数：${changed.hint}`);
+  assert.equal(changed.disabled, false, "有改动时「恢复默认」要可点");
+  await evaluate("document.querySelector('.settings-footer .btn.ghost').click(); true");
+  await wait(320);
+  const afterReset = await footerState();
+  assert.ok(!afterReset.hint.includes("已改动"), `恢复默认后计数要消失：${afterReset.hint}`);
+  assert.equal(afterReset.disabled, true, "恢复默认之后按钮要重新禁用");
+
+  // ---- 换页后滚动位置要归零（否则会停在上一页滚到的地方）----
+  await openTab("appearance");
+  await wait(360);
+  const scrolled = JSON.parse(await evaluate(`(() => {
+    const body = document.querySelector('.settings-body');
+    body.scrollTo({ top: 600, behavior: 'auto' });
+    return JSON.stringify({ before: Math.round(body.scrollTop), max: Math.round(body.scrollHeight - body.clientHeight) });
+  })()`));
+  assert.ok(scrolled.max > 0 && scrolled.before > 0, `外观页应该足够长以便测试滚动：${JSON.stringify(scrolled)}`);
+  await evaluate(`document.querySelector('[data-settings-section="desktop"]').click(); true`);
+  await wait(420);
+  assert.equal(await evaluate("Math.round(document.querySelector('.settings-body').scrollTop)"), 0, "换分区后滚动位置要归零");
+
+  // 回到默认分区，后面的断言按原顺序继续
+  await evaluate(`document.querySelector('[data-settings-section="chat"]').click(); true`);
+  await wait(220);
+
   // 截图留档（调试协议，避免拿到旧帧）
   const shot = async (name) => {
     try {
