@@ -65,6 +65,25 @@ export function withAlpha(hex: string, alpha: number): string {
 }
 
 /**
+ * 弹窗遮罩的黑色透明度：.modal-backdrop 用的就是 0.45。
+ * 原生标题栏按钮区是系统画的，盖不到遮罩下面，只能按同样的比例压暗它。
+ */
+export const SCRIM_ALPHA = 0.45;
+
+/** 把颜色按遮罩叠加压暗（让原生窗口按钮和遮罩后的界面一致） */
+export function dimmedColor(hex: string, alpha = SCRIM_ALPHA): string {
+  const match = /^#?([0-9a-f]{6})$/i.exec(String(hex ?? "").trim());
+  if (!match) return "";
+  const value = parseInt(match[1], 16);
+  const keep = Math.max(0, Math.min(1, 1 - alpha));
+  const channel = (shift: number): string =>
+    Math.round(((value >> shift) & 255) * keep)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/**
  * 强调色变量。`--accent-soft` 在深色下更实一点、浅色下更淡一点，
  * 否则浅色主题里高亮块会显得脏。
  */

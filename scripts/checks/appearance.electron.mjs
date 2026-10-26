@@ -180,6 +180,28 @@ export async function checkAppearanceInElectron(win) {
   const others = JSON.parse(keptOthers);
   assert.ok(others.send && others.save && others.term !== undefined, "恢复默认外观不应清掉其它设置");
 
-  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, radius: round.radius, column: full.column, motion: still.motion }));
+  // 原生窗口按钮区（右上角最小化/最大化/关闭）盖不到弹窗遮罩，必须跟着压暗，
+  // 否则一开弹窗右上角就剩一条亮块。颜色由渲染进程算，这里验证状态切换。
+  const chrome = JSON.parse(await evaluate(`(async () => {
+    const api = window.__piDesktop;
+    const frame = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
+    api.settings.close();
+    await new Promise((r) => setTimeout(r, 600));
+    const closed = document.documentElement.dataset.winChrome ?? "";
+    api.settings.open("appearance");
+    await new Promise((r) => setTimeout(r, 700));
+    const opened = document.documentElement.dataset.winChrome ?? "";
+    const scrim = Boolean(document.querySelector(".settings-modal-position"));
+    api.settings.close();
+    await new Promise((r) => setTimeout(r, 700));
+    const reopened = document.documentElement.dataset.winChrome ?? "";
+    return JSON.stringify({ frame, closed, opened, reopened, scrim });
+  })()`));
+  assert.equal(chrome.scrim, true, "设置弹窗应处于打开状态才能验证遮罩");
+  assert.equal(chrome.closed, "plain", `没有弹窗时原生按钮区保持原色，实际 ${chrome.closed}`);
+  assert.equal(chrome.opened, "scrim", `打开弹窗后原生按钮区要跟着压暗，实际 ${chrome.opened}`);
+  assert.equal(chrome.reopened, "plain", `关闭弹窗后要恢复原色，实际 ${chrome.reopened}`);
+
+  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));
   return { controls, violet, round, full, still };
 }

@@ -13,6 +13,7 @@ import {
   normalizeThemeMode,
   radiusVars,
   resolveScheme,
+  dimmedColor,
   withAlpha,
 } from "../../packages/ui/src/shared/appearance.ts";
 
@@ -45,6 +46,13 @@ for (const preset of RADIUS_PRESETS) {
 for (const width of COLUMN_WIDTHS) {
   assert.match(width.max, /^(\d+px|100%)$/, `列宽 ${width.id} 取值不对：${width.max}`);
 }
+
+// dimmedColor：弹窗遮罩压暗（原生窗口按钮区要跟着遮罩一起变暗）
+assert.equal(dimmedColor("#e9eaee"), "#808183", "浅色标题栏压暗 45% 后应接近遮罩后的灰");
+assert.equal(dimmedColor("#000000"), "#000000", "纯黑压暗还是黑");
+assert.equal(dimmedColor("#ffffff", 0), "#ffffff", "alpha 为 0 表示不压暗");
+assert.equal(dimmedColor("#2a7deb", 0.45), dimmedColor("#2a7deb"), "默认 alpha 就是遮罩的 0.45");
+assert.equal(dimmedColor("not-a-color"), "", "非法颜色返回空串，调用方保留原色");
 
 // withAlpha：只接受 6 位十六进制
 assert.equal(withAlpha("#2a7deb", 0.16), "rgba(42, 125, 235, 0.16)");
