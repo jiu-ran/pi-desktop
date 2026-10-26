@@ -102,8 +102,6 @@ function resetAreaWidths(): void {
 </script>
 
 <template>
-
-<template>
     <div class="settings-group">
     <div class="settings-group-head">
       <span class="settings-group-title">主题</span>
@@ -426,5 +424,4 @@ class="settings-segment"
       />
     </div>
   </div>
-</template>
 </template>

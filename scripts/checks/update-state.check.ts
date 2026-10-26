@@ -49,7 +49,8 @@ console.log("update-state OK");
     /state\.appUpdate\.error = "";[\s\S]*?state\.appUpdate\.checkedAt = Date\.now\(\);/.test(workbench),
     "只有成功才更新 checkedAt",
   );
-  const settings = await readFile("packages/ui/src/components/overlays/SettingsModal.vue", "utf8");
+  // 状态文案拆到了「环境与快捷键」页（settings/EnvironmentSettings.vue）
+  const settings = await readFile("packages/ui/src/components/overlays/settings/EnvironmentSettings.vue", "utf8");
   assert.ok(
     /if \(state\.appUpdate\.error\) return \{ tone: "warn", label: "检查失败" \}/.test(settings),
     "状态文案要区分「检查失败」和「已是最新」",
