@@ -96,6 +96,25 @@ export async function checkQueueInElectron(win) {
   await evaluate("window.__piDesktop.workbench.setTheme('dark'); true");
   await wait(200);
 
+  // ---- 排队卡片的操作：标签就是「排队 / 引导」切换按钮，撤回按钮在右边 ----
+  // 行为（重新入队顺序 / 图片 / 失败还原）由内核级 scripts/checks/queue-mode.check.ts 覆盖，
+  // 这里只确认界面上点得到、语义对。
+  {
+    const cards = JSON.parse(await evaluate(`(() => JSON.stringify(
+      [...document.querySelectorAll('.queue-card')].map((n) => ({
+        tag: n.querySelector('.queue-card-tag')?.textContent.trim() ?? '',
+        tagKind: n.querySelector('.queue-card-tag')?.tagName ?? '',
+        label: n.querySelector('.queue-card-tag')?.getAttribute('aria-label') ?? '',
+        withdraw: n.querySelector('.queue-card-withdraw')?.textContent.trim() ?? '',
+      })),
+    ))()`));
+    assert.equal(cards.length, 2, `队列里的两条都应列出来，实际 ${cards.length}`);
+    assert.deepEqual(cards.map((item) => item.tag), ["排队", "排队"], `标签要写出当前投递方式：${JSON.stringify(cards)}`);
+    assert.ok(cards.every((item) => item.tagKind === "BUTTON"), "标签要能点（按钮），点一下换投递方式");
+    assert.match(cards[0].label, /改为引导/, `排队的提示要说清点了会变成引导：${cards[0].label}`);
+    assert.deepEqual(cards.map((item) => item.withdraw), ["撤回", "撤回"], "每条都要有撤回按钮");
+  }
+
   // ---- 编辑排队消息 ----
   // 真实编辑会调用 clearQueue / steer / followUp（可能真的开始一轮对话），
   // 这里只验证界面链路：把 editQueued 换成记录函数，断言参数正确。

@@ -5,7 +5,7 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { planQueueEdit, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt } from "../shared/queue-view.ts";
+import { planQueueEdit, planQueueMode, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt } from "../shared/queue-view.ts";
 import { rebuildPrompt } from "../shared/queue-prompt.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
@@ -1517,9 +1517,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 按原顺序重新入队、最后删掉这一条的乐观气泡。重新入队失败时把内容放回输入框，
    * 不能把用户排队的话弄丢。
    */
-  async function withdrawQueued(target: { mode: "steer" | "followUp"; text: string }): Promise<boolean> {
+  async function withdrawQueued(target: {
+    mode: "steer" | "followUp";
+    text: string;
+  }): Promise<{ ok: boolean; draft: string }> {
     const ws = active.value;
-    if (!ws || !target?.text) return false;
+    if (!ws || !target?.text) return { ok: false, draft: "" };
     const thread = ws.activeThread;
     const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
     const wanted = normalize(target.text);
@@ -1544,15 +1547,72 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         level: "error",
         text: `撤回失败，其余排队消息已保留：${error?.message ?? String(error)}`,
       });
-      return false;
+      return { ok: false, draft: "" };
     }
     applyQueue(thread, planned);
+    // 撤回 = 拿回来改：文字回填输入框（附件标记不进去，只回人写的那部分）
+    const draft = queueDraftText(target.text);
     for (const block of [...thread.blocks]) {
       if (block.kind !== "user") continue;
       if (normalize(block.queueText ?? "") !== wanted) continue;
       thread.transcript.removeBlock(block.id);
       break;
     }
+    return { ok: true, draft };
+  }
+
+  /**
+   * 换一条排队消息的投递方式（排队 ↔ 引导）。
+   *
+   * 和撤回 / 编辑同一套做法：Pi 只能整体 clearQueue，所以清空后按新分组重新入队。
+   * 顺序规则见 planQueueMode：目标列追加到末尾，多次改动不会打乱各自队列的先后。
+   * 改成「引导」会立刻插进正在进行的回合；改成「排队」则等这一轮结束再发——
+   * 这个时机由 Pi 的两条 RPC 决定，界面只负责把状态同步回来。
+   */
+  async function changeQueuedMode(
+    target: { mode: "steer" | "followUp"; text: string },
+    mode: "steer" | "followUp",
+  ): Promise<boolean> {
+    const ws = active.value;
+    if (!ws || !target?.text) return false;
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    // 书写顺序：气泡在时间线上的先后，就是用户写下它们的先后。
+    // 换成排队时要按这个顺序插回去，否则「先写的话」会排到「后写的话」后面发。
+    const rank = new Map<string, number>();
+    thread.blocks.forEach((block, index) => {
+      if (block.kind !== "user") return;
+      const key = normalize(block.queueText ?? "");
+      if (key && !rank.has(key)) rank.set(key, index);
+    });
+    const { queue: planned, changed } = planQueueMode(current, target, mode, rank);
+    if (!changed) {
+      // 队列里已经没有这条（比如刚被取走发出去）：把最新状态同步回来即可
+      applyQueue(thread, current);
+      return false;
+    }
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
+    try {
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+    } catch (error: any) {
+      applyQueue(thread, current);
+      bus.emit("notify", {
+        level: "error",
+        text: `改投递方式失败，队列已还原：${error?.message ?? String(error)}`,
+      });
+      return false;
+    }
+    applyQueue(thread, planned);
     return true;
   }
 
@@ -2222,6 +2282,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     addSessionAttachment,
     recallQueued,
     withdrawQueued,
+    changeQueuedMode,
     editQueued,
     stagePastedAttachment,
     previewSessionQuote,

@@ -197,17 +197,38 @@ function saveQuoteEditor(patch: { name: string; customText: string | null }): vo
   if (ok) closeQuoteEditor();
 }
 
-/** 撤回单条排队消息（不放进输入框，直接丢掉）。 */
+/** 撤回单条排队消息：从队列里拿掉，文字回填输入框（拿回来就是要改的）。 */
 async function withdrawQueued(item: { mode: "steer" | "followUp"; text: string }): Promise<void> {
   if (queueBusy.value) return;
   queueBusy.value = true;
   try {
-    const ok = await workbench.withdrawQueued({ mode: item.mode, text: item.text });
-    if (!ok) return;
+    const result = await workbench.withdrawQueued({ mode: item.mode, text: item.text });
+    if (!result.ok) return;
+    if (result.draft) {
+      draft.value = [draft.value, result.draft].filter(Boolean).join("\n");
+      nextTick(() => {
+        focus();
+        const area = document.querySelector<HTMLTextAreaElement>(".composer-input");
+        area?.setSelectionRange(area.value.length, area.value.length);
+      });
+    }
     // 正在编辑这条的话，把编辑框一起收起
     if (queueEdit.value && normalizePrompt(queueEdit.value.prompt) === normalizePrompt(item.text)) {
       closeQueueEdit();
     }
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
+}
+
+/** 换投递方式：排队 ↔ 引导（引导立刻插进当前回合，排队等这一轮结束）。 */
+async function switchQueuedMode(item: { mode: "steer" | "followUp"; text: string }, mode: "steer" | "followUp"): Promise<void> {
+  if (queueBusy.value || item.mode === mode) return;
+  queueBusy.value = true;
+  try {
+    await workbench.changeQueuedMode({ mode: item.mode, text: item.text }, mode);
   } catch (error) {
     notifyError(error);
   } finally {
@@ -1025,7 +1046,17 @@ const argHint = computed(() => {
             <span class="queue-dot" />
             待发送
           </span>
-          <span class="queue-card-tag">{{ item.mode === "steer" ? "插话" : "排队" }}</span>
+          <button
+            type="button"
+            class="queue-card-tag"
+            :class="{ clickable: true }"
+            :disabled="queueBusy"
+            :aria-label="item.mode === 'steer' ? '改为排队发送（等这一轮结束）' : '改为引导发送（立刻插入当前回合）'"
+            :title="item.mode === 'steer' ? '现在是引导：立刻插入当前回合。点击改成排队，等这一轮结束再发' : '现在是排队：等这一轮结束再发。点击改成引导，立刻插入当前回合'"
+            @click="switchQueuedMode(item, item.mode === 'steer' ? 'followUp' : 'steer')"
+          >
+            {{ item.mode === "steer" ? "引导" : "排队" }}
+          </button>
           <button
             type="button"
             class="queue-card-text"

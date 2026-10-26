@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   planQueueView,
+  planQueueMode,
   planQueueWithdraw,
   planQueuedFlush,
   queueImagesByPrompt,
@@ -263,6 +264,67 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   const crlf = planQueueWithdraw({ steering: [], followUp: ["第一行\r\n第二行"] }, { mode: "followUp", text: "第一行\n第二行" });
   assert.deepEqual(crlf.followUp, [], "CRLF 与 LF 视为同一条");
   console.log("queue withdraw OK 单条撤回 / 只删一条 / 找不到不动");
+}
+
+// ---------- 换投递方式：排队 ↔ 引导 ----------
+{
+  const queue = { steering: ["插话一"], followUp: ["排队一", "排队二"] };
+
+  // 排队 → 引导：从排队列去掉，追加到引导列末尾
+  const toSteer = planQueueMode(queue, { mode: "followUp", text: "排队二" }, "steer");
+  assert.equal(toSteer.changed, true);
+  assert.deepEqual(toSteer.queue.steering, ["插话一", "排队二"], "改引导要追加到引导列末尾");
+  assert.deepEqual(toSteer.queue.followUp, ["排队一"], "排队列要少一条");
+
+  // 引导 → 排队：同理
+  const toFollow = planQueueMode(queue, { mode: "steer", text: "插话一" }, "followUp");
+  assert.equal(toFollow.changed, true);
+  assert.deepEqual(toFollow.queue.steering, [], "引导列要少一条");
+  assert.deepEqual(toFollow.queue.followUp, ["排队一", "排队二", "插话一"], "改排队要追加到排队列末尾");
+
+  // 同类型原样返回（调用方据此跳过重新入队）
+  const same = planQueueMode(queue, { mode: "followUp", text: "排队一" }, "followUp");
+  assert.equal(same.changed, false, "类型没变就不用动队列");
+  assert.deepEqual(same.queue, queue, "类型没变时队列内容不变");
+
+  // 队列里已经没有这条（刚被取走）：不动，交给调用方同步状态
+  const gone = planQueueMode(queue, { mode: "steer", text: "不存在" }, "followUp");
+  assert.equal(gone.changed, false);
+  assert.deepEqual(gone.queue.followUp, ["排队一", "排队二"]);
+
+  // 不改原对象
+  assert.deepEqual(queue, { steering: ["插话一"], followUp: ["排队一", "排队二"] }, "纯函数不能改入参");
+
+  // 给了书写顺序：改成排队要插在「比自己晚写」的那条前面，不能一律排到末尾
+  {
+    const written = { steering: ["插话一"], followUp: ["排队一", "排队二"] };
+    // 用户书写顺序：插话一(0) → 排队一(1) → 排队二(2)
+    const rank = new Map([["插话一", 0], ["排队一", 1], ["排队二", 2]]);
+    const reordered = planQueueMode(written, { mode: "steer", text: "插话一" }, "followUp", rank);
+    assert.deepEqual(
+      reordered.queue.followUp,
+      ["插话一", "排队一", "排队二"],
+      `改成排队要按书写顺序插回去，实际 ${JSON.stringify(reordered.queue.followUp)}`,
+    );
+    // 反过来：排队二改成引导，它比排队一晚写，应当排在排队一后面
+    const queueToSteer = planQueueMode(
+      { steering: [], followUp: ["排队一", "排队二"] },
+      { mode: "followUp", text: "排队二" },
+      "steer",
+      new Map([["排队一", 1], ["排队二", 2]]),
+    );
+    assert.deepEqual(queueToSteer.queue.steering, ["排队二"], "改成引导时引导列只有它");
+    // 没有顺序信息的老队列：追加到末尾（行为可预期）
+    const noRank = planQueueMode(written, { mode: "steer", text: "插话一" }, "followUp");
+    assert.deepEqual(noRank.queue.followUp, ["排队一", "排队二", "插话一"], "没有顺序信息时追加到末尾");
+    console.log("queue mode order OK 按书写顺序插回 / 无顺序时追加");
+  }
+
+  // 连续改回来：先排队→引导，再引导→排队，回到原顺序（各自列内顺序稳定）
+  const round = planQueueMode(planQueueMode(queue, { mode: "followUp", text: "排队一" }, "steer").queue, { mode: "steer", text: "排队一" }, "followUp");
+  assert.deepEqual(round.queue.followUp, ["排队二", "排队一"], "来回切换不会丢消息，也不会重复");
+  assert.equal(round.queue.steering.length + round.queue.followUp.length, 3, "总条数不变");
+  console.log("queue mode OK 排队↔引导 / 列内顺序稳定 / 不改入参");
 }
 
 // ---------- 发出后把乐观气泡挪到末尾 ----------

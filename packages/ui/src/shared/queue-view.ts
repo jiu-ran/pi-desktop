@@ -129,6 +129,59 @@ export function planQueueWithdraw(queue: QueueState, target: QueuedEntry): Queue
 }
 
 /**
+ * 换投递方式：把一条排队消息从「排队」改成「引导」（或反过来）。
+ *
+ * 两列在 Pi 里是分开的队列，没有跨列顺序可依，所以规则固定成：
+ * 从原来那列去掉这条，追加到目标列**末尾**——多次改动也保持各自那一列原本的先后，
+ * 不会出现「改完类型顺序就乱了」。
+ * 同列（原地不动）直接原样返回，调用方可以据此跳过重新入队。
+ */
+export function planQueueMode(
+  queue: QueueState,
+  target: QueuedEntry,
+  mode: QueueMode,
+  /** 每条消息的书写顺序（越小越早）。给了就按它插回正确位置，不给就追加到末尾。 */
+  rank?: Map<string, number>,
+): { queue: QueueState; changed: boolean } {
+  const normalizeText = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const wanted = normalizeText(target.text);
+  const same = { steering: [...queue.steering], followUp: [...queue.followUp] };
+  if (target.mode === mode) return { queue: same, changed: false };
+
+  const drop = (list: string[]): { list: string[]; removed: boolean } => {
+    const index = list.findIndex((item) => normalizeText(item) === wanted);
+    if (index < 0) return { list: [...list], removed: false };
+    return { list: [...list.slice(0, index), ...list.slice(index + 1)], removed: true };
+  };
+
+  const source = target.mode === "steer" ? "steering" : "followUp";
+  const destination = mode === "steer" ? "steering" : "followUp";
+  const from = drop(queue[source]);
+  if (!from.removed) return { queue: same, changed: false };
+
+  // 插到目标列里「第一个比它晚写」的消息前面：改成排队时不会排到比它更早写的消息后面。
+  // 没有顺序信息（历史会话、别处塞进队列的消息）时按末尾处理，保持稳定。
+  const mine = rank?.get(normalizeText(target.text));
+  const insertInto = (list: string[]): string[] => {
+    if (mine === undefined) return [...list, target.text];
+    const index = list.findIndex((item) => {
+      const other = rank?.get(normalizeText(item));
+      return other !== undefined && other > mine;
+    });
+    if (index < 0) return [...list, target.text];
+    return [...list.slice(0, index), target.text, ...list.slice(index)];
+  };
+
+  return {
+    queue: {
+      steering: destination === "steering" ? insertInto(queue.steering) : from.list,
+      followUp: destination === "followUp" ? insertInto(queue.followUp) : from.list,
+    },
+    changed: true,
+  };
+}
+
+/**
  * 已经离开队列的乐观气泡要挪到时间线末尾。
  *
  * 排队期间这条气泡是隐藏的（内容在输入框上方），但它在 blocks 里的位置停在

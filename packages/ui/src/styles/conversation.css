@@ -1580,6 +1580,9 @@
 .queue-card-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
 .queue-card-tag {
   flex: none;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
   padding: 0 5px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -1590,6 +1593,9 @@
 .queue-card.steer .queue-card-tag {
   background: color-mix(in srgb, var(--warn, var(--accent)) 16%, transparent);
 }
+/* 标签就是「排队 / 引导」的切换按钮：悬停时提亮，点一下换投递方式 */
+.queue-card-tag:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.queue-card-tag:disabled { opacity: 0.6; cursor: default; }
 .queue-card-text {
   min-width: 0;
   flex: 1;
