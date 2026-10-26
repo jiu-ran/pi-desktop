@@ -9,6 +9,7 @@ import "./styles/base.css";
 import "./styles/shell.css";
 import "./styles/conversation.css";
 import "./styles/components.css";
+import "./styles/settings.css";
 
 const kernel = createKernel();
 
