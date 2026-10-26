@@ -4,7 +4,7 @@ import { StateEffect, StateField, type EditorState, type Range } from "@codemirr
 import type { SyntaxNode } from "@lezer/common";
 import { collectLiveSpans, type LiveSpan } from "./live-preview-rules.ts";
 import { anchorOf, isAnchorLink, normalizeAnchor } from "../../shared/relative-path.ts";
-import { CodeWidget, MermaidWidget, RuleWidget, SourceToggleWidget, TableWidget, codeBody, mermaidEnabled, type LiveBlockHost } from "./live-preview-blocks.ts";
+import { CodeWidget, MermaidWidget, RuleWidget, TableWidget, codeBody, mermaidEnabled, type LiveBlockHost } from "./live-preview-blocks.ts";
 
 /**
  * 把 markdown 源码渲染成「Typora / Obsidian 的实时预览」：
@@ -102,14 +102,13 @@ class ImageWidget extends WidgetType {
 function widgetFor(span: LiveSpan, from: number, to: number, text: string, options: LivePreviewOptions, host: LiveBlockHost): Decoration | null {
   if (span.block === "code") {
     const body = codeBody(text);
-    if (span.lang === "mermaid" && mermaidEnabled()) return Decoration.replace({ widget: new MermaidWidget(body, from, host), block: true });
+    if (span.lang === "mermaid" && mermaidEnabled()) return Decoration.replace({ widget: new MermaidWidget(from, to, text, host), block: true });
     return Decoration.replace({ widget: new CodeWidget(from, to, text, options.isDark?.() ?? true, host), block: true });
   }
   if (span.block === "table") return Decoration.replace({ widget: new TableWidget(from, to, text, host), block: true });
   if (span.block === "hr") return Decoration.replace({ widget: new RuleWidget(), block: true });
   if (span.widget === "bullet") return Decoration.replace({ widget: new BulletWidget() });
   if (span.widget === "image") return Decoration.replace({ widget: new ImageWidget(span.src, span.alt, options.resolveImage) });
-  if (span.widget === "source-toggle") return Decoration.widget({ widget: new SourceToggleWidget(from, host), side: -1 });
   return null;
 }
 
@@ -129,7 +128,6 @@ function buildDecorations(state: EditorState, options: LivePreviewOptions, host:
     },
     charAt: (pos) => (pos >= 0 && pos < doc.length ? doc.sliceString(pos, pos + 1) : ""),
     slice: (from, to) => doc.sliceString(from, to),
-    isSourceMode: (from) => host.isSourceMode(from),
   });
 
   const decorations: Range<Decoration>[] = [];
@@ -234,7 +232,16 @@ export function livePreview(options: LivePreviewOptions = {}) {
   const field = StateField.define<DecorationSet>({
     create: (state) => buildDecorations(state, options, host),
     update: (decorations, transaction) => {
-      if (transaction.docChanged) sourceMode.clear();
+      // 源码面板里的编辑也会改动文档：把「显示源码」的位置跟着映射过去，
+      // 否则改一个字面板就自己消失了（用户以为按钮坏了）。
+      if (transaction.docChanged) {
+        for (const [from, to] of [...sourceMode]) {
+          sourceMode.delete(from);
+          const nextFrom = transaction.changes.mapPos(from, -1);
+          const nextTo = Math.max(nextFrom, transaction.changes.mapPos(to, 1));
+          sourceMode.set(nextFrom, nextTo);
+        }
+      }
       const forced = transaction.effects.some((effect) => effect.is(refreshLivePreview));
       if (forced || transaction.docChanged || transaction.selection || syntaxTree(transaction.state) !== syntaxTree(transaction.startState)) {
         return buildDecorations(transaction.state, options, host);
@@ -274,28 +281,10 @@ export function livePreview(options: LivePreviewOptions = {}) {
     },
   });
 
-  // Esc：光标停在「源码态」的块里时，退回渲染态（源码态没有按钮可以点回去）
-  const escapeSource = keymap.of([
-    {
-      key: "Escape",
-      run: (view) => {
-        if (!sourceMode.size) return false;
-        const head = view.state.selection.main.head;
-        for (const [from, to] of sourceMode) {
-          if (head < from || head > to) continue;
-          sourceMode.delete(from);
-          view.dispatch({ effects: refreshLivePreview.of(null) });
-          return true;
-        }
-        return false;
-      },
-    },
-  ]);
-
   // widget 里编辑时要拿到视图来派发变更（toDOM 拿不到 view）
   const tracker = EditorView.updateListener.of((update) => {
     currentView = update.view;
   });
 
-  return [field, links, escapeSource, tracker];
+  return [field, links, tracker];
 }

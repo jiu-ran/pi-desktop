@@ -490,13 +490,6 @@
   padding: 0;
   color: var(--fg);
 }
-.md-live .cm-md-codelang {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--fg-dim);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
 /* 图片：解析出来之前占位，失败退回替代文字 */
 .md-live .cm-md-imagewrap {
   display: inline-block;
@@ -559,7 +552,6 @@
 }
 .md-live .cm-md-tablewrap {
   margin: 0.6em 0;
-  overflow-x: auto;
 }
 .md-live .cm-md-tablewrap table {
   border-collapse: collapse;
@@ -2867,15 +2859,34 @@ html[data-density="compact"] .tool-card {
 }
 
 /* ---------- 代码块 / 表格的就地编辑（Typora / Obsidian 观感） ---------- */
-.md-live .cm-md-codebar {
+/* 所有块共用一条头部：左边类型（js / 表格 / 图表 / 源码），右边操作按钮。
+   正常流、不绝对定位，永远不会盖住正文；按钮常驻但很淡，悬停变清楚。 */
+.md-live .cm-md-blockhead {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  min-height: 18px;
+  margin: 0 0 6px;
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 18px;
+}
+.md-live .cm-md-blocklabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-live .cm-md-blockactions {
+  display: flex;
+  flex: none;
+  gap: 2px;
 }
 .md-live .cm-md-blocktool {
   flex: none;
+  height: 18px;
   padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -2883,14 +2894,12 @@ html[data-density="compact"] .tool-card {
   color: var(--fg-3);
   font: inherit;
   font-size: 11px;
-  line-height: 18px;
+  line-height: 16px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms ease;
+  opacity: 0.72;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.md-live .cm-md-codeblock:hover .cm-md-blocktool,
-.md-live .cm-md-tablewrap:hover .cm-md-blocktool,
-.md-live .cm-md-mermaid:hover .cm-md-blocktool,
+.md-live .cm-md-blockhead:hover .cm-md-blocktool,
 .md-live .cm-md-blocktool:focus-visible {
   opacity: 1;
 }
@@ -2899,13 +2908,41 @@ html[data-density="compact"] .tool-card {
   background: var(--bg-2);
   color: var(--fg);
 }
-.md-live .cm-md-tabletools {
-  display: flex;
-  justify-content: flex-end;
-  height: 0;
+/* 复制成功：按钮自己给个短反馈 */
+.md-live .cm-md-blocktool[data-done="1"] {
+  color: var(--accent);
+  opacity: 1;
 }
-.md-live .cm-md-tabletools .cm-md-blocktool {
-  transform: translateY(-4px);
+/* 表格：头部在表格上方，表格自己横向滚动（不再用零高度 + 位移压住表头） */
+.md-live .cm-md-tablescroll {
+  overflow-x: auto;
+}
+/* 源码面板：和渲染结果同时显示 —— 上面是渲染结果，下面是 markdown 源码。
+   点头部「源码」把面板收起来，Esc 也能收起。 */
+.md-live .cm-md-sourcepane {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px dashed color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-0));
+  color: var(--fg-2);
+  font: 12px/1.65 var(--mono);
+  white-space: pre;
+  tab-size: 2;
+  outline: none;
+}
+.md-live .cm-md-sourcepane:focus {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+/* 面板打开时按钮显示为「已开启」 */
+.md-live .cm-md-blocktool[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  opacity: 1;
 }
 /* 代码正文可就地编辑：不再额外留边距，聚焦时只给一点底 */
 .md-live .cm-md-codeblock code {

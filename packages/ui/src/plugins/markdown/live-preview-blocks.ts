@@ -41,13 +41,16 @@ export class RuleWidget extends WidgetType {
   }
 }
 
-/** 小的「源码」开关（代码块 / 表格共用） */
-function sourceToggle(host: LiveBlockHost, from: number, label = "源码"): HTMLButtonElement {
+/** 小的「源码」开关（代码块 / 表格 / 图表共用） */
+function sourceToggle(host: LiveBlockHost, from: number): HTMLButtonElement {
+  const open = host.isSourceMode(from);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "cm-md-blocktool";
-  button.textContent = label;
-  button.title = "显示这段的 markdown 源码";
+  button.dataset.action = "source";
+  button.textContent = open ? "隐藏源码" : "源码";
+  button.title = open ? "收起下面的源码，只看渲染结果" : "在渲染结果下面同时显示 markdown 源码";
+  button.setAttribute("aria-pressed", open ? "true" : "false");
   // 别让点击冒泡到编辑器（否则会把光标塞进块里、又切回渲染态）
   button.addEventListener("mousedown", (event) => event.preventDefault());
   button.addEventListener("click", (event) => {
@@ -58,30 +61,101 @@ function sourceToggle(host: LiveBlockHost, from: number, label = "源码"): HTML
   return button;
 }
 
-/** 源码态下贴在块前的「渲染」按钮：点一下回到渲染结果 */
-export class SourceToggleWidget extends WidgetType {
-  readonly from: number;
-  readonly host: LiveBlockHost;
-  constructor(from: number, host: LiveBlockHost) {
-    super();
-    this.from = from;
-    this.host = host;
-  }
-  eq(): boolean {
-    return true;
-  }
-  toDOM(): HTMLElement {
+/**
+ * 源码面板：和渲染结果同时显示，改源码立刻反映到上面的渲染。
+ *
+ * 这里**不再**把整块换成 CodeMirror 的原始行：那样渲染结果会消失，
+ * 用户没法一边看结果一边改标记。面板内容是整块源码（含 ``` 围栏 / 表格竖线）。
+ */
+function sourcePane(dom: HTMLElement, source: string, onChange: (text: string) => void, onClose: () => void): HTMLElement {
+  const pane = document.createElement("pre");
+  pane.className = "cm-md-sourcepane";
+  pane.spellcheck = false;
+  pane.contentEditable = "plaintext-only";
+  pane.textContent = source;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = (): void => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    onChange(pane.textContent ?? "");
+  };
+  pane.addEventListener("input", () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      onChange(pane.textContent ?? "");
+    }, 160);
+  });
+  // 失焦前把最后一次输入派发出去（否则最后一个字可能没写回）
+  pane.addEventListener("blur", () => {
+    if (timer) flush();
+  });
+  pane.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    if (timer) flush();
+    onClose();
+  });
+  dom.appendChild(pane);
+  return pane;
+}
+
+/** 「复制」按钮：点一下把代码正文写进剪贴板，短暂显示「已复制」 */
+function copyButton(read: () => string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "cm-md-blocktool";
+  button.dataset.action = "copy";
+  button.textContent = "复制";
+  button.title = "复制这段正文";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const reset = (): void => {
+    button.dataset.done = "0";
+    button.textContent = "复制";
+  };
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const text = read();
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        button.dataset.done = "1";
+        button.textContent = "已复制";
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(reset, 1200);
+      },
+      () => {
+        button.textContent = "复制失败";
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(reset, 1500);
+      },
+    );
+  });
+  return button;
+}
+
+/**
+ * 每个块统一的头部：左边是类型标签（js / 表格 / 图表 / 源码），右边是操作按钮。
+ *
+ * 以前这些按钮是绝对定位浮在块上的（表格的「源码」压在表头上、
+ * 源码态的「渲染」另起一行），看起来乱。现在所有块都用同一条正常流的头部，
+ * 永远不会盖住正文，位置也对得上。
+ */
+function blockHead(labelText: string, actions: HTMLElement[]): HTMLElement {
+  const head = document.createElement("div");
+  head.className = "cm-md-blockhead";
+  const label = document.createElement("span");
+  label.className = "cm-md-blocklabel";
+  label.textContent = labelText;
+  head.appendChild(label);
+  if (actions.length) {
     const box = document.createElement("span");
-    box.className = "cm-md-sourcebar";
-    box.appendChild(sourceToggle(this.host, this.from, "渲染"));
-    // 默认可见：源码态没有别的入口能回去
-    const button = box.firstElementChild as HTMLElement | null;
-    if (button) button.style.opacity = "1";
-    return box;
+    box.className = "cm-md-blockactions";
+    for (const action of actions) box.appendChild(action);
+    head.appendChild(box);
   }
-  ignoreEvent(): boolean {
-    return false;
-  }
+  return head;
 }
 
 /** 代码块：渲染成带语言标签的代码面板，正文可以直接编辑 */
@@ -91,6 +165,8 @@ export class CodeWidget extends WidgetType {
   readonly source: string;
   readonly dark: boolean;
   readonly host: LiveBlockHost;
+  /** 构造时「源码面板」是否打开：eq 据此判断要不要重建 DOM */
+  readonly paneOpen: boolean;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private paintToken = 0;
 
@@ -101,11 +177,13 @@ export class CodeWidget extends WidgetType {
     this.source = source;
     this.dark = dark;
     this.host = host;
+    this.paneOpen = host.isSourceMode(from);
   }
 
-  eq(): boolean {
-    // 始终复用同一个 DOM：编辑过程中重建节点会丢焦点与选中的文字
-    return true;
+  eq(other: CodeWidget): boolean {
+    // 面板开关变了必须重建（CodeMirror 认为 widget 相同时不会调 updateDOM）；
+    // 其余情况一律复用同一个 DOM：编辑过程中重建节点会丢焦点与选中的文字
+    return other.paneOpen === this.paneOpen;
   }
 
   toDOM(): HTMLElement {
@@ -118,6 +196,9 @@ export class CodeWidget extends WidgetType {
 
   updateDOM(dom: HTMLElement): boolean {
     (dom as unknown as { __piCode: CodeWidget }).__piCode = this;
+    // 面板开关变了交给 CodeMirror 重建 DOM（返回 false = 我没法原地更新）：
+    // 原地重绘容易和「正在编辑」的旧节点打架，直接重建最稳。
+    if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
     if (isEditing(dom)) return true;
     this.paint(dom);
     return true;
@@ -130,33 +211,46 @@ export class CodeWidget extends WidgetType {
 
   private paint(dom: HTMLElement): void {
     const parts = codeFenceParts(this.source);
+    const showSource = this.paneOpen;
+    dom.dataset.sourcePane = showSource ? "1" : "0";
     dom.textContent = "";
-    const bar = document.createElement("div");
-    bar.className = "cm-md-codebar";
-    const label = document.createElement("span");
-    label.className = "cm-md-codelang";
-    label.textContent = parts.lang || "代码";
-    bar.appendChild(label);
-    bar.appendChild(sourceToggle(this.host, this.from));
-    dom.appendChild(bar);
+    // 复制的是当前可见的正文（编辑中的临时纯文本也算），读不到时退回 widget 里的源码
+    const readCode = (): string => dom.querySelector("code")?.textContent ?? codeFenceParts(this.source).body;
+    dom.appendChild(blockHead(parts.lang || "代码", [
+      copyButton(readCode),
+      sourceToggle(this.host, this.from),
+    ]));
 
     const pre = document.createElement("pre");
     const code = document.createElement("code");
     code.textContent = parts.body;
     code.spellcheck = false;
-    code.contentEditable = "plaintext-only";
+    // 源码面板打开时正文只读：两处同时可编辑会互相覆盖
+    code.contentEditable = showSource ? "false" : "plaintext-only";
     code.dataset.editing = "0";
     code.addEventListener("focus", () => {
+      if (code.contentEditable === "false") return;
       code.dataset.editing = "1";
       code.textContent = parts.body;
     });
     code.addEventListener("input", () => this.scheduleSync(dom, code));
     code.addEventListener("blur", () => {
+      if (code.dataset.editing !== "1") return;
       code.dataset.editing = "0";
       this.paint(dom);
     });
     pre.appendChild(code);
     dom.appendChild(pre);
+
+    // 源码面板：渲染结果保留在上面，源码贴在下面，两边同时可见
+    if (showSource) {
+      sourcePane(
+        dom,
+        this.source,
+        (text) => this.host.onEditBlock(this.from, this.to, text),
+        () => this.host.onToggleSource(this.from),
+      );
+    }
 
     // 高亮：先给纯文本，算好再填色，避免整块闪一下空白
     const token = ++this.paintToken;
@@ -205,6 +299,8 @@ export class TableWidget extends WidgetType {
   readonly to: number;
   readonly source: string;
   readonly host: LiveBlockHost;
+  /** 构造时「源码面板」是否打开：eq 据此判断要不要重建 DOM */
+  readonly paneOpen: boolean;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(from: number, to: number, source: string, host: LiveBlockHost) {
@@ -213,10 +309,12 @@ export class TableWidget extends WidgetType {
     this.to = to;
     this.source = source;
     this.host = host;
+    this.paneOpen = host.isSourceMode(from);
   }
 
-  eq(): boolean {
-    return true;
+  eq(other: TableWidget): boolean {
+    // 面板开关变了要重建；其余情况复用 DOM，避免丢输入焦点
+    return other.paneOpen === this.paneOpen;
   }
 
   toDOM(): HTMLElement {
@@ -229,6 +327,8 @@ export class TableWidget extends WidgetType {
 
   updateDOM(dom: HTMLElement): boolean {
     (dom as unknown as { __piTable: TableWidget }).__piTable = this;
+    // 同上：面板开关变了让 CodeMirror 重建，其余情况编辑中保持 DOM
+    if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
     if (isEditing(dom)) return true;
     this.paint(dom);
     return true;
@@ -240,6 +340,8 @@ export class TableWidget extends WidgetType {
   }
 
   private paint(dom: HTMLElement): void {
+    const showSource = this.paneOpen;
+    dom.dataset.sourcePane = showSource ? "1" : "0";
     dom.textContent = "";
     const table = parseMarkdownTable(this.source);
     if (!table) {
@@ -248,17 +350,16 @@ export class TableWidget extends WidgetType {
       dom.appendChild(pre);
       return;
     }
-    const tools = document.createElement("div");
-    tools.className = "cm-md-tabletools";
-    tools.appendChild(sourceToggle(this.host, this.from));
-    dom.appendChild(tools);
+    dom.appendChild(blockHead("表格", [copyButton(() => this.source), sourceToggle(this.host, this.from)]));
 
+    const scroller = document.createElement("div");
+    scroller.className = "cm-md-tablescroll";
     const el = document.createElement("table");
     const head = document.createElement("thead");
     const headRow = document.createElement("tr");
     table.header.forEach((cell, col) => {
       const th = document.createElement("th");
-      this.fillCell(th, -1, col, cell);
+      this.fillCell(th, -1, col, cell, !showSource);
       headRow.appendChild(th);
     });
     head.appendChild(headRow);
@@ -268,28 +369,47 @@ export class TableWidget extends WidgetType {
       const tr = document.createElement("tr");
       row.forEach((cell, col) => {
         const td = document.createElement("td");
-        this.fillCell(td, index, col, cell);
+        this.fillCell(td, index, col, cell, !showSource);
         tr.appendChild(td);
       });
       body.appendChild(tr);
     });
     el.appendChild(body);
-    dom.appendChild(el);
+    scroller.appendChild(el);
+    dom.appendChild(scroller);
+
+    // 源码面板：表格在上面、源码在下面，同时可见
+    if (showSource) {
+      sourcePane(
+        dom,
+        this.source,
+        (text) => this.host.onEditBlock(this.from, this.to, text),
+        () => this.host.onToggleSource(this.from),
+      );
+    }
   }
 
-  private fillCell(cell: HTMLElement, row: number, col: number, value: string): void {
-    cell.contentEditable = "plaintext-only";
+  private fillCell(cell: HTMLElement, row: number, col: number, value: string, editable = true): void {
+    // 源码面板打开时单元格只读：两处同时能改会互相覆盖
+    if (editable) cell.contentEditable = "plaintext-only";
+    else cell.contentEditable = "false";
     cell.spellcheck = false;
     cell.dataset.row = String(row);
     cell.dataset.col = String(col);
     cell.dataset.raw = value;
+    // "1" = 当前显示的是 markdown 源码（正在编辑），"0" = 显示渲染结果
+    cell.dataset.source = "0";
     // 单元格里的 **加粗**、`代码`、[链接] 要显示成渲染结果，不能把标记原样露出来
     cell.innerHTML = renderInlineMarkdown(value, { codeClass: "cm-md-inlinecode" });
+    if (!editable) return;
     cell.addEventListener("input", () => {
       // 编辑期间 DOM 是纯文本（plaintext-only），把用户敲的 markdown 记到 raw 上
       cell.dataset.raw = cell.textContent ?? "";
       this.scheduleSync(cell);
     });
+    // 聚焦后补一次点击兜底：已经聚焦过的单元格再点不会有 focus 事件，
+    // 那时内容已经是源码，showSource 是空操作（不会打乱光标）
+    cell.addEventListener("click", () => this.showSource(cell));
     cell.addEventListener("focus", () => this.showSource(cell));
     cell.addEventListener("blur", () => this.showRendered(cell));
     cell.addEventListener("keydown", (event) => this.onCellKey(event, cell));
@@ -298,13 +418,20 @@ export class TableWidget extends WidgetType {
   /** 聚焦时露出 markdown 源码：要改的是标记本身，不是加粗后的文字 */
   private showSource(cell: HTMLElement): void {
     const raw = cell.dataset.raw ?? "";
+    cell.dataset.source = "1";
     if ((cell.textContent ?? "") !== raw) cell.textContent = raw;
   }
 
-  /** 失焦后重新渲染；同时把 DOM 里的纯文本同步回 raw */
+  /**
+   * 失焦后重新渲染。
+   *
+   * 只有确实处于「源码态」时才把 DOM 文本写回 raw —— 否则（重绘后失焦、
+   * 程序化 blur 等）会把渲染结果当成源码写回去，`**加粗**` 的标记就丢了。
+   */
   private showRendered(cell: HTMLElement): void {
-    const raw = cell.textContent ?? "";
-    cell.dataset.raw = raw;
+    if (cell.dataset.source === "1") cell.dataset.raw = cell.textContent ?? "";
+    cell.dataset.source = "0";
+    const raw = cell.dataset.raw ?? "";
     const html = renderInlineMarkdown(raw, { codeClass: "cm-md-inlinecode" });
     if (cell.innerHTML !== html) cell.innerHTML = html;
   }
@@ -361,6 +488,7 @@ async function renderMermaid(code: string, host: HTMLElement): Promise<void> {
     const id = `cm-mermaid-${(mermaidSerial += 1)}`;
     const { svg } = await mermaid.render(id, code);
     if (!host.isConnected) return;
+    // 只替换图表这块内容：widget 的头部与源码面板要留着
     host.innerHTML = svg;
     host.dataset.state = "ready";
   } catch (error) {
@@ -375,36 +503,58 @@ async function renderMermaid(code: string, host: HTMLElement): Promise<void> {
 
 /** mermaid 图：光标不在代码块里时直接渲染成图，右上角可以切回源码 */
 export class MermaidWidget extends WidgetType {
-  readonly code: string;
   readonly from: number;
+  readonly to: number;
+  /** 整块源码（含 ``` 围栏）：源码面板要原样显示/写回 */
+  readonly source: string;
   readonly host: LiveBlockHost;
-  constructor(code: string, from: number, host: LiveBlockHost) {
+  readonly paneOpen: boolean;
+  constructor(from: number, to: number, source: string, host: LiveBlockHost) {
     super();
-    this.code = code;
     this.from = from;
+    this.to = to;
+    this.source = source;
     this.host = host;
+    this.paneOpen = host.isSourceMode(from);
   }
-  eq(): boolean {
-    return true;
+  eq(other: MermaidWidget): boolean {
+    // 面板开关变了要重建，其余复用（避免重新渲染图表）
+    return other.paneOpen === this.paneOpen;
+  }
+  private code(): string {
+    return codeFenceParts(this.source).body;
   }
   toDOM(): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "cm-md-mermaid";
     (wrap as unknown as { __piMermaid: MermaidWidget }).__piMermaid = this;
-    const tools = document.createElement("div");
-    tools.className = "cm-md-tabletools";
-    tools.appendChild(sourceToggle(this.host, this.from));
-    wrap.appendChild(tools);
-    const body = document.createElement("pre");
-    body.className = "cm-md-mermaid-source";
-    body.textContent = this.code;
-    wrap.appendChild(body);
-    void renderMermaid(this.code, wrap);
+    this.paint(wrap);
     return wrap;
   }
   updateDOM(dom: HTMLElement): boolean {
     (dom as unknown as { __piMermaid: MermaidWidget }).__piMermaid = this;
+    if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
+    if (isEditing(dom)) return true;
+    this.paint(dom);
     return true;
+  }
+  private paint(wrap: HTMLElement): void {
+    const showSource = this.paneOpen;
+    wrap.dataset.sourcePane = showSource ? "1" : "0";
+    wrap.textContent = "";
+    wrap.appendChild(blockHead("图表", [sourceToggle(this.host, this.from)]));
+    const canvas = document.createElement("div");
+    canvas.className = "cm-md-mermaid-canvas";
+    wrap.appendChild(canvas);
+    void renderMermaid(this.code(), canvas);
+    if (showSource) {
+      sourcePane(
+        wrap,
+        this.source,
+        (text) => this.host.onEditBlock(this.from, this.to, text),
+        () => this.host.onToggleSource(this.from),
+      );
+    }
   }
   ignoreEvent(): boolean {
     return false;

@@ -8,7 +8,7 @@ import { collectLiveSpans, type LiveRulesContext, type LiveSpan } from "../../pa
  */
 const md = parser.configure(GFM);
 
-function spansFor(doc: string, activeLine = -1, sourceModeAt = -1): LiveSpan[] {
+function spansFor(doc: string, activeLine = -1): LiveSpan[] {
   const lines = doc.split("\n");
   const lineStarts: number[] = [];
   let offset = 0;
@@ -31,7 +31,6 @@ function spansFor(doc: string, activeLine = -1, sourceModeAt = -1): LiveSpan[] {
     lineAt,
     charAt: (pos) => (pos >= 0 && pos < doc.length ? doc[pos] : ""),
     slice: (from, to) => doc.slice(from, to),
-    isSourceMode: (from) => from === sourceModeAt,
   };
   return collectLiveSpans(md.parse(doc), ctx);
 }
@@ -107,11 +106,11 @@ const lineClasses = (spans: LiveSpan[]) => spans.filter((span) => span.line).map
   const inTable = spansFor(doc, 5);
   assert.deepEqual(blocks(inTable), ["code", "table", "hr"], "光标在表格里也要保持块级渲染");
 
-  // 只有显式切到「源码」的块才显示围栏 / 竖线
+  // 打开「源码」时渲染结果不消失：仍然是同一个 block widget，源码面板由 widget 自己画
   const codeStart = doc.indexOf("```");
-  const raw = spansFor(doc, 1, codeStart);
-  assert.deepEqual(blocks(raw), ["table", "hr"], "源码态下代码块不再用 widget");
-  assert.ok(lineClasses(raw).includes("cm-md-coderaw"), "源码态显示围栏");
+  const withPane = spansFor(doc, 1);
+  assert.deepEqual(blocks(withPane), ["code", "table", "hr"], "打开源码面板后仍要保留渲染结果");
+  assert.equal(lineClasses(withPane).includes("cm-md-coderaw"), false, "不再把整块换成原始行");
 }
 
 // 引用块：每行都带竖线样式，`>` 收起

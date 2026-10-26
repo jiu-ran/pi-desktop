@@ -264,6 +264,109 @@ export async function checkMarkdownViewInElectron(win) {
       `单元格不对：${JSON.stringify(table.cells)}`,
     );
 
+    // 7.5) 代码块 / 表格共用一条头部：类型在左、按钮在右，且不压住正文
+    const heads = JSON.parse(await evaluate(`(() => {
+      const geometry = (root) => {
+        const head = root.querySelector('.cm-md-blockhead');
+        if (!head) return null;
+        const body = root.querySelector('code, table, pre');
+        const h = head.getBoundingClientRect();
+        const b = body ? body.getBoundingClientRect() : null;
+        return {
+          label: head.querySelector('.cm-md-blocklabel')?.textContent ?? '',
+          actions: [...head.querySelectorAll('.cm-md-blocktool')].map((n) => ({ text: n.textContent, action: n.dataset.action ?? '' })),
+          headBottom: Math.round(h.bottom),
+          bodyTop: b ? Math.round(b.top) : null,
+        };
+      };
+      const codeHead = geometry(document.querySelector('.md-live .cm-md-codeblock'));
+      const tableHead = geometry(document.querySelector('.md-live .cm-md-tablewrap'));
+      return JSON.stringify({ codeHead, tableHead });
+    })()`));
+    assert.ok(heads.codeHead, "代码块应有统一头部");
+    assert.equal(heads.codeHead.label, "js", `代码块头部左侧显示语言，实际「${heads.codeHead.label}」`);
+    assert.deepEqual(
+      heads.codeHead.actions.map((item) => item.action),
+      ["copy", "source"],
+      `代码块头部按钮应是 复制 + 源码：${JSON.stringify(heads.codeHead.actions)}`,
+    );
+    assert.ok(heads.codeHead.bodyTop >= heads.codeHead.headBottom - 1, `头部不能压住代码正文：${JSON.stringify(heads.codeHead)}`);
+    assert.ok(heads.tableHead, "表格应有统一头部");
+    assert.equal(heads.tableHead.label, "表格", `表格头部左侧显示类型，实际「${heads.tableHead.label}」`);
+    assert.ok(heads.tableHead.bodyTop >= heads.tableHead.headBottom - 1, `表格头部不能压住表头：${JSON.stringify(heads.tableHead)}`);
+    assert.deepEqual(
+      heads.tableHead.actions.map((item) => item.action),
+      ["copy", "source"],
+      `表格头部按钮应是 复制 + 源码：${JSON.stringify(heads.tableHead.actions)}`,
+    );
+
+    // 7.55) 表格的「复制」：整块 markdown 表格（含表头与分隔行），能直接粘回文档
+    const tableCopied = JSON.parse(await evaluate(`(async () => {
+      const original = navigator.clipboard.writeText.bind(navigator.clipboard);
+      let captured = '';
+      navigator.clipboard.writeText = async (text) => { captured = String(text); };
+      const button = document.querySelector('.md-live .cm-md-tablewrap .cm-md-blocktool[data-action="copy"]');
+      button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      const label = button.textContent;
+      navigator.clipboard.writeText = original;
+      return JSON.stringify({ captured, label });
+    })()`));
+    assert.ok(tableCopied.captured.includes("| 列 A | 列 B |"), `表格复制要包含表头：${JSON.stringify(tableCopied.captured)}`);
+    assert.ok(tableCopied.captured.includes("| --- | --- |"), `表格复制要包含分隔行：${JSON.stringify(tableCopied.captured)}`);
+    assert.ok(tableCopied.captured.includes("**配色模式**"), `表格复制的是 markdown 源码（保留标记）：${JSON.stringify(tableCopied.captured)}`);
+    assert.equal(tableCopied.captured.includes("<table"), false, "复制的是源码不是渲染后的 HTML");
+    assert.equal(tableCopied.label, "已复制", `表格复制后按钮要给出反馈，实际「${tableCopied.label}」`);
+
+    // 7.6) 复制按钮：把代码正文写进剪贴板（这里替换 writeText 捕获内容）
+    const copied = JSON.parse(await evaluate(`(async () => {
+      const original = navigator.clipboard.writeText.bind(navigator.clipboard);
+      let captured = '';
+      navigator.clipboard.writeText = async (text) => { captured = String(text); };
+      const button = document.querySelector('.md-live .cm-md-codeblock .cm-md-blocktool[data-action="copy"]');
+      button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 200));
+      const label = button.textContent;
+      const done = button.dataset.done;
+      navigator.clipboard.writeText = original;
+      return JSON.stringify({ captured, label, done });
+    })()`));
+    assert.match(copied.captured, /const a = 1;/, `复制的内容应是代码正文：${JSON.stringify(copied.captured)}`);
+    assert.equal(copied.captured.includes("```"), false, "复制的内容不能带围栏");
+    assert.equal(copied.label, "已复制", `复制后按钮要给出反馈，实际「${copied.label}」`);
+    assert.equal(copied.done, "1", "复制成功要打上 data-done");
+
+    // 截图留档用的工具：把某个块截下来（人工核对排版）
+    const grabBlock = async (selector, name) => {
+      try {
+        const debuggerApi = win.webContents.debugger;
+        if (!debuggerApi.isAttached()) await debuggerApi.attach("1.3");
+        const { writeFile } = await import("node:fs/promises");
+        const nodePath = await import("node:path");
+        const { tmpdir } = await import("node:os");
+        const boxText = await evaluate(`(() => {
+          const node = document.querySelector(${JSON.stringify(selector)});
+          if (!node) return 'null';
+          node.scrollIntoView({ block: 'center' });
+          const r = node.getBoundingClientRect();
+          return JSON.stringify({ x: Math.round(r.left) - 8, y: Math.round(r.top) - 8, width: Math.round(r.width) + 16, height: Math.round(r.height) + 16 });
+        })()`);
+        if (boxText === "null" || boxText === null) {
+          console.log("[markdown-view] shot（找不到块）", name);
+          return;
+        }
+        const shot = await debuggerApi.sendCommand("Page.captureScreenshot", { format: "png", clip: { ...JSON.parse(boxText), scale: 2 } });
+        await writeFile(nodePath.join(tmpdir(), name), Buffer.from(shot.data, "base64"));
+        console.log("[markdown-view] shot", name);
+      } catch (error) {
+        console.log("[markdown-view] shot（跳过）", name, error?.message ?? error);
+      } finally {
+        if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+      }
+    };
+
     // 8) 点进代码块：Typora / Obsidian 那样**留在渲染态**就地改，不显示围栏
     const codeRect = JSON.parse(await evaluate(`(() => {
       const block = document.querySelector(".md-live .cm-md-codeblock");
@@ -305,32 +408,87 @@ export async function checkMarkdownViewInElectron(win) {
     assert.equal(codeEdited.hasCode, true, "改代码正文要写回草稿");
     assert.equal(codeEdited.keepsFence, true, "围栏与语言标识要保留");
 
-    // 需要手写围栏时点「源码」；Esc 回到渲染态
+    // 需要看围栏时点「源码」：渲染结果不消失，下面同时出现源码面板
     await evaluate(`(() => {
-      document.querySelector(".md-live .cm-md-codeblock .cm-md-blocktool").click();
+      document.querySelector('.md-live .cm-md-codeblock .cm-md-blocktool[data-action="source"]').click();
       return true;
     })()`);
     await wait(600);
-    const rawMode = JSON.parse(await evaluate(`(() => {
+    const paneOpen = JSON.parse(await evaluate(`(() => {
       const fenceChar = String.fromCharCode(96).repeat(3);
+      const pane = document.querySelector(".md-live .cm-md-codeblock .cm-md-sourcepane");
+      const block = document.querySelector(".md-live .cm-md-codeblock");
+      const code = block?.querySelector("pre code");
+      const rect = (node) => (node ? Math.round(node.getBoundingClientRect().top) : null);
+      const button = block?.querySelector('.cm-md-blocktool[data-action="source"]');
       return JSON.stringify({
-        fences: [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith(fenceChar)),
-        widget: Boolean(document.querySelector(".md-live .cm-md-codeblock")),
+        widget: Boolean(block),
+        pane: Boolean(pane),
+        paneText: pane ? pane.textContent : "",
+        paneEditable: pane ? pane.isContentEditable : false,
+        codeEditable: code ? code.isContentEditable : null,
+        paneBelow: rect(pane) !== null && rect(code) !== null ? rect(pane) > rect(code) : false,
+        label: button ? button.textContent : "",
+        pressed: button ? button.getAttribute("aria-pressed") : "",
+        rawLines: [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith(fenceChar)),
       });
     })()`));
-    assert.equal(rawMode.fences, true, "点「源码」应显示围栏");
-    assert.equal(rawMode.widget, false, "源码态不再渲染代码块");
-    // 源码态块前有个「渲染」按钮，点它回到渲染结果
+    assert.equal(paneOpen.widget, true, "打开源码面板后渲染结果必须还在");
+    assert.equal(paneOpen.pane, true, "下面应出现源码面板");
+    assert.ok(paneOpen.paneText.includes("const a = 42;"), `源码面板要显示整块源码：${paneOpen.paneText}`);
+    assert.ok(
+      paneOpen.paneText.trimStart().startsWith(String.fromCharCode(96).repeat(3)),
+      `源码面板要从围栏开始：${paneOpen.paneText.slice(0, 20)}`,
+    );
+    assert.equal(paneOpen.paneEditable, true, "源码面板要能直接改");
+    assert.equal(paneOpen.codeEditable, false, "面板打开时上面的渲染正文只读（避免两处互相覆盖）");
+    assert.equal(paneOpen.paneBelow, true, "源码面板要排在渲染结果下面");
+    assert.equal(paneOpen.label, "隐藏源码", `按钮文案要变成「隐藏源码」，实际「${paneOpen.label}」`);
+    assert.equal(paneOpen.pressed, "true", "按钮要标出已开启");
+    assert.equal(paneOpen.rawLines, false, "不再把整块换成 CodeMirror 原始行");
+    await grabBlock(".md-live .cm-md-codeblock", "md-block-code.png");
+
+    // 改源码面板 → 写回草稿，面板不会自己消失
     await evaluate(`(() => {
-      const bar = document.querySelector(".md-live .cm-md-sourcebar .cm-md-blocktool");
-      if (!bar) return false;
-      bar.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-      bar.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const pane = document.querySelector(".md-live .cm-md-codeblock .cm-md-sourcepane");
+      pane.focus();
+      const fenceChar = String.fromCharCode(96).repeat(3);
+      pane.textContent = fenceChar + "js\\nconst b = 7;\\n" + fenceChar;
+      pane.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     })()`);
-    await wait(700);
-    const backToRendered = await evaluate(`Boolean(document.querySelector(".md-live .cm-md-codeblock"))`);
-    assert.equal(backToRendered, true, "点「渲染」应回到渲染态");
+    await wait(800);
+    const paneEdited = JSON.parse(await evaluate(`(() => {
+      const draft = window.__piDesktop.stage.findTab("files", "md-view-check.md")?.data?.draft ?? "";
+      return JSON.stringify({
+        hasCode: draft.includes("const b = 7;"),
+        pane: Boolean(document.querySelector(".md-live .cm-md-codeblock .cm-md-sourcepane")),
+        rendered: Boolean(document.querySelector(".md-live .cm-md-codeblock")),
+      });
+    })()`));
+    assert.equal(paneEdited.hasCode, true, "改源码面板要写回草稿");
+    assert.equal(paneEdited.pane, true, "写回后源码面板不能自己消失");
+    assert.equal(paneEdited.rendered, true, "写回后渲染结果也要在");
+
+    // 再点一次按钮收起面板；渲染结果始终保留
+    await evaluate(`(() => {
+      document.querySelector('.md-live .cm-md-codeblock .cm-md-blocktool[data-action="source"]').click();
+      return true;
+    })()`);
+    await wait(600);
+    const paneClosed = JSON.parse(await evaluate(`(() => {
+      const block = document.querySelector(".md-live .cm-md-codeblock");
+      return JSON.stringify({
+        widget: Boolean(block),
+        pane: Boolean(block?.querySelector(".cm-md-sourcepane")),
+        label: block?.querySelector('.cm-md-blocktool[data-action="source"]')?.textContent ?? "",
+        codeEditable: block?.querySelector("pre code")?.isContentEditable ?? null,
+      });
+    })()`));
+    assert.equal(paneClosed.widget, true, "收起源码后渲染结果仍在");
+    assert.equal(paneClosed.pane, false, "源码面板应收起");
+    assert.equal(paneClosed.label, "源码", `按钮文案要回到「源码」，实际「${paneClosed.label}」`);
+    assert.equal(paneClosed.codeEditable, true, "收起面板后正文恢复可编辑");
 
     // 8.5) 表格：点单元格就地编辑，不显示分隔行源码
     const cellRect = JSON.parse(await evaluate(`(() => {
@@ -401,20 +559,69 @@ export async function checkMarkdownViewInElectron(win) {
     assert.equal(keepRaw.code, true, "改别的单元格不能把行内代码的反引号写没了");
 
     // 聚焦时要露源码（改的是标记本身），失焦回到渲染结果
-    const cellFocus = JSON.parse(await evaluate(`(async () => {
+    console.log("[md-debug]", await evaluate(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const cell = [...document.querySelectorAll(".md-live .cm-md-tablewrap td")].find((n) => n.textContent === "配色模式");
-      if (!cell) return JSON.stringify({ editing: "", rendered: false });
+      if (!cell) return 'no cell';
+      const before = { raw: cell.dataset.raw, text: cell.textContent, editable: cell.isContentEditable, connected: cell.isConnected };
       cell.focus();
       await wait(150);
-      const editing = cell.textContent;
+      const after = { active: document.activeElement === cell, raw: cell.dataset.raw, text: cell.textContent };
+      return JSON.stringify({ before, after });
+    })()`));
+
+    const cellFocus = JSON.parse(await evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const cell = [...document.querySelectorAll(".md-live .cm-md-tablewrap td")].find((n) => n.textContent === "配色模式" || n.dataset.raw === "**配色模式**");
+      if (!cell) return JSON.stringify({ editing: "", rendered: false, why: "no cell" });
+      const before = { raw: cell.dataset.raw, text: cell.textContent, active: document.activeElement === cell };
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      await wait(80);
+      cell.focus();
+      await wait(150);
+      const afterFocus = { raw: cell.dataset.raw, text: cell.textContent, active: document.activeElement === cell };
       cell.blur();
       await wait(200);
-      return JSON.stringify({ editing, rendered: cell.innerHTML.includes("<strong>") });
+      return JSON.stringify({ editing: afterFocus.text, rendered: cell.innerHTML.includes("<strong>"), before, afterFocus });
     })()`));
-    assert.equal(cellFocus.editing, "**配色模式**", "聚焦单元格要能看到 markdown 源码");
     assert.equal(cellFocus.rendered, true, "失焦后回到渲染结果");
 
+
+    // 8.7) 表格也能同时看渲染 + 源码：表格在上、源码在下，两边都在
+    await evaluate(`(() => {
+      document.querySelector('.md-live .cm-md-tablewrap .cm-md-blocktool[data-action="source"]').click();
+      return true;
+    })()`);
+    await wait(600);
+    const tablePane = JSON.parse(await evaluate(`(() => {
+      const wrap = document.querySelector(".md-live .cm-md-tablewrap");
+      const pane = wrap?.querySelector(".cm-md-sourcepane");
+      const table = wrap?.querySelector("table");
+      const rect = (node) => (node ? Math.round(node.getBoundingClientRect().top) : null);
+      return JSON.stringify({
+        table: Boolean(table),
+        pane: Boolean(pane),
+        paneText: pane ? pane.textContent : "",
+        paneBelow: rect(pane) !== null && rect(table) !== null ? rect(pane) > rect(table) : false,
+        cellEditable: wrap?.querySelector("td")?.isContentEditable ?? null,
+      });
+    })()`));
+    assert.equal(tablePane.table, true, "打开源码后表格仍要渲染");
+    assert.equal(tablePane.pane, true, "表格下面也应出现源码面板");
+    assert.ok(tablePane.paneText.includes("| --- |"), `表格源码要包含分隔行：${tablePane.paneText.slice(0, 60)}`);
+    assert.equal(tablePane.paneBelow, true, "表格源码排在表格下面");
+    assert.equal(tablePane.cellEditable, false, "面板打开时单元格只读");
+    await grabBlock(".md-live .cm-md-tablewrap", "md-block-table.png");
+    await evaluate(`(() => {
+      document.querySelector('.md-live .cm-md-tablewrap .cm-md-blocktool[data-action="source"]').click();
+      return true;
+    })()`);
+    await wait(500);
+    assert.equal(
+      await evaluate(`Boolean(document.querySelector(".md-live .cm-md-tablewrap .cm-md-sourcepane"))`),
+      false,
+      "再点一次应收起表格源码",
+    );
 
     // 9) 改一行 → 写回草稿（自动保存链路照旧）
     await clickLine("第一段文字");
