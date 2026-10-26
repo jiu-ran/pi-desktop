@@ -527,11 +527,11 @@ function openChangesPanel(): void {
 
 const blockText = searchableText;
 
+// 大纲只列用户自己说的话，不带「第 N 轮」这类编号（用户要的是内容本身）
 const outline = computed(() => visibleBlocks.value
   .filter((block) => block.kind === "user" && block.text?.trim())
-  .map((block, index) => ({
+  .map((block) => ({
     id: block.id,
-    turn: index + 1,
     text: block.text!.replace(/\s+/g, " ").trim(),
   })));
 /** 当前视口所属的用户轮次；滚动时更新，让右侧大纲能标示位置。 */
@@ -841,7 +841,7 @@ watch(searchMatches, () => {
             v-for="item in outline"
             :key="item.id"
             :class="{ active: item.id === activeOutlineId }"
-            :title="`第 ${item.turn} 轮：${item.text}`"
+            :title="item.text"
             :aria-current="item.id === activeOutlineId ? 'location' : undefined"
             @click="openOutline(item.id)"
           >{{ item.text }}</button>

@@ -75,6 +75,20 @@ export async function checkActivityInElectron(win) {
     assert.equal(top.steps, 0, "收起时不挂载步骤");
     assert.equal(top.toolCards, 0, "收起时工具卡片不挂载");
 
+    // 1.5) 右侧大纲：只显示用户消息本身，不带「第 N 轮」编号
+    const outline = JSON.parse(await evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('.chat-outline button')];
+      return JSON.stringify({
+        count: buttons.length,
+        texts: buttons.map((node) => node.textContent.trim()),
+        titles: buttons.map((node) => node.getAttribute('title') ?? ''),
+      });
+    })()`));
+    assert.ok(outline.count >= 1, "有用户消息时应有大纲");
+    assert.equal(outline.texts.at(-1), "跑一下检查", `大纲条目应就是用户消息，实际「${outline.texts.at(-1)}」`);
+    assert.equal(/第\s*\d+\s*轮/.test(outline.titles.join(" ")), false, `大纲提示里不该出现「第 N 轮」：${JSON.stringify(outline.titles)}`);
+    assert.equal(outline.titles.at(-1), "跑一下检查", `大纲提示应只有内容，实际「${outline.titles.at(-1)}」`);
+
     // 2) 展开组：22 步按注入顺序排列，卡片仍不挂载
     await evaluate(`(() => { ${scope}.querySelector(".activity-group .activity-head").click(); return true; })()`);
     await poll(`Boolean(${scope}.querySelector(".turn-step"))`, "时间线出现");
