@@ -838,10 +838,10 @@ watch(searchMatches, () => {
                         @click="toggleRun(item.group, row)"
                       >
                         <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
-                        <span class="turn-step-count">×{{ row.steps.length }}</span>
-                        <span class="turn-step-target">{{ row.target }}</span>
                         <span v-if="row.added != null" class="stat-add">+{{ row.added }}</span>
                         <span v-if="row.removed != null" class="stat-del">−{{ row.removed }}</span>
+                        <span class="turn-step-count">×{{ row.steps.length }}</span>
+                        <span class="turn-step-target">{{ row.target }}</span>
                         <span v-if="row.failed" class="turn-step-failed">失败</span>
                         <span v-else-if="row.live" class="mini-spinner turn-step-live" aria-hidden="true" />
                       </button>
@@ -892,6 +892,8 @@ watch(searchMatches, () => {
                         @click="toggleStep(item.group, row.step.block.id)"
                       >
                         <span class="turn-step-label">{{ row.step.label }}</span>
+                        <span v-if="row.step.added != null" class="stat-add">+{{ row.step.added }}</span>
+                        <span v-if="row.step.removed != null" class="stat-del">−{{ row.step.removed }}</span>
                         <span
                           v-if="row.step.kind !== 'thinking' || !stepOpen(item.group, row.step.block.id)"
                           class="turn-step-target"
@@ -901,8 +903,6 @@ watch(searchMatches, () => {
                           </template>
                           <template v-else>{{ row.step.target }}</template>
                         </span>
-                        <span v-if="row.step.added != null" class="stat-add">+{{ row.step.added }}</span>
-                        <span v-if="row.step.removed != null" class="stat-del">−{{ row.step.removed }}</span>
                         <span v-if="row.step.failed" class="turn-step-failed">失败</span>
                         <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
                         <span v-if="row.step.offsetLabel" class="turn-step-time">{{ row.step.offsetLabel }}</span>

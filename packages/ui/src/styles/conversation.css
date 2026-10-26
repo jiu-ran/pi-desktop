@@ -665,6 +665,11 @@
 .step-error { flex: none; color: var(--err); font-size: 12px; }
 .stat-add { flex: none; color: var(--add-fg); font: 12px var(--mono); }
 .stat-del { flex: none; color: var(--del-fg); font: 12px var(--mono); }
+/* 时间线行：改动行数紧跟在动作名后面，和它描述的那次改动挨着 */
+.turn-step-head :is(.stat-add, .stat-del) { font-size: 11.5px; }
+.turn-step-head .stat-del + .turn-step-target,
+.turn-step-head .stat-add + .turn-step-target,
+.turn-step-head .stat-add + .stat-del + .turn-step-target { margin-left: 2px; }
 
 .thinking-preview { font-family: var(--font); font-style: italic; }
 .thinking-body {
