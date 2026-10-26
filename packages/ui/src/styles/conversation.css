@@ -667,9 +667,7 @@
 .stat-del { flex: none; color: var(--del-fg); font: 12px var(--mono); }
 /* 时间线行：改动行数紧跟在动作名后面，和它描述的那次改动挨着 */
 .turn-step-head :is(.stat-add, .stat-del) { font-size: 11.5px; }
-.turn-step-head .stat-del + .turn-step-target,
-.turn-step-head .stat-add + .turn-step-target,
-.turn-step-head .stat-add + .stat-del + .turn-step-target { margin-left: 2px; }
+.turn-step-head .turn-step-target + :is(.stat-add, .stat-del) { margin-left: 6px; }
 
 .thinking-preview { font-family: var(--font); font-style: italic; }
 .thinking-body {
@@ -2186,3 +2184,5 @@
 .cursor-diagram-fullscreen .cursor-diagram-view.dragging { cursor: grabbing; user-select: none; }
 .cursor-diagram-error { display: flex; flex-direction: column; gap: 8px; padding: 14px; color: var(--err); }
 .cursor-diagram-error pre { color: var(--fg-2); white-space: pre-wrap; }
+/* 有增删行数时，路径不再撑满整行：让「+N −N」紧跟在文件名后面 */
+.turn-step-head:has(:is(.stat-add, .stat-del)) .turn-step-target { flex: 0 1 auto; }

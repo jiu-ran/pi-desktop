@@ -139,12 +139,12 @@ export async function checkActivityInElectron(win) {
           target: node.querySelector(".turn-step-target")?.textContent ?? "",
           added: node.querySelector(".stat-add")?.textContent ?? "",
           removed: node.querySelector(".stat-del")?.textContent ?? "",
-          // 增删要紧跟在动作名后面（在路径之前），不要甩到行尾
-          statsBeforeTarget: (() => {
+          // 增删放在路径后面，不要挤在动作名和路径之间
+          statsAfterTarget: (() => {
             const add = node.querySelector(".stat-add");
             const target = node.querySelector(".turn-step-target");
             if (!add || !target) return null;
-            return Boolean(add.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
+            return Boolean(target.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING);
           })(),
         })),
         rails: el.querySelectorAll(".turn-step-rail").length,
@@ -163,7 +163,7 @@ export async function checkActivityInElectron(win) {
     // 改动步骤要把 +N / −N 显示出来（卡片头部不再画，行上得有）
     assert.equal(timeline.singles[0].added, "+2", `改动行要显示新增行数，实际「${timeline.singles[0].added}」`);
     assert.equal(timeline.singles[0].removed, "−1", `改动行要显示删除行数，实际「${timeline.singles[0].removed}」`);
-    assert.equal(timeline.singles[0].statsBeforeTarget, true, "增删要显示在动作名后面、路径前面");
+    assert.equal(timeline.singles[0].statsAfterTarget, true, "增删要放在路径后面，不要挤在动作名与路径之间");
     assert.equal(timeline.runs[0].added, "", "命令合并行没有增删");
     // 只是有序列表：不画圆点、不画竖线（用户要求去掉时间线的额外标识）
     const markers = JSON.parse(await evaluate(`(() => {
