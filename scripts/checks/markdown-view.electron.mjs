@@ -58,6 +58,10 @@ export async function checkMarkdownViewInElectron(win) {
     "",
     "这里有 **加粗文字** 和 \`行内代码\` 以及 [一个链接](https://example.com)。",
     "",
+    "[跳到最后一节](#最后一段)",
+    "",
+    "![截图](md-view-shot.png)",
+    "",
     "## 小标题",
     "",
     "- 甲",
@@ -75,6 +79,9 @@ export async function checkMarkdownViewInElectron(win) {
   ].join("\n");
   const filePath = path.join(cwd, "md-view-check.md");
   await writeFile(filePath, body, "utf8").catch(() => {});
+  // 1x1 透明 PNG：验证 markdown 里的相对图片地址能读成 data URL
+  const pngPath = path.join(cwd, "md-view-shot.png");
+  await writeFile(pngPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64")).catch(() => {});
 
   const open = async (tabId, name, text) => {
     await evaluate(`(() => {
@@ -180,6 +187,43 @@ export async function checkMarkdownViewInElectron(win) {
     assert.ok(Number(inline.strongWeight) >= 600, `加粗要真的是粗体，实际 ${inline.strongWeight}`);
     assert.equal(inline.codeMono, true, "行内代码要用等宽字体");
 
+    // 5.5) 图片：相对地址读出 data URL 后直接显示成图
+    const image = JSON.parse(await evaluate(`(() => {
+      const wrap = document.querySelector(".md-live .cm-md-imagewrap");
+      const img = wrap ? wrap.querySelector("img") : null;
+      return JSON.stringify({
+        wrap: Boolean(wrap),
+        state: wrap ? wrap.dataset.state : "",
+        src: img ? img.src.slice(0, 22) : "",
+        alt: img ? img.alt : "",
+      });
+    })()`));
+    assert.equal(image.wrap, true, "markdown 里的图片要渲染成图");
+    assert.match(image.src, /^data:image\/png/, `图片应转成 data URL，实际 ${image.src}`);
+    assert.equal(image.alt, "截图", `替代文字要保留，实际「${image.alt}」`);
+
+    // 5.6) Ctrl+点击文档内锚点：滚到对应标题
+    const scrollBefore = await evaluate(`document.querySelector(".md-live .cm-scroller").scrollTop`);
+    const anchorPoint = JSON.parse(await evaluate(`(() => {
+      const line = [...document.querySelectorAll(".md-live .cm-line")].find((n) => n.textContent.includes("跳到最后一节"));
+      const text = line ? line.textContent : "";
+      const r = line.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.left + 30), y: Math.round(r.top + 6), text });
+    })()`));
+    assert.match(anchorPoint.text, /跳到最后一节/, "锚点链接那一行要显示文字，不显示地址");
+    // 用带 ctrlKey 的真实 DOM 事件点击（合成事件即可触发 EditorView.domEventHandlers）
+    await evaluate(`(() => {
+      const line = [...document.querySelectorAll(".md-live .cm-line")].find((n) => n.textContent.includes("跳到最后一节"));
+      const r = line.getBoundingClientRect();
+      const x = r.left + 30;
+      const y = r.top + 6;
+      const target = document.elementFromPoint(x, y) || line;
+      for (const type of ["mousedown", "mouseup"]) {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, ctrlKey: true, button: 0 }));
+      }
+      return true;
+    })()`);
+    await wait(700);
     // 6) 代码块：光标不在时是块级渲染，没有 ``` 围栏
     const code = JSON.parse(await evaluate(`(() => {
       const block = document.querySelector(".md-live .cm-md-codeblock");
@@ -192,6 +236,14 @@ export async function checkMarkdownViewInElectron(win) {
     })()`));
     assert.equal(code.widget, true, "代码块应收起成块级渲染");
     assert.match(code.text, /const a = 1;/, `代码块内容应保留，实际「${code.text}」`);
+    // 语法高亮：shiki 跑完后代码会被切成带颜色的 span
+    const colored = await evaluate(`(() => {
+      const spans = [...document.querySelectorAll(".md-live .cm-md-codeblock code span")];
+      return JSON.stringify({ count: spans.length, colors: spans.filter((n) => n.style.color).length });
+    })()`);
+    const highlight = JSON.parse(colored);
+    assert.ok(highlight.count >= 3, `代码块要做语法高亮，实际 ${highlight.count} 个片段`);
+    assert.ok(highlight.colors >= 1, `高亮片段要带颜色，实际 ${highlight.colors}`);
     // 光标已经不在代码块里（上一步点的是标题行），此时不该露出围栏
 
     // 7) 表格：渲染成真正的表格
@@ -309,10 +361,12 @@ export async function checkMarkdownViewInElectron(win) {
   } finally {
     await evaluate(`window.__piDesktop.settings.settings.markdownView = "preview"; true`).catch(() => {});
     await evaluate(`(() => {
-      const tab = window.__piDesktop.stage.findTab("files", "md-view-check.md");
-      if (tab) window.__piDesktop.stage.close(tab.key);
+      window.__piDesktop.stage.clear();
       return true;
     })()`).catch(() => {});
     await rm(filePath, { force: true }).catch(() => {});
+    await rm(path.join(cwd, "md-view-shot.png"), { force: true }).catch(() => {});
+    // 关掉文件页后等一拍：下一个检查（对话滚动）要保证拿到的是对话视图
+    await wait(600);
   }
 }

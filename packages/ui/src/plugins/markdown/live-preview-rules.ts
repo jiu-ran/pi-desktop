@@ -14,7 +14,7 @@ import type { Tree } from "@lezer/common";
  */
 
 export type LiveBlockRenderer = "" | "code" | "table" | "hr";
-export type LiveWidget = "" | "bullet";
+export type LiveWidget = "" | "bullet" | "image";
 
 export interface LiveSpan {
   from: number;
@@ -29,8 +29,12 @@ export interface LiveSpan {
   block: LiveBlockRenderer;
   /** 代码块的语言（决定渲染成 mermaid 图还是普通代码） */
   lang: string;
-  /** 行内 widget（目前只有无序列表的项目符号） */
+  /** 行内 widget（无序列表圆点 / 图片） */
   widget: LiveWidget;
+  /** 图片地址（widget 为 image 时有效） */
+  src: string;
+  /** 图片替代文字 */
+  alt: string;
 }
 
 export interface LiveRulesContext {
@@ -73,15 +77,27 @@ const HEADING_LEVEL: Record<string, number> = {
 };
 
 function span(part: Partial<LiveSpan> & { from: number; to: number }): LiveSpan {
-  return { hide: false, cls: "", line: "", block: "", widget: "", lang: "", ...part };
+  return { hide: false, cls: "", line: "", block: "", widget: "", lang: "", src: "", alt: "", ...part };
 }
 
-/** 链接/图片是否真的指向某个地址（[0.3.2] 这种没解析到的引用要按普通文字显示） */
-function linkHasTarget(node: SyntaxNode): boolean {
+/** 链接/图片指向的地址；没解析到地址时返回空串（[0.3.2] 这种引用要按普通文字显示） */
+function targetUrl(node: SyntaxNode, ctx: LiveRulesContext): string {
   for (let child = node.firstChild; child; child = child.nextSibling) {
-    if (child.name === "URL") return true;
+    if (child.name === "URL" && child.to > child.from) return ctx.slice(child.from, child.to).trim();
   }
-  return false;
+  return "";
+}
+
+/** 图片的替代文字（![这里](src) 里的「这里」） */
+function labelOf(node: SyntaxNode, ctx: LiveRulesContext): string {
+  const marks: SyntaxNode[] = [];
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (WRAP_MARKS.has(child.name)) {
+      marks.push(child);
+      if (marks.length === 2) return ctx.slice(marks[0].to, child.from).trim();
+    }
+  }
+  return "";
 }
 
 /**
@@ -182,10 +198,21 @@ export function collectLiveSpans(tree: Tree, ctx: LiveRulesContext): LiveSpan[] 
         Strikethrough: "cm-md-strike",
         InlineCode: "cm-md-inlinecode",
         Link: "cm-md-link",
-        Image: "cm-md-image",
       };
+      // 图片：光标不在这一行时直接显示图（地址为空的按普通文字处理）
+      if (name === "Image") {
+        const src = targetUrl(node, ctx);
+        if (!src) return false;
+        if (!ctx.isActiveLine(ref.from)) {
+          spans.push(span({ from: ref.from, to: ref.to, widget: "image", src, alt: labelOf(node, ctx) }));
+          return false;
+        }
+        const innerImage = innerRange(node, name);
+        if (innerImage.to > innerImage.from) spans.push(span({ from: innerImage.from, to: innerImage.to, cls: "cm-md-image" }));
+        return false;
+      }
       // 没解析到地址的 [xxx] 是普通文字：既不变蓝、也不收方括号
-      if ((name === "Link" || name === "Image") && !linkHasTarget(node)) return false;
+      if (name === "Link" && !targetUrl(node, ctx)) return false;
       if (styled[name]) {
         const inner = innerRange(node, name);
         if (inner.to > inner.from) spans.push(span({ from: inner.from, to: inner.to, cls: styled[name] }));

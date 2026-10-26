@@ -453,6 +453,8 @@ export interface PiDesktopBridge {
   }>;
   listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
+  /** 用系统浏览器打开 http(s) / mailto 链接（markdown 里 Ctrl+点击） */
+  openExternalUrl?: (url: string) => Promise<boolean>;
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => Promise<WorkspaceFileData>;
   openWorkspacePath: (cwd: string, relative: string) => Promise<string>;
   createWorkspaceEntry: (cwd: string, parent: string, name: string, kind: "file" | "folder") => Promise<WorkspaceEntry>;

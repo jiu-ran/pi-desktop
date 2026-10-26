@@ -122,6 +122,23 @@ const lineClasses = (spans: LiveSpan[]) => spans.filter((span) => span.line).map
   assert.ok(lineClasses(spans).includes("cm-md-h1"), "setext 也要按 h1 排版");
 }
 
+// 图片：光标不在这一行时渲染成图（带地址），光标进来回到源码
+{
+  const doc = "![截图](images/a.png)";
+  const idle = spansFor(doc);
+  const image = idle.find((span) => span.widget === "image");
+  assert.ok(image, `非活动行要把图片交给 widget：${JSON.stringify(idle)}`);
+  assert.equal(image.src, "images/a.png", `图片地址要带出来：${image.src}`);
+  assert.equal(image.alt, "截图", `替代文字要带出来：${image.alt}`);
+  assert.equal(idle.some((span) => span.hide), false, "图片整体交给 widget 后不该再逐段收起标记");
+
+  const active = spansFor(doc, 0);
+  assert.equal(active.some((span) => span.widget === "image"), false, "光标所在行不渲染图片，显示源码便于修改");
+  // 没写地址的 ![]() 按普通文字处理
+  const broken = spansFor("![只是文字]()");
+  assert.equal(broken.some((span) => span.widget === "image"), false, "空地址不能渲染成图片");
+}
+
 // 裸链接（自动链接）是正文，不能当标记收起
 {
   const doc = "见 https://example.com 说明";

@@ -628,6 +628,11 @@ app.whenReady().then(() => {
     if (!isAllowedExternalUrl(url)) return false;
     return shell.openExternal(url).then(() => true, () => false);
   });
+  // markdown 里 Ctrl+点击外部链接（app:open-update 只给更新提示用，语义不同）
+  handle("app:open-external", (url = "") => {
+    if (!isAllowedExternalUrl(url)) return false;
+    return shell.openExternal(url).then(() => true, () => false);
+  });
   handle("pi:update", (customPath = "", scope: "self" | "all" = "self") => updatePi(customPath, scope === "all" ? "all" : "self"));
   // 界面缩放完全由设置页控制（不再设全局快捷键，避免与输入法/阅读器冲突）。
   handle("pi:set-zoom", (factor: number) => {

@@ -387,6 +387,8 @@ onBeforeUnmount(() => {
     <MarkdownLive
       v-else-if="showPreview && file"
       :content="draft"
+      :cwd="file?.cwd"
+      :relative="file?.relative"
       @update:content="applyLiveContent"
       @keydown="onKeydown"
     />

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   readClipboard: () => ipcRenderer.invoke("app:read-clipboard"),
   installAppUpdate: (version = "") => ipcRenderer.invoke("app:install-update", version),
   openAppUpdate: (url = "") => ipcRenderer.invoke("app:open-update", url),
+  openExternalUrl: (url = "") => ipcRenderer.invoke("app:open-external", url),
   updatePi: (customPath = "", scope: "self" | "all" = "self") => ipcRenderer.invoke("pi:update", customPath, scope),
   recent: () => ipcRenderer.invoke("pi:recent"),
   forget: (cwd: string) => ipcRenderer.invoke("pi:forget", cwd),
