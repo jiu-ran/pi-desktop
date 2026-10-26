@@ -125,10 +125,17 @@ class="settings-theme-tile"
 :title="item.hint"
 @click="appSettings.themeMode = item.id"
         >
+<!-- 缩略图就是「选出来会变成什么颜色」：深色黑底、浅色白底、跟随系统左右各一半 -->
 <span class="settings-theme-art" :data-scheme="item.id">
-  <span class="settings-theme-art-head" />
-  <span class="settings-theme-art-line" />
-  <span class="settings-theme-art-line short" />
+  <span
+    v-for="half in item.id === 'system' ? ['dark', 'light'] : ['auto']"
+    :key="half"
+    class="settings-theme-half"
+    :class="`is-${half}`"
+  >
+    <span class="settings-theme-art-line" />
+    <span class="settings-theme-art-line short" />
+  </span>
 </span>
 {{ item.label }}
         </button>

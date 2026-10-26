@@ -999,35 +999,54 @@
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--fg);
 }
+/* 缩略图要能一眼看出「选出来是什么颜色」：
+   深色 = 黑底、浅色 = 白底、跟随系统 = 左黑右白（两半各自画一套线条，
+   这样分割线和线条永远是对齐的，不会出现半截压在缝上的灰块）。 */
 .settings-theme-art {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
   width: 100%;
-  height: 34px;
-  padding: 5px 6px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
   border-radius: 6px;
-  background: var(--bg-2);
   overflow: hidden;
+  transition: border-color 0.12s;
 }
-.settings-theme-art-head {
+.settings-theme-half {
   display: flex;
-  gap: 3px;
-  align-items: center;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 7px;
+  background: var(--half-bg);
 }
-.settings-theme-art-head span {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--line-2);
+/* 单主题时用整套主题色；跟随系统时两半各自固定黑/白 */
+.settings-theme-art[data-scheme="dark"] .settings-theme-half,
+.settings-theme-half.is-dark {
+  --half-bg: #000000;
+  --half-ink: rgba(255, 255, 255, 0.38);
+}
+.settings-theme-art[data-scheme="light"] .settings-theme-half,
+.settings-theme-half.is-light {
+  --half-bg: #ffffff;
+  --half-ink: rgba(0, 0, 0, 0.24);
 }
 .settings-theme-art-line {
   height: 3px;
   border-radius: 2px;
-  background: var(--line-2);
+  background: var(--half-ink);
 }
 .settings-theme-art-line.short {
-  width: 55%;
+  width: 62%;
+}
+/* 左黑右白：在缝上补一条极淡的描边，两半才不会糊成一块 */
+.settings-theme-art[data-scheme="system"] .settings-theme-half.is-light {
+  box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.08);
+}
+/* 选中态：缩略图的描边跟着强调色，和外面的卡片呼应 */
+.settings-theme-tile.active .settings-theme-art {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .settings-swatches {

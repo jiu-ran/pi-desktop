@@ -84,6 +84,31 @@ export async function checkAppearanceInElectron(win) {
   assert.ok(controls.preview, "外观页应有实时预览块");
   assert.ok(controls.reset, "外观页应有「恢复默认外观」");
 
+  // 缩略图必须「选什么颜色就是什么颜色」：深色黑底、浅色白底、跟随系统左右各一半
+  const art = JSON.parse(
+    await evaluate(`(() => JSON.stringify([...document.querySelectorAll(".settings-theme-art")].map((node) => ({
+      scheme: node.dataset.scheme ?? "",
+      halves: [...node.querySelectorAll(".settings-theme-half")].map((half) => {
+        const style = getComputedStyle(half);
+        return { bg: style.backgroundColor, ink: getComputedStyle(half.querySelector(".settings-theme-art-line")).backgroundColor };
+      }),
+    }))))()`),
+  );
+  const artOf = (scheme) => art.find((item) => item.scheme === scheme);
+  assert.deepEqual(art.map((item) => item.scheme), ["system", "dark", "light"], `缩略图顺序应与主题卡一致：${art.map((item) => item.scheme).join("/")}`);
+  assert.equal(artOf("dark")?.halves.length, 1, "深色缩略图是整块黑底");
+  assert.equal(artOf("dark")?.halves[0]?.bg, "rgb(0, 0, 0)", `深色缩略图必须是纯黑底，实际 ${artOf("dark")?.halves[0]?.bg}`);
+  assert.equal(artOf("light")?.halves.length, 1, "浅色缩略图是整块白底");
+  assert.equal(artOf("light")?.halves[0]?.bg, "rgb(255, 255, 255)", `浅色缩略图必须是纯白底，实际 ${artOf("light")?.halves[0]?.bg}`);
+  assert.equal(artOf("system")?.halves.length, 2, "跟随系统要画成左右两半");
+  assert.equal(artOf("system")?.halves[0]?.bg, "rgb(0, 0, 0)", "跟随系统左半是黑");
+  assert.equal(artOf("system")?.halves[1]?.bg, "rgb(255, 255, 255)", "跟随系统右半是白");
+  // 线条要在两半上都看得见：黑底用浅线、白底用深线
+  const darkInk = artOf("dark")?.halves[0]?.ink ?? "";
+  const lightInk = artOf("light")?.halves[0]?.ink ?? "";
+  assert.ok(darkInk.startsWith("rgba(255, 255, 255"), `黑底上的线条要是浅色：${darkInk}`);
+  assert.ok(lightInk.startsWith("rgba(0, 0, 0"), `白底上的线条要是深色：${lightInk}`);
+
   // 先把外观恢复成默认，避免上一次运行留下的 localStorage 影响基线
   await evaluate(`(() => {
     [...document.querySelectorAll(".settings-group-head .btn")].find((n) => n.textContent.includes("恢复默认外观")).click();
