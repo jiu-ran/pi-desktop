@@ -2839,3 +2839,83 @@ html[data-density="compact"] .tool-card {
 @media (prefers-reduced-motion: reduce) {
   .pi-tooltip { animation: none; }
 }
+
+/* ---------- 代码块 / 表格的就地编辑（Typora / Obsidian 观感） ---------- */
+.md-live .cm-md-codebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.md-live .cm-md-blocktool {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.md-live .cm-md-codeblock:hover .cm-md-blocktool,
+.md-live .cm-md-tablewrap:hover .cm-md-blocktool,
+.md-live .cm-md-mermaid:hover .cm-md-blocktool,
+.md-live .cm-md-blocktool:focus-visible {
+  opacity: 1;
+}
+.md-live .cm-md-blocktool:hover {
+  border-color: var(--line);
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.md-live .cm-md-tabletools {
+  display: flex;
+  justify-content: flex-end;
+  height: 0;
+}
+.md-live .cm-md-tabletools .cm-md-blocktool {
+  transform: translateY(-4px);
+}
+/* 代码正文可就地编辑：不再额外留边距，聚焦时只给一点底 */
+.md-live .cm-md-codeblock code {
+  display: block;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  caret-color: var(--accent);
+}
+.md-live .cm-md-codeblock code[data-editing="1"] {
+  min-height: 1.4em;
+}
+/* 表格单元格可就地编辑 */
+.md-live .cm-md-tablewrap td[contenteditable],
+.md-live .cm-md-tablewrap th[contenteditable] {
+  outline: none;
+  caret-color: var(--accent);
+  min-width: 4em;
+}
+.md-live .cm-md-tablewrap td[contenteditable]:hover,
+.md-live .cm-md-tablewrap th[contenteditable]:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.md-live .cm-md-tablewrap td[contenteditable]:focus,
+.md-live .cm-md-tablewrap th[contenteditable]:focus {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* 源码态下贴在块前的「渲染」按钮 */
+.md-live .cm-md-sourcebar {
+  display: inline-flex;
+  margin-right: 6px;
+}
+.md-live .cm-md-sourcebar .cm-md-blocktool {
+  border-color: var(--line);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}

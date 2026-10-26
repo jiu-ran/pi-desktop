@@ -259,7 +259,7 @@ export async function checkMarkdownViewInElectron(win) {
     assert.deepEqual(table.headers, ["列 A", "列 B"], `表头不对：${JSON.stringify(table.headers)}`);
     assert.deepEqual(table.cells, ["1", "2"], `单元格不对：${JSON.stringify(table.cells)}`);
 
-    // 8) 点进代码块 → 变回源码（围栏露出来）
+    // 8) 点进代码块：Typora / Obsidian 那样**留在渲染态**就地改，不显示围栏
     const codeRect = JSON.parse(await evaluate(`(() => {
       const block = document.querySelector(".md-live .cm-md-codeblock");
       block.scrollIntoView({ block: "center" });
@@ -270,11 +270,94 @@ export async function checkMarkdownViewInElectron(win) {
     await clickAt(codeRect.x, codeRect.y);
     const codeActive = JSON.parse(await evaluate(`(() => {
       const widget = document.querySelector(".md-live .cm-md-codeblock");
-      const fences = [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith("\`\`\`"));
-      return JSON.stringify({ widget: Boolean(widget), fences });
+      const fenceChar = String.fromCharCode(96).repeat(3);
+      const fences = [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith(fenceChar));
+      return JSON.stringify({ widget: Boolean(widget), fences, editable: widget?.querySelector("code")?.isContentEditable ?? false });
     })()`));
-    assert.equal(codeActive.widget, false, "光标进入后应收起 widget，显示源码");
-    assert.equal(codeActive.fences, true, "光标进入后应显示 ``` 围栏");
+    assert.equal(codeActive.widget, true, "点代码块不该退回源码，仍应是块级渲染");
+    assert.equal(codeActive.fences, false, "点代码块不该露出围栏");
+    assert.equal(codeActive.editable, true, "代码正文要能直接编辑");
+
+    // 改代码正文 → 写回草稿（围栏与语言标识原样保留）
+    await evaluate(`(() => {
+      const code = document.querySelector(".md-live .cm-md-codeblock code");
+      code.focus();
+      code.textContent = "const a = 42;";
+      code.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await wait(700);
+    const codeEdited = JSON.parse(await evaluate(`(() => {
+      const draft = window.__piDesktop.stage.findTab("files", "md-view-check.md")?.data?.draft ?? "";
+      const fenceChar = String.fromCharCode(96).repeat(3);
+      return JSON.stringify({
+        widget: Boolean(document.querySelector(".md-live .cm-md-codeblock")),
+        hasCode: draft.includes("const a = 42;"),
+        keepsFence: draft.includes(fenceChar + "js"),
+      });
+    })()`));
+    assert.equal(codeEdited.widget, true, "编辑代码块时不该退回源码");
+    assert.equal(codeEdited.hasCode, true, "改代码正文要写回草稿");
+    assert.equal(codeEdited.keepsFence, true, "围栏与语言标识要保留");
+
+    // 需要手写围栏时点「源码」；Esc 回到渲染态
+    await evaluate(`(() => {
+      document.querySelector(".md-live .cm-md-codeblock .cm-md-blocktool").click();
+      return true;
+    })()`);
+    await wait(600);
+    const rawMode = JSON.parse(await evaluate(`(() => {
+      const fenceChar = String.fromCharCode(96).repeat(3);
+      return JSON.stringify({
+        fences: [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith(fenceChar)),
+        widget: Boolean(document.querySelector(".md-live .cm-md-codeblock")),
+      });
+    })()`));
+    assert.equal(rawMode.fences, true, "点「源码」应显示围栏");
+    assert.equal(rawMode.widget, false, "源码态不再渲染代码块");
+    // 源码态块前有个「渲染」按钮，点它回到渲染结果
+    await evaluate(`(() => {
+      const bar = document.querySelector(".md-live .cm-md-sourcebar .cm-md-blocktool");
+      if (!bar) return false;
+      bar.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      bar.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+    await wait(700);
+    const backToRendered = await evaluate(`Boolean(document.querySelector(".md-live .cm-md-codeblock"))`);
+    assert.equal(backToRendered, true, "点「渲染」应回到渲染态");
+
+    // 8.5) 表格：点单元格就地编辑，不显示分隔行源码
+    const cellRect = JSON.parse(await evaluate(`(() => {
+      const cell = document.querySelector(".md-live .cm-md-tablewrap td");
+      cell.scrollIntoView({ block: "center" });
+      const r = cell.getBoundingClientRect();
+      return JSON.stringify({ x: r.left + 10, y: r.top + r.height / 2, editable: cell.isContentEditable });
+    })()`));
+    assert.equal(cellRect.editable, true, "表格单元格要能直接编辑");
+    await wait(250);
+    await clickAt(cellRect.x, cellRect.y);
+    const tableActive = JSON.parse(await evaluate(`(() => {
+      const wrap = document.querySelector(".md-live .cm-md-tablewrap");
+      const raw = [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.includes("| --- |"));
+      return JSON.stringify({ widget: Boolean(wrap), raw });
+    })()`));
+    assert.equal(tableActive.widget, true, "点表格不该退回源码");
+    assert.equal(tableActive.raw, false, "点表格不该露出分隔行");
+    await evaluate(`(() => {
+      const cell = document.querySelector(".md-live .cm-md-tablewrap td");
+      cell.focus();
+      cell.textContent = "99";
+      cell.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await wait(700);
+    const tableEdited = JSON.parse(await evaluate(`(() => {
+      const draft = window.__piDesktop.stage.findTab("files", "md-view-check.md")?.data?.draft ?? "";
+      return JSON.stringify({ hasCell: draft.includes("| 99"), stillTable: draft.includes("| --- |") });
+    })()`));
+    assert.equal(tableEdited.hasCell, true, "改单元格要写回草稿");
+    assert.equal(tableEdited.stillTable, true, "表格分隔行要保留");
 
     // 9) 改一行 → 写回草稿（自动保存链路照旧）
     await clickLine("第一段文字");

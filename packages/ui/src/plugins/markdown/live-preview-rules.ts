@@ -14,7 +14,7 @@ import type { Tree } from "@lezer/common";
  */
 
 export type LiveBlockRenderer = "" | "code" | "table" | "hr";
-export type LiveWidget = "" | "bullet" | "image";
+export type LiveWidget = "" | "bullet" | "image" | "source-toggle";
 
 export interface LiveSpan {
   from: number;
@@ -48,6 +48,8 @@ export interface LiveRulesContext {
   charAt(pos: number): string;
   /** 取一段原文（代码块语言用） */
   slice(from: number, to: number): string;
+  /** 这个块是否被用户切成「显示源码」（代码块 / 表格） */
+  isSourceMode?(from: number): boolean;
 }
 
 /** 这些节点的源码标记在非活动行上要收起来 */
@@ -169,17 +171,25 @@ export function collectLiveSpans(tree: Tree, ctx: LiveRulesContext): LiveSpan[] 
 
       // ---- 必须整块渲染的结构 ----
       if (name === "FencedCode" || name === "CodeBlock") {
-        if (!ctx.isActiveRange(ref.from, ref.to)) {
+        // Typora / Obsidian 点代码块不会露围栏：默认始终是渲染态（可就地编辑），
+        // 只有用户在这个块上点了「源码」才显示 ``` 与语言标识。
+        if (ctx.isSourceMode?.(ref.from)) {
+          spans.push(span({ from: ref.from, to: ref.from, widget: "source-toggle" }));
+          pushLines(ref.from, ref.to, "cm-md-coderaw");
+        } else {
           const fenceLine = ctx.slice(ref.from, ctx.lineAt(ref.from).to);
           const lang = /^\s*(?:`{3,}|~{3,})\s*(\S*)/.exec(fenceLine)?.[1] ?? "";
           spans.push(span({ from: ref.from, to: ref.to, block: "code", lang }));
         }
-        else pushLines(ref.from, ref.to, "cm-md-coderaw");
         return false;
       }
       if (name === "Table") {
-        if (!ctx.isActiveRange(ref.from, ref.to)) spans.push(span({ from: ref.from, to: ref.to, block: "table" }));
-        else pushLines(ref.from, ref.to, "cm-md-tableraw");
+        // 点单元格是就地编辑，不再整块退回源码
+        if (ctx.isSourceMode?.(ref.from)) {
+          spans.push(span({ from: ref.from, to: ref.from, widget: "source-toggle" }));
+          pushLines(ref.from, ref.to, "cm-md-tableraw");
+        }
+        else spans.push(span({ from: ref.from, to: ref.to, block: "table" }));
         return false;
       }
       if (name === "HorizontalRule") {

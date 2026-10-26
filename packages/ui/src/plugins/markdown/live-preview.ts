@@ -1,18 +1,17 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorView, Decoration, WidgetType, type DecorationSet } from "@codemirror/view";
+import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from "@codemirror/view";
 import { StateEffect, StateField, type EditorState, type Range } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
 import { collectLiveSpans, type LiveSpan } from "./live-preview-rules.ts";
 import { anchorOf, isAnchorLink, normalizeAnchor } from "../../shared/relative-path.ts";
-import { mermaidRender } from "./markdown.ts";
-import { highlightCode } from "./markdown-highlight.ts";
+import { CodeWidget, MermaidWidget, RuleWidget, SourceToggleWidget, TableWidget, codeBody, mermaidEnabled, type LiveBlockHost } from "./live-preview-blocks.ts";
 
 /**
  * 把 markdown 源码渲染成「Typora / Obsidian 的实时预览」：
  * 光标不在的那一行只留排版结果，语法标记收起来；进了哪一行，哪一行的标记就露出来。
  *
- * 规则本身在 `live-preview-rules.ts`（纯函数），这里只负责翻译成 CodeMirror 装饰，
- * 以及需要 DOM 的部分：代码块高亮、mermaid、图片、Ctrl+点击链接。
+ * 规则本身在 `live-preview-rules.ts`（纯函数），widget 在 `live-preview-blocks.ts`
+ * （代码块 / 表格可就地编辑），这里只负责把它们接到 CodeMirror 上。
  */
 
 export interface LivePreviewOptions {
@@ -24,7 +23,7 @@ export interface LivePreviewOptions {
   isDark?: () => boolean;
 }
 
-/** 主题切换后要求重建装饰（代码高亮颜色跟着变） */
+/** 主题切换 / 切换源码态后要求重建装饰 */
 export const refreshLivePreview = StateEffect.define<null>();
 
 /** 无序列表的项目符号（源码里的 `-` 换成圆点） */
@@ -37,136 +36,6 @@ class BulletWidget extends WidgetType {
     node.className = "cm-md-bullet";
     node.textContent = "•";
     return node;
-  }
-  ignoreEvent(): boolean {
-    return false;
-  }
-}
-
-/** 分割线（`---` 换成一条横线） */
-class RuleWidget extends WidgetType {
-  eq(): boolean {
-    return true;
-  }
-  toDOM(): HTMLElement {
-    const node = document.createElement("div");
-    node.className = "cm-md-rule";
-    return node;
-  }
-  ignoreEvent(): boolean {
-    return false;
-  }
-}
-
-/** 代码块：先给纯文本（不闪空白），高亮算好后再填色 */
-class CodeWidget extends WidgetType {
-  readonly text: string;
-  readonly language: string;
-  readonly dark: boolean;
-  constructor(text: string, language: string, dark: boolean) {
-    super();
-    this.text = text;
-    this.language = language;
-    this.dark = dark;
-  }
-  eq(other: CodeWidget): boolean {
-    return other.text === this.text && other.language === this.language && other.dark === this.dark;
-  }
-  toDOM(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-md-codeblock";
-    if (this.language) {
-      const label = document.createElement("span");
-      label.className = "cm-md-codelang";
-      label.textContent = this.language;
-      wrap.appendChild(label);
-    }
-    const pre = document.createElement("pre");
-    const code = document.createElement("code");
-    code.textContent = this.text;
-    pre.appendChild(code);
-    wrap.appendChild(pre);
-
-    const language = this.language;
-    if (language && language !== "text") {
-      void highlightCode(this.text, language, this.dark)
-        .then((lines) => {
-          if (!code.isConnected) return;
-          code.textContent = "";
-          lines.forEach((tokens, index) => {
-            if (index > 0) code.appendChild(document.createTextNode("\n"));
-            for (const token of tokens) {
-              if (!token.color) {
-                code.appendChild(document.createTextNode(token.content));
-                continue;
-              }
-              const span = document.createElement("span");
-              span.style.color = token.color;
-              span.textContent = token.content;
-              code.appendChild(span);
-            }
-          });
-        })
-        .catch(() => {
-          /* 高亮失败就保留纯文本 */
-        });
-    }
-    return wrap;
-  }
-  ignoreEvent(): boolean {
-    return false;
-  }
-}
-
-/** 表格：收起时渲染成真正的表格 */
-class TableWidget extends WidgetType {
-  readonly source: string;
-  constructor(source: string) {
-    super();
-    this.source = source;
-  }
-  eq(other: TableWidget): boolean {
-    return other.source === this.source;
-  }
-  toDOM(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-md-tablewrap";
-    const table = document.createElement("table");
-    const rows = this.source
-      .replace(/\r/g, "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    const parseRow = (line: string): string[] =>
-      line
-        .replace(/^\|/, "")
-        .replace(/\|$/, "")
-        .split("|")
-        .map((cell) => cell.trim());
-    const header = rows.length > 0 ? parseRow(rows[0]) : [];
-    const body = rows.slice(2).map(parseRow);
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const cell of header) {
-      const th = document.createElement("th");
-      th.textContent = cell;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    for (const row of body) {
-      const tr = document.createElement("tr");
-      for (const cell of row) {
-        const td = document.createElement("td");
-        td.textContent = cell;
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    wrap.appendChild(table);
-    return wrap;
   }
   ignoreEvent(): boolean {
     return false;
@@ -230,77 +99,21 @@ class ImageWidget extends WidgetType {
   }
 }
 
-/** mermaid 图：光标不在代码块里时直接渲染成图 */
-class MermaidWidget extends WidgetType {
-  readonly code: string;
-  constructor(code: string) {
-    super();
-    this.code = code;
-  }
-  eq(other: MermaidWidget): boolean {
-    return other.code === this.code;
-  }
-  toDOM(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-md-mermaid";
-    const body = document.createElement("pre");
-    body.className = "cm-md-mermaid-source";
-    body.textContent = this.code;
-    wrap.appendChild(body);
-    void renderMermaid(this.code, wrap);
-    return wrap;
-  }
-  ignoreEvent(): boolean {
-    return false;
-  }
-}
-
-let mermaidSerial = 0;
-
-/** 用应用统一的 mermaid 主题渲染；失败就把源码留着，不让整篇崩掉 */
-async function renderMermaid(code: string, host: HTMLElement): Promise<void> {
-  try {
-    const [{ buildMermaidInitConfig }, mod] = await Promise.all([import("./mermaid-theme.ts"), import("mermaid")]);
-    const mermaid = (mod as Record<string, any>).default ?? mod;
-    const isDark = document.documentElement.dataset.theme !== "light";
-    mermaid.initialize({ ...buildMermaidInitConfig(isDark), startOnLoad: false });
-    const id = `cm-mermaid-${(mermaidSerial += 1)}`;
-    const { svg } = await mermaid.render(id, code);
-    if (!host.isConnected) return;
-    host.innerHTML = svg;
-    host.dataset.state = "ready";
-  } catch (error) {
-    if (!host.isConnected) return;
-    host.dataset.state = "error";
-    const tip = document.createElement("span");
-    tip.className = "cm-md-mermaiderror";
-    tip.textContent = `图表渲染失败：${error instanceof Error ? error.message : String(error)}`;
-    host.prepend(tip);
-  }
-}
-
-/** 代码块正文（去掉首尾围栏行） */
-function codeBody(text: string): string {
-  const lines = text.replace(/\r/g, "").split("\n");
-  if (/^\s*(?:`{3,}|~{3,})/.test(lines[0] ?? "")) lines.shift();
-  if (/^\s*(?:`{3,}|~{3,})\s*$/.test(lines[lines.length - 1] ?? "")) lines.pop();
-  return lines.join("\n");
-}
-
-function widgetFor(span: LiveSpan, text: string, options: LivePreviewOptions): Decoration | null {
+function widgetFor(span: LiveSpan, from: number, to: number, text: string, options: LivePreviewOptions, host: LiveBlockHost): Decoration | null {
   if (span.block === "code") {
     const body = codeBody(text);
-    if (span.lang === "mermaid" && mermaidRender.enabled) return Decoration.replace({ widget: new MermaidWidget(body), block: true });
-    return Decoration.replace({ widget: new CodeWidget(body, span.lang, options.isDark?.() ?? true), block: true });
+    if (span.lang === "mermaid" && mermaidEnabled()) return Decoration.replace({ widget: new MermaidWidget(body, from, host), block: true });
+    return Decoration.replace({ widget: new CodeWidget(from, to, text, options.isDark?.() ?? true, host), block: true });
   }
-  if (span.block === "table") return Decoration.replace({ widget: new TableWidget(text), block: true });
+  if (span.block === "table") return Decoration.replace({ widget: new TableWidget(from, to, text, host), block: true });
   if (span.block === "hr") return Decoration.replace({ widget: new RuleWidget(), block: true });
   if (span.widget === "bullet") return Decoration.replace({ widget: new BulletWidget() });
   if (span.widget === "image") return Decoration.replace({ widget: new ImageWidget(span.src, span.alt, options.resolveImage) });
+  if (span.widget === "source-toggle") return Decoration.widget({ widget: new SourceToggleWidget(from, host), side: -1 });
   return null;
 }
 
-function buildDecorations(state: EditorState, options: LivePreviewOptions): DecorationSet {
+function buildDecorations(state: EditorState, options: LivePreviewOptions, host: LiveBlockHost): DecorationSet {
   const ranges = state.selection.ranges;
   // 不整篇 toString：大文档里每次移动光标都复制一遍太浪费
   const doc = state.doc;
@@ -316,12 +129,13 @@ function buildDecorations(state: EditorState, options: LivePreviewOptions): Deco
     },
     charAt: (pos) => (pos >= 0 && pos < doc.length ? doc.sliceString(pos, pos + 1) : ""),
     slice: (from, to) => doc.sliceString(from, to),
+    isSourceMode: (from) => host.isSourceMode(from),
   });
 
   const decorations: Range<Decoration>[] = [];
   for (const span of spans) {
     if (span.block || span.widget) {
-      const widget = widgetFor(span, doc.sliceString(span.from, span.to), options);
+      const widget = widgetFor(span, span.from, span.to, doc.sliceString(span.from, span.to), options, host);
       if (widget) decorations.push(widget.range(span.from, span.to));
       continue;
     }
@@ -373,16 +187,57 @@ function jumpToAnchor(view: EditorView, href: string): boolean {
 
 /**
  * 实时预览扩展。
+ *
  * 装饰放在 StateField 里：块级 widget（代码块 / 表格 / 分割线）只能由 state 提供，
  * ViewPlugin 里给块级替换会被 CodeMirror 直接拒绝。
  */
 export function livePreview(options: LivePreviewOptions = {}) {
+  let currentView: EditorView | null = null;
+  /** 这些块被用户切成了「显示源码」：起始位置 → 结束位置（文档一改就清空，避免位置漂移） */
+  const sourceMode = new Map<number, number>();
+
+  const host: LiveBlockHost = {
+    isSourceMode: (from) => sourceMode.has(from),
+    onToggleSource: (from) => {
+      if (sourceMode.has(from)) sourceMode.delete(from);
+      else {
+        const view = currentView;
+        const line = view ? view.state.doc.lineAt(from) : null;
+        // 记录块的结束位置：Esc 退出源码态要用它判断光标在不在块里
+        sourceMode.set(from, line ? line.from + (view ? view.state.doc.lineAt(from).to - line.from : 0) : from);
+        if (view) {
+          // 结束位置取 syntaxTree 里这个块的 to；拿不到就退化成「文档末尾」
+          const tree = syntaxTree(view.state);
+          let end = view.state.doc.length;
+          tree.iterate({
+            enter: (node) => {
+              if (node.from !== from) return undefined;
+              if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "Table") end = node.to;
+              return false;
+            },
+          });
+          sourceMode.set(from, end);
+        }
+      }
+      currentView?.dispatch({ effects: refreshLivePreview.of(null) });
+    },
+    onEditBlock: (from, to, next) => {
+      const view = currentView;
+      if (!view) return;
+      const length = view.state.doc.length;
+      const end = Math.min(to, length);
+      if (view.state.doc.sliceString(from, end) === next) return;
+      view.dispatch({ changes: { from, to: end, insert: next } });
+    },
+  };
+
   const field = StateField.define<DecorationSet>({
-    create: (state) => buildDecorations(state, options),
+    create: (state) => buildDecorations(state, options, host),
     update: (decorations, transaction) => {
+      if (transaction.docChanged) sourceMode.clear();
       const forced = transaction.effects.some((effect) => effect.is(refreshLivePreview));
       if (forced || transaction.docChanged || transaction.selection || syntaxTree(transaction.state) !== syntaxTree(transaction.startState)) {
-        return buildDecorations(transaction.state, options);
+        return buildDecorations(transaction.state, options, host);
       }
       return decorations;
     },
@@ -406,5 +261,28 @@ export function livePreview(options: LivePreviewOptions = {}) {
     },
   });
 
-  return [field, links];
+  // Esc：光标停在「源码态」的块里时，退回渲染态（源码态没有按钮可以点回去）
+  const escapeSource = keymap.of([
+    {
+      key: "Escape",
+      run: (view) => {
+        if (!sourceMode.size) return false;
+        const head = view.state.selection.main.head;
+        for (const [from, to] of sourceMode) {
+          if (head < from || head > to) continue;
+          sourceMode.delete(from);
+          view.dispatch({ effects: refreshLivePreview.of(null) });
+          return true;
+        }
+        return false;
+      },
+    },
+  ]);
+
+  // widget 里编辑时要拿到视图来派发变更（toDOM 拿不到 view）
+  const tracker = EditorView.updateListener.of((update) => {
+    currentView = update.view;
+  });
+
+  return [field, links, escapeSource, tracker];
 }

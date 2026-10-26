@@ -8,7 +8,7 @@ import { collectLiveSpans, type LiveRulesContext, type LiveSpan } from "../../pa
  */
 const md = parser.configure(GFM);
 
-function spansFor(doc: string, activeLine = -1): LiveSpan[] {
+function spansFor(doc: string, activeLine = -1, sourceModeAt = -1): LiveSpan[] {
   const lines = doc.split("\n");
   const lineStarts: number[] = [];
   let offset = 0;
@@ -31,6 +31,7 @@ function spansFor(doc: string, activeLine = -1): LiveSpan[] {
     lineAt,
     charAt: (pos) => (pos >= 0 && pos < doc.length ? doc[pos] : ""),
     slice: (from, to) => doc.slice(from, to),
+    isSourceMode: (from) => from === sourceModeAt,
   };
   return collectLiveSpans(md.parse(doc), ctx);
 }
@@ -98,12 +99,19 @@ const lineClasses = (spans: LiveSpan[]) => spans.filter((span) => span.line).map
   const codeSpan = idle.find((span) => span.block === "code");
   assert.equal(codeSpan.lang, "ts", `代码块要带语言：${codeSpan.lang}`);
 
+  // Typora / Obsidian 点代码块、表格不会露源码：光标进去仍然是块级渲染（就地编辑）
   const inCode = spansFor(doc, 1);
-  assert.deepEqual(blocks(inCode), ["table", "hr"], "光标进代码块后不再用 widget");
-  assert.ok(lineClasses(inCode).includes("cm-md-coderaw"), "光标在代码块里时按源码显示");
+  assert.deepEqual(blocks(inCode), ["code", "table", "hr"], "光标在代码块里也要保持块级渲染");
+  assert.equal(lineClasses(inCode).includes("cm-md-coderaw"), false, "默认不该显示围栏");
 
   const inTable = spansFor(doc, 5);
-  assert.deepEqual(blocks(inTable), ["code", "hr"], "光标进表格后不再用 widget");
+  assert.deepEqual(blocks(inTable), ["code", "table", "hr"], "光标在表格里也要保持块级渲染");
+
+  // 只有显式切到「源码」的块才显示围栏 / 竖线
+  const codeStart = doc.indexOf("```");
+  const raw = spansFor(doc, 1, codeStart);
+  assert.deepEqual(blocks(raw), ["table", "hr"], "源码态下代码块不再用 widget");
+  assert.ok(lineClasses(raw).includes("cm-md-coderaw"), "源码态显示围栏");
 }
 
 // 引用块：每行都带竖线样式，`>` 收起
