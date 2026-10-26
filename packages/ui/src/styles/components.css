@@ -1149,8 +1149,10 @@
 
 /* 弹窗 */
 .modal-backdrop {
+  --scrim-alpha: 0.45;
   position: fixed;
-  inset: 0;
+  /* 从标题栏下方开始：原生窗口按钮区由系统绘制，压暗它永远慢一帧，干脆不压 */
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 100;
   display: grid;
   place-items: center;
@@ -1756,8 +1758,9 @@ html[data-density="compact"] .tool-card {
 /* 通用浮层：命令面板 / 快速打开 / 扩展弹窗 / 设置共用。
    设置页会用自己的定位覆盖（居中 + 自定义偏移），所以这里保持「顶部偏下居中」。 */
 .overlay {
+  --scrim-alpha: 0.45;
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 100;
   display: grid;
   place-items: start center;

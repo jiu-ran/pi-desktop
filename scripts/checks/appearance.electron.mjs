@@ -331,60 +331,62 @@ export async function checkAppearanceInElectron(win) {
   assert.equal(inlineCode.withDefault, rgbOf(inlineCode.defaultAccent), `行内代码应跟随默认强调色：${inlineCode.withDefault} vs ${rgbOf(inlineCode.defaultAccent)}`);
   assert.equal(inlineCode.withViolet, rgbOf(inlineCode.violetAccent), `换成紫罗兰后行内代码要跟着变：${inlineCode.withViolet} vs ${rgbOf(inlineCode.violetAccent)}`);
 
-  // 原生窗口按钮区（右上角最小化/最大化/关闭）盖不到弹窗遮罩，必须跟着压暗，
-  // 否则一开弹窗右上角就剩一条亮块。颜色由渲染进程算，这里验证状态切换。
-  const chrome = JSON.parse(await evaluate(`(async () => {
-    const api = window.__piDesktop;
-    const frame = getComputedStyle(document.documentElement).getPropertyValue("--frame").trim();
-    api.settings.close();
-    await new Promise((r) => setTimeout(r, 600));
-    const closed = document.documentElement.dataset.winChrome ?? "";
-    api.settings.open("appearance");
-    await new Promise((r) => setTimeout(r, 700));
-    const opened = document.documentElement.dataset.winChrome ?? "";
-    const scrim = Boolean(document.querySelector(".settings-modal-position"));
-    api.settings.close();
-    await new Promise((r) => setTimeout(r, 700));
-    const reopened = document.documentElement.dataset.winChrome ?? "";
-    return JSON.stringify({ frame, closed, opened, reopened, scrim });
-  })()`));
-  assert.equal(chrome.scrim, true, "设置弹窗应处于打开状态才能验证遮罩");
-  assert.equal(chrome.closed, "plain", `没有弹窗时原生按钮区保持原色，实际 ${chrome.closed}`);
-  // 设置是浮层窗口（遮罩 18%），原生按钮跟着轻压暗即可；全屏浮层（45%）仍然用 "scrim"
-  assert.equal(chrome.opened, "scrim-light", `设置打开时原生按钮区要跟着轻压暗（不能是原色、也不该用全屏的 45%），实际 ${chrome.opened}`);
-  assert.equal(chrome.reopened, "plain", `关闭弹窗后要恢复原色，实际 ${chrome.reopened}`);
-
-  // 最关键的一条：原生按钮区的底色必须和网页标题栏（被遮罩压过之后）一致，
-  // 否则右上角会明显深一块。这里直接采样像素对比，而不是只信 dataset。
+  // 原生窗口按钮区（右上角最小化/最大化/关闭）由系统绘制，压暗它永远慢一帧。
+  // 现在的做法是「遮罩从标题栏下方开始」，标题栏与原生按钮区天然同色，
+  // 这里验证这条前提：遮罩顶边 = 标题栏高度，且打开弹窗时标题栏像素不变。
   {
-    await evaluate("window.__piDesktop.settings.open('appearance'); true");
-    await wait(900);
-    const applied = JSON.parse(await evaluate("JSON.stringify({ color: document.documentElement.dataset.winChromeColor ?? '', alpha: document.documentElement.dataset.winChromeAlpha ?? '', state: document.documentElement.dataset.winChrome ?? '' })"));
-    assert.equal(applied.state, "scrim-light", `设置打开时原生按钮区应进入轻压暗状态，实际 ${applied.state}`);
     const parse = (hex) => {
       const value = Number.parseInt(String(hex).replace("#", ""), 16);
       return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
     };
-    const expected = parse(applied.color);
-    const image = await win.webContents.capturePage();
-    const size = image.getSize();
-    const bitmap = image.getBitmap();
-    const sample = (x, y) => {
+    const sampleTitlebar = async () => {
+      const image = await win.webContents.capturePage();
+      const size = image.getSize();
+      const bitmap = image.getBitmap();
+      const x = Math.round(size.width * 0.5);
+      const y = Math.round(size.height * 0.018);
       const index = (y * size.width + x) * 4;
-      return [bitmap[index + 2], bitmap[index + 1], bitmap[index]];
+      return { pixel: [bitmap[index + 2], bitmap[index + 1], bitmap[index]], size };
     };
-    // 标题栏中间位置（避开左侧项目和右侧原生按钮区）
-    const pixel = sample(Math.round(size.width * 0.5), Math.round(size.height * 0.018));
-    const delta = expected.map((value, index) => Math.abs(value - pixel[index]));
-    assert.ok(
-      Math.max(...delta) <= 3,
-      `原生按钮底色要和标题栏一致：按钮区 ${applied.color} vs 标题栏像素 rgb(${pixel.join(",")})（差 ${delta.join("/")}）`,
+
+    const closed = JSON.parse(await evaluate(`(() => {
+      const root = getComputedStyle(document.documentElement);
+      const bar = document.querySelector(".titlebar");
+      return JSON.stringify({
+        frame: root.getPropertyValue("--frame").trim(),
+        titlebarH: Math.round(bar?.getBoundingClientRect().height ?? 0),
+      });
+    })()`));
+    const before = await sampleTitlebar();
+
+    await evaluate("window.__piDesktop.settings.open('appearance'); true");
+    await wait(700);
+    const opened = JSON.parse(await evaluate(`(() => {
+      const overlay = document.querySelector('.settings-overlay');
+      const rect = overlay.getBoundingClientRect();
+      return JSON.stringify({ top: Math.round(rect.top), active: Boolean(document.querySelector('.settings-modal')) });
+    })()`));
+    const after = await sampleTitlebar();
+
+    const delta = parse(closed.frame).map((value, index) => Math.abs(value - before.pixel[index]));
+    assert.ok(Math.max(...delta) <= 3, `标题栏像素应等于 --frame：${closed.frame} vs rgb(${before.pixel.join(",")})`);
+    assert.equal(opened.active, true, "设置弹窗应已打开");
+    assert.equal(
+      opened.top,
+      closed.titlebarH,
+      `遮罩必须从标题栏下方开始（标题栏高 ${closed.titlebarH}px），实际 top=${opened.top}`,
     );
-    console.log("[appearance] chrome color", JSON.stringify({ color: applied.color, alpha: applied.alpha, pixel }));
+    const drift = after.pixel.map((value, index) => Math.abs(value - before.pixel[index]));
+    assert.ok(
+      Math.max(...drift) <= 2,
+      `打开弹窗后标题栏不能被压暗（原生按钮区才不会深一块），实测 rgb(${before.pixel.join(",")}) → rgb(${after.pixel.join(",")})`,
+    );
+    console.log("[appearance] titlebar", JSON.stringify({ frame: closed.frame, titlebarH: closed.titlebarH, overlayTop: opened.top, pixel: after.pixel }));
+
     await evaluate("window.__piDesktop.settings.close(); true");
     await wait(500);
   }
 
-  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, emphasis: violet.emphasis, customAccent: "#12ab34", splitEmphasis: "#ff8800", radius: round.radius, column: full.column, motion: still.motion, chrome: chrome.opened }));
+  console.log("[appearance]", JSON.stringify({ controls: { swatches: controls.swatches, segments: controls.segments }, violet: violet.accent, emphasis: violet.emphasis, customAccent: "#12ab34", splitEmphasis: "#ff8800", radius: round.radius, column: full.column, motion: still.motion }));
   return { controls, violet, round, full, still };
 }

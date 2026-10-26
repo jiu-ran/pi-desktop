@@ -60,7 +60,7 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
   const theme = setupTheme(workbench, host, (mode) => {
     appSettings.themeMode = mode;
   });
-  // 原生窗口按钮区盖不到遮罩：开弹窗时按同样的透明度压暗它
+  // 主题切换时把标题栏颜色告诉主进程（遮罩从标题栏下方开始，不再需要跟着压暗）
   const stopWindowChrome = setupWindowChrome(workbench, host, (id) => {
     const current = theme.themes.find((item) => item.id === id) ?? theme.themes[0];
     return { id: current.id, titlebar: current.titlebar };
