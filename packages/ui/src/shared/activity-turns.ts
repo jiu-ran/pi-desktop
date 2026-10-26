@@ -60,10 +60,10 @@ export interface TurnStep<T extends ActivityBlockLike = ActivityBlockLike> {
   added: number | null;
   /** 改动删除行数；写入（write）或非改动步骤为 null */
   removed: number | null;
-  /** 相对本轮第一步的偏移（毫秒）；没有时间戳时 -1 */
-  offsetMs: number;
-  /** 「+12 秒」；没有时间戳或不足 1 秒时为空串 */
-  offsetLabel: string;
+  /** 这一步自己花了多久（毫秒）；拿不到时间戳时 -1 */
+  elapsedMs: number;
+  /** 「0.4 秒」/「12 秒」/「1 分 5 秒」；拿不到时间时为空串 */
+  elapsedLabel: string;
 }
 
 export interface TurnGroup<T extends ActivityBlockLike = ActivityBlockLike> {
@@ -123,6 +123,13 @@ export function stepTarget(block: ActivityBlockLike): string {
   return firstLine(activityTarget(block));
 }
 
+/** 单步耗时文案：不足 1 秒也要显示（否则「很慢的一步」和「没跑」分不清） */
+export function formatStepDuration(ms: number): string {
+  if (ms < 0) return "";
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)} 秒`;
+  return formatDuration(ms);
+}
+
 /** 耗时文案（不足 1 秒返回空串） */
 export function formatDuration(ms: number): string {
   if (ms < 1000) return "";
@@ -152,13 +159,16 @@ export function editStat<T extends ActivityBlockLike>(block: T): { added: number
  * 这里不做任何合并 —— 用户要看的正是「先思考、再跑命令、然后改文件、又失败」的真实次序。
  */
 export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEntry<T>[]): TurnStep<T>[] {
-  const stamps = entries.map((entry) => entry.block.ts).filter((ts): ts is number => typeof ts === "number" && ts > 0);
-  const start = stamps.length ? Math.min(...stamps) : 0;
-  return entries.map((entry) => {
+  return entries.map((entry, position) => {
     const block = entry.block;
     const ts = typeof block.ts === "number" && block.ts > 0 ? block.ts : 0;
-    const offsetMs = start && ts ? Math.max(0, ts - start) : -1;
-    const offset = formatDuration(offsetMs);
+    // 这一步自己的耗时：工具类有记录的 durationMs 就直接用；
+    // 思考 / 没记录的工具用「到下一步开始」的间隔（最后一步没有后继，只能给 -1 不显示）。
+    const recorded = typeof block.durationMs === "number" && block.durationMs >= 0 ? block.durationMs : null;
+    const nextTs = entries[position + 1]?.block.ts;
+    const gap = ts && typeof nextTs === "number" && nextTs > ts ? nextTs - ts : -1;
+    const elapsedMs = recorded ?? gap;
+    const elapsed = formatStepDuration(elapsedMs);
     // 改动步骤把 +N / −N 一起带出来：时间线里的卡片不再画头部，行上要能直接看到增删
     const stat = editStat(block);
     return {
@@ -172,8 +182,8 @@ export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEnt
       live: isLiveTool(block) || Boolean(block.streaming),
       added: stat?.added ?? null,
       removed: stat?.removed ?? null,
-      offsetMs,
-      offsetLabel: offset ? `+${offset}` : "",
+      elapsedMs,
+      elapsedLabel: elapsed,
     };
   });
 }
@@ -210,8 +220,13 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
   const lastSettled = [...tools].reverse().find((entry) => isSettled(entry.block));
   const errored = !live && Boolean(lastSettled && isFailed(lastSettled.block));
 
+  const steps = buildTurnSteps(entries);
   const stamps = entries.map((entry) => entry.block.ts).filter((ts): ts is number => typeof ts === "number" && ts > 0);
-  const durationMs = stamps.length >= 2 ? Math.max(0, Math.max(...stamps) - Math.min(...stamps)) : 0;
+  // 有真实时间戳就用首尾差；老会话没有时间戳时退回「各步耗时之和」，总时间不至于空着
+  const durationMs =
+    stamps.length >= 2
+      ? Math.max(0, Math.max(...stamps) - Math.min(...stamps))
+      : steps.reduce((sum, step) => sum + Math.max(0, step.elapsedMs), 0);
 
   const parts: string[] = [];
   if (live) {
@@ -227,7 +242,6 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     if (failedCount) parts.push(`${failedCount} 处失败`);
   }
 
-  const steps = buildTurnSteps(entries);
   const detail = steps
     .slice(0, 8)
     .map((step) => (step.target ? `${step.label} ${step.target}` : step.label))

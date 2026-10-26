@@ -38,7 +38,7 @@ export async function checkActivityInElectron(win) {
       t.pushUser("跑一下检查", 0);
       const run = (id, name, args) => {
         t.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: name, args });
-        t.applyEvent({ type: "tool_execution_end", toolCallId: id, toolName: name, args, result: { content: [{ type: "text", text: "ok" }] } });
+        t.applyEvent({ type: "tool_execution_end", toolCallId: id, toolName: name, args, durationMs: 1_500, result: { content: [{ type: "text", text: "ok" }] } });
       };
       for (let i = 0; i < 18; i += 1) run("act-bash-" + i, "bash", { command: "npm run check -- " + i });
       for (let i = 0; i < 3; i += 1) run("act-read-" + i, "read", { path: "src/file-" + i + ".ts" });
@@ -333,12 +333,35 @@ export async function checkActivityInElectron(win) {
       const el = ${scope};
       const head = el.querySelector(".activity-head");
       if (head && head.getAttribute("aria-expanded") !== "true") head.click();
-      return JSON.stringify({ duration: el.querySelector(".activity-duration")?.textContent ?? "" });
+      const duration = el.querySelector(".activity-duration");
+      const summary = el.querySelector(".activity-summary");
+      return JSON.stringify({
+        duration: duration?.textContent ?? "",
+        /** 总耗时挂在「执行」后面：DOM 里应当在摘要之前 */
+        beforeSummary: Boolean(duration && summary && (duration.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        titleBeforeDuration: Boolean(el.querySelector(".activity-title") && duration && (el.querySelector(".activity-title").compareDocumentPosition(duration) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      });
     })()`));
     await wait(300);
-    const stepTimes = await evaluate(`${scope}.querySelectorAll(".turn-step-time").length`);
+    const stepTimes = JSON.parse(
+      await evaluate(`JSON.stringify([...${scope}.querySelectorAll(".turn-step-time")].map((n) => n.textContent.trim()))`),
+    );
     assert.match(timing.duration, /分|秒/, `有耗时数据时应显示时长，实际「${timing.duration}」`);
-    assert.ok(stepTimes >= 1, `时间线上应出现相对时间，实际 ${stepTimes}`);
+    assert.equal(timing.beforeSummary, true, "总耗时要紧跟「执行」，排在摘要之前");
+    assert.equal(timing.titleBeforeDuration, true, "总耗时应在「执行」之后");
+    assert.ok(stepTimes.length >= 1, `未合并的步骤要显示自己的耗时，实际 ${stepTimes.length} 处`);
+    assert.ok(!stepTimes.some((text) => text.startsWith("+")), `步骤时间不要带「+」（那是累计偏移）：${stepTimes.join("/")}`);
+
+    // 展开合并行：18 条各自显示自己的耗时（fixture 给每条记录了 1500ms）
+    await evaluate(`(() => { ${scope}.querySelector(".turn-step-run .turn-step-head").click(); return true; })()`);
+    await wait(250);
+    const runTimes = JSON.parse(
+      await evaluate(`JSON.stringify([...${scope}.querySelectorAll(".turn-run-item .turn-step-time")].map((n) => n.textContent.trim()))`),
+    );
+    assert.equal(runTimes.length, 18, `合并行展开后每一步都要有自己的耗时，实际 ${runTimes.length} 条`);
+    assert.deepEqual([...new Set(runTimes)], ["2 秒"], `每条命令耗时都是自己记录的 1.5 秒（四舍五入为 2 秒），实际 ${[...new Set(runTimes)].join("/")}`);
+    await evaluate(`(() => { ${scope}.querySelector(".turn-step-run .turn-step-head").click(); return true; })()`);
+    await wait(150);
 
     // 7) 视觉核对：思考 / 长输出步骤展开后「直接看到内容」（没有多余头部、没有序号）
     await evaluate(`(() => {

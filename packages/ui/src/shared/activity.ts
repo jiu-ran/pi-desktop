@@ -14,6 +14,8 @@ export interface ActivityBlockLike {
   images?: number;
   /** 块的创建时间（毫秒）；历史会话可能没有，用来算这一轮花了多久 */
   ts?: number;
+  /** 工具自己记录的耗时（毫秒）；思考块没有 */
+  durationMs?: number | null;
 }
 
 export interface ActivityEntry<T extends ActivityBlockLike = ActivityBlockLike> {

@@ -3,6 +3,7 @@ import {
   buildTurnSteps,
   deriveTurnItems,
   editStat,
+  formatStepDuration,
   isTurnStep,
   stepLabel,
   stepTarget,
@@ -137,13 +138,26 @@ assert.equal(stepTarget(read("r", "packages/ui/src/kernel/transcript.ts")), "ker
 assert.equal(stepTarget(think("t2", "  先 看看\n文件  ")), "先 看看 文件", "思考摘要压成一行");
 assert.ok(stepTarget(think("long", "x".repeat(200))).endsWith("…"), "过长的思考摘要要截断");
 
+// 单步耗时：每步算自己的，不是「相对本轮开始」的累计
 const stamped = buildTurnSteps([
   { block: { ...bash("b1"), ts: 10_000 }, index: 0 },
   { block: { ...bash("b2"), ts: 11_400 }, index: 1 },
   { block: { ...bash("b3"), ts: 22_000 }, index: 2 },
 ]);
-assert.deepEqual(stamped.map((step) => step.offsetMs), [0, 1_400, 12_000], "相对第一步算偏移");
-assert.deepEqual(stamped.map((step) => step.offsetLabel), ["", "+1 秒", "+12 秒"], "超过 1 秒才显示耗时");
+assert.deepEqual(stamped.map((step) => step.elapsedMs), [1_400, 10_600, -1], "每步耗时 = 到下一步开始的间隔，最后一步没有后继");
+assert.deepEqual(stamped.map((step) => step.elapsedLabel), ["1 秒", "11 秒", ""], "整秒四舍五入，最后一步没有后继就不显示");
+
+// 工具自带的 durationMs 优先：它比「到下一步的间隔」更准
+const recorded = buildTurnSteps([
+  { block: { ...bash("r1"), ts: 10_000, durationMs: 320 }, index: 0 },
+  { block: { ...bash("r2"), ts: 10_400, durationMs: 5_400 }, index: 1 },
+  { block: { ...think("r3"), ts: 15_900 }, index: 2 },
+]);
+assert.deepEqual(recorded.map((step) => step.elapsedMs), [320, 5_400, -1], "有记录的用记录值，思考块用间隔");
+assert.deepEqual(recorded.map((step) => step.elapsedLabel), ["0.3 秒", "5 秒", ""], "毫秒级也给出可读文案");
+assert.equal(formatStepDuration(0), "0.0 秒", "零耗时也要占位");
+assert.equal(formatStepDuration(65_000), "1 分 5 秒", "超过一分钟按分秒");
+assert.equal(formatStepDuration(-1), "", "没有时间就不显示");
 // 改动步骤带增删行数：时间线里的卡片没有头部，行上要能看到 +N / −N
 const stats = buildTurnSteps([
   {
@@ -165,8 +179,8 @@ assert.equal(editStat(bash("b10")), null, "非改动工具不算增删");
 assert.equal(editStat({ ...edit("e2"), args: { path: "src/a.ts" } }), null, "没有差异时不算增删");
 
 const unstamped = buildTurnSteps([{ block: { ...bash("n1"), ts: undefined }, index: 0 }]);
-assert.equal(unstamped[0]!.offsetLabel, "", "没有时间戳时不显示耗时");
-assert.equal(unstamped[0]!.offsetMs, -1);
+assert.equal(unstamped[0]!.elapsedLabel, "", "没有时间戳时不显示耗时");
+assert.equal(unstamped[0]!.elapsedMs, -1);
 
 // 失败与运行中
 const failing = buildTurnSteps([
@@ -225,4 +239,4 @@ const detail = summarizeTurn(
 assert.match(detail, /^运行 cmd-0/, `提示从第一步开始：${detail}`);
 assert.match(detail, /\+2$/, `超过 8 步要补计数：${detail}`);
 
-console.log("activity-turns OK 回合分组 / 时间线顺序 / 单步摘要 / 相对时间 / 失败与运行中");
+console.log("activity-turns OK 回合分组 / 时间线顺序 / 单步摘要 / 单步耗时 / 失败与运行中");

@@ -872,7 +872,15 @@
   padding: 3px 0 2px 10px;
   border-left: 1px solid var(--line);
 }
-.activity-duration { flex: none; color: var(--fg-3); font: 11px var(--mono); white-space: nowrap; }
+.activity-duration {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
 
 /* 执行时间线：一次请求内按真实顺序列出每一步（思考 / 运行 / 改动混排）。
    只是一份有序列表：不加圆点、不画竖线，靠缩进与序号读顺序。 */

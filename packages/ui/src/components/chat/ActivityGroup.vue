@@ -44,8 +44,8 @@ defineEmits<{ toggle: [] }>();
       <span class="activity-caret" :class="{ open: expanded }" v-html="icons.chevronRight" />
       <span class="activity-icon" v-html="icons.events" />
       <span class="activity-title">{{ label || "活动" }}</span>
-      <span class="activity-summary">{{ group.summary }}</span>
       <span v-if="duration" class="activity-duration">{{ duration }}</span>
+      <span class="activity-summary">{{ group.summary }}</span>
       <span v-if="group.live" class="mini-spinner activity-live" aria-hidden="true" />
       <!-- 以失败收尾才标红；中途失败但随后恢复，只留一个弱提示，不继续报警。 -->
       <span v-if="group.errored" class="activity-error">失败</span>

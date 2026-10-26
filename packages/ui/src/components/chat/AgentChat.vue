@@ -861,7 +861,7 @@ watch(searchMatches, () => {
                             >
                               <span class="turn-run-target">{{ step.target }}</span>
                               <span v-if="step.failed" class="turn-step-failed">失败</span>
-                              <span v-if="step.offsetLabel" class="turn-step-time">{{ step.offsetLabel }}</span>
+                              <span v-if="step.elapsedLabel" class="turn-step-time">{{ step.elapsedLabel }}</span>
                             </button>
                             <div v-if="stepOpen(item.group, step.block.id)" class="turn-step-body">
                               <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === step.block.id }">
@@ -905,7 +905,7 @@ watch(searchMatches, () => {
                         </span>
                         <span v-if="row.step.failed" class="turn-step-failed">失败</span>
                         <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
-                        <span v-if="row.step.offsetLabel" class="turn-step-time">{{ row.step.offsetLabel }}</span>
+                        <span v-if="row.step.elapsedLabel" class="turn-step-time">{{ row.step.elapsedLabel }}</span>
                       </button>
                       <div v-if="stepOpen(item.group, row.step.block.id)" class="turn-step-body">
                         <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === row.step.block.id }">
