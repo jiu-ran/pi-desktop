@@ -9,7 +9,6 @@ import { buildCopyTexts } from "../../shared/copy-text.ts";
 import { planQueueView } from "../../shared/queue-view.ts";
 import { FOLLOW_THRESHOLD_PX, isAtBottom, isSelfScroll, shouldRunFollowFrame, wantsToPauseFollow } from "../../shared/autoscroll.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
-import { deriveActivityItems, type ActivityGroup as ActivityGroupModel } from "../../shared/activity.ts";
 import { deriveTurnItems, turnDurationLabel, type TurnGroup } from "../../shared/activity-turns.ts";
 import { appSettings } from "../../services/settings.ts";
 import { searchableText } from "../../shared/search-text.ts";
@@ -29,9 +28,9 @@ const searchIndex = ref(0);
 let searchFocusToken = 0;
 /** 用户手动展开/收起活动组的覆盖状态；未设置时默认折叠，搜索命中的组强制展开。 */
 const activityOverrides = ref<Record<string, boolean>>({});
-/** 回合组内「思考 / 读取 / 运行 / 改动」二级分组的展开状态 */
-const sectionOverrides = ref<Record<string, boolean>>({});
-/** 执行记录的分组方式：grouped（默认）/ compact（旧行为）/ expanded（全部展开） */
+/** 时间线里单步细节的展开状态（key = 组 id | 块 id） */
+const stepOverrides = ref<Record<string, boolean>>({});
+/** 执行记录的展示方式：grouped（时间线，默认）/ compact（时间线更密）/ expanded（默认展开每一步） */
 const activityMode = computed(() => appSettings.activityDetail);
 let scrollFrame = 0;
 let scrollForce = false;
@@ -568,17 +567,11 @@ const copyTextByIndex = computed(() =>
   buildCopyTexts(visibleBlocks.value, Boolean(ws.value?.streaming)),
 );
 
-// 三种展示方式共用同一个列表：turns 是「执行记录」组，group 是旧的活动组，block 是独立卡片。
+// 两种展示方式共用一个列表：turns 是「执行记录」组（内部按时间线展开），block 是独立卡片。
 type ChatRenderItem =
   | { kind: "block"; block: any; index: number }
-  | { kind: "turn"; group: TurnGroup<any> }
-  | { kind: "activity"; group: ActivityGroupModel<any> };
-const activityItems = computed<ChatRenderItem[]>(() => {
-  const blocks = visibleBlocks.value;
-  if (activityMode.value === "expanded") return blocks.map((block, index) => ({ kind: "block" as const, block, index }));
-  if (activityMode.value === "compact") return deriveActivityItems(blocks) as ChatRenderItem[];
-  return deriveTurnItems(blocks) as ChatRenderItem[];
-});
+  | { kind: "turn"; group: TurnGroup<any> };
+const activityItems = computed<ChatRenderItem[]>(() => deriveTurnItems(visibleBlocks.value) as ChatRenderItem[]);
 
 function openOutline(id: string): void {
   activeOutlineId.value = id;
@@ -603,19 +596,22 @@ function activityOpen(group: { id: string; entries: Array<{ block: any }> }): bo
   const override = activityOverrides.value[group.id];
   if (override !== undefined) return override;
   // 默认收起：错误仍通过折叠头的红色徽标提示，避免一次展开几十个工具。
-  return false;
+  // 「展开」模式例外：用户明确要求每次请求都摊开。
+  return activityMode.value === "expanded";
 }
 
-/** 组内二级分组（思考 / 读取 / 运行 / 改动）是否展开；搜索命中时全开 */
-function sectionOpen(group: { id: string; entries: Array<{ block: any }> }, key: string): boolean {
+/** 时间线里某一步的细节卡片是否展开；搜索命中时全开 */
+function stepOpen(group: { id: string; entries: Array<{ block: any }> }, blockId: string): boolean {
   if (groupHasSearchHit(group)) return true;
-  return sectionOverrides.value[`${group.id}|${key}`] === true;
+  const override = stepOverrides.value[`${group.id}|${blockId}`];
+  if (override !== undefined) return override;
+  return activityMode.value === "expanded";
 }
 
-function toggleSection(group: { id: string; entries: Array<{ block: any }> }, key: string): void {
+function toggleStep(group: { id: string; entries: Array<{ block: any }> }, blockId: string): void {
   if (groupHasSearchHit(group)) return;
-  const id = `${group.id}|${key}`;
-  sectionOverrides.value = { ...sectionOverrides.value, [id]: !sectionOpen(group, key) };
+  const id = `${group.id}|${blockId}`;
+  stepOverrides.value = { ...stepOverrides.value, [id]: !stepOpen(group, blockId) };
 }
 
 /** Ctrl+Shift+E：展开 / 收起全部执行记录 */
@@ -629,8 +625,9 @@ function onActivityKey(event: KeyboardEvent): void {
 
 /** 展开 / 收起全部执行记录（Ctrl+Shift+E） */
 function toggleAllActivity(): void {
-  const groups = activityItems.value.filter((item) => item.kind === "turn" || item.kind === "activity");
+  const groups = activityItems.value.filter((item) => item.kind === "turn");
   if (!groups.length) return;
+  // 「展开」模式下组默认是全开的，所以首次按快捷键应当是收起
   const open = groups.every((item) => activityOpen(item.group));
   const next = { ...activityOverrides.value };
   for (const item of groups) next[item.group.id] = !open;
@@ -773,66 +770,58 @@ watch(searchMatches, () => {
               <ActivityGroup
                 v-else
                 :group="item.group"
-                :label="item.kind === 'turn' ? '执行' : '活动'"
-                :duration="item.kind === 'turn' ? turnDurationLabel(item.group) : ''"
-                :show-counts="item.kind !== 'turn'"
+                label="执行"
+                :duration="turnDurationLabel(item.group)"
                 :expanded="activityOpen(item.group)"
                 :search-hit="groupHasSearchHit(item.group)"
-                :class="{ 'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)) }"
+                :class="{
+                  'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)),
+                  'activity-compact': activityMode === 'compact',
+                }"
                 @toggle="toggleActivity(item.group)"
               >
-                <!-- 执行记录：先按 思考 / 读取 / 运行 / 改动 分类，点开某一类才挂载卡片 -->
-                <template v-if="item.kind === 'turn'">
-                  <div
-                    v-for="section in item.group.sections"
-                    :key="section.key"
-                    class="turn-section"
-                    :data-section="section.key"
+                <!-- 执行时间线：按真实发生顺序列出每一步，点某一步才挂载它的卡片 -->
+                <ol class="turn-timeline" :data-steps="item.group.steps.length">
+                  <li
+                    v-for="(step, stepIndex) in item.group.steps"
+                    :key="step.block.id"
+                    class="turn-step"
+                    :class="[
+                      `is-${step.key}`,
+                      { failed: step.failed, live: step.live, open: stepOpen(item.group, step.block.id) },
+                    ]"
+                    :data-block-id="step.block.id"
+                    :data-step-index="stepIndex + 1"
+                    :data-step-kind="step.key"
                   >
+                    <span class="turn-step-rail" aria-hidden="true" />
+                    <span class="turn-step-dot" aria-hidden="true" />
                     <button
                       type="button"
-                      class="turn-section-head"
-                      :aria-expanded="sectionOpen(item.group, section.key)"
-                      @click="toggleSection(item.group, section.key)"
+                      class="turn-step-head"
+                      :aria-expanded="stepOpen(item.group, step.block.id)"
+                      :title="step.failed ? `${step.label} ${step.target}（失败）` : undefined"
+                      @click="toggleStep(item.group, step.block.id)"
                     >
-                      <span class="turn-caret" :class="{ open: sectionOpen(item.group, section.key) }" v-html="icons.chevronRight" />
-                      <span class="turn-section-label">{{ section.label }}</span>
-                      <span class="turn-section-count">· {{ section.count }}</span>
-                      <span v-if="section.preview" class="turn-section-preview">{{ section.preview }}</span>
-                      <span v-if="section.failedCount" class="activity-error">失败 ×{{ section.failedCount }}</span>
+                      <span class="turn-step-index">{{ stepIndex + 1 }}</span>
+                      <span class="turn-step-label">{{ step.label }}</span>
+                      <span class="turn-step-target">{{ step.target }}</span>
+                      <span v-if="step.failed" class="turn-step-failed">失败</span>
+                      <span v-else-if="step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                      <span v-if="step.offsetLabel" class="turn-step-time">{{ step.offsetLabel }}</span>
                     </button>
-                    <div v-if="sectionOpen(item.group, section.key)" class="turn-section-body">
-                      <div
-                        v-for="entry in section.entries"
-                        :key="entry.block.id"
-                        :data-block-id="entry.block.id"
-                        :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
-                      >
+                    <div v-if="stepOpen(item.group, step.block.id)" class="turn-step-body">
+                      <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === step.block.id }">
                         <BlockView
-                          :block="entry.block"
+                          :block="step.block"
                           :query="searchQuery"
                           :copy-text="''"
                           :collapse-long="false"
                         />
                       </div>
                     </div>
-                  </div>
-                </template>
-                <template v-else>
-                  <div
-                    v-for="entry in item.group.entries"
-                    :key="entry.block.id"
-                    :data-block-id="entry.block.id"
-                    :class="{ 'search-hit': searchMatches[searchIndex]?.id === entry.block.id }"
-                  >
-                    <BlockView
-                      :block="entry.block"
-                      :query="searchQuery"
-                      :copy-text="''"
-                      :collapse-long="false"
-                    />
-                  </div>
-                </template>
+                  </li>
+                </ol>
               </ActivityGroup>
             </template>
             <div v-if="ws.streaming && ws.blocks.at(-1)?.kind === 'user'" class="thinking-hint">

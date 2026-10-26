@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
-  buildActivitySections,
+  buildTurnSteps,
   deriveTurnItems,
   isTurnStep,
+  stepLabel,
+  stepTarget,
   summarizeTurn,
   turnDurationLabel,
   TURN_MIN_STEPS,
@@ -11,8 +13,8 @@ import {
 import type { ActivityBlockLike, ActivityEntry } from "../../packages/ui/src/shared/activity.ts";
 
 /**
- * 回合分组（一次用户请求 = 一条「执行记录」）。
- * 断言用的是真实会话的规模：5 轮 / 52 个工具 / 46 段思考 —— 原来渲染 47 行，现在 15 行。
+ * 执行记录 = 时间线：一次用户请求一组（收起只占一行），展开后**按真实顺序**列出每一步。
+ * 断言用的是真实会话规模：5 轮 / 52 个工具 / 46 段思考。
  */
 const at = (base: number, offset: number): number => base + offset;
 
@@ -53,7 +55,6 @@ function realSession(): ActivityBlockLike[] {
   };
 
   push(user(`u1`));
-  // 第 1 轮：24 段思考 + 30 个工具（26 bash / 3 read / 1 write）
   turn(
     24,
     [
@@ -98,7 +99,7 @@ const turns = items.filter((item) => item.kind === "turn").map((item) => item.gr
 // 顶层行数：5 条用户 + 5 个执行记录 + 5 段回复
 assert.equal(items.filter((item) => item.kind === "block").length, 10, "用户消息与回复保持独立");
 assert.equal(turns.length, 5, "一轮对话一条执行记录");
-assert.equal(items.length, 15, `顶层应只有 15 行，实际 ${items.length}（原来 47 行）`);
+assert.equal(items.length, 15, `顶层应只有 15 行，实际 ${items.length}`);
 
 // 步数合计：46 段思考 + 52 个工具
 const totalSteps = turns.reduce((sum, group) => sum + group.entries.length, 0);
@@ -115,15 +116,45 @@ assert.match(first.summary, /读 3 个文件/, `组头应说明读取数：${fir
 assert.match(first.summary, /思考 24 段/, `组头应说明思考段数：${first.summary}`);
 assert.equal(first.editCount, 1, "改动文件数按去重路径统计");
 
-// 组内二级分组：思考 / 读取 / 运行 / 改动
-const labels = first.sections.map((section) => section.label);
-assert.deepEqual(labels, ["思考", "运行", "读取", "改动"], `二级分组按首次出现排序并合并同类动作：${labels.join("/")}`);
-const bashSection = first.sections.find((section) => section.key === "bash")!;
-assert.equal(bashSection.count, 26, "26 条命令合成一行");
-assert.match(bashSection.preview, /^npm run check/, `预览应显示命令：${bashSection.preview}`);
-assert.match(bashSection.preview, /\+\d+$/, "超过 2 条要显示 +N");
-const editSection = first.sections.find((section) => section.key === "edit")!;
-assert.equal(editSection.entries.length, 1, "write 归到改动");
+// 时间线：顺序必须与块的原始顺序一致，不能按类别归并
+assert.equal(first.steps.length, first.entries.length, "每一步都要在时间线上");
+assert.deepEqual(
+  first.steps.map((step) => step.block.id),
+  first.entries.map((entry) => entry.block.id),
+  "时间线顺序 = 真实发生顺序",
+);
+assert.equal(first.steps[0]!.kind, "thinking", "第一条是思考");
+assert.equal(first.steps[24]!.key, "bash", "24 段思考之后接着是命令，没有被挪到别处");
+assert.equal(first.steps.at(-1)!.key, "edit", "write 收在时间线末尾（改动）");
+
+// 单步展示字段：动作名、摘要、相对时间
+assert.equal(stepLabel(bash("b", "npm run check")), "运行");
+assert.equal(stepLabel(edit("e", "src/a.ts")), "改动");
+assert.equal(stepLabel(think("t", "x")), "思考");
+assert.equal(stepTarget(bash("b2", "cd /tmp && npm run check")), "npm run check", "命令去掉前置 cd");
+assert.equal(stepTarget(read("r", "packages/ui/src/kernel/transcript.ts")), "kernel/transcript.ts", "路径只留最后两级");
+assert.equal(stepTarget(think("t2", "  先 看看\n文件  ")), "先 看看 文件", "思考摘要压成一行");
+assert.ok(stepTarget(think("long", "x".repeat(200))).endsWith("…"), "过长的思考摘要要截断");
+
+const stamped = buildTurnSteps([
+  { block: { ...bash("b1"), ts: 10_000 }, index: 0 },
+  { block: { ...bash("b2"), ts: 11_400 }, index: 1 },
+  { block: { ...bash("b3"), ts: 22_000 }, index: 2 },
+]);
+assert.deepEqual(stamped.map((step) => step.offsetMs), [0, 1_400, 12_000], "相对第一步算偏移");
+assert.deepEqual(stamped.map((step) => step.offsetLabel), ["", "+1 秒", "+12 秒"], "超过 1 秒才显示耗时");
+const unstamped = buildTurnSteps([{ block: { ...bash("n1"), ts: undefined }, index: 0 }]);
+assert.equal(unstamped[0]!.offsetLabel, "", "没有时间戳时不显示耗时");
+assert.equal(unstamped[0]!.offsetMs, -1);
+
+// 失败与运行中
+const failing = buildTurnSteps([
+  { block: { ...bash("f1"), ts: 1_000 }, index: 0 },
+  { block: { ...bash("f2"), ts: 2_000, isError: true, status: "error" }, index: 1 },
+  { block: { ...bash("f3"), ts: 3_000, status: "running" }, index: 2 },
+]);
+assert.deepEqual(failing.map((step) => step.failed), [false, true, false], "失败步骤要标出来");
+assert.deepEqual(failing.map((step) => step.live), [false, false, true], "运行中的步骤要有标记");
 
 // 少于 2 步的片段不单独做组头
 const small = deriveTurnItems([user("u"), bash("b1"), text("x")]);
@@ -144,14 +175,14 @@ assert.equal(withSubagent[2]!.kind, "block", "subagent 自己保持独立卡片"
 assert.equal(isTurnStep(tool("e", "edit")), true, "edit 要收进组里");
 
 // 失败计数与耗时
-const failing = summarizeTurn([
+const failingTurn = summarizeTurn([
   { block: { ...bash("b1"), ts: 1_000 }, index: 0 },
   { block: { ...bash("b2"), ts: 6_200, isError: true, status: "error" }, index: 1 },
   { block: { ...bash("b3"), ts: 12_400 }, index: 2 },
 ]);
-assert.equal(failing.failedCount, 1, "失败数要统计");
-assert.match(failing.summary, /1 处失败/, "组头要提示失败");
-assert.equal(turnDurationLabel(failing), "11 秒", `耗时按时间戳算：${turnDurationLabel(failing)}`);
+assert.equal(failingTurn.failedCount, 1, "失败数要统计");
+assert.match(failingTurn.summary, /1 处失败/, "组头要提示失败");
+assert.equal(turnDurationLabel(failingTurn), "11 秒", `耗时按时间戳算：${turnDurationLabel(failingTurn)}`);
 assert.equal(turnDurationLabel({ durationMs: 0 }), "", "没有时间戳时不显示耗时");
 assert.equal(turnDurationLabel({ durationMs: 92_000 }), "1 分 32 秒");
 assert.equal(turnDurationLabel({ durationMs: 120_000 }), "2 分");
@@ -166,15 +197,11 @@ assert.equal(live.live, true);
 assert.match(live.summary, /正在运行/, `运行中要说明在做什么：${live.summary}`);
 assert.match(live.summary, /已完成 2 步/, `运行中要显示进度：${live.summary}`);
 
-// 二级分组顺序按首次出现，同类跨位置也合并
-const sections = buildActivitySections([
-  { block: bash("b1"), index: 0 },
-  { block: think("t1"), index: 1 },
-  { block: bash("b2"), index: 2 },
-  { block: read("r1"), index: 3 },
-]);
-assert.deepEqual(sections.map((section) => section.key), ["bash", "thinking", "read"], "分组顺序按首次出现");
-assert.equal(sections[0]!.count, 2, "同类的两条命令合并到一组");
-assert.equal(sections[1]!.preview, "1 段", "单段思考的预览文案");
+// detail（title 提示）按顺序取前 8 步，超出补 +N
+const detail = summarizeTurn(
+  Array.from({ length: 10 }, (_, i) => ({ block: { ...bash(`d${i}`, `cmd-${i}`), ts: 1_000 + i }, index: i })),
+).detail;
+assert.match(detail, /^运行 cmd-0/, `提示从第一步开始：${detail}`);
+assert.match(detail, /\+2$/, `超过 8 步要补计数：${detail}`);
 
-console.log("activity-turns OK 回合分组 / 二级分类 / 摘要 / 耗时 / 独立卡片");
+console.log("activity-turns OK 回合分组 / 时间线顺序 / 单步摘要 / 相对时间 / 失败与运行中");

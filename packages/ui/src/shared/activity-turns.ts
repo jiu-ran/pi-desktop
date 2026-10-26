@@ -1,10 +1,10 @@
 import {
   activityTarget,
-  isSettled,
   activityVerb,
   describeActivityBlock,
   isFailed,
   isLiveTool,
+  isSettled,
   type ActivityBlockLike,
   type ActivityEntry,
 } from "./activity.ts";
@@ -14,8 +14,9 @@ import {
  *
  * 真实会话实测（108 块）：原来渲染 47 行 —— 阈值 4 步导致 15 个独立思考行各自成行、
  * edit/write 打断分组散出 16 张卡片、20 步上限又切出 6 个组头。
- * 这里改成「只要还在同一条用户消息里，活动就归到同一组」，组内再按
- * 思考 / 读取 / 运行 / 改动 做二级分组，收起时永远只占一行。
+ * 这里改成「只要还在同一条用户消息里，活动就归到同一组」，收起时只占一行；
+ * 展开后**按时间顺序**列出每一步（思考、读取、运行、改动混排），
+ * 而不是按类别归并 —— 归并后看不出「先跑测试、看到失败、再改代码」这种真实顺序。
  */
 
 /** 会打断回合分组、保持独立卡片的工具（要交互或代表一次完整子任务）。 */
@@ -27,8 +28,8 @@ const EDIT_TOOLS = new Set(["edit", "write", "apply_patch"]);
 /** 少于 2 步的片段不单独做组头（一次 read 直接显示卡片更省事）。 */
 export const TURN_MIN_STEPS = 2;
 
-/** 二级分组的固定文案；未列出的工具用 activityVerb。 */
-const CATEGORY_LABEL: Record<string, string> = {
+/** 时间线上的动作名；未列出的工具用 activityVerb。 */
+const STEP_LABEL: Record<string, string> = {
   thinking: "思考",
   edit: "改动",
   bash: "运行",
@@ -40,22 +41,31 @@ const CATEGORY_LABEL: Record<string, string> = {
   fetch: "抓取",
 };
 
-export interface ActivitySection<T extends ActivityBlockLike = ActivityBlockLike> {
-  /** 二级分组的键：thinking / edit / bash / read … */
+/** 时间线上的一步：块的原文 + 展示用的派生字段 */
+export interface TurnStep<T extends ActivityBlockLike = ActivityBlockLike> {
+  block: T;
+  /** 在完整 blocks 数组中的下标 */
+  index: number;
+  /** 分类键：thinking / edit / bash / read …（只用来上色和统计） */
   key: string;
   kind: "thinking" | "tool";
+  /** 动作名：思考 / 改动 / 运行 / 读取 … */
   label: string;
-  count: number;
-  failedCount: number;
-  /** 一行预览：「util.ts · session.ts +1」「npm run check · git status +24」 */
-  preview: string;
-  entries: ActivityEntry<T>[];
+  /** 一行摘要：命令、文件名，思考步骤取推理开头 */
+  target: string;
+  failed: boolean;
+  live: boolean;
+  /** 相对本轮第一步的偏移（毫秒）；没有时间戳时 -1 */
+  offsetMs: number;
+  /** 「+12 秒」；没有时间戳或不足 1 秒时为空串 */
+  offsetLabel: string;
 }
 
 export interface TurnGroup<T extends ActivityBlockLike = ActivityBlockLike> {
   id: string;
   entries: ActivityEntry<T>[];
-  sections: ActivitySection<T>[];
+  /** 按时间顺序排列的每一步（与 entries 一一对应） */
+  steps: TurnStep<T>[];
   toolCount: number;
   thinkingCount: number;
   /** 改动过的文件数（edit / write / apply_patch 去重后的路径数） */
@@ -90,47 +100,22 @@ export function activityCategory(block: ActivityBlockLike): string {
   return name || "tool";
 }
 
-function sectionPreview<T extends ActivityBlockLike>(category: string, entries: ActivityEntry<T>[]): string {
-  if (category === "thinking") return entries.length > 1 ? `${entries.length} 段` : "1 段";
-  const seen = new Set<string>();
-  const targets: string[] = [];
-  for (const entry of entries) {
-    const target = activityTarget(entry.block);
-    if (!target || seen.has(target)) continue;
-    seen.add(target);
-    targets.push(target);
-  }
-  if (!targets.length) return "";
-  const shown = targets.slice(0, 2).join(" · ");
-  return targets.length > 2 ? `${shown} +${targets.length - 2}` : shown;
+/** 单个步骤的动作名：改动（edit/write）、运行、读取 … */
+export function stepLabel(block: ActivityBlockLike): string {
+  const category = activityCategory(block);
+  return STEP_LABEL[category] ?? activityVerb(block);
 }
 
-/** 把一轮活动拆成「思考 / 读取 / 运行 / 改动」等二级分组，顺序按首次出现 */
-export function buildActivitySections<T extends ActivityBlockLike>(entries: ActivityEntry<T>[]): ActivitySection<T>[] {
-  const order: string[] = [];
-  const buckets = new Map<string, ActivityEntry<T>[]>();
-  for (const entry of entries) {
-    const category = activityCategory(entry.block);
-    if (!buckets.has(category)) {
-      buckets.set(category, []);
-      order.push(category);
-    }
-    buckets.get(category)!.push(entry);
-  }
-  return order.map((category) => {
-    const items = buckets.get(category)!;
-    const sample = items[0]!.block;
-    const kind: "thinking" | "tool" = sample.kind === "thinking" ? "thinking" : "tool";
-    return {
-      key: category,
-      kind,
-      label: CATEGORY_LABEL[category] ?? (kind === "thinking" ? "思考" : activityVerb(sample)),
-      count: items.length,
-      failedCount: items.filter((entry) => isFailed(entry.block)).length,
-      preview: sectionPreview(category, items),
-      entries: items,
-    };
-  });
+function firstLine(text: unknown, max = 96): string {
+  if (typeof text !== "string") return "";
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** 单步摘要：工具看参数，思考取推理的第一句（截断，完整内容在展开后的卡片里） */
+export function stepTarget(block: ActivityBlockLike): string {
+  if (block.kind === "thinking") return firstLine(block.text);
+  return firstLine(activityTarget(block));
 }
 
 /** 耗时文案（不足 1 秒返回空串） */
@@ -147,10 +132,49 @@ export function turnDurationLabel(group: Pick<TurnGroup, "durationMs">): string 
   return formatDuration(group.durationMs);
 }
 
+/**
+ * 时间线：保持块的原始顺序，只补上展示用的动作名、摘要、失败/运行状态和相对时间。
+ *
+ * 这里不做任何合并 —— 用户要看的正是「先思考、再跑命令、然后改文件、又失败」的真实次序。
+ */
+export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEntry<T>[]): TurnStep<T>[] {
+  const stamps = entries.map((entry) => entry.block.ts).filter((ts): ts is number => typeof ts === "number" && ts > 0);
+  const start = stamps.length ? Math.min(...stamps) : 0;
+  return entries.map((entry) => {
+    const block = entry.block;
+    const ts = typeof block.ts === "number" && block.ts > 0 ? block.ts : 0;
+    const offsetMs = start && ts ? Math.max(0, ts - start) : -1;
+    const offset = formatDuration(offsetMs);
+    return {
+      block,
+      index: entry.index,
+      key: activityCategory(block),
+      kind: block.kind === "thinking" ? "thinking" : "tool",
+      label: stepLabel(block),
+      target: stepTarget(block),
+      failed: isFailed(block),
+      live: isLiveTool(block) || Boolean(block.streaming),
+      offsetMs,
+      offsetLabel: offset ? `+${offset}` : "",
+    };
+  });
+}
+
 /** 组头摘要：「执行了 N 步 · 改 N 个文件 · N 条命令 · 思考 N 段」 */
 export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntry<T>[]): Pick<
   TurnGroup<T>,
-  "toolCount" | "thinkingCount" | "editCount" | "commandCount" | "readCount" | "failedCount" | "errored" | "live" | "durationMs" | "summary" | "detail"
+  | "steps"
+  | "toolCount"
+  | "thinkingCount"
+  | "editCount"
+  | "commandCount"
+  | "readCount"
+  | "failedCount"
+  | "errored"
+  | "live"
+  | "durationMs"
+  | "summary"
+  | "detail"
 > {
   const tools = entries.filter((entry) => entry.block.kind === "tool");
   const thoughts = entries.filter((entry) => entry.block.kind === "thinking");
@@ -185,12 +209,14 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     if (failedCount) parts.push(`${failedCount} 处失败`);
   }
 
-  const sections = buildActivitySections(entries);
-  const detail = sections
-    .map((section) => `${section.label} ${section.count}${section.preview ? `（${section.preview}）` : ""}`)
+  const steps = buildTurnSteps(entries);
+  const detail = steps
+    .slice(0, 8)
+    .map((step) => (step.target ? `${step.label} ${step.target}` : step.label))
     .join(" · ");
 
   return {
+    steps,
     toolCount: tools.length,
     thinkingCount: thoughts.length,
     editCount: files.size,
@@ -201,7 +227,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     live,
     durationMs,
     summary: parts.join(" · "),
-    detail,
+    detail: steps.length > 8 ? `${detail} · +${steps.length - 8}` : detail,
   };
 }
 
@@ -221,7 +247,6 @@ export function deriveTurnItems<T extends ActivityBlockLike>(blocks: readonly T[
         group: {
           id: `turn:${first.block.id}`,
           entries: run,
-          sections: buildActivitySections(run),
           ...summarizeTurn(run),
         },
       });

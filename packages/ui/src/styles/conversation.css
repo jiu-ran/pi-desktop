@@ -866,16 +866,67 @@
 }
 .activity-duration { flex: none; color: var(--fg-3); font: 11px var(--mono); white-space: nowrap; }
 
-/* 执行记录里的二级分组：思考 / 读取 / 运行 / 改动 */
-.turn-section { display: flex; flex-direction: column; gap: 4px; }
-.turn-section-head {
+/* 执行时间线：一次请求内按真实顺序列出每一步（思考 / 运行 / 改动混排） */
+.turn-timeline {
   display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.turn-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  column-gap: 4px;
+  align-items: start;
+}
+/* 竖线画在每步左侧，最后一步不再往下延伸 */
+.turn-step-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: var(--line);
+}
+.turn-step:first-child .turn-step-rail { top: 11px; }
+.turn-step:last-child .turn-step-rail { bottom: calc(100% - 12px); }
+.turn-step-dot {
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  margin: 8px 0 0 3px;
+  border-radius: 50%;
+  background: var(--bg-0);
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+  justify-self: center;
+}
+.turn-step.is-edit .turn-step-dot { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.turn-step.is-bash .turn-step-dot { box-shadow: inset 0 0 0 1.5px var(--fg-2); }
+.turn-step.is-thinking .turn-step-dot {
+  width: 5px;
+  height: 5px;
+  margin-top: 9px;
+  background: var(--fg-3);
+  box-shadow: none;
+  opacity: 0.75;
+}
+.turn-step.live .turn-step-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.turn-step.failed .turn-step-dot { background: var(--err); box-shadow: none; }
+
+.turn-step-head {
+  display: flex;
+  grid-column: 2;
   align-items: center;
   gap: 6px;
   width: 100%;
   min-height: 24px;
-  padding: 2px 6px;
-  border: 1px solid transparent;
+  padding: 2px 6px 2px 2px;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--fg-2);
@@ -883,12 +934,27 @@
   text-align: left;
   cursor: pointer;
 }
-.turn-section-head:hover { border-color: var(--line); background: var(--bg-1); }
-.turn-caret { display: grid; flex: none; place-items: center; color: var(--fg-3); transition: transform 140ms ease; }
-.turn-caret.open { transform: rotate(90deg); }
-.turn-section-label { flex: none; font-weight: 500; }
-.turn-section-count { flex: none; color: var(--fg-3); font: 11px var(--mono); }
-.turn-section-preview {
+.turn-step-head:hover { background: var(--bg-1); }
+.turn-step-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.turn-step-index {
+  flex: none;
+  width: 18px;
+  color: var(--fg-3);
+  font: 10.5px/1.6 var(--mono);
+  text-align: right;
+  opacity: 0.7;
+}
+.turn-step-label {
+  flex: none;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.turn-step.is-thinking .turn-step-label { color: var(--fg-3); font-weight: 400; }
+.turn-step.is-edit .turn-step-label { color: var(--accent); }
+.turn-step.failed .turn-step-label { color: var(--err); }
+.turn-step-target {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -897,15 +963,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.turn-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 2px 0 4px 18px;
+.turn-step.is-thinking .turn-step-target { font-family: inherit; font-style: italic; }
+.turn-step-failed { flex: none; color: var(--err); font-size: 11px; }
+.turn-step-live { flex: none; color: var(--accent); }
+.turn-step-time {
+  flex: none;
+  color: var(--fg-3);
+  font: 10.5px var(--mono);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.turn-step-body {
+  grid-column: 2;
+  margin: 2px 0 6px;
   padding-left: 8px;
   border-left: 1px solid var(--line);
 }
-@media (prefers-reduced-motion: reduce) { .turn-caret { transition: none; } }
+
+/* 紧凑：去掉序号与相对时间，行高再压一点 */
+.activity-compact .turn-step-index,
+.activity-compact .turn-step-time { display: none; }
+.activity-compact .turn-step-head { min-height: 20px; }
+@media (prefers-reduced-motion: reduce) { .turn-step-head { transition: none; } }
 
 .activity-group.search-hit > .activity-head { border-color: var(--accent); }
 .activity-group.search-hit > .activity-body { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 6px; }

@@ -238,9 +238,9 @@ const accentColor = computed(() => (ACCENTS.find((item) => item.id === appSettin
 const radiusLabel = computed(() => (RADIUS_PRESETS.find((item) => item.id === appSettings.radius) ?? RADIUS_PRESETS[1]).label);
 
 const ACTIVITY_DETAILS = [
-  { id: "grouped", label: "分组", hint: "按一次请求合成一行「执行了 N 步」，展开后按 思考/读取/运行/改动 分类" },
-  { id: "compact", label: "紧凑", hint: "只折叠连续 4 步以上的活动，其余逐块显示" },
-  { id: "expanded", label: "展开", hint: "全部展开，每个工具与思考各占一行" },
+  { id: "grouped", label: "时间线", hint: "按一次请求合成一行「执行了 N 步」，展开后按真实顺序列出每一步" },
+  { id: "compact", label: "紧凑", hint: "同上，但去掉步骤序号与耗时，行更矮" },
+  { id: "expanded", label: "展开", hint: "打开对话时直接展开每一步的细节" },
 ] as const;
 const activityDetailLabel = computed(() => (ACTIVITY_DETAILS.find((item) => item.id === appSettings.activityDetail) ?? ACTIVITY_DETAILS[0]).label);
 const columnWidthLabel = computed(

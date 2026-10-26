@@ -22,50 +22,6 @@ export interface ActivityEntry<T extends ActivityBlockLike = ActivityBlockLike> 
   index: number;
 }
 
-export interface ActivityGroup<T extends ActivityBlockLike = ActivityBlockLike> {
-  id: string;
-  entries: ActivityEntry<T>[];
-  toolCount: number;
-  thinkingCount: number;
-  live: boolean;
-  /**
-   * 这段活动是否「以失败收尾」。整组会跨越多个回合，中间失败但随后重试成功时
-   * 不应继续报警，所以只看最后一个已结算的工具；失败总数另由 failedCount 提供。
-   */
-  errored: boolean;
-  /** 组内失败的工具数量，用于在中途失败但已恢复时给出弱提示 */
-  failedCount: number;
-  /** 折叠头的一行摘要 */
-  summary: string;
-  /** 完整摘要，放在 title 里 */
-  detail: string;
-}
-
-export type ActivityRenderItem<T extends ActivityBlockLike = ActivityBlockLike> =
-  | { kind: "block"; block: T; index: number }
-  | { kind: "activity"; group: ActivityGroup<T> };
-
-/** 少于 4 步的零散工具保持原样，避免为两次 read 也加一条折叠头。 */
-export const ACTIVITY_MIN_STEPS = 4;
-
-/** 单个活动组最多收 20 步；超长工具链拆成多组，搜索展开时不会一次挂载几十张卡片。 */
-export const ACTIVITY_MAX_STEPS = 20;
-
-/** 这些工具本身是主要产物或需要用户交互，不放进折叠的活动组。 */
-// 子代理类工具（subagent / parallel / review / bg_wait）单独成行：它们代表一次完整的
-// 子任务，折进活动组后既看不出在跑什么，也没法点开对话。
-const PRIMARY_TOOLS = new Set([
-  "edit",
-  "write",
-  "apply_patch",
-  "request_review",
-  "ask_user_question",
-  "subagent",
-  "parallel",
-  "review",
-  "bg_wait",
-]);
-
 const TOOL_VERBS: Record<string, string> = {
   read: "读取",
   bash: "运行",
@@ -80,21 +36,8 @@ const TOOL_VERBS: Record<string, string> = {
   glob: "匹配",
 };
 
-/** 主要工具（diff、写文件、需要用户回答）保持独立卡片。 */
-export function isPrimaryToolName(name = ""): boolean {
-  return PRIMARY_TOOLS.has(name);
-}
-
 export function isLiveTool(block: ActivityBlockLike): boolean {
   return block.status === "pending" || block.status === "running" || Boolean(block.streaming);
-}
-
-/** 可以作为活动步骤的块：思考，以及非主要、无图片的工具调用。 */
-export function isActivityStep(block: ActivityBlockLike): boolean {
-  if (block.kind === "thinking") return true;
-  if (block.kind !== "tool") return false;
-  if (isPrimaryToolName(block.name)) return false;
-  return !(block.images && block.images > 0);
 }
 
 function firstLine(text: unknown): string {
@@ -133,7 +76,7 @@ export function activityTarget(block: ActivityBlockLike): string {
   return "";
 }
 
-/** 工具动作类别，例如 读取 / 运行 / 搜索；折叠头用它做计数摘要。 */
+/** 工具动作类别，例如 读取 / 运行 / 搜索。 */
 export function activityVerb(block: ActivityBlockLike): string {
   if (block.kind === "thinking") return "思考";
   const name = block.name ?? "";
@@ -149,107 +92,5 @@ export function describeActivityBlock(block: ActivityBlockLike): string {
   return target ? clip(`${verb} ${target}`) : verb;
 }
 
-function uniqueActions(entries: ActivityEntry[]): string[] {
-  const seen = new Set<string>();
-  const actions: string[] = [];
-  for (const entry of entries) {
-    if (entry.block.kind !== "tool") continue;
-    const action = describeActivityBlock(entry.block);
-    if (!action || seen.has(action)) continue;
-    seen.add(action);
-    actions.push(action);
-  }
-  return actions;
-}
-
 export const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";
 export const isSettled = (block: ActivityBlockLike): boolean => block.status === "done" || block.status === "error";
-
-export function summarizeActivity(entries: ActivityEntry[]): Pick<ActivityGroup, "toolCount" | "thinkingCount" | "live" | "errored" | "failedCount" | "summary" | "detail"> {
-  const tools = entries.filter((entry) => entry.block.kind === "tool");
-  const thoughts = entries.filter((entry) => entry.block.kind === "thinking");
-  const failedCount = tools.filter((entry) => isFailed(entry.block)).length;
-  const live = entries.some((entry) => isLiveTool(entry.block) || entry.block.streaming);
-  // 只看最后一个已结算的工具：失败后重试成功，这一组就不再算失败；
-  // 仍在运行时也先不报警（可能是重试还没结束）。
-  const lastSettled = [...tools].reverse().find((entry) => isSettled(entry.block));
-  const errored = !live && Boolean(lastSettled && isFailed(lastSettled.block));
-  const actions = uniqueActions(entries);
-  const detail = actions.length
-    ? clip(actions.slice(0, 8).join(" · ") + (actions.length > 8 ? ` · +${actions.length - 8}` : ""), 240)
-    : thoughts.length
-      ? `${thoughts.length} 段思考`
-      : "";
-
-  // 折叠头显示去重后的具体动作，比「运行 ×18」更能说明这一组做了什么；
-  // 完整数量由左侧的「N 工具 · N 思考」承担。
-  const shown = actions.slice(0, 3).join(" · ");
-  const more = actions.length - 3;
-  let summary = shown ? `${shown}${more > 0 ? ` · +${more}` : ""}` : thoughts.length ? `${thoughts.length} 段思考` : "活动";
-
-  if (live) {
-    const running = [...tools].reverse().find((entry) => isLiveTool(entry.block));
-    const thinking = [...thoughts].reverse().find((entry) => entry.block.streaming);
-    if (running) summary = `正在${describeActivityBlock(running.block)}`;
-    else if (thinking) summary = "正在思考…";
-    else summary = "正在处理…";
-  } else if (errored) {
-    summary = lastSettled ? `失败 · ${describeActivityBlock(lastSettled.block)}` : "有工具执行失败";
-  }
-
-  return {
-    toolCount: tools.length,
-    thinkingCount: thoughts.length,
-    live,
-    errored,
-    failedCount,
-    summary: clip(summary || "活动", 96),
-    detail,
-  };
-}
-
-/**
- * 把连续的思考 / 常规工具合并成活动组；文本、用户消息、错误提示和主要工具会打断分组。
- * 少于 ACTIVITY_MIN_STEPS 步的连续片段仍按原样逐块渲染。
- */
-export function deriveActivityItems<T extends ActivityBlockLike>(blocks: readonly T[]): ActivityRenderItem<T>[] {
-  const items: ActivityRenderItem<T>[] = [];
-  let run: ActivityEntry<T>[] = [];
-
-  const flush = (): void => {
-    if (run.length >= ACTIVITY_MIN_STEPS) {
-      const first = run[0]!;
-      items.push({
-        kind: "activity",
-        group: {
-          id: `activity:${first.block.id}`,
-          entries: run,
-          ...summarizeActivity(run),
-        },
-      });
-    } else {
-      for (const entry of run) items.push({ kind: "block", ...entry });
-    }
-    run = [];
-  };
-
-  blocks.forEach((block, index) => {
-    if (isActivityStep(block)) {
-      run.push({ block, index });
-      if (run.length >= ACTIVITY_MAX_STEPS) flush();
-      return;
-    }
-    flush();
-    items.push({ kind: "block", block, index });
-  });
-  flush();
-  return items;
-}
-
-/** 活动组里的工具数量与思考数量，用于折叠头右侧的计数。 */
-export function activityCountLabel(group: Pick<ActivityGroup, "toolCount" | "thinkingCount">): string {
-  if (group.toolCount && group.thinkingCount) return `${group.toolCount} 工具 · ${group.thinkingCount} 思考`;
-  if (group.toolCount) return `${group.toolCount} 个工具`;
-  if (group.thinkingCount) return `${group.thinkingCount} 段思考`;
-  return "活动";
-}
