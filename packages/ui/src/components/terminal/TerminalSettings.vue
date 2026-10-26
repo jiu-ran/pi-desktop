@@ -5,6 +5,7 @@ import { appSettings } from "../../services/settings.ts";
 import { pushToast } from "../../services/extension-ui.ts";
 import { localizeNotification } from "../../shared/notify-text.ts";
 import { icons } from "../../shared/util.ts";
+import SelectMenu from "../shared/SelectMenu.vue";
 
 const { terminal, plugins, platform } = useKernel();
 const selected = ref(appSettings.terminalProfile);
@@ -23,8 +24,7 @@ async function togglePlugin(): Promise<void> {
   finally { toggling.value = false; }
 }
 
-async function selectProfile(event: Event): Promise<void> {
-  const id = (event.target as HTMLSelectElement).value;
+async function selectProfile(id: string): Promise<void> {
   selected.value = id;
   error.value = "";
   if (id === "custom") return;
@@ -118,11 +118,17 @@ onMounted(() => void terminal.refreshProfiles());
         <strong>默认终端</strong>
         <span>仅改变新建会话。现有终端继续使用创建时的 shell，可在 + 旁的菜单临时新建其他 shell。</span>
       </div>
-      <select class="settings-select" :value="selected" :disabled="saving || !terminal.available" aria-label="默认终端" @change="selectProfile">
-        <option v-if="unavailable" :value="appSettings.terminalProfile" disabled>配置已失效 · {{ appSettings.terminalProfile }}</option>
-        <option v-for="profile in terminal.state.profiles" :key="profile.id" :value="profile.id">{{ profile.label }}</option>
-        <option value="custom">自定义可执行文件…</option>
-      </select>
+      <SelectMenu
+        :model-value="selected"
+        :disabled="saving || !terminal.available"
+        aria-label="默认终端"
+        :options="[
+          ...(unavailable ? [{ value: appSettings.terminalProfile, label: `配置已失效 · ${appSettings.terminalProfile}`, disabled: true }] : []),
+          ...terminal.state.profiles.map((profile: any) => ({ value: profile.id, label: profile.label })),
+          { value: 'custom', label: '自定义可执行文件…' },
+        ]"
+        @change="(value) => void selectProfile(String(value))"
+      />
     </div>
     <p class="terminal-settings-note">
       <template v-if="platform === 'win32'">系统默认使用 %ComSpec%（通常是 CMD）；pwsh、Windows PowerShell 和 Git Bash 安装后会自动列出。这里切换的是 shell，不会修改 Windows Terminal 等外部终端应用的设置。</template>

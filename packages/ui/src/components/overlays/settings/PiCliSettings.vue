@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { appSettings } from "../../../services/settings.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
+import SelectMenu from "../../shared/SelectMenu.vue";
 
 /**
  * Pi CLI：本机 pi 命令的路径、版本与更新。
@@ -158,10 +159,18 @@ onMounted(() => {
         <span>使用识别到的 Pi 执行更新，由它按实际安装方式（npm、pnpm 或官方安装器）处理；完成后展示版本变化与输出</span>
       </div>
       <div style="display: flex; gap: 6px; flex: none; align-items: center;">
-        <select v-model="appSettings.piUpdateScope" class="settings-select" :disabled="state.pi.updating" title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展">
-          <option value="self">pi update</option>
-          <option value="all">update --all</option>
-        </select>
+        <SelectMenu
+          v-model="appSettings.piUpdateScope"
+          size="sm"
+          align="right"
+          :disabled="state.pi.updating"
+          aria-label="更新范围"
+          title="pi update 只更新 Pi；pi update --all 同时更新已安装扩展"
+          :options="[
+            { value: 'self', label: 'pi update', hint: '只更新 Pi' },
+            { value: 'all', label: 'update --all', hint: '含已装扩展' },
+          ]"
+        />
         <button
           type="button"
           class="btn ghost small"

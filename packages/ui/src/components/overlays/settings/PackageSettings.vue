@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import type { PiPackagesOverview, PiPackageItem } from "../../../env.d.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { icons, shortPath } from "../../../shared/util.ts";
+import SelectMenu from "../../shared/SelectMenu.vue";
 
 const { workbench, bus } = useKernel();
 const state = workbench.state;
@@ -115,10 +116,16 @@ watch(() => state.activeCwd, loadPackagesOverview);
           :disabled="pkgBusy"
           @keydown.enter.prevent="installPackage"
         />
-        <select v-model="pkgInstallLocal" class="settings-select">
-          <option :value="false">全局安装</option>
-          <option :value="true" :disabled="!state.activeCwd">当前项目 (-l)</option>
-        </select>
+        <SelectMenu
+          v-model="pkgInstallLocal"
+          size="sm"
+          align="right"
+          aria-label="安装位置"
+          :options="[
+            { value: false, label: '全局安装' },
+            { value: true, label: '当前项目 (-l)', hint: state.activeCwd ? '' : '未打开项目', disabled: !state.activeCwd },
+          ]"
+        />
         <button
           type="button"
           class="btn small"

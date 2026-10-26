@@ -503,6 +503,150 @@
   flex: none;
 }
 
+/* ---------- 下拉选择（自绘，替代原生 select） ---------- */
+.select-menu {
+  position: relative;
+  flex: none;
+  min-width: 0;
+}
+.select-menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 120px;
+  max-width: 280px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12.5px var(--sans);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.select-menu.is-sm .select-menu-trigger {
+  min-width: 96px;
+  height: 26px;
+  font-size: 12px;
+}
+.select-menu-trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fg-3) 70%, var(--line-2));
+}
+.select-menu-trigger:focus-visible,
+.select-menu.open .select-menu-trigger {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.select-menu-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.select-menu-trigger.placeholder .select-menu-value {
+  color: var(--fg-3);
+}
+.select-menu-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-menu-caret {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--fg-3);
+  transition: transform 0.14s ease, color 0.12s;
+}
+.select-menu-caret svg {
+  display: block;
+}
+.select-menu.open .select-menu-caret {
+  transform: rotate(180deg);
+  color: var(--fg-2);
+}
+
+/* 浮层传送到底层 body：跟随主题、不被滚动容器裁掉 */
+.select-menu-popup {
+  position: fixed;
+  z-index: 320;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+  animation: select-pop 0.12s ease-out;
+}
+@keyframes select-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.select-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-2);
+  font: 12.5px var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+.select-menu-item:hover,
+.select-menu-item:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--fg);
+}
+.select-menu-item.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
+.select-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.select-menu-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-menu-item-hint {
+  flex: none;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.select-menu-item-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--accent);
+}
+.select-menu-item-check svg {
+  display: block;
+}
+
+/* 用自绘控件时，行右侧不再需要原生 select 的宽度限制 */
+.settings-row > .select-menu {
+  flex: none;
+}
+
 /* ---------- 基础控件 ---------- */
 .settings-select,
 .settings-input,

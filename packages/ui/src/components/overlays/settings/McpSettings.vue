@@ -3,6 +3,7 @@ import { onMounted, reactive, ref, watch } from "vue";
 import type { McpExposureMode, McpOverview, McpServerItem } from "../../../env.d.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { icons } from "../../../shared/util.ts";
+import SelectMenu from "../../shared/SelectMenu.vue";
 
 const { workbench, bus } = useKernel();
 const state = workbench.state;
@@ -297,10 +298,16 @@ watch(() => state.activeCwd, loadMcpOverview);
     <div v-if="mcpJsonImportOpen" class="settings-card-form">
       <div class="settings-form-head">
         <strong>从 JSON 导入 MCP 服务配置</strong>
-        <select v-model="mcpJsonScope" class="settings-select">
-          <option value="global">全局配置</option>
-          <option value="project" :disabled="!state.activeCwd">当前项目 (.pi/mcp.json)</option>
-        </select>
+        <SelectMenu
+          v-model="mcpJsonScope"
+          size="sm"
+          align="right"
+          aria-label="导入到哪份配置"
+          :options="[
+            { value: 'global', label: '全局配置' },
+            { value: 'project', label: '当前项目 (.pi/mcp.json)', disabled: !state.activeCwd, hint: state.activeCwd ? '' : '未打开项目' },
+          ]"
+        />
       </div>
       <textarea
         v-model="mcpJsonText"
@@ -326,10 +333,16 @@ watch(() => state.activeCwd, loadMcpOverview);
     <div v-if="mcpFormOpen" class="settings-card-form">
       <div class="settings-form-head">
         <strong>{{ mcpForm.editingName ? `编辑服务「${mcpForm.editingName}」` : "新增 MCP 服务" }}</strong>
-        <select v-model="mcpForm.scope" class="settings-select">
-          <option value="global">全局 (~/.pi/agent/mcp.json)</option>
-          <option value="project" :disabled="!state.activeCwd">当前项目 (.pi/mcp.json)</option>
-        </select>
+        <SelectMenu
+          v-model="mcpForm.scope"
+          size="sm"
+          align="right"
+          aria-label="写入哪份配置"
+          :options="[
+            { value: 'global', label: '全局', hint: '~/.pi/agent/mcp.json' },
+            { value: 'project', label: '当前项目', hint: '.pi/mcp.json', disabled: !state.activeCwd },
+          ]"
+        />
       </div>
 
       <div class="settings-form-grid">
@@ -345,10 +358,15 @@ watch(() => state.activeCwd, loadMcpOverview);
 
         <div class="settings-field">
           <span>传输类型</span>
-          <select v-model="mcpForm.type" class="settings-select">
-            <option value="stdio">STDIO 本地进程</option>
-            <option value="http">HTTP 远程服务</option>
-          </select>
+          <SelectMenu
+            v-model="mcpForm.type"
+            width="100%"
+            aria-label="传输类型"
+            :options="[
+              { value: 'stdio', label: 'STDIO 本地进程' },
+              { value: 'http', label: 'HTTP 远程服务' },
+            ]"
+          />
         </div>
       </div>
 
@@ -410,11 +428,7 @@ watch(() => state.activeCwd, loadMcpOverview);
       <div class="settings-form-grid">
         <label class="settings-field">
           <span>工具暴露模式 (exposure)</span>
-          <select v-model="mcpForm.exposure" class="settings-select">
-            <option v-for="opt in exposureOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
+          <SelectMenu v-model="mcpForm.exposure" width="100%" aria-label="工具暴露模式" :options="exposureOptions" />
         </label>
         <label class="settings-field">
           <span>服务功能描述（可选，提示给系统提示词）</span>
@@ -480,17 +494,20 @@ watch(() => state.activeCwd, loadMcpOverview);
           </div>
 
           <div class="settings-item-controls">
-            <select
-              :value="srv.exposure"
-              class="settings-select compact"
+            <SelectMenu
+              :model-value="srv.exposure"
+              size="sm"
+              align="right"
               title="工具暴露策略"
-              @change="changeMcpServerExposure(srv, ($event.target as HTMLSelectElement).value as McpExposureMode)"
-            >
-              <option value="codemode">Codemode</option>
-              <option value="direct">Direct</option>
-              <option value="deferred">Deferred</option>
-              <option value="hidden">Hidden</option>
-            </select>
+              aria-label="工具暴露策略"
+              :options="[
+                { value: 'codemode', label: 'Codemode' },
+                { value: 'direct', label: 'Direct' },
+                { value: 'deferred', label: 'Deferred' },
+                { value: 'hidden', label: 'Hidden' },
+              ]"
+              @change="changeMcpServerExposure(srv, $event as McpExposureMode)"
+            />
             <button
               type="button"
               class="btn ghost small"

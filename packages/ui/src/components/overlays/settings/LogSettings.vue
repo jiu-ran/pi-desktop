@@ -5,6 +5,7 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
 import { formatBytes as formatSize } from "../../../shared/attachments.ts";
 import { DEFAULT_LOG_MAX_BYTES, LOG_MAX_CHOICES_MB } from "../../../shared/log-limit.ts";
 import SettingGroup from "./SettingGroup.vue";
+import SelectMenu from "../../shared/SelectMenu.vue";
 import SettingRow from "./SettingRow.vue";
 
 /**
@@ -88,9 +89,11 @@ onMounted(load);
     </SettingRow>
 
     <SettingRow label="总量上限" hint="给日志留多少空间：超了就按时间删最旧的；排查问题时可以临时调大">
-      <select v-model.number="appSettings.logMaxBytes" class="settings-select">
-        <option v-for="mb in LOG_MAX_CHOICES_MB" :key="mb" :value="mb * 1024 * 1024">{{ mb }} MB</option>
-      </select>
+      <SelectMenu
+        v-model="appSettings.logMaxBytes"
+        aria-label="日志总量上限"
+        :options="LOG_MAX_CHOICES_MB.map((mb) => ({ value: mb * 1024 * 1024, label: `${mb} MB` }))"
+      />
     </SettingRow>
 
     <SettingRow

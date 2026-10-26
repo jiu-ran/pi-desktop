@@ -84,7 +84,7 @@ export async function checkSettingsInElectron(win) {
   })()`));
   assert.deepEqual(
     nav.sections.map((item) => item.label),
-    ["对话", "能力", "外观", "Pi CLI", "Pi Desktop", "桌面"],
+    ["对话", "扩展", "外观", "Pi CLI", "Pi Desktop", "系统"],
     `左栏只留四个一级分区，实际 ${nav.sections.map((item) => item.label).join("/")}`,
   );
   assert.ok(nav.sections.every((item) => item.icon), "每个分区都要有图标");
@@ -218,6 +218,57 @@ export async function checkSettingsInElectron(win) {
   }
   assert.ok(!piCli.rows.includes("当前活动项目目录"), "项目目录属于「环境与快捷键」，不该混进 Pi CLI 页");
 
+  // 自绘下拉：设置页里不能再出现原生 <select>（系统弹出层是浅色系统菜单，和主题割裂）
+  assert.equal(await evaluate("document.querySelectorAll('.settings-body select').length"), 0, "设置页不该再用原生 select");
+  const dropdown = JSON.parse(await evaluate(`(async () => {
+    const trigger = [...document.querySelectorAll('.select-menu-trigger')].find((node) => node.textContent.includes('pi update'));
+    trigger.click();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const popup = document.querySelector('.select-menu-popup');
+    const rect = popup?.getBoundingClientRect();
+    const styles = popup ? getComputedStyle(popup) : null;
+    return JSON.stringify({
+      triggerExpanded: trigger.getAttribute("aria-expanded"),
+      open: Boolean(popup),
+      parent: popup?.parentElement?.tagName ?? "",
+      bg: styles?.backgroundColor ?? "",
+      radius: styles?.borderRadius ?? "",
+      inViewport: rect ? rect.left >= 0 && rect.bottom <= innerHeight && rect.top >= 0 : false,
+      items: [...(popup?.querySelectorAll('.select-menu-item') ?? [])].map((node) => ({
+        label: node.querySelector('.select-menu-item-label')?.textContent?.trim() ?? '',
+        hint: node.querySelector('.select-menu-item-hint')?.textContent?.trim() ?? '',
+        active: node.classList.contains('active'),
+        selected: node.getAttribute('aria-selected'),
+      })),
+    });
+  })()`));
+  assert.equal(dropdown.triggerExpanded, "true", "点开后触发器要带 aria-expanded");
+  assert.equal(dropdown.open, true, "点触发器要弹出下拉");
+  assert.equal(dropdown.parent, "BODY", "下拉浮层要传送到 body（不被滚动容器裁掉）");
+  assert.notEqual(dropdown.bg, "rgba(0, 0, 0, 0)", `下拉浮层要自己有主题底色，实际 ${dropdown.bg}`);
+  assert.notEqual(dropdown.radius, "0px", "下拉浮层要有圆角（说明走的是设置页样式而不是系统菜单）");
+  assert.ok(dropdown.inViewport, "下拉必须落在视口内");
+  assert.deepEqual(dropdown.items.map((item) => item.label), ["pi update", "update --all"], `下拉选项不对：${JSON.stringify(dropdown.items)}`);
+  assert.equal(dropdown.items.filter((item) => item.active).length, 1, "当前值只能有一项高亮");
+  assert.equal(dropdown.items[0].selected, "true", "当前值要带 aria-selected");
+  assert.ok(dropdown.items[0].hint.length > 0, "选项要带补充说明");
+
+  // 选第二项：值要真的写进设置，浮层要收起
+  const picked = JSON.parse(await evaluate(`(async () => {
+    const items = [...document.querySelectorAll('.select-menu-item')];
+    items[1].click();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return JSON.stringify({
+      value: window.__piDesktop.settings.settings.piUpdateScope,
+      text: [...document.querySelectorAll('.select-menu-trigger')].find((node) => node.textContent.includes('update'))?.textContent?.trim() ?? '',
+      closed: !document.querySelector('.select-menu-popup'),
+    });
+  })()`));
+  assert.equal(picked.value, "all", `选「update --all」后设置要变成 all，实际 ${picked.value}`);
+  assert.ok(picked.text.includes("update --all"), `触发器要显示新值，实际 ${picked.text}`);
+  assert.equal(picked.closed, true, "选完要收起浮层");
+  await evaluate("window.__piDesktop.settings.settings.piUpdateScope = 'self'; true");
+
   await openTab("pi-desktop");
   await wait(400);
   const piDesktop = await readGroups();
@@ -249,7 +300,7 @@ export async function checkSettingsInElectron(win) {
   })`));
   assert.deepEqual(filtered.items, ["运行日志"], `搜索「日志」应只剩运行日志：${filtered.items.join("/")}`);
   const hitHint = await evaluate(`document.querySelector('.settings-nav-item .settings-nav-hint')?.textContent.trim() ?? ''`);
-  assert.equal(hitHint, "桌面", `搜索命中要标出所属分区，实际「${hitHint}」`);
+  assert.equal(hitHint, "系统", `搜索命中要标出所属分区，实际「${hitHint}」`);
 
   // 清空搜索后恢复
   await evaluate(`(() => {

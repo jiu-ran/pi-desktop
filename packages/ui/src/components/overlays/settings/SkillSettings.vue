@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import type { PiSkillsOverview } from "../../../env.d.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { icons } from "../../../shared/util.ts";
+import SelectMenu from "../../shared/SelectMenu.vue";
 
 const { workbench, bus } = useKernel();
 const state = workbench.state;
@@ -40,11 +41,17 @@ watch(() => state.activeCwd, loadSkillsOverview);
     <div class="settings-group-head">
       <span class="settings-group-title">已加载的技能（{{ visibleSkills.length }}）</span>
       <div class="settings-toolbar-actions">
-        <select v-model="skillsFilter" class="settings-select">
-          <option value="all">全部</option>
-          <option value="user">全局</option>
-          <option value="project">当前项目</option>
-        </select>
+        <SelectMenu
+          v-model="skillsFilter"
+          size="sm"
+          align="right"
+          aria-label="技能作用域"
+          :options="[
+            { value: 'all', label: '全部' },
+            { value: 'user', label: '全局' },
+            { value: 'project', label: '当前项目' },
+          ]"
+        />
         <button type="button" class="btn ghost small" :disabled="skillsLoading" @click="loadSkillsOverview">
           <span class="settings-inline-icon" v-html="icons.refresh" />
           刷新

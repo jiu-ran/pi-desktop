@@ -3,6 +3,7 @@ import { appSettings } from "../../../services/settings.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { thinkingLabel } from "../../../shared/util.ts";
 import SettingGroup from "./SettingGroup.vue";
+import SelectMenu from "../../shared/SelectMenu.vue";
 import SettingRow from "./SettingRow.vue";
 
 /**
@@ -37,34 +38,44 @@ async function applyThinkingNow(): Promise<void> {
 <template>
   <SettingGroup title="消息发送与交互">
     <SettingRow label="发送消息快捷键" hint="选择输入框按下回车键时的默认发送方式">
-      <select v-model="appSettings.sendShortcut" class="settings-select">
-        <option value="enter">Enter 发送</option>
-        <option value="ctrl-enter">Ctrl+Enter 发送</option>
-      </select>
+      <SelectMenu
+        v-model="appSettings.sendShortcut"
+        aria-label="发送消息快捷键"
+        :options="[
+          { value: 'enter', label: 'Enter 发送', hint: 'Shift+Enter 换行' },
+          { value: 'ctrl-enter', label: 'Ctrl+Enter 发送', hint: 'Enter 换行' },
+        ]"
+      />
     </SettingRow>
 
     <SettingRow label="运行中默认发送模式" hint="当前会话正在执行任务时，继续发送新消息的默认处理策略">
-      <select v-model="appSettings.streamingMode" class="settings-select">
-        <option value="followUp">排队（结束后执行）</option>
-        <option value="steer">引导（立即插入）</option>
-      </select>
+      <SelectMenu
+        v-model="appSettings.streamingMode"
+        aria-label="运行中默认发送模式"
+        :options="[
+          { value: 'followUp', label: '排队', hint: '本轮结束后执行' },
+          { value: 'steer', label: '引导', hint: '立即插入当前回合' },
+        ]"
+      />
     </SettingRow>
 
     <SettingRow label="默认思考深度（Thinking Level）" hint="新建会话或切换模型时优先采用的思考等级">
-      <select v-model="appSettings.defaultThinking" class="settings-select" @change="applyThinkingNow">
-        <option v-for="opt in thinkingOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-      </select>
+      <SelectMenu v-model="appSettings.defaultThinking" aria-label="默认思考深度" :options="thinkingOptions" @change="applyThinkingNow" />
     </SettingRow>
   </SettingGroup>
 
   <SettingGroup title="文件编辑器与自动保存">
     <SettingRow label="修改文件自动保存" hint="控制在代码编辑器中修改项目文件后的自动落盘保存策略">
-      <select v-model="appSettings.autoSave" class="settings-select">
-        <option value="off">关闭</option>
-        <option value="afterDelay">延迟保存</option>
-        <option value="onFocusChange">失焦时</option>
-        <option value="onWindowChange">切窗口时</option>
-      </select>
+      <SelectMenu
+        v-model="appSettings.autoSave"
+        aria-label="修改文件自动保存"
+        :options="[
+          { value: 'off', label: '关闭' },
+          { value: 'afterDelay', label: '延迟保存' },
+          { value: 'onFocusChange', label: '失焦时' },
+          { value: 'onWindowChange', label: '切窗口时' },
+        ]"
+      />
     </SettingRow>
 
     <SettingRow
@@ -76,15 +87,12 @@ async function applyThinkingNow(): Promise<void> {
           : '仅在「延迟保存」模式下生效'
       "
     >
-      <select
-        v-model.number="appSettings.autoSaveDelay"
-        class="settings-select"
+      <SelectMenu
+        v-model="appSettings.autoSaveDelay"
+        aria-label="自动保存延迟时间"
         :disabled="appSettings.autoSave !== 'afterDelay'"
-      >
-        <option v-for="ms in [500, 1000, 2000, 3000]" :key="ms" :value="ms">
-          {{ ms >= 1000 ? `${ms / 1000}s` : `${ms}ms` }}
-        </option>
-      </select>
+        :options="[500, 1000, 2000, 3000].map((ms) => ({ value: ms, label: ms >= 1000 ? `${ms / 1000}s` : `${ms}ms` }))"
+      />
     </SettingRow>
   </SettingGroup>
 
@@ -93,9 +101,11 @@ async function applyThinkingNow(): Promise<void> {
       label="单目录温备 Worker 进程上限"
       hint="同一项目目录支持任意数量任务同时并行运行；此项控制任务结束后保留的空闲温备进程数（切换更快）"
     >
-      <select v-model.number="appSettings.maxIdleWorkers" class="settings-select">
-        <option v-for="num in [1, 2, 3, 5]" :key="num" :value="num">{{ num }} 个</option>
-      </select>
+      <SelectMenu
+        v-model="appSettings.maxIdleWorkers"
+        aria-label="单目录温备 Worker 进程上限"
+        :options="[1, 2, 3, 5].map((num) => ({ value: num, label: `${num} 个` }))"
+      />
     </SettingRow>
 
     <SettingRow

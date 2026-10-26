@@ -1,5 +1,6 @@
 import type { SettingsTabId } from "../../../services/settings.ts";
 import { icons } from "../../../shared/icons.ts";
+import { windowGlyph } from "./section-glyphs.ts";
 
 /**
  * 设置页的目录：一级分区 + 二级 tab。
@@ -119,9 +120,9 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "chat", label: "对话", icon: icons.chat, desc: "怎么说、怎么排队", tabs: ["conversation", "agents"] },
   {
     id: "power",
-    label: "能力",
+    label: "扩展",
     icon: icons.puzzle,
-    desc: "Pi 自带的技能、MCP 服务、扩展包与插件",
+    desc: "Skills、MCP 服务、软件包与桌面插件",
     tabs: ["skills", "mcp", "packages", "plugins"],
   },
   { id: "look", label: "外观", icon: icons.palette, desc: "配色、字号与面板宽度", tabs: ["appearance"] },
@@ -135,15 +136,15 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   {
     id: "pi-desktop-section",
     label: "Pi Desktop",
-    icon: icons.download,
-    desc: "桌面应用的版本与安装包",
+    icon: windowGlyph,
+    desc: "桌面应用本身的版本与安装包",
     tabs: ["pi-desktop"],
   },
   {
     id: "desktop",
-    label: "桌面",
-    icon: icons.terminal,
-    desc: "终端、工作区、快捷键与日志",
+    label: "系统",
+    icon: icons.gear,
+    desc: "终端、工作区、快捷键与运行日志",
     tabs: ["terminal", "environment", "logs"],
   },
 ];

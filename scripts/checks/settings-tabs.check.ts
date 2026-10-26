@@ -65,7 +65,7 @@ for (const tab of SETTINGS_TABS) {
 assert.equal(findSettingsTab("logs").label, "运行日志", "按 id 找页");
 assert.equal(findSettingsTab("nope" as any).id, SETTINGS_TABS[0]!.id, "找不到时退回第一页，界面不至于空白");
 assert.equal(sectionOfTab("logs").id, "desktop", "运行日志属于「桌面」分区");
-assert.equal(sectionOfTab("mcp").id, "power", "MCP 属于「能力」分区");
+assert.equal(sectionOfTab("mcp").id, "power", "MCP 属于「扩展」分区");
 // Pi CLI 与 Pi Desktop 是平级的一级分区（各自只有一页）
 assert.equal(sectionOfTab("pi-cli").id, "pi-cli-section", "Pi CLI 自己是一个一级分区");
 assert.equal(sectionOfTab("pi-desktop").id, "pi-desktop-section", "Pi Desktop 自己是一个一级分区");
@@ -81,7 +81,7 @@ assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conv
 // 搜索：跨分区命中，并带上所属分区名
 const logHits = searchSettings("日志");
 assert.deepEqual(logHits.map((hit) => hit.id), ["logs"], `搜「日志」只应命中运行日志：${logHits.map((hit) => hit.id).join("/")}`);
-assert.equal(logHits[0]!.sectionLabel, "桌面", "命中结果要标出所属分区");
+assert.equal(logHits[0]!.sectionLabel, "系统", "命中结果要标出所属分区");
 
 // 具体的设置项：旧的「只匹配页名/说明」搜不到这些
 const darkHits = searchSettings("深色");
@@ -97,8 +97,9 @@ assert.ok(searchSettings("快捷键").some((hit) => hit.id === "environment"), "
 
 const skillHits = searchSettings("SKILL");
 assert.ok(skillHits.some((hit) => hit.id === "skills"), "搜索不区分大小写");
-const bySection = searchSettings("能力");
-assert.ok(bySection.length >= 4, `按分区名搜索应命中该分区所有页，实际 ${bySection.length}`);
+const bySection = searchSettings("扩展");
+assert.ok(bySection.length >= 3, `按分区名搜索应命中该分区所有页，实际 ${bySection.length}`);
+assert.ok(searchSettings("系统").some((hit) => hit.id === "logs"), "按分区名搜「系统」能命中运行日志");
 assert.deepEqual(searchSettings("   "), [], "空查询不返回结果");
 
 // ---- 5. 设置项字段与页面不脱节：至少这一页是「对话」相关的 ----
