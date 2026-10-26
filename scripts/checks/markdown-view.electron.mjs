@@ -74,6 +74,7 @@ export async function checkMarkdownViewInElectron(win) {
     "| 列 A | 列 B |",
     "| --- | --- |",
     "| 1 | 2 |",
+    "| **配色模式** | 跟随 `--accent` 切换 |",
     "",
     ...Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 段填充文字，用来把文档撑到超过一屏，验证预览可以向下滚动。\n`),
   ].join("\n");
@@ -257,7 +258,11 @@ export async function checkMarkdownViewInElectron(win) {
     })()`));
     assert.equal(table.widget, true, "表格应收起成块级渲染");
     assert.deepEqual(table.headers, ["列 A", "列 B"], `表头不对：${JSON.stringify(table.headers)}`);
-    assert.deepEqual(table.cells, ["1", "2"], `单元格不对：${JSON.stringify(table.cells)}`);
+    assert.deepEqual(
+      table.cells,
+      ["1", "2", "配色模式", "跟随 --accent 切换"],
+      `单元格不对：${JSON.stringify(table.cells)}`,
+    );
 
     // 8) 点进代码块：Typora / Obsidian 那样**留在渲染态**就地改，不显示围栏
     const codeRect = JSON.parse(await evaluate(`(() => {
@@ -358,6 +363,58 @@ export async function checkMarkdownViewInElectron(win) {
     })()`));
     assert.equal(tableEdited.hasCell, true, "改单元格要写回草稿");
     assert.equal(tableEdited.stillTable, true, "表格分隔行要保留");
+    // 8.6) 单元格里的行内语法要渲染：**加粗** 显示成粗体、`代码` 显示成行内代码；
+    // 编辑别的格子不能把它们的 markdown 标记吃掉（写回要按 raw 源码，不是渲染后的文字）
+    const cellInline = JSON.parse(await evaluate(`(() => {
+      const cells = [...document.querySelectorAll(".md-live .cm-md-tablewrap td")];
+      const strongCell = cells.find((cell) => cell.querySelector("strong"));
+      const codeCell = cells.find((cell) => cell.querySelector("code"));
+      const tick = String.fromCharCode(96);
+      return JSON.stringify({
+        strong: Boolean(strongCell),
+        strongText: strongCell ? strongCell.textContent.trim() : "",
+        strongWeight: strongCell ? getComputedStyle(strongCell.querySelector("strong")).fontWeight : "",
+        code: Boolean(codeCell),
+        codeText: codeCell ? codeCell.textContent.trim() : "",
+        codeOnly: codeCell?.querySelector("code")?.textContent ?? "",
+        codeMono: codeCell ? getComputedStyle(codeCell.querySelector("code")).fontFamily : "",
+        literals: cells.filter((cell) => cell.textContent.includes("**") || cell.textContent.includes(tick)).length,
+      });
+    })()`));
+    assert.equal(cellInline.strong, true, "单元格里的 **加粗** 要渲染成 <strong>");
+    assert.equal(cellInline.strongText, "配色模式", "加粗单元格不能露出星号");
+    assert.ok(Number(cellInline.strongWeight) >= 600, `单元格加粗要真的变粗，实际 ${cellInline.strongWeight}`);
+    assert.equal(cellInline.code, true, "单元格里的行内代码要渲染成 <code>");
+    assert.equal(cellInline.codeText, "跟随 --accent 切换", "行内代码单元格不能露出反引号");
+    assert.equal(cellInline.codeOnly, "--accent", "只有反引号里的内容才是 <code>");
+    assert.ok(/mono/i.test(cellInline.codeMono), `行内代码要用等宽字体，实际 ${cellInline.codeMono}`);
+    assert.equal(cellInline.literals, 0, "表格里不该有残留的 markdown 标记");
+
+    const keepRaw = JSON.parse(await evaluate(`(() => {
+      const draft = window.__piDesktop.stage.findTab("files", "md-view-check.md")?.data?.draft ?? "";
+      return JSON.stringify({
+        bold: draft.includes("| **配色模式** |"),
+        code: draft.includes("| **配色模式** | 跟随 " + String.fromCharCode(96) + "--accent" + String.fromCharCode(96) + " 切换 |"),
+      });
+    })()`));
+    assert.equal(keepRaw.bold, true, "改别的单元格不能把 **加粗** 的标记写没了");
+    assert.equal(keepRaw.code, true, "改别的单元格不能把行内代码的反引号写没了");
+
+    // 聚焦时要露源码（改的是标记本身），失焦回到渲染结果
+    const cellFocus = JSON.parse(await evaluate(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const cell = [...document.querySelectorAll(".md-live .cm-md-tablewrap td")].find((n) => n.textContent === "配色模式");
+      if (!cell) return JSON.stringify({ editing: "", rendered: false });
+      cell.focus();
+      await wait(150);
+      const editing = cell.textContent;
+      cell.blur();
+      await wait(200);
+      return JSON.stringify({ editing, rendered: cell.innerHTML.includes("<strong>") });
+    })()`));
+    assert.equal(cellFocus.editing, "**配色模式**", "聚焦单元格要能看到 markdown 源码");
+    assert.equal(cellFocus.rendered, true, "失焦后回到渲染结果");
+
 
     // 9) 改一行 → 写回草稿（自动保存链路照旧）
     await clickLine("第一段文字");

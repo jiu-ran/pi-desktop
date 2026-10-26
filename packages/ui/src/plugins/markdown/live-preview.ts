@@ -248,6 +248,19 @@ export function livePreview(options: LivePreviewOptions = {}) {
   const links = EditorView.domEventHandlers({
     mousedown(event, view) {
       if (!(event.ctrlKey || event.metaKey) || event.button !== 0) return false;
+      // widget（表格单元格等）里的链接在源码上搜不到，直接看点到的是不是 <a>
+      const anchorEl = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (anchorEl && view.contentDOM.contains(anchorEl)) {
+        event.preventDefault();
+        const href = anchorEl.getAttribute("href") ?? "";
+        if (!href) return false;
+        if (isAnchorLink(href)) {
+          if (!jumpToAnchor(view, href)) options.openLink?.(href);
+          return true;
+        }
+        void options.openLink?.(href);
+        return true;
+      }
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
       const href = linkAt(view.state, pos);
       if (!href) return false;

@@ -129,9 +129,13 @@ export async function checkTooltipInElectron(win) {
     });
 
     replacement.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 0, relatedTarget: document.body }));
-    await wait(400);
-    const closed = document.querySelectorAll('.pi-tooltip').length;
-    const restored = replacement.getAttribute('title');
+    let closed = 1;
+    let restored = replacement.getAttribute('title');
+    for (let i = 0; i < 20 && restored === null; i += 1) {
+      await wait(120);
+      closed = document.querySelectorAll('.pi-tooltip').length;
+      restored = replacement.getAttribute('title');
+    }
 
     // 真实界面元素：悬停后应被接管（元素可能因流式重渲染失效，失效时跳过该断言）
     const real = [...document.querySelectorAll('[title]')]

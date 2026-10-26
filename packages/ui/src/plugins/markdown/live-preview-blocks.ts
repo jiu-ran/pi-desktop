@@ -1,4 +1,5 @@
 import { WidgetType } from "@codemirror/view";
+import { renderInlineMarkdown } from "../../shared/inline-markdown.ts";
 import { codeFenceParts, parseMarkdownTable, replaceCodeFenceBody, serializeMarkdownTable } from "../../shared/markdown-block-edit.ts";
 import { highlightCode } from "./markdown-highlight.ts";
 import { mermaidRender } from "./markdown.ts";
@@ -279,11 +280,33 @@ export class TableWidget extends WidgetType {
   private fillCell(cell: HTMLElement, row: number, col: number, value: string): void {
     cell.contentEditable = "plaintext-only";
     cell.spellcheck = false;
-    cell.textContent = value;
     cell.dataset.row = String(row);
     cell.dataset.col = String(col);
-    cell.addEventListener("input", () => this.scheduleSync(cell));
+    cell.dataset.raw = value;
+    // 单元格里的 **加粗**、`代码`、[链接] 要显示成渲染结果，不能把标记原样露出来
+    cell.innerHTML = renderInlineMarkdown(value, { codeClass: "cm-md-inlinecode" });
+    cell.addEventListener("input", () => {
+      // 编辑期间 DOM 是纯文本（plaintext-only），把用户敲的 markdown 记到 raw 上
+      cell.dataset.raw = cell.textContent ?? "";
+      this.scheduleSync(cell);
+    });
+    cell.addEventListener("focus", () => this.showSource(cell));
+    cell.addEventListener("blur", () => this.showRendered(cell));
     cell.addEventListener("keydown", (event) => this.onCellKey(event, cell));
+  }
+
+  /** 聚焦时露出 markdown 源码：要改的是标记本身，不是加粗后的文字 */
+  private showSource(cell: HTMLElement): void {
+    const raw = cell.dataset.raw ?? "";
+    if ((cell.textContent ?? "") !== raw) cell.textContent = raw;
+  }
+
+  /** 失焦后重新渲染；同时把 DOM 里的纯文本同步回 raw */
+  private showRendered(cell: HTMLElement): void {
+    const raw = cell.textContent ?? "";
+    cell.dataset.raw = raw;
+    const html = renderInlineMarkdown(raw, { codeClass: "cm-md-inlinecode" });
+    if (cell.innerHTML !== html) cell.innerHTML = html;
   }
 
   private onCellKey(event: KeyboardEvent, cell: HTMLElement): void {
@@ -316,7 +339,8 @@ export class TableWidget extends WidgetType {
       for (const node of wrap.querySelectorAll<HTMLElement>("[data-row][data-col]")) {
         const row = Number(node.dataset.row);
         const col = Number(node.dataset.col);
-        const value = node.textContent ?? "";
+        // raw 是 markdown 源码；textContent 是渲染后的纯文本，不能用它写回
+        const value = node.dataset.raw ?? node.textContent ?? "";
         if (row === -1) table.header[col] = value;
         else if (table.rows[row]) table.rows[row]![col] = value;
       }

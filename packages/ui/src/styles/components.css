@@ -576,6 +576,23 @@
   background: var(--bg-2);
   font-weight: 620;
 }
+/* 单元格里的行内代码/链接：跟随强调色，和正文里的行内样式一致 */
+.md-live .cm-md-tablewrap a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.md-live .cm-md-tablewrap a:hover {
+  text-decoration: underline;
+}
+.md-live .cm-md-tablewrap code {
+  white-space: nowrap;
+}
+/* 中文按词断行：加粗后的「配色模式」不该被拆成两行（真放不下时再按字符断） */
+.md-live .cm-md-tablewrap th,
+.md-live .cm-md-tablewrap td {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
 .md-live .cm-md-tablewrap tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--bg-1) 60%, transparent);
 }
