@@ -30,6 +30,7 @@
 - **图片放大点了没反应**：放大层用了只定义在 `.shell` 上的 `--titlebar-h`，Teleport 到 body 后读到空值导致 `inset` 整条失效，缩成视口外的小方块。
 - **压缩上下文不再 30 秒报失败**：上游 RPC 给每条命令只留 30 秒，而 `compact` 常常更久；超时改为「还没回」，等 `compaction_end`（上限 10 分钟）。
 - 设置页「记录内容」不再被挤成一字一行；执行记录的总时长恢复正常显示。
+- 修掉 `ResizeObserver loop completed with undelivered notifications`（观察者回调里直接写布局触发第二轮观察），Windows 冒烟不再因此失败。
 
 ## [0.4.1] - 2026-10-27
 
