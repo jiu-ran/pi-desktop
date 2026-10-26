@@ -428,11 +428,13 @@
 .md-live .cm-md-strong { font-weight: 650; }
 .md-live .cm-md-em { font-style: italic; }
 .md-live .cm-md-strike { text-decoration: line-through; color: var(--fg-dim); }
+/* 文件里的行内代码和对话保持一致：颜色跟随强调色 */
 .md-live .cm-md-inlinecode {
-  padding: 0.06em 0.34em;
-  border: 1px solid var(--line);
+  padding: 0.04em 0.34em;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 4px;
-  background: var(--bg-1);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
   font-family: var(--mono);
   font-size: 0.9em;
 }

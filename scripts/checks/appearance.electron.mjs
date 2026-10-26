@@ -180,6 +180,42 @@ export async function checkAppearanceInElectron(win) {
   const others = JSON.parse(keptOthers);
   assert.ok(others.send && others.save && others.term !== undefined, "恢复默认外观不应清掉其它设置");
 
+  // 对话里的「强调」（行内代码）必须用用户选的强调色，而不是固定橙色
+  const inlineCode = JSON.parse(await evaluate(`(async () => {
+    const api = window.__piDesktop;
+    const tick = String.fromCharCode(96);
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    api.settings.close();
+    await wait(400);
+    const thread = api.workbench.active.value.activeThread;
+    thread.transcript.blocks.splice(0);
+    thread.transcript.blocks.push({ kind: "text", id: "accent-probe", text: "这一句里有 " + tick + "强调" + tick + " 行内代码", status: "done" });
+    await wait(600);
+    const read = () => {
+      const code = document.querySelector(".md-body code");
+      return code ? getComputedStyle(code).color : "";
+    };
+    const readAccent = () => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    api.settings.settings.accent = "default";
+    await wait(450);
+    const withDefault = read();
+    const defaultAccent = readAccent();
+    api.settings.settings.accent = "violet";
+    await wait(450);
+    const withViolet = read();
+    const violetAccent = readAccent();
+    api.settings.settings.accent = "default";
+    await wait(300);
+    thread.transcript.blocks.splice(0);
+    return JSON.stringify({ withDefault, defaultAccent, withViolet, violetAccent });
+  })()`));
+  const rgbOf = (hex) => {
+    const value = Number.parseInt(String(hex).replace("#", ""), 16);
+    return `rgb(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255})`;
+  };
+  assert.equal(inlineCode.withDefault, rgbOf(inlineCode.defaultAccent), `行内代码应跟随默认强调色：${inlineCode.withDefault} vs ${rgbOf(inlineCode.defaultAccent)}`);
+  assert.equal(inlineCode.withViolet, rgbOf(inlineCode.violetAccent), `换成紫罗兰后行内代码要跟着变：${inlineCode.withViolet} vs ${rgbOf(inlineCode.violetAccent)}`);
+
   // 原生窗口按钮区（右上角最小化/最大化/关闭）盖不到弹窗遮罩，必须跟着压暗，
   // 否则一开弹窗右上角就剩一条亮块。颜色由渲染进程算，这里验证状态切换。
   const chrome = JSON.parse(await evaluate(`(async () => {
