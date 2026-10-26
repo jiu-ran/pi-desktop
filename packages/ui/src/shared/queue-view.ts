@@ -257,3 +257,95 @@ export function queueImagesByPrompt(blocks: QueueImageBlockLike[]): Record<strin
 export function queueDraftText(input: string): string {
   return splitPromptMessage(String(input ?? "")).message.replace(/\n{3,}/g, "\n\n").trim();
 }
+
+/* ------------------------------------------------------------------ *
+ * 拖拽排序
+ * ------------------------------------------------------------------ */
+
+/**
+ * 把第 `from` 条移动到「第 `to` 条之前」（`to === length` 表示末尾）。
+ *
+ * 关键点：Pi 有两条队列（引导立刻插入当前回合、排队等本轮结束），所以界面上永远
+ * 「引导在前、排队在后」。跨组拖拽 = 顺带换投递方式（跟随落点那一条的模式），
+ * 然后按模式稳定分组——这样**界面上看到的顺序就是真实投递顺序**，不会出现
+ * 「排在排队消息后面的引导消息其实先发」这种看不懂的情况。
+ */
+export function planQueueMove(
+  entries: QueuedEntry[],
+  from: number,
+  to: number,
+): { entries: QueuedEntry[]; changed: boolean } {
+  if (entries.length < 2) return { entries, changed: false };
+  const source = Math.max(0, Math.min(entries.length - 1, from));
+  const target = Math.max(0, Math.min(entries.length, to));
+  // 拖到自己头上 / 拖到自己后面一格 = 没动
+  if (target === source || target === source + 1) return { entries, changed: false };
+
+  const moving = entries[source]!;
+  const rest = entries.filter((_, index) => index !== source);
+  const insertAt = target > source ? target - 1 : target;
+  const anchor = rest[insertAt] ?? rest[rest.length - 1];
+  const moved: QueuedEntry = { mode: anchor ? anchor.mode : moving.mode, text: moving.text };
+  const next = [...rest.slice(0, insertAt), moved, ...rest.slice(insertAt)];
+  // 稳定分组：引导在前、排队在后
+  const grouped = [
+    ...next.filter((entry) => entry.mode === "steer"),
+    ...next.filter((entry) => entry.mode === "followUp"),
+  ];
+  const changed = grouped.some(
+    (entry, index) => entry.mode !== entries[index]!.mode || entry.text !== entries[index]!.text,
+  );
+  return { entries: grouped, changed };
+}
+
+/** 扁平顺序（引导在前、排队在后）→ Pi 的两条队列 */
+export function queueFromOrder(order: QueuedEntry[]): QueueState {
+  return {
+    steering: order.filter((entry) => entry.mode === "steer").map((entry) => entry.text),
+    followUp: order.filter((entry) => entry.mode === "followUp").map((entry) => entry.text),
+  };
+}
+
+/**
+ * 用界面顺序生成目标队列，同时以 Pi 的真实队列为准：
+ * - 已经不在队列里的（刚被取走发出去）不能重新入队；
+ * - Pi 队列里确实还有、但界面顺序里没出现的（极端竞态），按原分组接在后面，别丢消息。
+ */
+export function resolveQueueOrder(current: QueueState, order: QueuedEntry[]): QueueState {
+  const budget = new Map<string, number>();
+  const add = (text: string): void => {
+    const key = normalize(text);
+    budget.set(key, (budget.get(key) ?? 0) + 1);
+  };
+  for (const text of current.steering ?? []) add(text);
+  for (const text of current.followUp ?? []) add(text);
+
+  const take = (text: string): boolean => {
+    const key = normalize(text);
+    const left = budget.get(key) ?? 0;
+    if (left <= 0) return false;
+    budget.set(key, left - 1);
+    return true;
+  };
+
+  const result: QueuedEntry[] = [];
+  for (const entry of order) {
+    if (!take(entry.text)) continue;
+    result.push({ mode: entry.mode, text: entry.text });
+  }
+  for (const text of current.steering ?? []) {
+    if (take(text)) result.push({ mode: "steer", text });
+  }
+  for (const text of current.followUp ?? []) {
+    if (take(text)) result.push({ mode: "followUp", text });
+  }
+  return queueFromOrder(result);
+}
+
+/** 两条队列内容是否一致（重新入队前用来判断「其实没动」） */
+export function sameQueue(left: QueueState, right: QueueState): boolean {
+  const normalizeAll = (list: string[]): string[] => (list ?? []).map(normalize);
+  const a = [...normalizeAll(left.steering), ...normalizeAll(left.followUp)];
+  const b = [...normalizeAll(right.steering), ...normalizeAll(right.followUp)];
+  return a.length === b.length && a.every((text, index) => text === b[index]);
+}

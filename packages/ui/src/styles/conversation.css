@@ -1579,24 +1579,80 @@
   color: var(--del-fg);
 }
 .queue-card-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
-.queue-card-tag {
+/* 投递方式：小号下拉（引导 / 排队），带说明，比原来「点一下翻面」的标签清楚 */
+.queue-card-mode {
   flex: none;
+  align-self: center;
+}
+.queue-card-mode .select-menu-trigger {
+  min-width: 0;
+  height: 20px;
+  padding: 0 5px 0 7px;
+  gap: 4px;
   border: 0;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  padding: 0 5px;
-  border-radius: 4px;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
   font-size: 10.5px;
+  font-weight: 600;
   line-height: 16px;
 }
-.queue-card.steer .queue-card-tag {
+.queue-card.steer .queue-card-mode .select-menu-trigger {
   background: color-mix(in srgb, var(--warn, var(--accent)) 16%, transparent);
+  color: var(--warn, var(--accent));
 }
-/* 标签就是「排队 / 引导」的切换按钮：悬停时提亮，点一下换投递方式 */
-.queue-card-tag:hover { color: var(--fg); background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.queue-card-tag:disabled { opacity: 0.6; cursor: default; }
+.queue-card-mode .select-menu-trigger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: transparent;
+}
+.queue-card-mode .select-menu-trigger:focus-visible,
+.queue-card-mode.open .select-menu-trigger {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.queue-card-mode .select-menu-caret svg { width: 10px; height: 10px; }
+.queue-card-mode .select-menu-caret { opacity: 0.8; }
+
+/* 分组说明：引导 / 排队各自的第一条前面出现一次 */
+.queue-group-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px 0;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.queue-group-note.steer { color: color-mix(in srgb, var(--warn, var(--accent)) 70%, var(--fg-3)); }
+.queue-group-line {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.18;
+}
+
+/* 拖拽排序：整张卡片可拖，插入线画在卡片上/下边缘 */
+.queue-card-grip {
+  display: grid;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  width: 12px;
+  color: var(--fg-3);
+  opacity: 0.6;
+  transition: opacity 0.12s, color 0.12s;
+}
+.queue-card-grip svg { display: block; width: 12px; height: 12px; transform: rotate(90deg); }
+.queue-card:hover .queue-card-grip { opacity: 0.95; color: var(--fg-2); }
+.queue-card.can-drag .queue-card-grip { cursor: grab; }
+.queue-card.can-drag { cursor: grab; }
+.queue-card.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.queue-card.drop-before { box-shadow: 0 -2px 0 0 var(--accent), 0 -5px 12px -6px var(--accent); }
+.queue-card.drop-after { box-shadow: 0 2px 0 0 var(--accent), 0 5px 12px -6px var(--accent); }
+.queue-card.dragging * { pointer-events: none; }
 .queue-card-text {
   min-width: 0;
   flex: 1;

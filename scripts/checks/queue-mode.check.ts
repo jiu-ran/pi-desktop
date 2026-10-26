@@ -156,4 +156,87 @@ assert.equal(failed, false, "写入失败要返回 false");
 assert.deepEqual(thread.queue.followUp, [followOne, followTwo], "失败时队列要还原，不能丢消息");
 assert.ok(notices.some((notice) => notice.level === "error"), "失败要给出错误提示");
 
-console.log("queue-mode OK 排队↔引导 / 重新入队顺序 / 图片带回去 / 撤回回填 / 失败还原");
+// ---- 6) 拖拽排序：按新顺序重新入队，跨组时投递方式也跟着变 ----
+// 前面的撤回已经把带图的那条气泡删了，这里补回来，验证排序时图片仍然跟着走
+thread.transcript.pushUser("插一句", 1, {
+  queueText: steerPrompt,
+  imageItems: [{ mimeType: "image/png", data: "BASE64:image-1.png" }],
+});
+reset();
+queueState = { steering: [steerPrompt], followUp: [followOne, followTwo] };
+thread.queue = { steering: [steerPrompt], followUp: [followOne, followTwo] };
+const reordered = await workbench.reorderQueued([
+  { mode: "followUp", text: followTwo },
+  { mode: "followUp", text: followOne },
+  { mode: "steer", text: steerPrompt },
+]);
+assert.equal(reordered, true, "调整顺序应成功");
+assert.deepEqual(thread.queue.followUp, [followTwo, followOne], "排队列按新顺序重新入队");
+assert.deepEqual(thread.queue.steering, [steerPrompt], "引导列不受影响");
+assert.deepEqual(
+  calls.filter((call) => call.method === "followUp").map((call) => call.args[0]),
+  [followTwo, followOne],
+  "入队顺序要和界面顺序一致（否则拖了等于没拖）",
+);
+assert.equal(
+  calls.find((call) => call.method === "steer")?.args[1]?.[0]?.data,
+  "BASE64:image-1.png",
+  "重新入队时每条仍要带自己的图片",
+);
+
+// 跨组拖拽：排队那条变成引导，按顺序进 steering
+reset();
+queueState = { steering: [], followUp: [followOne, followTwo] };
+thread.queue = { steering: [], followUp: [followOne, followTwo] };
+await workbench.reorderQueued([
+  { mode: "steer", text: followTwo },
+  { mode: "followUp", text: followOne },
+]);
+assert.deepEqual(thread.queue.steering, [followTwo], "换成引导的条目进 steering 列");
+assert.deepEqual(thread.queue.followUp, [followOne], "剩下的排队列保持顺序");
+assert.equal(
+  calls.some((call) => call.method === "steer" && call.args[0] === followTwo),
+  true,
+  "跨组时要按 steer 重新入队（立刻插入当前回合）",
+);
+
+// 顺序没变：不要动 Pi 的队列
+reset();
+queueState = { steering: [steerPrompt], followUp: [followOne] };
+thread.queue = { steering: [steerPrompt], followUp: [followOne] };
+const noop = await workbench.reorderQueued([
+  { mode: "steer", text: steerPrompt },
+  { mode: "followUp", text: followOne },
+]);
+assert.equal(noop, false, "顺序没变时不做事");
+assert.equal(calls.length, 0, "顺序没变就一个 RPC 都不该发（不惊动 Pi 的队列）");
+
+// 界面里已经没有的那条（刚被取走）：不能又被塞回去
+reset();
+queueState = { steering: [], followUp: [followOne] };
+thread.queue = { steering: [], followUp: [followOne] };
+await workbench.reorderQueued([
+  { mode: "followUp", text: followTwo },
+  { mode: "followUp", text: followOne },
+]);
+assert.deepEqual(thread.queue.followUp, [followOne], "已取走的条目不能重新入队");
+assert.equal(
+  calls.some((call) => call.method === "followUp" && call.args[0] === followTwo),
+  false,
+  "也不能发给 Pi：它已经不在队列里了",
+);
+
+// 写入失败：队列还原 + 提示
+reset();
+failNext = true;
+queueState = { steering: [], followUp: [followOne, followTwo] };
+thread.queue = { steering: [], followUp: [followOne, followTwo] };
+const reorderFailed = await workbench.reorderQueued([
+  { mode: "followUp", text: followTwo },
+  { mode: "followUp", text: followOne },
+]);
+assert.equal(reorderFailed, false, "写入失败要返回 false");
+assert.deepEqual(thread.queue.followUp, [followOne, followTwo], "失败时队列顺序还原，不能丢消息");
+assert.ok(notices.some((notice) => notice.level === "error"), "失败要给出错误提示");
+
+console.log("queue-mode OK 排队↔引导 / 拖拽排序 / 重新入队顺序与图片 / 撤回回填 / 失败还原");

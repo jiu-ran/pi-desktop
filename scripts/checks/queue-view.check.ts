@@ -8,6 +8,10 @@ import {
   queueDraftText,
   queuePreview,
   stripQueueMarkers,
+  planQueueMove,
+  queueFromOrder,
+  resolveQueueOrder,
+  sameQueue,
 } from "../../packages/ui/src/shared/queue-view.ts";
 
 const block = (id: string, text: string, queueText?: string) => ({ id, kind: "user", text, queueText });
@@ -393,4 +397,83 @@ console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览")
   const history = queueImagesByPrompt([{ kind: "user", imageItems: [png("CCC")] }] as any[]);
   assert.deepEqual(Object.keys(history), [], "没有 queueText 的历史消息不参与");
   console.log("queue images OK 按条带回 / 不重复 / 历史忽略");
+}
+
+
+// ---- 拖拽排序：同组换位 / 跨组换位（顺带改投递方式） ----
+const queueEntries = [
+  { mode: "steer" as const, text: "引导一" },
+  { mode: "followUp" as const, text: "排队一" },
+  { mode: "followUp" as const, text: "排队二" },
+];
+const shape = (entries: Array<{ mode: string; text: string }>) => entries.map((entry) => `${entry.mode}:${entry.text}`);
+
+{
+  // 1) 两个排队互换：只变顺序
+  const swapped = planQueueMove(queueEntries, 2, 1);
+  assert.deepEqual(shape(swapped.entries), ["steer:引导一", "followUp:排队二", "followUp:排队一"]);
+  assert.equal(swapped.changed, true);
+  assert.deepEqual(queueFromOrder(swapped.entries), { steering: ["引导一"], followUp: ["排队二", "排队一"] });
+
+  // 2) 拖到自己身上 / 自己的下一格：算没动，且原样返回
+  assert.equal(planQueueMove(queueEntries, 1, 1).changed, false);
+  assert.equal(planQueueMove(queueEntries, 1, 2).changed, false);
+  assert.deepEqual(planQueueMove(queueEntries, 1, 1).entries, queueEntries);
+
+  // 3) 排队拖到引导上面：跟随落点那一条的模式 → 变成引导，排在引导组里
+  const toTop = planQueueMove(queueEntries, 2, 0);
+  assert.deepEqual(shape(toTop.entries), ["steer:排队二", "steer:引导一", "followUp:排队一"]);
+  assert.deepEqual(queueFromOrder(toTop.entries), { steering: ["排队二", "引导一"], followUp: ["排队一"] });
+
+  // 4) 引导拖到最末尾：跟随末条模式 → 变成排队，按顺序等本轮结束
+  const toEnd = planQueueMove(queueEntries, 0, 3);
+  assert.deepEqual(shape(toEnd.entries), ["followUp:排队一", "followUp:排队二", "followUp:引导一"]);
+  assert.deepEqual(queueFromOrder(toEnd.entries), { steering: [], followUp: ["排队一", "排队二", "引导一"] });
+
+  // 5) 排队插到另一条排队前面：不改投递方式
+  const beforeOther = planQueueMove(queueEntries, 2, 1);
+  assert.equal(beforeOther.entries.find((entry) => entry.text === "排队二")!.mode, "followUp");
+
+  // 6) 越界索引夹住，不抛；空队列 / 单条不动
+  assert.equal(planQueueMove(queueEntries, -5, 99).entries.length, 3);
+  assert.deepEqual(planQueueMove([], 0, 0).entries, []);
+  assert.deepEqual(planQueueMove([queueEntries[0]!], 0, 1).entries, [queueEntries[0]!]);
+}
+
+// ---- 以 Pi 的真实队列为准：不发已取走的，也不丢没见过的 ----
+{
+  const current = { steering: ["引导一"], followUp: ["排队一", "排队二"] };
+  assert.deepEqual(
+    resolveQueueOrder(current, [
+      { mode: "followUp", text: "排队二" },
+      { mode: "followUp", text: "排队一" },
+      { mode: "steer", text: "引导一" },
+    ]),
+    { steering: ["引导一"], followUp: ["排队二", "排队一"] },
+    "按界面顺序重排",
+  );
+
+  // 已经被取走发出去的那条不能又被塞回来
+  assert.deepEqual(
+    resolveQueueOrder(current, [
+      { mode: "followUp", text: "已经不在了" },
+      { mode: "followUp", text: "排队二" },
+    ]).followUp,
+    ["排队二", "排队一"],
+    "界面里多出来的条目被忽略，队列里的其余条目保留",
+  );
+
+  // 同名两条（用户真的重复写了两遍）不能被去重掉
+  const dup = { steering: [], followUp: ["一样的话", "一样的话"] };
+  assert.deepEqual(
+    resolveQueueOrder(dup, [
+      { mode: "followUp", text: "一样的话" },
+      { mode: "followUp", text: "一样的话" },
+    ]).followUp,
+    ["一样的话", "一样的话"],
+    "重复文案按条数算，不能合并",
+  );
+
+  assert.equal(sameQueue({ steering: [], followUp: ["a"] }, { steering: [], followUp: ["a"] }), true);
+  assert.equal(sameQueue({ steering: [], followUp: ["a", "b"] }, { steering: [], followUp: ["b", "a"] }), false);
 }

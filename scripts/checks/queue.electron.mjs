@@ -43,7 +43,7 @@ export async function checkQueueInElectron(win) {
       badges: cards.map((n) => n.querySelector('.queue-card-badge')?.textContent.trim() ?? ''),
       edits: cards.map((n) => Boolean(n.querySelector('.queue-card-edit'))),
       cards: cards.map((n) => ({
-        tag: n.querySelector('.queue-card-tag')?.textContent.trim() ?? '',
+        tag: n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim() ?? '',
         text: n.querySelector('.queue-card-text')?.textContent.trim() ?? '',
         title: n.getAttribute('title') ?? '',
       })),
@@ -59,7 +59,7 @@ export async function checkQueueInElectron(win) {
   assert.equal(view.cards.length, 2, `队列里的两条都应列在输入框上方，实际 ${view.cards.length}`);
   assert.deepEqual(view.badges, ["待发送", "待发送"], "每条都要带「待发送」标记");
   assert.deepEqual(view.edits, [true, true], "每条都要能点开编辑");
-  assert.equal(view.cards[0].tag, "排队", "卡片要标出模式");
+  assert.equal(view.cards[0].tag, "排队", "卡片要标出投递方式（排队）");
   assert.ok(
     view.cards.some((card) => card.text === "只存在于队列里的消息"),
     `队列里那条没有气泡的消息应显示在卡片上：${view.cards.map((c) => c.text).join(" | ")}`,
@@ -96,23 +96,148 @@ export async function checkQueueInElectron(win) {
   await evaluate("window.__piDesktop.workbench.setTheme('dark'); true");
   await wait(200);
 
-  // ---- 排队卡片的操作：标签就是「排队 / 引导」切换按钮，撤回按钮在右边 ----
-  // 行为（重新入队顺序 / 图片 / 失败还原）由内核级 scripts/checks/queue-mode.check.ts 覆盖，
-  // 这里只确认界面上点得到、语义对。
+  // ---- 排队卡片：投递方式是下拉（引导 / 排队），整张卡片可拖拽排序 ----
+  // 重新入队的语义（顺序 / 图片 / 失败还原）由内核级 queue-mode.check.ts 覆盖，
+  // 这里只验证界面链路：控件在不在、能不能拖、拖完传出去的顺序对不对。
   {
-    const cards = JSON.parse(await evaluate(`(() => JSON.stringify(
-      [...document.querySelectorAll('.queue-card')].map((n) => ({
-        tag: n.querySelector('.queue-card-tag')?.textContent.trim() ?? '',
-        tagKind: n.querySelector('.queue-card-tag')?.tagName ?? '',
-        label: n.querySelector('.queue-card-tag')?.getAttribute('aria-label') ?? '',
-        withdraw: n.querySelector('.queue-card-withdraw')?.textContent.trim() ?? '',
-      })),
-    ))()`));
+    // 注意：这里不要用多行模板串拼表达式 —— executeJavaScript 的返回值必须是可结构化克隆的，
+    // 之前写成多行箭头函数时偶发 "An object could not be cloned"，改用单行表达式最稳。
+    const rawCards = await evaluate(
+      'JSON.stringify([...document.querySelectorAll(".queue-card")].map((node) => ({' +
+        'mode: (node.querySelector(".queue-card-mode .select-menu-value")?.textContent || "").trim(),' +
+        'modeKind: node.querySelector(".queue-card-mode .select-menu-trigger")?.tagName || "",' +
+        'modeLabel: node.querySelector(".queue-card-mode .select-menu-trigger")?.getAttribute("aria-label") || "",' +
+        'draggable: node.getAttribute("draggable"),' +
+        'grip: Boolean(node.querySelector(".queue-card-grip svg")),' +
+        'text: (node.querySelector(".queue-card-text")?.textContent || "").trim(),' +
+        'withdraw: (node.querySelector(".queue-card-withdraw")?.textContent || "").trim(),' +
+      '})))',
+    );
+    const cards = JSON.parse(rawCards);
     assert.equal(cards.length, 2, `队列里的两条都应列出来，实际 ${cards.length}`);
-    assert.deepEqual(cards.map((item) => item.tag), ["排队", "排队"], `标签要写出当前投递方式：${JSON.stringify(cards)}`);
-    assert.ok(cards.every((item) => item.tagKind === "BUTTON"), "标签要能点（按钮），点一下换投递方式");
-    assert.match(cards[0].label, /改为引导/, `排队的提示要说清点了会变成引导：${cards[0].label}`);
+    assert.deepEqual(cards.map((item) => item.mode), ["排队", "排队"], `卡片要写出当前投递方式：${JSON.stringify(cards)}`);
+    assert.ok(cards.every((item) => item.modeKind === "BUTTON"), "投递方式要能点（按钮）");
+    assert.ok(cards.every((item) => item.modeLabel.length > 0), "投递方式按钮要有可读的无障碍名称");
+    assert.ok(cards.every((item) => item.draggable === "true"), "卡片要可拖拽（拖拽排序）");
+    assert.ok(cards.every((item) => item.grip), "卡片要显示拖拽把手");
     assert.deepEqual(cards.map((item) => item.withdraw), ["撤回", "撤回"], "每条都要有撤回按钮");
+
+    // 分组说明：排队那一组第一条前面要有一句「本轮结束后按顺序发送」
+    const notes = JSON.parse(await evaluate("JSON.stringify([...document.querySelectorAll('.queue-group-note')].map((n) => n.textContent.trim()))"));
+    assert.equal(notes.length, 1, `只有一组时应只有一条分组说明，实际 ${JSON.stringify(notes)}`);
+    assert.match(notes[0], /排队 · 本轮结束后/, `分组说明要写清投递时机：${notes[0]}`);
+  }
+
+  // ---- 投递方式下拉：两个选项，选中项带勾 ----
+  {
+    const menu = JSON.parse(await evaluate(`(async () => {
+      const trigger = document.querySelector('.queue-card-mode .select-menu-trigger');
+      trigger.click();
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      const popup = document.querySelector('.select-menu-popup');
+      return JSON.stringify({
+        open: Boolean(popup),
+        parent: popup?.parentElement?.tagName ?? '',
+        items: [...(popup?.querySelectorAll('.select-menu-item') ?? [])].map((node) => ({
+          label: node.querySelector('.select-menu-item-label')?.textContent.trim() ?? '',
+          hint: node.querySelector('.select-menu-item-hint')?.textContent.trim() ?? '',
+          active: node.classList.contains('active'),
+        })),
+      });
+    })()`));
+    assert.equal(menu.open, true, "点投递方式要弹出下拉");
+    assert.deepEqual(menu.items.map((item) => item.label), ["引导", "排队"], `下拉只有这两种投递方式：${JSON.stringify(menu.items)}`);
+    assert.ok(menu.items[1].hint.includes("本轮结束"), "排队要说明是等本轮结束");
+    assert.equal(menu.items.filter((item) => item.active).length, 1, "只能有一项是当前值");
+    // 关掉，不影响后面的拖拽
+    await evaluate("document.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); true");
+    await wait(160);
+  }
+
+  // ---- 拖拽排序：把第二条拖到第一条前面 ----
+  {
+    // 真实拖拽会走 clearQueue + 重新入队（可能真的开始一轮对话），这里换成记录函数，
+    // 只验证界面把「拖出来的顺序」原样交给内核。
+    await evaluate(`(() => {
+      window.__reorderCalls = [];
+      window.__piDesktop.workbench.reorderQueued = async (order) => {
+        window.__reorderCalls.push(order);
+        return true;
+      };
+      return true;
+    })()`);
+    // Vue 的 class 更新是异步的：每一步之间要让出一帧再断言
+    await evaluate("(() => { const cards = [...document.querySelectorAll('.queue-card')]; window.__dragData = new DataTransfer(); cards[1].dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: window.__dragData })); return true; })()");
+    await wait(160);
+    assert.equal(await evaluate("document.querySelectorAll('.queue-card.dragging').length"), 1, "拖拽开始时卡片要进入拖拽态");
+
+    await evaluate("(() => { const first = document.querySelector('.queue-card'); const rect = first.getBoundingClientRect(); first.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: window.__dragData, clientY: Math.round(rect.top + 2) })); return true; })()");
+    await wait(160);
+    assert.equal(await evaluate("document.querySelectorAll('.queue-card.drop-before').length"), 1, "拖到卡片上半部分要画出插入线（在它前面）");
+
+    await evaluate("(() => { const first = document.querySelector('.queue-card'); const rect = first.getBoundingClientRect(); first.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: window.__dragData, clientY: Math.round(rect.top + 2) })); return true; })()");
+    await wait(320);
+    const ordered = JSON.parse(await evaluate("JSON.stringify(window.__reorderCalls)"));
+    assert.equal(ordered.length, 1, "拖放应触发一次重排");
+    assert.equal(ordered[0].length, 2, "重排要带上整个待发送队列");
+    assert.equal(ordered[0][0].text, "只存在于队列里的消息", "被拖的那条要排到最前");
+    assert.equal(ordered[0][1].text.includes("顺便看下日志"), true, "另一条排到后面");
+    assert.ok(ordered[0].every((entry) => entry.mode === "followUp"), "同组内拖动不改投递方式");
+    assert.equal(await evaluate("document.querySelectorAll('.queue-card.dragging').length"), 0, "松手后不能再有拖拽态的卡片");
+    assert.equal(await evaluate("document.querySelectorAll('.queue-card.drop-before, .queue-card.drop-after').length"), 0, "插入线要收掉");
+    assert.equal(await evaluate("document.querySelectorAll('.queue-card.drop-before, .queue-card.drop-after').length"), 0, "插入线要收掉");
+  }
+
+  // ---- 混合队列：两组各有一句说明；跨组拖拽 = 顺带改投递方式 ----
+  {
+    // 这一节会改队列，结束时要还原，后面的编辑 / 撤回测试还依赖原来那两条
+    const previousQueue = JSON.parse(
+      await evaluate("JSON.stringify(window.__piDesktop.workbench.active.value.activeThread.queue)"),
+    );
+    await evaluate(`(() => {
+      const thread = window.__piDesktop.workbench.active.value.activeThread;
+      thread.queue = { steering: ["插一句"], followUp: ["排队一", "排队二"] };
+      return true;
+    })()`);
+    await wait(260);
+    const notes = JSON.parse(
+      await evaluate("JSON.stringify([...document.querySelectorAll('.queue-group-note')].map((n) => n.textContent.replace(/\\s+/g, ' ').trim()))"),
+    );
+    assert.equal(notes.length, 2, `引导 / 排队各要有一句说明，实际 ${JSON.stringify(notes)}`);
+    assert.match(notes[0], /引导 · 立刻插入/, `第一组是引导：${notes[0]}`);
+    assert.match(notes[1], /排队 · 本轮结束后/, `第二组是排队：${notes[1]}`);
+
+    const modes = JSON.parse(await evaluate("JSON.stringify([...document.querySelectorAll('.queue-card')].map((n) => n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim()))"));
+    assert.deepEqual(modes, ["引导", "排队", "排队"], `卡片要各自标出投递方式：${JSON.stringify(modes)}`);
+
+    // 把最后一条（排队）拖到第一条（引导）前面：投递方式要跟着落点变成引导
+    await evaluate(`(() => {
+      window.__reorderCalls = [];
+      window.__piDesktop.workbench.reorderQueued = async (order) => { window.__reorderCalls.push(order); return true; };
+      const cards = [...document.querySelectorAll('.queue-card')];
+      window.__dragData = new DataTransfer();
+      cards[2].dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: window.__dragData }));
+      const rect = cards[0].getBoundingClientRect();
+      cards[0].dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: window.__dragData, clientY: Math.round(rect.top + 2) }));
+      cards[0].dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: window.__dragData, clientY: Math.round(rect.top + 2) }));
+      return true;
+    })()`);
+    await wait(320);
+    const cross = JSON.parse(await evaluate("JSON.stringify(window.__reorderCalls)"));
+    assert.equal(cross.length, 1, "跨组拖拽也要触发一次重排");
+    assert.equal(cross[0][0].text, "排队二", `被拖的那条排到最前：${JSON.stringify(cross[0])}`);
+    assert.equal(cross[0][0].mode, "steer", "落到引导组前面就变成引导（立刻插入当前回合）");
+    assert.deepEqual(
+      cross[0].map((entry) => `${entry.mode}:${entry.text}`),
+      ["steer:排队二", "steer:插一句", "followUp:排队一"],
+      "扁平顺序里引导在前、排队在后",
+    );
+
+    await evaluate(`(() => {
+      window.__piDesktop.workbench.active.value.activeThread.queue = ${JSON.stringify(previousQueue)};
+      return true;
+    })()`);
+    await wait(260);
   }
 
   // ---- 编辑排队消息 ----

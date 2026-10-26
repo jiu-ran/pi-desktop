@@ -5,7 +5,18 @@ import { applySessionName } from "../shared/session-title.ts";
 import { clearComposerDraft, readComposerDraft, writeComposerDraft, type ComposerDraft } from "../shared/composer-draft.ts";
 import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff.ts";
 import { composePrompt } from "../shared/prompt.ts";
-import { planQueueEdit, planQueueMode, planQueueWithdraw, planQueuedFlush, queueDraftText, queueImagesByPrompt } from "../shared/queue-view.ts";
+import {
+    planQueueEdit,
+    planQueueMode,
+    planQueueWithdraw,
+    planQueuedFlush,
+    queueDraftText,
+    queueFromOrder,
+    queueImagesByPrompt,
+    resolveQueueOrder,
+    sameQueue,
+    type QueuedEntry,
+  } from "../shared/queue-view.ts";
 import { rebuildPrompt } from "../shared/queue-prompt.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
@@ -1616,6 +1627,71 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return true;
   }
 
+  /**
+   * 拖拽调整整个待发送队列的顺序。
+   *
+   * 和撤回 / 换投递方式同一套：Pi 只能整体 clearQueue，所以清空后按新顺序重新入队
+   * （引导按顺序 steer、排队按顺序 followUp）。跨组拖拽时那一条的投递方式已经由
+   * planQueueMove 改好，这里只按队列落实。
+   *
+   * 以 Pi 的真实队列为准过滤：已被取走发出去的不会又被塞回去；
+   * 队列里有但顺序里没出现的（竞态）接在后面，宁可顺序差一点也不能丢消息。
+   */
+  async function reorderQueued(order: QueuedEntry[]): Promise<boolean> {
+    const ws = active.value;
+    if (!ws || !order?.length) return false;
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    // 顺序就是当前队列：不用惊动 Pi（省一次 clearQueue + 整队重新入队）
+    if (sameQueue(queueFromOrder(order), thread.queue)) return false;
+    let cleared: { steering?: string[]; followUp?: string[] } | null = null;
+    try {
+      cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: `调整顺序失败：${error?.message ?? String(error)}` });
+      return false;
+    }
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    const planned = resolveQueueOrder(current, order);
+    if (sameQueue(current, planned)) {
+      applyQueue(thread, current);
+      return false;
+    }
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
+    try {
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+    } catch (error: any) {
+      applyQueue(thread, current);
+      bus.emit("notify", {
+        level: "error",
+        text: `调整顺序失败，队列已还原：${error?.message ?? String(error)}`,
+      });
+      // 还原后把「已被清空」的队列重新排回去，别让用户看着空队列
+      try {
+        for (const text of current.steering) {
+          await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+        }
+        for (const text of current.followUp) {
+          await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+        }
+      } catch {
+        // 还原也失败：把真实状态同步回来即可
+      }
+      applyQueue(thread, current);
+      return false;
+    }
+    applyQueue(thread, planned);
+    return true;
+  }
+
   async function recallQueued(): Promise<string> {
     const ws = active.value;
     if (!ws) return "";
@@ -2283,6 +2359,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     recallQueued,
     withdrawQueued,
     changeQueuedMode,
+    reorderQueued,
     editQueued,
     stagePastedAttachment,
     previewSessionQuote,

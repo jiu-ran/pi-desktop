@@ -5,8 +5,9 @@ import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
-import { planQueueView, queueDraftText, queuePreview, splitPromptBlocks, type PromptBlock } from "../../shared/queue-view.ts";
+import { planQueueMove, planQueueView, queueDraftText, queuePreview, splitPromptBlocks, type PromptBlock } from "../../shared/queue-view.ts";
 import QuoteEditor from "./QuoteEditor.vue";
+import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -234,6 +235,73 @@ async function switchQueuedMode(item: { mode: "steer" | "followUp"; text: string
   } finally {
     queueBusy.value = false;
   }
+}
+
+/* ---------- 拖拽调整顺序 ---------- */
+const queueDrag = ref<number | null>(null);
+const queueDrop = ref<{ index: number; after: boolean } | null>(null);
+
+/** 落点：卡片上下一半决定插到它前面还是后面 */
+function queueDropTarget(index: number, event: DragEvent): { index: number; after: boolean } {
+  const element = event.currentTarget as HTMLElement;
+  const rect = element.getBoundingClientRect();
+  return { index, after: event.clientY > rect.top + rect.height / 2 };
+}
+
+function onQueueDragStart(index: number, event: DragEvent): void {
+  if (queueBusy.value) return;
+  queueDrag.value = index;
+  queueDrop.value = null;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    // Firefox 里不设数据不会真的开始拖拽
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+}
+
+function onQueueDragOver(index: number, event: DragEvent): void {
+  if (queueDrag.value === null) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  const target = queueDropTarget(index, event);
+  const to = target.index + (target.after ? 1 : 0);
+  // 拖到自己身上 / 拖到自己后面一格：没有变化，不画插入线
+  queueDrop.value = to === queueDrag.value || to === queueDrag.value + 1 ? null : target;
+}
+
+function onQueueDragEnd(): void {
+  queueDrag.value = null;
+  queueDrop.value = null;
+}
+
+async function onQueueDrop(index: number, event: DragEvent): Promise<void> {
+  if (queueDrag.value === null || queueBusy.value) {
+    onQueueDragEnd();
+    return;
+  }
+  event.preventDefault();
+  const { after } = queueDropTarget(index, event);
+  const from = queueDrag.value;
+  onQueueDragEnd();
+  const { entries, changed } = planQueueMove(queuePending.value, from, index + (after ? 1 : 0));
+  if (!changed) return;
+  queueBusy.value = true;
+  try {
+    await workbench.reorderQueued(entries.map((entry) => ({ mode: entry.mode, text: entry.text })));
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
+}
+
+/** 分组说明：只在每组第一条前面出现一次，一眼看出会怎么发出去 */
+function queueGroupNote(index: number): string {
+  const list = queuePending.value;
+  const item = list[index];
+  if (!item) return "";
+  if (list.findIndex((entry) => entry.mode === item.mode) !== index) return "";
+  return item.mode === "steer" ? "引导 · 立刻插入当前回合" : "排队 · 本轮结束后按顺序发送";
 }
 
 function normalizePrompt(value: string): string {
@@ -1035,28 +1103,49 @@ const argHint = computed(() => {
           </span>
           <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">全部撤回</button>
         </div>
-        <div
-          v-for="(item, i) in queuePending"
-          :key="i"
-          class="queue-card"
-          :class="item.mode"
-          :title="queuePreview(item.text, 400)"
-        >
+        <template v-for="(item, i) in queuePending" :key="i">
+          <div v-if="queueGroupNote(i)" class="queue-group-note" :class="item.mode">
+            <span class="queue-group-line" />
+            {{ queueGroupNote(i) }}
+            <span class="queue-group-line" />
+          </div>
+          <div
+            class="queue-card"
+            :class="[
+              item.mode,
+              {
+                dragging: queueDrag === i,
+                'drop-before': queueDrop && queueDrop.index === i && !queueDrop.after,
+                'drop-after': queueDrop && queueDrop.index === i && queueDrop.after,
+                'can-drag': !queueBusy,
+              },
+            ]"
+            :draggable="!queueBusy"
+            :title="queuePreview(item.text, 400)"
+            @dragstart="onQueueDragStart(i, $event)"
+            @dragover="onQueueDragOver(i, $event)"
+            @drop="onQueueDrop(i, $event)"
+            @dragend="onQueueDragEnd"
+          >
+          <span class="queue-card-grip" title="拖动调整发送顺序" aria-hidden="true" v-html="icons.more" />
           <span class="queue-card-badge">
             <span class="queue-dot" />
             待发送
           </span>
-          <button
-            type="button"
-            class="queue-card-tag"
-            :class="{ clickable: true }"
+          <SelectMenu
+            class="queue-card-mode"
+            size="sm"
+            :model-value="item.mode"
             :disabled="queueBusy"
-            :aria-label="item.mode === 'steer' ? '改为排队发送（等这一轮结束）' : '改为引导发送（立刻插入当前回合）'"
-            :title="item.mode === 'steer' ? '现在是引导：立刻插入当前回合。点击改成排队，等这一轮结束再发' : '现在是排队：等这一轮结束再发。点击改成引导，立刻插入当前回合'"
-            @click="switchQueuedMode(item, item.mode === 'steer' ? 'followUp' : 'steer')"
-          >
-            {{ item.mode === "steer" ? "引导" : "排队" }}
-          </button>
+            align="left"
+            aria-label="这条消息怎么发出去"
+            title="引导 = 立刻插入当前回合；排队 = 等本轮结束再发"
+            :options="[
+              { value: 'steer', label: '引导', hint: '立刻插入' },
+              { value: 'followUp', label: '排队', hint: '本轮结束' },
+            ]"
+            @change="(mode) => switchQueuedMode(item, mode as 'steer' | 'followUp')"
+          />
           <button
             type="button"
             class="queue-card-text"
@@ -1084,7 +1173,8 @@ const argHint = computed(() => {
               撤回
             </button>
           </span>
-        </div>
+          </div>
+        </template>
       </div>
 
       <div
