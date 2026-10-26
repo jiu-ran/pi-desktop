@@ -141,7 +141,7 @@ export function formatDuration(ms: number): string {
 }
 
 export function turnDurationLabel(group: Pick<TurnGroup, "durationMs">): string {
-  return formatDuration(group.durationMs);
+  return formatStepDuration(group.durationMs);
 }
 
 /** 改动步骤的增删行数；非改动工具或没有差异时返回 null（写入只报新增） */
@@ -222,11 +222,14 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
 
   const steps = buildTurnSteps(entries);
   const stamps = entries.map((entry) => entry.block.ts).filter((ts): ts is number => typeof ts === "number" && ts > 0);
-  // 有真实时间戳就用首尾差；老会话没有时间戳时退回「各步耗时之和」，总时间不至于空着
-  const durationMs =
-    stamps.length >= 2
-      ? Math.max(0, Math.max(...stamps) - Math.min(...stamps))
-      : steps.reduce((sum, step) => sum + Math.max(0, step.elapsedMs), 0);
+  const span = stamps.length >= 2 ? Math.max(0, Math.max(...stamps) - Math.min(...stamps)) : 0;
+  // 工具自己记录的耗时之和：回放 / 恢复的会话里时间戳可能挤在同一毫秒（span≈0），
+  // 这时用它兜底，组头才不会「明明跑了半分钟却没有总时长」。
+  const recorded = tools.reduce(
+    (sum, entry) => sum + (typeof entry.block.durationMs === "number" ? Math.max(0, entry.block.durationMs) : 0),
+    0,
+  );
+  const durationMs = Math.max(span, recorded);
 
   const parts: string[] = [];
   if (live) {

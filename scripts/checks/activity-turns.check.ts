@@ -218,7 +218,20 @@ const failingTurn = summarizeTurn([
 assert.equal(failingTurn.failedCount, 1, "失败数要统计");
 assert.match(failingTurn.summary, /1 处失败/, "组头要提示失败");
 assert.equal(turnDurationLabel(failingTurn), "11 秒", `耗时按时间戳算：${turnDurationLabel(failingTurn)}`);
-assert.equal(turnDurationLabel({ durationMs: 0 }), "", "没有时间戳时不显示耗时");
+// 时间戳挤在同一毫秒（回放 / 恢复的会话）：用工具自报的耗时之和兜底，组头不能没有总时长
+const replayed = summarizeTurn([
+  { block: { ...bash("rp1"), ts: 5_000, durationMs: 62_000 }, index: 0 },
+  { block: { ...bash("rp2"), ts: 5_000, durationMs: 1_500 }, index: 1 },
+]);
+assert.equal(replayed.durationMs, 63_500, `时间戳并在一起时用记录耗时之和：${replayed.durationMs}`);
+assert.equal(turnDurationLabel(replayed), "1 分 4 秒", `总时长文案：${turnDurationLabel(replayed)}`);
+// 正常会话：首尾时间戳差更大，优先用它（并行工具不会把总时长加爆）
+const spanned = summarizeTurn([
+  { block: { ...bash("sp1"), ts: 1_000, durationMs: 60_000 }, index: 0 },
+  { block: { ...bash("sp2"), ts: 121_000, durationMs: 60_000 }, index: 1 },
+]);
+assert.equal(spanned.durationMs, 120_000, `有时间戳时按首尾差：${spanned.durationMs}`);
+assert.equal(turnDurationLabel({ durationMs: 0 }), "0.0 秒", "极短的回合也给一个占位时间，不再空白");
 assert.equal(turnDurationLabel({ durationMs: 92_000 }), "1 分 32 秒");
 assert.equal(turnDurationLabel({ durationMs: 120_000 }), "2 分");
 

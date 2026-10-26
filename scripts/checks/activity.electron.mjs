@@ -337,8 +337,8 @@ export async function checkActivityInElectron(win) {
       const summary = el.querySelector(".activity-summary");
       return JSON.stringify({
         duration: duration?.textContent ?? "",
-        /** 总耗时挂在「执行」后面：DOM 里应当在摘要之前 */
-        beforeSummary: Boolean(duration && summary && (duration.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        /** 总耗时放在行尾：DOM 里应当在摘要之后 */
+        afterSummary: Boolean(duration && summary && (summary.compareDocumentPosition(duration) & Node.DOCUMENT_POSITION_FOLLOWING)),
         titleBeforeDuration: Boolean(el.querySelector(".activity-title") && duration && (el.querySelector(".activity-title").compareDocumentPosition(duration) & Node.DOCUMENT_POSITION_FOLLOWING)),
       });
     })()`));
@@ -347,7 +347,7 @@ export async function checkActivityInElectron(win) {
       await evaluate(`JSON.stringify([...${scope}.querySelectorAll(".turn-step-time")].map((n) => n.textContent.trim()))`),
     );
     assert.match(timing.duration, /分|秒/, `有耗时数据时应显示时长，实际「${timing.duration}」`);
-    assert.equal(timing.beforeSummary, true, "总耗时要紧跟「执行」，排在摘要之前");
+    assert.equal(timing.afterSummary, true, "总耗时放在摘要后面（行尾），不要插在「执行」与摘要之间");
     assert.equal(timing.titleBeforeDuration, true, "总耗时应在「执行」之后");
     assert.ok(stepTimes.length >= 1, `未合并的步骤要显示自己的耗时，实际 ${stepTimes.length} 处`);
     assert.ok(!stepTimes.some((text) => text.startsWith("+")), `步骤时间不要带「+」（那是累计偏移）：${stepTimes.join("/")}`);
