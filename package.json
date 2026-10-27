@@ -26,7 +26,7 @@
     "check:smoke": "npm run build && electron scripts/checks/smoke.electron.mjs",
     "check:syntax": "node scripts/checks/syntax.mjs",
     "icons:build": "node scripts/build-icons.mjs",
-    "icons:seti": "node scripts/build-seti-icons.mjs"
+    "icons:file": "node scripts/build-material-file-icons.mjs"
   },
   "build": {
     "appId": "dev.pi.desktop",

@@ -42,7 +42,7 @@
 .file-tree-icon.text { color: var(--fg-2); }
 .file-tree-icon.file { color: var(--code); }
 
-/* ---------------- 文件类型图标（Seti UI 三主题） ---------------- */
+/* ---------------- 文件类型图标（Material 三主题） ---------------- */
 /*
  * 形状来自 Seti UI（32 网格），组件只传两个自定义属性：
  *   --file-icon-color  品牌色（也是填充主题的底色）
@@ -60,38 +60,8 @@
 .file-icon-glyph { display: grid; place-items: center; width: 100%; height: 100%; color: var(--file-icon-ink, var(--fg-2)); }
 .file-icon-glyph svg { display: block; width: 100%; height: 100%; }
 
-/* 徽标：Seti 没覆盖的类型（txt / ppt / heic…）用扩展名缩写代替图形 */
-.file-icon-badge {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 3px;
-  color: var(--file-icon-ink, var(--fg-2));
-  font-family: var(--mono);
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  text-transform: uppercase;
-  line-height: 1;
-  background: color-mix(in srgb, var(--file-icon-color) 16%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--file-icon-color) 40%, transparent);
-}
-.file-icon-badge[data-len="2"] { font-size: 7.5px; }
-.file-icon-badge[data-len="3"] { font-size: 6.4px; }
-.file-icon-badge[data-len="4"] { font-size: 5.4px; letter-spacing: -0.4px; }
-/* 填充主题：徽标底色就是方块，不再叠一层 */
-.file-icon.is-block .file-icon-badge {
-  background: transparent;
-  box-shadow: none;
-}
-/* 单色主题：徽标也跟正文走，只留形状 */
-.file-icon.is-mono .file-icon-badge {
-  background: color-mix(in srgb, var(--fg-2) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg-2) 34%, transparent);
-}
-
-/* ① Seti 原色 / ② 单色：都没有底色，图标略小于行高，和文字对齐更稳 */
-.file-icon.is-seti .file-icon-glyph,
+/* ① Material 原色 / ② 单色：都没有底色，图标略小于行高，和文字对齐更稳 */
+.file-icon.is-material .file-icon-glyph,
 .file-icon.is-mono .file-icon-glyph { padding: 1px; }
 
 /* ③ 填充：品牌色方块 + 反白图标 */
