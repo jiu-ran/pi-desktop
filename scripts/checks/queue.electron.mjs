@@ -41,6 +41,22 @@ export async function checkQueueInElectron(win) {
       hiddenBubble: Boolean(document.querySelector('[data-block-id="queue-a"]')),
       visibleBubbles: document.querySelectorAll('.msg-user-bubble').length,
       badges: cards.map((n) => n.querySelector('.queue-card-badge')?.textContent.trim() ?? ''),
+      // 「待发送」只在表头报一次；卡片上不再重复
+      cardRoles: cards.map((n) => ({
+        role: n.getAttribute('role') ?? '',
+        tabindex: n.getAttribute('tabindex') ?? '',
+        label: n.getAttribute('aria-label') ?? '',
+        grip: Boolean(n.querySelector('.queue-card-grip')),
+        // 把手平时隐起来，悬停才现形
+        gripOpacity: n.querySelector('.queue-card-grip') ? getComputedStyle(n.querySelector('.queue-card-grip')).opacity : null,
+      })),
+      listRole: document.querySelector('.queue-list')?.getAttribute('role') ?? '',
+      listScrollable: (() => {
+        const list = document.querySelector('.queue-list');
+        if (!list) return null;
+        return { maxHeight: getComputedStyle(list).maxHeight, overflowY: getComputedStyle(list).overflowY };
+      })(),
+      headHint: document.querySelector('.queue-head-hint')?.textContent.trim() ?? '',
       edits: cards.map((n) => Boolean(n.querySelector('.queue-card-edit'))),
       cards: cards.map((n) => ({
         tag: n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim() ?? '',
@@ -48,7 +64,9 @@ export async function checkQueueInElectron(win) {
         title: n.getAttribute('title') ?? '',
         // 正文独占一行：投递方式的下拉曾经把正文挤成窄条，两/三行才局促地折回来
         textLeft: Math.round(n.querySelector('.queue-card-text')?.getBoundingClientRect().left ?? 0),
-        badgeLeft: Math.round(n.querySelector('.queue-card-badge')?.getBoundingClientRect().left ?? 0),
+        pillLeft: Math.round(n.querySelector('.queue-card-mode')?.getBoundingClientRect().left ?? 0),
+        // 长预览只挂在正文上（以前挂整张卡片，悬停「编辑」也弹一大段）
+        cardTitle: n.getAttribute('title') ?? '',
         // 附件是独立小标签：正文里不能再掉一串 [文件: …]
         chips: [...n.querySelectorAll('.queue-card-attachments .queue-attach-chip')].map((chip) => ({
           name: chip.querySelector('.queue-attach-name')?.textContent.trim() ?? '',
@@ -75,8 +93,19 @@ export async function checkQueueInElectron(win) {
   assert.equal(view.hiddenBubble, false, "还排在队列里的消息不应同时出现在对话里");
   assert.equal(view.visibleBubbles, 1, `队列里没有对应气泡的那条照常显示，实际 ${view.visibleBubbles}`);
   assert.equal(view.cards.length, 2, `队列里的两条都应列在输入框上方，实际 ${view.cards.length}`);
-  assert.deepEqual(view.badges, ["待发送", "待发送"], "每条都要带「待发送」标记");
+  assert.deepEqual(view.badges, ["", ""], "「待发送」只在表头报一次，卡片上不重复");
+  assert.equal(view.listRole, "list", "待发送区应是列表语义");
+  assert.match(view.headHint, /Alt/, `表头要提示键盘排序：${view.headHint}`);
+  assert.deepEqual(view.listScrollable?.overflowY, "auto", "排很多条时只滚卡片区（不顶输入框）");
   assert.deepEqual(view.edits, [true, true], "每条都要能点开编辑");
+  for (const [index, role] of view.cardRoles.entries()) {
+    assert.equal(role.role, "listitem", `第 ${index + 1} 条应是 listitem`);
+    assert.equal(role.tabindex, "0", `第 ${index + 1} 条要能聚焦（Alt+↑/↓ 排序的前提）`);
+    assert.match(role.label, new RegExp(`第 ${index + 1} 条`), `读屏文案要带序号：${role.label}`);
+    assert.equal(role.grip, true, "每条都要有拖拽把手");
+    assert.equal(role.gripOpacity, "0", "把手平时隐起来，别当成一列杂点");
+    assert.equal(view.cards[index].cardTitle, "", "整张卡片不再挂长 title（它会遮蔽按钮的 tooltip）");
+  }
   assert.equal(view.cards[0].tag, "排队", "卡片要标出投递方式（排队）");
   assert.ok(
     view.cards.some((card) => card.text === "只存在于队列里的消息"),
@@ -91,8 +120,8 @@ export async function checkQueueInElectron(win) {
     assert.ok(card.pillBox.w <= 64, `投递方式不该撑成大按钮，实测 ${card.pillBox.w}px 宽`);
     assert.equal(card.textBelowPill, true, "正文要在控制条下面，不能再被下拉挤在同一行里");
     assert.ok(
-      Math.abs(card.textLeft - card.badgeLeft) <= 6,
-      `正文与「待发送」要左对齐（正文 ${card.textLeft} vs 标记 ${card.badgeLeft}）`,
+      Math.abs(card.textLeft - card.pillLeft) <= 6,
+      `正文与投递方式要左对齐（正文 ${card.textLeft} vs 胶囊 ${card.pillLeft}）`,
     );
   }
   assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
@@ -153,7 +182,7 @@ export async function checkQueueInElectron(win) {
         'modeKind: node.querySelector(".queue-card-mode .select-menu-trigger")?.tagName || "",' +
         'modeLabel: node.querySelector(".queue-card-mode .select-menu-trigger")?.getAttribute("aria-label") || "",' +
         'draggable: node.getAttribute("draggable"),' +
-        'grip: Boolean(node.querySelector(".queue-card-grip svg")),' +
+        'grip: Boolean(node.querySelector(".queue-card-grip")),' +
         'text: (node.querySelector(".queue-card-text")?.textContent || "").trim(),' +
         'withdraw: (node.querySelector(".queue-card-withdraw")?.textContent || "").trim(),' +
       '})))',
@@ -164,7 +193,7 @@ export async function checkQueueInElectron(win) {
     assert.ok(cards.every((item) => item.modeKind === "BUTTON"), "投递方式要能点（按钮）");
     assert.ok(cards.every((item) => item.modeLabel.length > 0), "投递方式按钮要有可读的无障碍名称");
     assert.ok(cards.every((item) => item.draggable === "true"), "卡片要可拖拽（拖拽排序）");
-    assert.ok(cards.every((item) => item.grip), "卡片要显示拖拽把手");
+    assert.ok(cards.every((item) => item.grip), "卡片要显示拖拽把手（点阵用 CSS 画，不是内联 svg）");
     assert.deepEqual(cards.map((item) => item.withdraw), ["撤回", "撤回"], "每条都要有撤回按钮");
 
     // 分组说明：排队那一组第一条前面要有一句「本轮结束后按顺序发送」

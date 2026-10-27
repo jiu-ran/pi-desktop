@@ -425,7 +425,14 @@ export async function checkAppearanceInElectron(win) {
       };
     }))`));
     assert.equal(rects.length, 3, `窗口按钮应有 3 个（最小化 / 最大化 / 关闭），实际 ${rects.length}`);
-    assert.deepEqual(rects.map((item) => item.label), ["最小化", "最大化", "关闭"]);
+    // 中间那个随窗口状态变：最大化时是「向下还原」。窗口边界是持久化的，
+    // 上一次跑完留在最大化状态就会把这条断言打成偶发失败。
+    assert.equal(rects[0].label, "最小化", `第一个按钮是最小化，实际「${rects[0].label}」`);
+    assert.ok(
+      ["最大化", "向下还原"].includes(rects[1].label),
+      `中间按钮应是最大化 / 向下还原，实际「${rects[1].label}」`,
+    );
+    assert.equal(rects[2].label, "关闭", `最后一个按钮是关闭，实际「${rects[2].label}」`);
     const inner = Number(await evaluate("window.innerWidth"));
     assert.equal(rects[2].right, inner, `关闭按钮要贴住窗口右缘（innerWidth=${inner}），实际 ${rects[2].right}`);
     for (const rect of rects) {

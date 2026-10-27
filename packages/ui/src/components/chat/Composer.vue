@@ -306,6 +306,31 @@ function queueGroupNote(index: number): string {
   return item.mode === "steer" ? "引导 · 立刻插入当前回合" : "排队 · 本轮结束后按顺序发送";
 }
 
+/** 卡片给读屏的名字：第几条、怎么发、写了什么 */
+function queueCardLabel(index: number): string {
+  const item = queuePending.value[index];
+  if (!item) return "";
+  const mode = item.mode === "steer" ? "引导" : "排队";
+  return `第 ${index + 1} 条，${mode}：${queuePreview(item.text, 60)}`;
+}
+
+/** 键盘调整顺序（和拖拽走同一套 planQueueMove + reorderQueued） */
+async function moveQueued(index: number, delta: number): Promise<void> {
+  if (queueBusy.value) return;
+  const to = index + delta;
+  if (to < 0 || to >= queuePending.value.length) return;
+  const { entries, changed } = planQueueMove(queuePending.value, index, delta > 0 ? to + 1 : to);
+  if (!changed) return;
+  queueBusy.value = true;
+  try {
+    await workbench.reorderQueued(entries.map((entry) => ({ mode: entry.mode, text: entry.text })));
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
+}
+
 function normalizePrompt(value: string): string {
   return String(value ?? "").replace(/\r\n/g, "\n").trim();
 }
@@ -1109,11 +1134,13 @@ const argHint = computed(() => {
             <span class="queue-dot" />
             {{ queuePending.length }} 条待发送
           </span>
+          <span class="queue-head-hint">拖动排序 · 聚焦后 Alt+↑ / Alt+↓</span>
           <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">全部撤回</button>
         </div>
+        <!-- 卡片单独一层：排队很长时只滚这一层，表头和输入框不动 -->
+        <div class="queue-list" role="list">
         <template v-for="(item, i) in queuePending" :key="i">
           <div v-if="queueGroupNote(i)" class="queue-group-note" :class="item.mode">
-            <span class="queue-group-line" />
             {{ queueGroupNote(i) }}
             <span class="queue-group-line" />
           </div>
@@ -1129,20 +1156,24 @@ const argHint = computed(() => {
               },
             ]"
             :draggable="!queueBusy"
-            :title="queuePreview(item.text, 400)"
+            tabindex="0"
+            role="listitem"
+            :aria-label="queueCardLabel(i)"
             @dragstart="onQueueDragStart(i, $event)"
             @dragover="onQueueDragOver(i, $event)"
             @drop="onQueueDrop(i, $event)"
             @dragend="onQueueDragEnd"
+            @keydown.alt.up.prevent="moveQueued(i, -1)"
+            @keydown.alt.down.prevent="moveQueued(i, 1)"
           >
-          <span class="queue-card-grip" title="拖动调整发送顺序" aria-hidden="true" v-html="icons.more" />
+          <span
+            class="queue-card-grip"
+            title="拖动调整发送顺序（聚焦后 Alt+↑ / Alt+↓）"
+            aria-hidden="true"
+          />
           <div class="queue-card-main">
             <!-- 控制条在上、正文在下：正文永远占满整行，不被下拉按钮挤成窄条 -->
             <div class="queue-card-bar">
-              <span class="queue-card-badge">
-                <span class="queue-dot" />
-                待发送
-              </span>
               <SelectMenu
                 class="queue-card-mode"
                 size="sm"
@@ -1196,6 +1227,7 @@ const argHint = computed(() => {
               v-if="queueCards[i]?.text"
               type="button"
               class="queue-card-text"
+              :title="queuePreview(item.text, 400)"
               :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
               @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
             >
@@ -1204,6 +1236,7 @@ const argHint = computed(() => {
           </div>
           </div>
         </template>
+        </div>
       </div>
 
       <div

@@ -1517,6 +1517,32 @@
   gap: 8px;
   padding: 0 2px;
 }
+.queue-head-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  margin-right: 2px;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+@container (max-width: 560px) {
+  .queue-head-hint { display: none; }
+}
+/* 卡片自己滚：排上十几条也不会把输入框顶出窗口 */
+.queue-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(42vh, 400px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .queue-label {
   display: inline-flex;
   align-items: center;
@@ -1540,15 +1566,21 @@
 .queue-card {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 5px 8px 6px 4px;
+  padding: 5px 8px 6px 5px;
   border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line-2));
   border-radius: 9px;
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
   color: var(--fg-2);
   font-size: 12.5px;
   line-height: 1.55;
+  outline: none;
+}
+.queue-card:focus-visible {
+  border-style: solid;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 /* 控制条（待发送 / 投递方式 / 编辑撤回）在上，正文在下占满整行 */
 .queue-card-main {
@@ -1579,21 +1611,7 @@
 .queue-card:hover {
   border-style: solid;
 }
-/* 「待发送」标记：呼吸点 + 小字，和对话里那条气泡的状态一致 */
-.queue-card-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: none;
-  color: var(--accent);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.queue-card-badge .queue-dot {
-  width: 5px;
-  height: 5px;
-}
+/* 「待发送」只在表头报一次（N 条待发送），卡片上不再重复一遍 */
 .queue-card-actions {
   display: flex;
   flex: none;
@@ -1656,12 +1674,12 @@
 .queue-card .queue-card-mode.is-sm .select-menu-caret svg { width: 9px; height: 9px; }
 .queue-card .queue-card-mode.is-sm .select-menu-caret { opacity: 0.75; }
 
-/* 分组说明：引导 / 排队各自的第一条前面出现一次 */
+/* 分组说明：一行小红/小蓝字 + 一条淡分隔线，不做「整行居中分隔条」抢戏 */
 .queue-group-note {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 2px 0;
+  margin: 3px 2px 0 16px;
   color: var(--fg-3);
   font-size: 10.5px;
   letter-spacing: 0.02em;
@@ -1671,22 +1689,31 @@
   flex: 1;
   height: 1px;
   background: currentColor;
-  opacity: 0.18;
+  opacity: 0.14;
 }
 
-/* 拖拽排序：整张卡片可拖，插入线画在卡片上/下边缘 */
+/* 拖拽把手：2×3 点阵（radial-gradient 画，不用图标）；平时淡、悬停/聚焦才亮 */
 .queue-card-grip {
   display: grid;
   flex: none;
   place-items: center;
   align-self: stretch;
-  width: 12px;
+  width: 10px;
   color: var(--fg-3);
-  opacity: 0.5;
+  opacity: 0;
   transition: opacity 0.12s, color 0.12s;
 }
-.queue-card-grip svg { display: block; width: 12px; height: 12px; transform: rotate(90deg); }
-.queue-card:hover .queue-card-grip { opacity: 0.9; color: var(--fg-2); }
+.queue-card-grip::before {
+  content: "";
+  width: 6px;
+  height: 12px;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.1px);
+  background-size: 3px 4px;
+}
+.queue-card:hover .queue-card-grip,
+.queue-card:focus-within .queue-card-grip,
+.queue-card:focus-visible .queue-card-grip,
+.queue-card.can-drag:hover .queue-card-grip { opacity: 0.75; color: var(--fg-2); }
 .queue-card.can-drag .queue-card-grip { cursor: grab; }
 .queue-card.can-drag { cursor: grab; }
 .queue-card.dragging {
