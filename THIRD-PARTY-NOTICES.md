@@ -25,6 +25,16 @@
   `packages/ui/src/plugins/markdown/live-preview-rules.ts` 中基于语法树自行实现。
 - 以上依赖均为未修改的 npm 包，随应用分发时保留其 LICENSE 与版权声明。
 
+## 文件类型图标
+
+- **Seti UI**：<https://github.com/jesseweed/seti-ui>
+- 版权：Copyright (c) 2014 Jesse Weed
+- 许可：MIT（全文见 <https://github.com/jesseweed/seti-ui/blob/master/LICENSE.md>）
+- 使用范围：`packages/ui/src/shared/seti-icons.ts` 里的文件/文件夹图标，取自 Seti UI 仓库的
+  `icons/*.svg`（commit `2d6c5e6`）。由 `scripts/build-seti-icons.mjs` 挑选本项目用到的 93 个图标内联生成：
+  保留 SVG 路径，把写死的品牌色改成 `currentColor` 以便跟随主题，原色单独记录在 `color` 字段里；
+  图形本身未做改动。
+
 ## ThinkRail
 
 - 来源：<https://github.com/JetBrains/thinkrail>

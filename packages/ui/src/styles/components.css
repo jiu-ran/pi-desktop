@@ -42,11 +42,11 @@
 .file-tree-icon.text { color: var(--fg-2); }
 .file-tree-icon.file { color: var(--code); }
 
-/* ---------------- 文件类型图标（三套主题） ---------------- */
+/* ---------------- 文件类型图标（Seti UI 三主题） ---------------- */
 /*
- * 尺寸与底色都在这里定，组件只传两个自定义属性：
- *   --file-icon-color  品牌色（底色 / 描边色）
- *   --file-icon-ink    字母与线条的颜色（填充主题里按对比度取黑或白）
+ * 形状来自 Seti UI（32 网格），组件只传两个自定义属性：
+ *   --file-icon-color  品牌色（也是填充主题的底色）
+ *   --file-icon-ink    图标实际颜色（填充主题里按对比度取黑或白）
  */
 .file-icon {
   display: grid;
@@ -57,69 +57,30 @@
   line-height: 1;
   border-radius: 4px;
 }
-.file-icon-glyph { display: grid; place-items: center; color: var(--file-icon-ink, var(--fg-2)); }
+.file-icon-glyph { display: grid; place-items: center; width: 100%; height: 100%; color: var(--file-icon-ink, var(--fg-2)); }
 .file-icon-glyph svg { display: block; width: 100%; height: 100%; }
 
-/* 字母：3 档字号，2 个字符最粗最大，4 个字符缩到 5.6px 仍然可读 */
-.file-icon-letters {
-  color: var(--file-icon-ink, var(--fg-2));
-  font-family: var(--mono);
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  text-transform: uppercase;
-  line-height: 1;
-  transform: translateY(0.2px);
-}
-.file-icon-letters[data-len="1"] { font-size: 9px; }
-.file-icon-letters[data-len="2"] { font-size: 8px; }
-.file-icon-letters[data-len="3"] { font-size: 6.8px; }
-.file-icon-letters[data-len="4"] { font-size: 6.3px; letter-spacing: -0.7px; }
+/* ① Seti 原色 / ② 单色：都没有底色，图标略小于行高，和文字对齐更稳 */
+.file-icon.is-seti .file-icon-glyph,
+.file-icon.is-mono .file-icon-glyph { padding: 1px; }
 
-/* ① 填充（VS Code 风）：品牌色实心方块 */
-.file-icon.is-solid {
+/* ③ 填充：品牌色方块 + 反白图标 */
+.file-icon.is-block {
   background: var(--file-icon-color);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 12%, transparent);
 }
-/* 文件夹不做实心块：整列文件夹都成色块会把文件淹掉，改用品牌色的实心图形 */
-.file-icon.is-solid.is-kind-folder,
-.file-icon.is-solid.is-kind-folderOpen {
+.file-icon.is-block .file-icon-glyph { padding: 2.5px; }
+/* 文件夹不做实心块：整列文件夹都成色块会把文件淹掉 */
+.file-icon.is-block.is-folder {
   background: transparent;
   box-shadow: none;
 }
-.file-icon.is-solid.is-kind-folder .file-icon-glyph,
-.file-icon.is-solid.is-kind-folderOpen .file-icon-glyph {
+.file-icon.is-block.is-folder .file-icon-glyph {
+  padding: 1px;
   color: var(--file-icon-color);
-}
-/*
- * 文件夹的「实心面」由主题决定：
- * 填充主题画成 VS Code 那样一整块；描边主题只留线条（JetBrains）；裸字形给一层很淡的底。
- */
-.file-icon.is-solid .fx-fill { fill-opacity: 0.95; }
-.file-icon.is-outline .fx-fill { fill-opacity: 0; }
-.file-icon.is-tint .fx-fill { fill-opacity: 0.3; }
-
-/* ② 描边（JetBrains 风）：透明底 + 1px 品牌色描边 */
-.file-icon.is-outline {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--file-icon-color) 55%, transparent);
-}
-.file-icon.is-outline.is-kind-folder,
-.file-icon.is-outline.is-kind-folderOpen {
-  box-shadow: none;
-}
-.file-icon.is-outline.is-kind-folder .file-icon-glyph,
-.file-icon.is-outline.is-kind-folderOpen .file-icon-glyph {
-  color: var(--file-icon-color);
+  filter: drop-shadow(0 0 0.4px color-mix(in srgb, var(--file-icon-color) 60%, transparent));
 }
 
-/* ③ 裸字形：无底无边，只有品牌色（文件夹跟随正文色，不抢眼） */
-.file-icon.is-tint {
-  background: transparent;
-  box-shadow: none;
-}
-
-/* 图形类在没有底色的主题里用品牌色描线；填充主题里靠 --file-icon-ink 变白 */
-.file-icon.is-tint .file-icon-glyph { color: var(--file-icon-color); }
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-dirty { flex: none; color: var(--accent); font-size: 9px; line-height: 1; }
 /* 文件树里的 Git 状态：与版本控制面板使用同一套字母与配色 */

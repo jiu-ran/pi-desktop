@@ -6,13 +6,11 @@ import { resolveFileIcon, type FileIconThemeId } from "../../shared/file-icons.t
 /**
  * 文件类型图标（文件树 / 打开中的标签页 / 设置页预览共用）。
  *
- * 三种画法来自同一张类型表（见 `shared/file-icons.ts`）：
- * - 填充（VS Code 风）：品牌色方块 + 黑/白字母或图形；
- * - 描边（JetBrains 风）：同形状细描边，字母与线条都是品牌色；
- * - 裸字形：不画底，只有品牌色字形。
- *
- * 字母用 HTML 文本（不是 SVG 里的 <text>）：这样字号/字距能用 CSS 精确调，
- * 16px 方块里 2–4 个字符都清楚，也不依赖系统字体在 SVG 里的度量。
+ * 形状来自 Seti UI（32 网格，SVG 里的 fill 已换成 `currentColor`），这里只负责
+ * 按主题决定「有没有底色」和「图标什么颜色」：
+ * - `seti`：Seti 原色，无底色；
+ * - `mono`：跟随正文颜色，无底色；
+ * - `block`：品牌色方块 + 反白图标。
  */
 const props = withDefaults(
   defineProps<{
@@ -32,15 +30,17 @@ const view = computed(() =>
     open: props.open,
   }),
 );
-/** 字母长度决定字号：2 个字符最大，4 个字符最小 */
-const letterLength = computed(() => (view.value.ink === "letters" ? view.value.letters.length : 0));
+
+const markup = computed(
+  () => `<svg viewBox="0 0 32 32" width="100%" height="100%" aria-hidden="true">${view.value.body}</svg>`,
+);
 </script>
 
 <template>
   <span
     class="file-icon"
-    :class="[`is-${view.theme}`, `is-kind-${view.kind}`, { 'is-letters': view.ink === 'letters' }]"
-    :data-kind="view.kind"
+    :class="[`is-${view.theme}`, { 'is-folder': view.isFolder }]"
+    :data-seti="view.seti"
     :data-theme="view.theme"
     :title="view.label"
     aria-hidden="true"
@@ -51,11 +51,6 @@ const letterLength = computed(() => (view.value.ink === "letters" ? view.value.l
       height: `${size}px`,
     }"
   >
-    <span
-      v-if="view.ink === 'letters'"
-      class="file-icon-letters"
-      :data-len="letterLength"
-    >{{ view.letters }}</span>
-    <span v-else class="file-icon-glyph" v-html="view.glyph" />
+    <span class="file-icon-glyph" v-html="markup" />
   </span>
 </template>
