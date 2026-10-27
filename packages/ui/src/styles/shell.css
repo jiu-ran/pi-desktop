@@ -337,6 +337,7 @@
   font-weight: 600;
 }
 .stage-tab-icon { display: grid; flex: none; color: var(--accent); }
+.stage-tab-fileicon { margin-right: 1px; }
 .stage-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stage-tab-dirty { flex: none; color: var(--accent); font-size: 9px; }
 .stage-tab-close {

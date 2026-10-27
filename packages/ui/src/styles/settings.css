@@ -460,6 +460,27 @@
 .settings-row.clickable {
   cursor: pointer;
 }
+/* 文件图标主题的实时预览：一行真实文件名 + 当前主题画出来的图标 */
+.settings-row-preview {
+  padding-top: 4px;
+  padding-bottom: 14px;
+}
+.settings-fileicon-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.settings-fileicon-sample {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+  font: 11.5px var(--mono);
+}
+.settings-fileicon-sample small {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
 .settings-row.is-disabled {
   opacity: 0.5;
 }

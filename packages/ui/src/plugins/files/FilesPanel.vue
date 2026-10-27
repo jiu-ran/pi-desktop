@@ -14,6 +14,7 @@ import {
 } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../git/state.ts";
 import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
+import FileIcon from "../../components/shared/FileIcon.vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { openFileInStage } from "./state.ts";
 
@@ -243,7 +244,7 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
           @click="openResult(item)"
           @contextmenu="resultMenu($event, item)"
         >
-          <span class="file-tree-icon file" v-html="icons.file" />
+          <FileIcon :name="item.name" />
           <span class="file-tree-name">{{ item.name }}</span>
           <small class="file-search-rel">{{ item.relative }}</small>
           <span v-if="gitFor(item.path)" class="file-tree-git" :data-kind="badgeKind(gitFor(item.path)!)">{{ badgeCode(gitFor(item.path)!) }}</span>
@@ -264,7 +265,7 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
         @click="openChanged(change)"
       >
         <span class="file-tree-caret" />
-        <span class="file-tree-icon file" v-html="icons.file" />
+        <FileIcon :name="change.name" />
         <span class="file-tree-name">{{ change.name }}</span>
         <small v-if="change.display !== change.name" class="file-search-rel">{{ change.display }}</small>
         <span class="file-tree-git" :data-kind="badgeKind(change)">{{ badgeCode(change) }}</span>

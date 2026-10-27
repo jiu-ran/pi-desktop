@@ -107,6 +107,8 @@ export interface AppSettings {
   reduceMotion: boolean;
   /** .md 文件的默认视图：预览（点哪块编辑哪块）/ 源码 */
   markdownView: "source" | "preview";
+  /** 文件树 / 标签页的类型图标主题 */
+  fileIconTheme: "solid" | "outline" | "tint";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -145,6 +147,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reduceMotion: false,
   // 默认预览：和 Typora 一样，点哪一块就地改哪一块
   markdownView: "preview",
+  // 默认「填充」：和 VS Code 一样认文件靠颜色，一眼能分
+  fileIconTheme: "solid",
 }
 
 function loadSavedSettings(): AppSettings {
@@ -202,6 +206,9 @@ function loadSavedSettings(): AppSettings {
       reduceMotion: parsed.reduceMotion === true,
       // 试过一版「分栏」写法（split），升级后统一回到预览
       markdownView: parsed.markdownView === "source" ? "source" : "preview",
+      fileIconTheme: ["solid", "outline", "tint"].includes(parsed.fileIconTheme)
+        ? parsed.fileIconTheme
+        : DEFAULT_SETTINGS.fileIconTheme,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

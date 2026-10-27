@@ -7,6 +7,7 @@ import { askConfirm, openMenu } from "../sidebar/ui.ts";
 import type { StageTab } from "../../kernel/stage.ts";
 import { saveFileTab } from "../../plugins/files/save.ts";
 import type { FileStageData } from "../../plugins/files/state.ts";
+import FileIcon from "../shared/FileIcon.vue";
 
 const { stage, plugins, workbench, bus } = useKernel();
 
@@ -182,8 +183,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onStageKey, true));
           @click="stage.activate(tab.key)"
           @contextmenu.prevent="openTabMenu($event, tab)"
         >
+          <FileIcon
+            v-if="tab.pluginId === 'files' && (tab.data as FileStageData | undefined)?.relative"
+            class="stage-tab-fileicon"
+            :size="14"
+            :name="(tab.data as FileStageData).relative"
+          />
           <span
-            v-if="plugins.get(tab.pluginId)?.icon"
+            v-else-if="plugins.get(tab.pluginId)?.icon"
             class="stage-tab-icon"
             v-html="plugins.get(tab.pluginId)?.icon"
           />

@@ -37,7 +37,8 @@ for (const file of files) {
   const rel = path.relative(ROOT, file).replace(/\\/g, "/");
 
   // 定义：CSS 声明 / 内联绑定 / setProperty
-  for (const match of text.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)) defined.add(match[1]!);
+  // CSS 声明与内联绑定里的 `'--x': v` 都算定义（引号可有可无）
+  for (const match of text.matchAll(/["']?(--[a-zA-Z0-9-]+)["']?\s*:/g)) defined.add(match[1]!);
   for (const match of text.matchAll(/setProperty\(\s*["'`](--[a-zA-Z0-9-]+)/g)) defined.add(match[1]!);
 
   // 使用：不给兜底的才算

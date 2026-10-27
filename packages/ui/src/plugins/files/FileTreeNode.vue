@@ -5,6 +5,7 @@ import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
 import { badgeCode, badgeKind, pathKey, type RepoChange } from "../../shared/git-changes.ts";
+import FileIcon from "../../components/shared/FileIcon.vue";
 import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
 import { openFileInStage } from "./state.ts";
 
@@ -54,20 +55,7 @@ function notify(error: any): void {
   bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
 }
 
-function fileIconKind(item: WorkspaceEntry): string {
-  if (item.kind === "folder") return "folder";
-  const ext = item.name.split(".").at(-1)?.toLowerCase() ?? "";
-  if (["js", "jsx", "ts", "tsx", "vue", "svelte", "html", "css", "scss"].includes(ext)) return "code";
-  if (["json", "jsonl"].includes(ext)) return "json";
-  if (["zip", "jar", "gz", "7z", "rar"].includes(ext)) return "archive";
-  if (["md", "txt", "log", "csv", "yml", "yaml"].includes(ext)) return "text";
-  return "file";
-}
 
-function fileIcon(item: WorkspaceEntry): string {
-  const kind = fileIconKind(item);
-  return icons[kind] ?? icons.file;
-}
 
 async function open(): Promise<void> {
   if (props.item.kind === "folder") {
@@ -157,7 +145,7 @@ function menu(event: MouseEvent): void {
         <span v-if="loading" class="mini-spinner" />
         <span v-else-if="item.kind === 'folder'" v-html="expanded ? icons.chevronDown : icons.chevronRight" />
       </span>
-      <span class="file-tree-icon" :class="fileIconKind(item)" v-html="fileIcon(item)" />
+      <FileIcon :name="item.name" :is-folder="item.kind === 'folder'" :open="expanded" />
       <span class="file-tree-name">{{ item.name }}</span>
       <span v-if="isDirty" class="file-tree-dirty" title="有未保存修改">●</span>
       <span
