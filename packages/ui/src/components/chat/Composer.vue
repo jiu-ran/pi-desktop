@@ -910,8 +910,14 @@ async function submit(): Promise<void> {
 }
 
 async function stop(): Promise<void> {
-  const returned = await workbench.stop();
-  if (returned) draft.value = [draft.value, returned].filter(Boolean).join("\n");
+  try {
+    // 队列里的消息会一起被清空并回填到输入框（只有人写的那部分，不带附件标记）
+    const returned = await workbench.stop();
+    if (returned) draft.value = [draft.value, returned].filter(Boolean).join("\n");
+  } catch (error) {
+    notifyError(error);
+  }
+  nextTick(focus);
 }
 
 function onKeydown(event: KeyboardEvent): void {

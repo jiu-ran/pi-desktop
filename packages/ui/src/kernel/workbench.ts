@@ -1045,6 +1045,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  /**
+   * Pi 本体换了（升级 / 换了手动路径）之后让空闲工作区重新拉起进程。
+   *
+   * 工作区里的 `pi` 进程是启动时拉起的，不重启就一直在用旧版本：提示里写着
+   * 「已更新到 0.9.1」，实际会话还是旧行为，看起来像升级没生效。
+   * 正在输出的工作区不动（重启会打断它），由调用方告知用户稍后生效。
+   */
+  async function restartIdleWorkspaces(): Promise<{ restarted: number; skipped: number }> {
+    const list = [...workspaces.values()].filter((ws) => ws.status === "ready");
+    const idle = list.filter((ws) => !ws.streaming);
+    for (const ws of idle) await restart(ws);
+    return { restarted: idle.length, skipped: list.length - idle.length };
+  }
+
   function setSidebarWidth(value: number, persist = true): number {
     const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Number(value)));
     if (!Number.isFinite(width)) return state.sidebarWidth;
@@ -1340,6 +1354,34 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  /**
+   * 把「还在队列里的提示词」对应的乐观气泡删掉（从后往前找）。
+   *
+   * 撤回 / 停止 / 改投递方式都走这里：这些气泡从没真正发出去，队列一清就必须一起消失，
+   * 否则界面上会留下一条「看起来已经发过」的消息，文字还会同时回到输入框。
+   *
+   * 按**出现次数**删：同一句话可以排队两次，两条气泡都得收回去。
+   */
+  function removeQueuedBlocks(thread: { blocks: TranscriptBlock[]; transcript: { removeBlock: (id: string) => void } }, prompts: string[]): void {
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const budget = new Map<string, number>();
+    for (const prompt of prompts) {
+      const key = normalize(prompt);
+      if (!key) continue;
+      budget.set(key, (budget.get(key) ?? 0) + 1);
+    }
+    if (!budget.size) return;
+    for (let index = thread.blocks.length - 1; index >= 0; index -= 1) {
+      const block = thread.blocks[index];
+      if (!block || block.kind !== "user") continue;
+      const key = normalize(block.queueText ?? "");
+      const left = budget.get(key) ?? 0;
+      if (!left) continue;
+      budget.set(key, left - 1);
+      thread.transcript.removeBlock(block.id);
+    }
+  }
+
   async function stop(): Promise<string> {
     const ws = active.value;
     if (!ws) return "";
@@ -1349,8 +1391,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const thread = ensureThread(ws, targetSessionFile);
     const queued = await rpc(ws.cwd, "clearQueue", [], targetSessionFile);
     await rpc(ws.cwd, "abort", [], targetSessionFile);
+    const prompts = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])].map(String);
+    // 队列被清空后 planQueuedFlush 会把残留的气泡当成「刚发出去」挪到末尾，
+    // 所以先删掉它们，再同步队列状态。
+    removeQueuedBlocks(thread, prompts);
     applyQueue(thread, { steering: [], followUp: [] });
-    return [...(queued?.steering ?? []), ...(queued?.followUp ?? [])].join("\n");
+    // 回填输入框的只有人写的那部分：附件块原样留在会话里，别把 XML 塞进输入框。
+    return prompts
+      .map((prompt) => queueDraftText(prompt))
+      .filter(Boolean)
+      .join("\n");
   }
 
   async function newSession(): Promise<void> {
@@ -1536,7 +1586,6 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (!ws || !target?.text) return { ok: false, draft: "" };
     const thread = ws.activeThread;
     const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
-    const wanted = normalize(target.text);
     const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
     const current = {
       steering: [...(cleared?.steering ?? [])],
@@ -1562,14 +1611,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
     applyQueue(thread, planned);
     // 撤回 = 拿回来改：文字回填输入框（附件标记不进去，只回人写的那部分）
-    const draft = queueDraftText(target.text);
-    for (const block of [...thread.blocks]) {
-      if (block.kind !== "user") continue;
-      if (normalize(block.queueText ?? "") !== wanted) continue;
-      thread.transcript.removeBlock(block.id);
-      break;
-    }
-    return { ok: true, draft };
+    removeQueuedBlocks(thread, [target.text]);
+    return { ok: true, draft: queueDraftText(target.text) };
   }
 
   /**
@@ -2046,11 +2089,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       state.pi.latest = result.to || state.pi.latest;
       state.pi.updateAvailable = false;
       state.pi.lastUpdate = { from: result.from, to: result.to, at: Date.now(), log: result.log };
+      // 工作区里的 pi 进程是启动时拉起的：不重启就还在跑旧版本
+      const refreshed = await restartIdleWorkspaces();
+      const suffix = refreshed.skipped
+        ? `（${refreshed.skipped} 个正在输出的任务会在本轮结束后才用上新版本）`
+        : "";
       bus.emit("notify", {
         level: "info",
         text: result.from === result.to
           ? `Pi 已是最新（${result.to || state.pi.version}），无需更新`
-          : `Pi 已从 ${result.from || "未知版本"} 更新到 ${result.to}`,
+          : `Pi 已从 ${result.from || "未知版本"} 更新到 ${result.to}${suffix}`,
       });
       bus.emit("pi:updated", { ...state.pi.lastUpdate });
       return true;
@@ -2375,6 +2423,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     reveal,
     reload,
     restart,
+    restartIdleWorkspaces,
     renameSession,
     notice,
     refreshSessions,

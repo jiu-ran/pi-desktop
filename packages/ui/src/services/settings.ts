@@ -328,13 +328,15 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     void syncAgentPreferences();
   }));
 
-  // Pi 定位后的一次性启动逻辑（启动 / 重检 / 更新后刷新都会广播，只处理首次）：
+  // Pi 定位后的一次性启动逻辑（启动 / 重检 / 更新后刷新都会广播，只处理首次成功的定位）：
   // 1) 若存有手动路径且与当前定位不一致，以手动路径为准重新定位一次；
   // 2) 若自动更新开关打开且发现新版本，自动执行一次全局更新。
+  // 注意「成功」才上锁：启动时 Pi 还没装好 / 路径还在校验，此时 `found` 为 false，
+  // 若在这里就上锁，用户后来装好 Pi 也不会再走一遍启动检查。
   let piBootHandled = false;
+  let customPathWarned = false;
   disposers.push(bus.on("pi:located", (info: any) => {
     if (piBootHandled) return;
-    piBootHandled = true;
     void (async () => {
       const custom = appSettings.piCustomPath.trim();
       let located = info;
@@ -342,11 +344,17 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
         const result = await workbench.refreshPi(custom);
         located = { ...info, ...result };
         if (!result.found) {
-          bus.emit("notify", { level: "warning", text: "已保存的 Pi 路径已失效，已回退为 PATH 自动识别，请检查设置" });
+          // 手动路径失效：只提醒一次，但**不上锁**——回退到 PATH 之后若定位到 Pi，
+          // 启动检查（含自动更新）还得正常跑。
+          if (!customPathWarned) {
+            customPathWarned = true;
+            bus.emit("notify", { level: "warning", text: "已保存的 Pi 路径已失效，已回退为 PATH 自动识别，请检查设置" });
+          }
           return;
         }
       }
       if (!located?.found) return;
+      piBootHandled = true;
       const checked = await workbench.checkPiUpdate(custom || undefined);
       if (checked.updateAvailable && appSettings.piAutoUpdate) {
         await workbench.updatePi(custom || undefined, appSettings.piUpdateScope);

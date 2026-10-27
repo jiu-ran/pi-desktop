@@ -54,7 +54,10 @@ async function applyPiCustomPath(): Promise<void> {
   }
   appSettings.piCustomPath = input;
   piPathEditing.value = false;
-  bus.emit("notify", { level: "info", text: `已使用手动指定的 Pi：${result.version}（${result.path}）` });
+  // 当前工作区还在跑换之前那个 pi：让空闲的重拉一次，否则“换了路径”对现有会话无效
+  const refreshed = await workbench.restartIdleWorkspaces();
+  const suffix = refreshed.skipped ? `；${refreshed.skipped} 个正在输出的任务结束后生效` : "";
+  bus.emit("notify", { level: "info", text: `已使用手动指定的 Pi：${result.version}（${result.path}）${suffix}` });
 }
 
 function editPiPath(): void {
@@ -72,6 +75,7 @@ async function clearPiCustomPath(): Promise<void> {
   piPathDraft.value = "";
   piPathEditing.value = false;
   await workbench.refreshPi();
+  await workbench.restartIdleWorkspaces();
   bus.emit("notify", { level: "info", text: "已恢复 PATH 自动识别" });
 }
 

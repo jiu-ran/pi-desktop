@@ -239,4 +239,33 @@ assert.equal(reorderFailed, false, "写入失败要返回 false");
 assert.deepEqual(thread.queue.followUp, [followOne, followTwo], "失败时队列顺序还原，不能丢消息");
 assert.ok(notices.some((notice) => notice.level === "error"), "失败要给出错误提示");
 
-console.log("queue-mode OK 排队↔引导 / 拖拽排序 / 重新入队顺序与图片 / 撤回回填 / 失败还原");
+// ---- 7) 中止（Esc / 停止按钮）：队列清空后，气泡不能留成「已发送」 ----
+// 以前 stop() 只清队列不回吞气泡：planQueuedFlush 会把它们当成刚发出去的挪到末尾，
+// 同时文字又回到输入框 —— 界面上一条从来没发出去的消息变成了「已发送」。
+reset();
+const stopSteer = `<file name="${imagePath}"></file>\n打断一下`;
+queueState = { steering: [stopSteer], followUp: [followOne] };
+thread.queue = { steering: [stopSteer], followUp: [followOne] };
+thread.transcript.pushUser("打断一下", 1, { queueText: stopSteer });
+thread.transcript.pushUser(followOne, 0, { queueText: followOne });
+// 同一段话可以排队两次：两条气泡都是待发的，都要收回去
+thread.transcript.pushUser("再插一句", 0, { queueText: "再插一句" });
+thread.transcript.pushUser("再插一句", 0, { queueText: "再插一句" });
+queueState = { steering: [stopSteer, "再插一句", "再插一句"], followUp: [followOne] };
+thread.queue = { steering: [...queueState.steering], followUp: [...queueState.followUp] };
+const countOf = (text: string) => thread.blocks.filter((block: any) => block.queueText === text).length;
+const beforeStop = { steer: countOf(stopSteer), follow: countOf(followOne), dup: countOf("再插一句") };
+const stopDraft = await workbench.stop();
+assert.equal(
+  thread.queue.steering.length + thread.queue.followUp.length,
+  0,
+  "中止后队列要清空",
+);
+assert.equal(countOf(stopSteer), beforeStop.steer - 1, "中止后待发的气泡要一并删掉");
+assert.equal(countOf(followOne), beforeStop.follow - 1, "每条待发的都要删掉（只删队列里那份）");
+assert.equal(countOf("再插一句"), beforeStop.dup - 2, "同一句话排两次，两条气泡都要收回去");
+assert.equal(stopDraft.includes("<file"), false, `回填文本不能带附件标记，实际「${stopDraft}」`);
+assert.equal(stopDraft, "打断一下\n再插一句\n再插一句\n排队一", `按队列顺序回填人写的文字，实际「${stopDraft}」`);
+assert.ok(calls.some((call) => call.method === "abort"), "中止还要真的发 abort");
+
+console.log("queue-mode OK 排队↔引导 / 拖拽排序 / 重新入队顺序与图片 / 撤回回填 / 中止不回吞 / 失败还原");

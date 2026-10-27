@@ -82,4 +82,29 @@ const draftKeys = [...store.keys()].filter(key => key.startsWith("pi-desktop.com
 assert.ok(draftKeys.length <= 40, `草稿条数应受上限约束，实际 ${draftKeys.length}`);
 assert.ok(text(readComposerDraft("C:\\Proj", "s59.jsonl")), "最近写入的草稿必须保留");
 
+// 12. 裁剪要看「最近写入」而不是 localStorage 的插入顺序
+// 改写已有键不会改变插入顺序：只看顺序的话，刚编辑过的老草稿会被当成最旧的丢掉。
+store.clear();
+const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
+for (let i = 0; i < 40; i += 1) {
+  writeComposerDraft("C:\\Proj", `k${i}.jsonl`, { text: `草稿 ${i}`, attachments: [] });
+  await tick();
+}
+assert.equal([...store.keys()].length, 40, "先摆满 40 条");
+// 改最老的那个：写完它仍是最先插入的，但内容是刚写下的
+writeComposerDraft("C:\\Proj", "k0.jsonl", { text: "刚改过的旧草稿", attachments: [] });
+await tick();
+assert.ok(store.has(composerDraftKey("C:\\Proj", "k0.jsonl")), "改写不能被当成删除");
+// 再写一条新的触发裁剪：该淘汰的是时间最早的 k1，而不是刚写过的 k0
+writeComposerDraft("C:\\Proj", "k40.jsonl", { text: "新草稿", attachments: [] });
+assert.equal(
+  text(readComposerDraft("C:\\Proj", "k0.jsonl")),
+  "刚改过的旧草稿",
+  "刚写过的草稿（哪怕是旧键）不能被当成最旧的删掉",
+);
+assert.equal(store.has(composerDraftKey("C:\\Proj", "k1.jsonl")), false, "真正最旧的那条应该被淘汰");
+assert.ok(store.has(composerDraftKey("C:\\Proj", "k40.jsonl")), "最新的草稿要保留");
+const kept = [...store.keys()].length;
+assert.equal(kept, 40, `裁剪后仍应正好是上限条数，实际 ${kept}`);
+
 console.log("composer-draft OK 正文 / 附件 / 隔离 / 空清理 / 旧格式 / 上限");

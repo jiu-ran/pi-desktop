@@ -44,15 +44,32 @@ function listDraftKeys(): string[] {
 }
 
 /** 超出上限时按「最近写入」保留，旧草稿直接丢弃。 */
+function draftTimestamp(key: string): number {
+  // localStorage 的枚举顺序是插入顺序，改写已有键并不会挪位置，
+  // 所以不能拿 key 顺序当「最近使用」——时间戳必须存在内容里。
+  try {
+    const parsed = JSON.parse(readStorage(key) ?? "null") as { at?: unknown } | null;
+    const at = parsed && typeof parsed === "object" ? Number((parsed as { at?: unknown }).at) : 0;
+    return Number.isFinite(at) && at > 0 ? at : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function trimDrafts(keep: string): void {
   const keys = listDraftKeys();
   if (keys.length <= MAX_DRAFTS) return;
-  for (const key of keys) {
-    if (key === keep) continue;
-    if (keys.length <= MAX_DRAFTS) break;
+  // 越旧越先丢：没有时间戳的老格式草稿排在最前面
+  const victims = keys
+    .filter((key) => key !== keep)
+    .map((key) => ({ key, at: draftTimestamp(key) }))
+    .sort((left, right) => left.at - right.at);
+  let remaining = keys.length;
+  for (const { key } of victims) {
+    if (remaining <= MAX_DRAFTS) break;
     try {
       localStorage.removeItem(key);
-      keys.splice(keys.indexOf(key), 1);
+      remaining -= 1;
     } catch {
       /* ignore */
     }
@@ -96,7 +113,7 @@ export function writeComposerDraft(cwd: string, sessionFile: string, draft: Comp
     }
     return;
   }
-  writeStorage(key, JSON.stringify({ text, attachments }));
+  writeStorage(key, JSON.stringify({ text, attachments, at: Date.now() }));
   trimDrafts(key);
 }
 
