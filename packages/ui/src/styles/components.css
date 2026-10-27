@@ -42,12 +42,10 @@
 .file-tree-icon.text { color: var(--fg-2); }
 .file-tree-icon.file { color: var(--code); }
 
-/* ---------------- 文件类型图标（Material 三主题） ---------------- */
+/* ---------------- 文件 / 文件夹图标（只有默认样式） ---------------- */
 /*
- * 图形来自 Material Icon Theme（每个图标的 viewBox 不统一，由组件逐个渲染），
- * 组件只传两个自定义属性：
- *   --file-icon-color  品牌色（也是填充主题的底色）
- *   --file-icon-ink    图标实际颜色（填充主题里按对比度取黑或白）
+ * 只保留两种图形：文件夹一个、其余一个。不再按扩展名换图标 / 换配色 ——
+ * 彩色图形太多时反而认不出「哪个是文件夹」，也没人靠图标记 200 多种扩展名。
  */
 .file-icon {
   display: grid;
@@ -56,31 +54,11 @@
   width: 16px;
   height: 16px;
   line-height: 1;
-  border-radius: 4px;
 }
-.file-icon-glyph { display: grid; place-items: center; width: 100%; height: 100%; color: var(--file-icon-ink, var(--fg-2)); }
+.file-icon-glyph { display: grid; place-items: center; width: 100%; height: 100%; padding: 1px; color: var(--fg-3); }
+/* 文件夹比文件稍微亮一点，扫一眼就能分出层次 */
+.file-icon.is-folder .file-icon-glyph { color: var(--fg-2); }
 .file-icon-glyph svg { display: block; width: 100%; height: 100%; }
-
-/* ① Material 原色 / ② 单色：都没有底色，图标略小于行高，和文字对齐更稳 */
-.file-icon.is-material .file-icon-glyph,
-.file-icon.is-mono .file-icon-glyph { padding: 1px; }
-
-/* ③ 填充：品牌色方块 + 反白图标 */
-.file-icon.is-block {
-  background: var(--file-icon-color);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 12%, transparent);
-}
-.file-icon.is-block .file-icon-glyph { padding: 2.5px; }
-/* 文件夹不做实心块：整列文件夹都成色块会把文件淹掉 */
-.file-icon.is-block.is-folder {
-  background: transparent;
-  box-shadow: none;
-}
-.file-icon.is-block.is-folder .file-icon-glyph {
-  padding: 1px;
-  color: var(--file-icon-color);
-  filter: drop-shadow(0 0 0.4px color-mix(in srgb, var(--file-icon-color) 60%, transparent));
-}
 
 .file-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-dirty { flex: none; color: var(--accent); font-size: 9px; line-height: 1; }

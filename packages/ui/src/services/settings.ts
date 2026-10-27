@@ -107,8 +107,6 @@ export interface AppSettings {
   reduceMotion: boolean;
   /** .md 文件的默认视图：预览（点哪块编辑哪块）/ 源码 */
   markdownView: "source" | "preview";
-  /** 文件树 / 标签页的类型图标主题 */
-  fileIconTheme: "material" | "mono" | "block";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -147,17 +145,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reduceMotion: false,
   // 默认预览：和 Typora 一样，点哪一块就地改哪一块
   markdownView: "preview",
-  // 默认 Material：和 VS Code 的 Material Icon Theme 同一套形状与配色
-  fileIconTheme: "material",
-}
-
-/** 文件图标主题：兼容早期存下来的名字 */
-function normalizeFileIconTheme(value: unknown): AppSettings["fileIconTheme"] {
-  if (value === "material" || value === "mono" || value === "block") return value;
-  // 早期版本存过 solid/outline/tint（自绘骨架）与 seti（Seti UI 版）
-  if (value === "solid" || value === "seti") return "material";
-  if (value === "outline" || value === "mono" || value === "tint") return "mono";
-  return DEFAULT_SETTINGS.fileIconTheme;
 }
 
 function loadSavedSettings(): AppSettings {
@@ -215,8 +202,6 @@ function loadSavedSettings(): AppSettings {
       reduceMotion: parsed.reduceMotion === true,
       // 试过一版「分栏」写法（split），升级后统一回到预览
       markdownView: parsed.markdownView === "source" ? "source" : "preview",
-      // 早期版本存的是 solid/outline/tint（同一套骨架的前三个名字），一并迁移过来
-      fileIconTheme: normalizeFileIconTheme(parsed.fileIconTheme),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

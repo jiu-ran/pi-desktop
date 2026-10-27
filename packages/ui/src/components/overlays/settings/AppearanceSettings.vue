@@ -10,8 +10,6 @@ import {
   type EmphasisMode,
 } from "../../../shared/appearance.ts";
 import { appSettings, DEFAULT_SETTINGS } from "../../../services/settings.ts";
-import { FILE_ICON_SAMPLES, FILE_ICON_THEMES } from "../../../shared/file-icons.ts";
-import FileIcon from "../../shared/FileIcon.vue";
 import { icons } from "../../../shared/util.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 
@@ -29,18 +27,6 @@ const themeModeHint = computed(() => {
   const actual = state.theme === "light" ? "浅色" : "深色";
   return mode.id === "system" ? `${mode.hint} · 当前 ${actual}` : mode.hint;
 });
-const fileIconLabel = computed(
-  () => (FILE_ICON_THEMES.find((item) => item.id === appSettings.fileIconTheme) ?? FILE_ICON_THEMES[0]).label,
-);
-/**
- * 预览只显示文件名（路径太长会把预览挤掉）。
- * 额外给两枚「文件夹」样本：文件夹按名字换形状/配色（src 蓝、node_modules 红、.git 换图形）。
- */
-const fileIconPreview = [
-  { path: "src", name: "src/", folder: true },
-  { path: "node_modules", name: "node_modules/", folder: true },
-  ...FILE_ICON_SAMPLES.map((path) => ({ path, name: path.split("/").pop() ?? path, folder: false })),
-];
 const accentCustom = computed(() => normalizeHex(appSettings.accentCustom, ACCENTS[0].color));
 const accentColor = computed(() =>
   appSettings.accent === "custom"
@@ -331,33 +317,6 @@ class="settings-segment"
       </div>
       <input v-model="appSettings.activityMerge" type="checkbox" class="settings-switch" />
     </label>
-
-    <div class="settings-row">
-      <div class="settings-row-info">
-        <strong>文件图标</strong>
-        <span>文件树与打开中的标签页怎么画图标 · 当前 {{ fileIconLabel }}</span>
-      </div>
-      <div class="settings-segments">
-        <button
-v-for="item in FILE_ICON_THEMES"
-:key="item.id"
-type="button"
-class="settings-segment"
-:class="{ active: appSettings.fileIconTheme === item.id }"
-:title="item.hint"
-@click="appSettings.fileIconTheme = item.id"
-        >{{ item.label }}</button>
-      </div>
-    </div>
-
-    <div class="settings-row settings-row-preview">
-      <div class="settings-fileicon-preview">
-        <span v-for="item in fileIconPreview" :key="item.path" class="settings-fileicon-sample" :title="item.path">
-          <FileIcon :name="item.path" :size="16" :is-folder="item.folder" />
-          <small>{{ item.name }}</small>
-        </span>
-      </div>
-    </div>
 
     <div class="settings-row">
       <div class="settings-row-info">

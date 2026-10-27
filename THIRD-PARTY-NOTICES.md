@@ -25,15 +25,10 @@
   `packages/ui/src/plugins/markdown/live-preview-rules.ts` 中基于语法树自行实现。
 - 以上依赖均为未修改的 npm 包，随应用分发时保留其 LICENSE 与版权声明。
 
-## 文件类型图标
+## 文件图标
 
-- **Material Icon Theme**：<https://github.com/PKief/vscode-material-icon-theme>
-- 版权：Copyright (c) 2018 Material Extensions
-- 许可：MIT（全文见 <https://github.com/PKief/vscode-material-icon-theme/blob/main/LICENSE>）
-- 使用范围：`packages/ui/src/shared/material-file-icons.ts`，由 `scripts/build-material-file-icons.mjs`
-  从上游 commit `045291f` 的「扩展名 / 文件名 / 文件夹名 → 图标」表里挑出本项目用到的键，
-  并内联对应的 162 个 SVG：保留图形与原始配色，另存一份把颜色换成 `currentColor` 的版本
-  供「单色 / 填充」主题使用；图形本身未改动。
+- 文件与文件夹图标只有两枚通用图形（文件夹 / 文件），由本仓库自行绘制，不包含第三方图标集。
+  早先版本内嵌过 Material Icon Theme 与 Seti UI，停止使用后已连同生成脚本一起删除。
 
 ## ThinkRail
 
