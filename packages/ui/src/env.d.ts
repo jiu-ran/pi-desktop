@@ -349,13 +349,6 @@ export interface PiUpdateResult {
   log: string;
 }
 
-export interface PiUpdateRecord {
-  from: string;
-  to: string;
-  at: number;
-  log: string;
-}
-
 export type TerminalTaskStatus = "running" | "stopping" | "exited" | "failed" | "stopped";
 
 export interface TerminalTaskInfo {

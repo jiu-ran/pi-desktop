@@ -11,8 +11,6 @@
 
 import { open, readFile, stat } from "node:fs/promises";
 
-export type HistoryRole = "user" | "assistant" | "toolResult";
-
 const HISTORY_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "toolResult"]);
 
 export interface HistoryPage {

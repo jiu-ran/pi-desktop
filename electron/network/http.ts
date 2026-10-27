@@ -114,5 +114,3 @@ export async function downloadFileStream(url: string, filePath: string, options:
   }
   throw lastError || new Error("下载失败");
 }
-
-export const downloadFile = downloadFileStream;

@@ -239,21 +239,3 @@ export function buildMermaidInitConfig(isDark: boolean): MermaidInitConfig {
     securityLevel: "strict",
   };
 }
-
-export function buildMermaidInitDirective(isDark: boolean): string {
-  return `%%{init: ${JSON.stringify(buildMermaidInitConfig(isDark))}}%%`;
-}
-
-const FENCE = /```mermaid[^\S\n]*\n([\s\S]*?)(?:```|$)/g;
-
-/**
- * 给每个 ```mermaid 围栏首行注入主题指令。已有 `%%{` 开头的围栏不动
- * （库同样会跳过，用户显式配置优先）。
- */
-export function injectMermaidTheme(content: string, isDark: boolean): string {
-  const directive = buildMermaidInitDirective(isDark);
-  return content.replace(FENCE, (whole, code: string) => {
-    if (String(code).trimStart().startsWith("%%{")) return whole;
-    return whole.replace(/```mermaid[^\S\n]*\n/, (head: string) => `${head}${directive}\n`);
-  });
-}

@@ -140,9 +140,3 @@ export async function readSessionName(file: string, size: number, legacyName?: u
   }
   return name;
 }
-
-/** 会话文件被删除 / 重写时清掉缓存（测试也用它隔离用例）。 */
-export function forgetSessionName(file?: string): void {
-  if (file) cache.delete(file);
-  else cache.clear();
-}

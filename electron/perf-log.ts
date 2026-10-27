@@ -17,10 +17,6 @@ export function logPerfLine(line: string): void {
  */
 let currentActivity = "";
 
-export function setActivity(label: string): void {
-  currentActivity = label;
-}
-
 export function activity(): string {
   return currentActivity;
 }
