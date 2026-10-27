@@ -664,11 +664,20 @@
 .step-badge { flex: none; padding: 0 6px; border-radius: 4px; background: var(--bg-2); color: var(--fg-2); font-size: 11px; line-height: 18px; }
 .step-meta { flex: none; color: var(--fg-3); font: 11.5px var(--mono); }
 .step-error { flex: none; color: var(--err); font-size: 12px; }
-.stat-add { flex: none; color: var(--add-fg); font: 12px var(--mono); }
-.stat-del { flex: none; color: var(--del-fg); font: 12px var(--mono); }
-/* 时间线行：改动行数紧跟在动作名后面，和它描述的那次改动挨着 */
+.stat-add { flex: none; color: var(--add-fg); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.stat-del { flex: none; color: var(--del-fg); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+/* 时间线行：改动行数与耗时统一停在行尾成一条右轨，逐行对得齐 */
 .turn-step-head :is(.stat-add, .stat-del) { font-size: 11.5px; }
-.turn-step-head .turn-step-target + :is(.stat-add, .stat-del) { margin-left: 6px; }
+.turn-step-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+/* 定宽 + 右对齐：一行是 +3，另一行是 +192，数字的个位也要对齐 */
+.turn-step-meta :is(.stat-add, .stat-del) { min-width: 32px; text-align: right; }
+.turn-step-head .turn-step-time { min-width: 40px; text-align: right; }
 
 .thinking-preview { font-family: var(--font); font-style: italic; }
 .thinking-body {
@@ -845,6 +854,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 组头的增删行数：和右侧耗时同一处，下面每一行也这么读 */
+.activity-stat {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.activity-head :is(.stat-add, .stat-del) { font-size: 11px; }
 .activity-group.errored .activity-head { color: var(--err); }
 .activity-group.errored .activity-title { color: var(--err); }
 .activity-error {
@@ -1522,16 +1539,31 @@
 }
 .queue-card {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 5px 8px 6px 4px;
   border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line-2));
   border-radius: 9px;
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
   color: var(--fg-2);
   font-size: 12.5px;
   line-height: 1.55;
+}
+/* 控制条（待发送 / 投递方式 / 编辑撤回）在上，正文在下占满整行 */
+.queue-card-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.queue-card-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  min-width: 0;
 }
 .queue-card:hover {
   border-style: solid;
@@ -1542,7 +1574,6 @@
   align-items: center;
   gap: 4px;
   flex: none;
-  padding-top: 1px;
   color: var(--accent);
   font-size: 10.5px;
   font-weight: 600;
@@ -1556,8 +1587,8 @@
   display: flex;
   flex: none;
   gap: 2px;
-  align-self: center;
   align-items: center;
+  margin-left: auto;
 }
 .queue-card-edit,
 .queue-card-withdraw {
@@ -1579,16 +1610,17 @@
   color: var(--del-fg);
 }
 .queue-card-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
-/* 投递方式：小号下拉（引导 / 排队），带说明，比原来「点一下翻面」的标签清楚 */
-.queue-card-mode {
+/* 投递方式：小号下拉（引导 / 排队），带说明，比原来「点一下翻面」的标签清楚。
+   注意特异性：`.select-menu.is-sm .select-menu-trigger` 是 0,3,0，这里必须压过它才有 18px 高。 */
+.queue-card .queue-card-mode.is-sm {
   flex: none;
   align-self: center;
 }
-.queue-card-mode .select-menu-trigger {
+.queue-card .queue-card-mode.is-sm .select-menu-trigger {
   min-width: 0;
-  height: 20px;
+  height: 18px;
   padding: 0 5px 0 7px;
-  gap: 4px;
+  gap: 3px;
   border: 0;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -1597,21 +1629,21 @@
   font-weight: 600;
   line-height: 16px;
 }
-.queue-card.steer .queue-card-mode .select-menu-trigger {
+.queue-card.steer .queue-card-mode.is-sm .select-menu-trigger {
   background: color-mix(in srgb, var(--warn, var(--accent)) 16%, transparent);
   color: var(--warn, var(--accent));
 }
-.queue-card-mode .select-menu-trigger:hover:not(:disabled) {
+.queue-card .queue-card-mode.is-sm .select-menu-trigger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 26%, transparent);
   border-color: transparent;
 }
-.queue-card-mode .select-menu-trigger:focus-visible,
-.queue-card-mode.open .select-menu-trigger {
+.queue-card .queue-card-mode.is-sm .select-menu-trigger:focus-visible,
+.queue-card .queue-card-mode.is-sm.open .select-menu-trigger {
   border-color: transparent;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }
-.queue-card-mode .select-menu-caret svg { width: 10px; height: 10px; }
-.queue-card-mode .select-menu-caret { opacity: 0.8; }
+.queue-card .queue-card-mode.is-sm .select-menu-caret svg { width: 9px; height: 9px; }
+.queue-card .queue-card-mode.is-sm .select-menu-caret { opacity: 0.75; }
 
 /* 分组说明：引导 / 排队各自的第一条前面出现一次 */
 .queue-group-note {
@@ -1636,14 +1668,14 @@
   display: grid;
   flex: none;
   place-items: center;
-  align-self: center;
+  align-self: stretch;
   width: 12px;
   color: var(--fg-3);
-  opacity: 0.6;
+  opacity: 0.5;
   transition: opacity 0.12s, color 0.12s;
 }
 .queue-card-grip svg { display: block; width: 12px; height: 12px; transform: rotate(90deg); }
-.queue-card:hover .queue-card-grip { opacity: 0.95; color: var(--fg-2); }
+.queue-card:hover .queue-card-grip { opacity: 0.9; color: var(--fg-2); }
 .queue-card.can-drag .queue-card-grip { cursor: grab; }
 .queue-card.can-drag { cursor: grab; }
 .queue-card.dragging {
@@ -1654,15 +1686,15 @@
 .queue-card.drop-after { box-shadow: 0 2px 0 0 var(--accent), 0 5px 12px -6px var(--accent); }
 .queue-card.dragging * { pointer-events: none; }
 .queue-card-text {
-  min-width: 0;
-  flex: 1;
   display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   color: var(--fg-2);
   font: inherit;
   text-align: left;
@@ -2247,5 +2279,3 @@
 .cursor-diagram-fullscreen .cursor-diagram-view.dragging { cursor: grabbing; user-select: none; }
 .cursor-diagram-error { display: flex; flex-direction: column; gap: 8px; padding: 14px; color: var(--err); }
 .cursor-diagram-error pre { color: var(--fg-2); white-space: pre-wrap; }
-/* 有增删行数时，路径不再撑满整行：让「+N −N」紧跟在文件名后面 */
-.turn-step-head:has(:is(.stat-add, .stat-del)) .turn-step-target { flex: 0 1 auto; }

@@ -1134,51 +1134,56 @@ const argHint = computed(() => {
             @dragend="onQueueDragEnd"
           >
           <span class="queue-card-grip" title="拖动调整发送顺序" aria-hidden="true" v-html="icons.more" />
-          <span class="queue-card-badge">
-            <span class="queue-dot" />
-            待发送
-          </span>
-          <SelectMenu
-            class="queue-card-mode"
-            size="sm"
-            :model-value="item.mode"
-            :disabled="queueBusy"
-            align="left"
-            aria-label="这条消息怎么发出去"
-            title="引导 = 立刻插入当前回合；排队 = 等本轮结束再发"
-            :options="[
-              { value: 'steer', label: '引导', hint: '立刻插入' },
-              { value: 'followUp', label: '排队', hint: '本轮结束' },
-            ]"
-            @change="(mode) => switchQueuedMode(item, mode as 'steer' | 'followUp')"
-          />
-          <button
-            type="button"
-            class="queue-card-text"
-            :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
-            @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
-          >
-            {{ queuePreview(item.text, 160) }}
-          </button>
-          <span class="queue-card-actions">
+          <div class="queue-card-main">
+            <!-- 控制条在上、正文在下：正文永远占满整行，不被下拉按钮挤成窄条 -->
+            <div class="queue-card-bar">
+              <span class="queue-card-badge">
+                <span class="queue-dot" />
+                待发送
+              </span>
+              <SelectMenu
+                class="queue-card-mode"
+                size="sm"
+                :model-value="item.mode"
+                :disabled="queueBusy"
+                align="left"
+                aria-label="这条消息怎么发出去"
+                title="引导 = 立刻插入当前回合；排队 = 等本轮结束再发"
+                :options="[
+                  { value: 'steer', label: '引导', hint: '立刻插入' },
+                  { value: 'followUp', label: '排队', hint: '本轮结束' },
+                ]"
+                @change="(mode) => switchQueuedMode(item, mode as 'steer' | 'followUp')"
+              />
+              <span class="queue-card-actions">
+                <button
+                  type="button"
+                  class="queue-card-edit"
+                  aria-label="编辑这条消息"
+                  @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  class="queue-card-withdraw"
+                  :disabled="queueBusy"
+                  :aria-label="`撤回这条消息：${queuePreview(item.text, 40)}`"
+                  @click="withdrawQueued(item)"
+                >
+                  撤回
+                </button>
+              </span>
+            </div>
             <button
               type="button"
-              class="queue-card-edit"
-              aria-label="编辑这条消息"
+              class="queue-card-text"
+              :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
               @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
             >
-              编辑
+              {{ queuePreview(item.text, 160) }}
             </button>
-            <button
-              type="button"
-              class="queue-card-withdraw"
-              :disabled="queueBusy"
-              :aria-label="`撤回这条消息：${queuePreview(item.text, 40)}`"
-              @click="withdrawQueued(item)"
-            >
-              撤回
-            </button>
-          </span>
+          </div>
           </div>
         </template>
       </div>

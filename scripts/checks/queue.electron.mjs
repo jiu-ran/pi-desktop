@@ -46,6 +46,19 @@ export async function checkQueueInElectron(win) {
         tag: n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim() ?? '',
         text: n.querySelector('.queue-card-text')?.textContent.trim() ?? '',
         title: n.getAttribute('title') ?? '',
+        // 正文独占一行：投递方式的下拉曾经把正文挤成窄条，两/三行才局促地折回来
+        textLeft: Math.round(n.querySelector('.queue-card-text')?.getBoundingClientRect().left ?? 0),
+        badgeLeft: Math.round(n.querySelector('.queue-card-badge')?.getBoundingClientRect().left ?? 0),
+        pillBox: (() => {
+          const r = n.querySelector('.queue-card-mode .select-menu-trigger')?.getBoundingClientRect();
+          return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
+        })(),
+        // 正文应该在下拉下方（同一行放不下时才会掉行，现在是结构上就分两行）
+        textBelowPill: (() => {
+          const text = n.querySelector('.queue-card-text')?.getBoundingClientRect();
+          const pill = n.querySelector('.queue-card-mode')?.getBoundingClientRect();
+          return Boolean(text && pill && text.top >= pill.bottom);
+        })(),
       })),
       label: document.querySelector('.queue-label')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
       recall: Boolean(document.querySelector('.queue-recall')),
@@ -65,6 +78,18 @@ export async function checkQueueInElectron(win) {
     `队列里那条没有气泡的消息应显示在卡片上：${view.cards.map((c) => c.text).join(" | ")}`,
   );
   assert.ok(view.recall, "待发送区要有撤回按钮");
+  // 卡片排版：控制条（待发送 + 投递方式 + 编辑/撤回）在上，正文在下并占满整行
+  for (const card of view.cards) {
+    assert.ok(card.pillBox, "每条卡片都要有一个投递方式下拉");
+    // `.select-menu.is-sm .select-menu-trigger` 是 0,3,0：拿不到 18px 高说明特异性又被打回去了
+    assert.ok(card.pillBox.h <= 20, `投递方式应该是小号胶囊，实测 ${card.pillBox.h}px 高`);
+    assert.ok(card.pillBox.w <= 64, `投递方式不该撑成大按钮，实测 ${card.pillBox.w}px 宽`);
+    assert.equal(card.textBelowPill, true, "正文要在控制条下面，不能再被下拉挤在同一行里");
+    assert.ok(
+      Math.abs(card.textLeft - card.badgeLeft) <= 6,
+      `正文与「待发送」要左对齐（正文 ${card.textLeft} vs 标记 ${card.badgeLeft}）`,
+    );
+  }
   assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
   assert.match(view.label, /2 条待发送/, `标题应显示条数，实际「${view.label}」`);
 

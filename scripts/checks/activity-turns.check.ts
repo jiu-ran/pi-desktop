@@ -7,8 +7,10 @@ import {
   isTurnStep,
   stepLabel,
   stepTarget,
+  stepsElapsedMs,
   summarizeTurn,
   turnDurationLabel,
+  turnStat,
   TURN_MIN_STEPS,
   type TurnGroup,
 } from "../../packages/ui/src/shared/activity-turns.ts";
@@ -252,4 +254,26 @@ const detail = summarizeTurn(
 assert.match(detail, /^运行 cmd-0/, `提示从第一步开始：${detail}`);
 assert.match(detail, /\+2$/, `超过 8 步要补计数：${detail}`);
 
-console.log("activity-turns OK 回合分组 / 时间线顺序 / 单步摘要 / 单步耗时 / 失败与运行中");
+// 组头的总账：逐行报 +N / −N，组头要把它们加起来（没有改动就什么都不报）
+const withEdits = summarizeTurn([
+  { block: { ...bash("st1"), ts: 1_000 }, index: 0 },
+  { block: { ...tool("st2", "edit", { path: "src/a.ts", edits: [{ oldText: "a", newText: "b\nc" }] }), ts: 2_000 }, index: 1 },
+  { block: { ...tool("st3", "write", { path: "src/b.ts", content: "x\ny\nz" }), ts: 3_000 }, index: 2 },
+  { block: { ...read("st4"), ts: 4_000 }, index: 3 },
+]);
+const stat = turnStat(withEdits);
+assert.equal(stat.added, 5, `组头的新增行数应是各步之和（2 + 3），实际 ${stat.added}`);
+assert.equal(stat.removed, 1, `组头的删除行数应是各步之和（write 不算删除），实际 ${stat.removed}`);
+// 没有改动的回合：不显示 0，而是干脆不显示
+const noEdits = turnStat(summarizeTurn([{ block: { ...bash("st5"), ts: 1_000 }, index: 0 }]));
+assert.equal(noEdits.added, null, `纯命令回合不该报 +0，实际 ${noEdits.added}`);
+assert.equal(noEdits.removed, null, `纯命令回合不该报 −0，实际 ${noEdits.removed}`);
+// 合并行右侧的耗时：各步之和，拿不到时间的（0 / -1）跳过
+assert.equal(stepsElapsedMs([]), 0, "没有步骤时为 0");
+assert.equal(
+  stepsElapsedMs([{ elapsedMs: 1_500 }, { elapsedMs: 0 }, { elapsedMs: -1 }, { elapsedMs: 250 }]),
+  1_750,
+  "合并行耗时是各步之和，0 / -1 跳过",
+);
+
+console.log("activity-turns OK 回合分组 / 时间线顺序 / 单步摘要 / 单步耗时 / 失败与运行中 / 组头增删合计");

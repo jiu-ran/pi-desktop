@@ -10,7 +10,7 @@ import { buildCopyTexts } from "../../shared/copy-text.ts";
 import { planQueueView } from "../../shared/queue-view.ts";
 import { FOLLOW_THRESHOLD_PX, isAtBottom, isSelfScroll, shouldRunFollowFrame, wantsToPauseFollow } from "../../shared/autoscroll.ts";
 import { activeOutlineIndex } from "../../shared/outline.ts";
-import { deriveTurnItems, turnDurationLabel, type TurnGroup } from "../../shared/activity-turns.ts";
+import { deriveTurnItems, formatStepDuration, stepsElapsedMs, turnDurationLabel, turnStat, type TurnGroup } from "../../shared/activity-turns.ts";
 import { buildTimelineRows, type TimelineRow } from "../../shared/timeline-rows.ts";
 import { appSettings } from "../../services/settings.ts";
 import { searchableText } from "../../shared/search-text.ts";
@@ -626,6 +626,11 @@ function timelineRows(steps: TimelineStep[]): TimelineRow<TimelineStep>[] {
   return buildTimelineRows(steps, { merge: timelineMerge.value });
 }
 
+/** 合并行右侧的耗时：合并了几步就是几步之和 */
+function runElapsedLabel(row: { steps: { elapsedMs: number }[] }): string {
+  return formatStepDuration(stepsElapsedMs(row.steps));
+}
+
 function rowKey(row: { kind: "step" | "run"; step?: { block: { id: string } }; steps?: Array<{ block: { id: string } }> }): string {
   return row.kind === "run" ? `run:${row.steps![0]!.block.id}` : `step:${row.step!.block.id}`;
 }
@@ -814,6 +819,8 @@ watch(searchMatches, () => {
                 :group="item.group"
                 label="执行"
                 :duration="turnDurationLabel(item.group)"
+                :added="turnStat(item.group).added"
+                :removed="turnStat(item.group).removed"
                 :expanded="activityOpen(item.group)"
                 :search-hit="groupHasSearchHit(item.group)"
                 :class="{
@@ -843,10 +850,13 @@ watch(searchMatches, () => {
                         <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
                         <span class="turn-step-count">×{{ row.steps.length }}</span>
                         <span class="turn-step-target">{{ row.target }}</span>
-                        <span v-if="row.added != null" class="stat-add">+{{ row.added }}</span>
-                        <span v-if="row.removed != null" class="stat-del">−{{ row.removed }}</span>
-                        <span v-if="row.failed" class="turn-step-failed">失败</span>
-                        <span v-else-if="row.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                        <span class="turn-step-meta">
+                          <span v-if="row.added != null" class="stat-add">+{{ row.added }}</span>
+                          <span v-if="row.removed != null" class="stat-del">−{{ row.removed }}</span>
+                          <span v-if="row.failed" class="turn-step-failed">失败</span>
+                          <span v-else-if="row.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                          <span v-if="runElapsedLabel(row)" class="turn-step-time">{{ runElapsedLabel(row) }}</span>
+                        </span>
                       </button>
                       <div v-if="runOpen(item.group, row)" class="turn-step-body turn-run-body">
                         <ol class="turn-run-list">
@@ -904,11 +914,13 @@ watch(searchMatches, () => {
                           </template>
                           <template v-else>{{ row.step.target }}</template>
                         </span>
-                        <span v-if="row.step.added != null" class="stat-add">+{{ row.step.added }}</span>
-                        <span v-if="row.step.removed != null" class="stat-del">−{{ row.step.removed }}</span>
-                        <span v-if="row.step.failed" class="turn-step-failed">失败</span>
-                        <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
-                        <span v-if="row.step.elapsedLabel" class="turn-step-time">{{ row.step.elapsedLabel }}</span>
+                        <span class="turn-step-meta">
+                          <span v-if="row.step.added != null" class="stat-add">+{{ row.step.added }}</span>
+                          <span v-if="row.step.removed != null" class="stat-del">−{{ row.step.removed }}</span>
+                          <span v-if="row.step.failed" class="turn-step-failed">失败</span>
+                          <span v-else-if="row.step.live" class="mini-spinner turn-step-live" aria-hidden="true" />
+                          <span v-if="row.step.elapsedLabel" class="turn-step-time">{{ row.step.elapsedLabel }}</span>
+                        </span>
                       </button>
                       <div v-if="stepOpen(item.group, row.step.block.id)" class="turn-step-body">
                         <div :class="{ 'search-hit': searchMatches[searchIndex]?.id === row.step.block.id }">

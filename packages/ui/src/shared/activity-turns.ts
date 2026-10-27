@@ -144,6 +144,27 @@ export function turnDurationLabel(group: Pick<TurnGroup, "durationMs">): string 
   return formatStepDuration(group.durationMs);
 }
 
+/**
+ * 这一组步骤累计的增删行数：组头要能在「执行了 N 步」后面报一个总账。
+ * 没有可统计的改动时为 null（不显示），不把「0」当成「改了 0 行」报出来。
+ */
+export function turnStat(group: Pick<TurnGroup, "steps">): { added: number | null; removed: number | null } {
+  let added: number | null = null;
+  let removed: number | null = null;
+  for (const step of group.steps) {
+    if (typeof step.added === "number") added = (added ?? 0) + step.added;
+    if (typeof step.removed === "number") removed = (removed ?? 0) + step.removed;
+  }
+  return { added, removed };
+}
+
+/** 合并行的总耗时：各步自己记录的耗时之和（拿不到时间的步骤跳过） */
+export function stepsElapsedMs(steps: readonly { elapsedMs: number }[]): number {
+  let total = 0;
+  for (const step of steps) if (step.elapsedMs > 0) total += step.elapsedMs;
+  return total;
+}
+
 /** 改动步骤的增删行数；非改动工具或没有差异时返回 null（写入只报新增） */
 export function editStat<T extends ActivityBlockLike>(block: T): { added: number; removed: number | null } | null {
   if (!EDIT_TOOLS.has(block.name ?? "")) return null;

@@ -82,6 +82,13 @@ export async function checkActivityInElectron(win) {
         groups: el.querySelectorAll(".activity-group").length,
         title: el.querySelector(".activity-title")?.textContent ?? "",
         summary: head?.querySelector(".activity-summary")?.textContent ?? "",
+        stats: (head?.querySelector(".activity-stat")?.textContent ?? "").replace(/\\s+/g, " ").trim(),
+        statsAtEnd: (() => {
+          const stat = head?.querySelector(".activity-stat");
+          const summary = head?.querySelector(".activity-summary");
+          if (!stat || !summary) return null;
+          return Boolean(summary.compareDocumentPosition(stat) & Node.DOCUMENT_POSITION_FOLLOWING);
+        })(),
         timeline: el.querySelectorAll(".turn-timeline").length,
         steps: el.querySelectorAll(".turn-step").length,
         toolCards: el.querySelectorAll(".tool-card").length,
@@ -95,6 +102,9 @@ export async function checkActivityInElectron(win) {
     assert.match(top.summary, /18 条命令/, `组头要写命令数：${top.summary}`);
     assert.match(top.summary, /读 3 个文件/, `组头要写读取数：${top.summary}`);
     assert.match(top.summary, /改 1 个文件/, `组头要写改动数：${top.summary}`);
+    // 组头要有整组的总账：下面逐行报 +N / −N，上面得有一个合计（不然只看到零散几行）
+    assert.equal(top.stats, "+2−1", `组头要显示整组的增删行数总计（视觉上靠 gap 分开，textContent 里没空格），实际「${top.stats}」`);
+    assert.equal(top.statsAtEnd, true, "组头的增删合计要排在说明文字后面（和右侧耗时同一处）");
     assert.equal(top.caret, "false", "默认收起");
     assert.equal(top.timeline, 0, "收起时不挂载时间线");
     assert.equal(top.steps, 0, "收起时不挂载步骤");
@@ -133,6 +143,17 @@ export async function checkActivityInElectron(win) {
           count: node.querySelector(".turn-step-count")?.textContent ?? "",
           index: node.querySelector(".turn-step-index")?.textContent ?? "",
           steps: Number(node.dataset.run ?? "0"),
+          metaLast: (() => {
+            const head = node.querySelector(".turn-step-head");
+            const meta = node.querySelector(".turn-step-meta");
+            return Boolean(head && meta && head.lastElementChild === meta);
+          })(),
+          metaRightGap: (() => {
+            const head = node.querySelector(".turn-step-head");
+            const meta = node.querySelector(".turn-step-meta");
+            if (!head || !meta) return null;
+            return Math.round(head.getBoundingClientRect().right - meta.getBoundingClientRect().right);
+          })(),
         })),
         singles: rows.filter((node) => !node.classList.contains("turn-step-run")).map((node) => ({
           label: node.querySelector(".turn-step-label")?.textContent ?? "",
@@ -145,6 +166,18 @@ export async function checkActivityInElectron(win) {
             const target = node.querySelector(".turn-step-target");
             if (!add || !target) return null;
             return Boolean(target.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING);
+          })(),
+          // 增删与耗时统一停在行尾：meta 必须是最后一个子节点，且右边缘贴着行尾
+          metaLast: (() => {
+            const head = node.querySelector(".turn-step-head");
+            const meta = node.querySelector(".turn-step-meta");
+            return Boolean(head && meta && head.lastElementChild === meta);
+          })(),
+          metaRightGap: (() => {
+            const head = node.querySelector(".turn-step-head");
+            const meta = node.querySelector(".turn-step-meta");
+            if (!head || !meta) return null;
+            return Math.round(head.getBoundingClientRect().right - meta.getBoundingClientRect().right);
           })(),
         })),
         rails: el.querySelectorAll(".turn-step-rail").length,
@@ -164,6 +197,14 @@ export async function checkActivityInElectron(win) {
     assert.equal(timeline.singles[0].added, "+2", `改动行要显示新增行数，实际「${timeline.singles[0].added}」`);
     assert.equal(timeline.singles[0].removed, "−1", `改动行要显示删除行数，实际「${timeline.singles[0].removed}」`);
     assert.equal(timeline.singles[0].statsAfterTarget, true, "增删要放在路径后面，不要挤在动作名与路径之间");
+    // 用户抱怨的原话：「行数加减以及耗时都放到最后方和其他行统一格式」
+    // 以前 `.turn-step-head:has(:is(.stat-add, .stat-del)) .turn-step-target { flex: 0 1 auto }`
+    // 把路径的 flex 收回成 auto，+N −N 就紧贴着文件名停在中途。
+    for (const row of [...timeline.runs, ...timeline.singles]) {
+      assert.equal(row.metaLast, true, `${row.label} 行的增删/耗时必须是行内最后一个元素`);
+      assert.ok(row.metaRightGap >= 0 && row.metaRightGap <= 8, `${row.label} 行的增删/耗时没贴到行尾（差 ${row.metaRightGap}px）`);
+    }
+    // 同一列：改动行的「+N」「−N」与命令行的耗时都落在同一条右轨上
     assert.equal(timeline.runs[0].added, "", "命令合并行没有增删");
     // 只是有序列表：不画圆点、不画竖线（用户要求去掉时间线的额外标识）
     const markers = JSON.parse(await evaluate(`(() => {
