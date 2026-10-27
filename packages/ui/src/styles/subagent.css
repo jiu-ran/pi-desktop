@@ -289,7 +289,6 @@
 }
 .subagent-card-error-agent { flex: none; opacity: 0.75; }
 .subagent-card-error-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.subagent-fallback-head { padding: 4px 2px; }
 .subagent-card-main:disabled { cursor: default; }
 .subagent-card-main:disabled:hover { border-color: var(--line); background: var(--bg-1); }
 .subagent-card-raw {

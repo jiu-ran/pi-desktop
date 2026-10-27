@@ -648,7 +648,7 @@
 }
 
 /* ---------- 基础控件 ---------- */
-.settings-select,
+
 .settings-input,
 .settings-textarea {
   min-width: 120px;
@@ -663,25 +663,22 @@
   font: 12.5px var(--font);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
-.settings-select:hover,
+
 .settings-input:hover,
 .settings-textarea:hover {
   border-color: color-mix(in srgb, var(--fg-3) 70%, var(--line-2));
 }
-.settings-select:focus,
+
 .settings-input:focus,
 .settings-textarea:focus {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.settings-select:disabled,
+
 .settings-input:disabled,
 .settings-textarea:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-.settings-select {
-  padding-right: 4px;
 }
 .settings-textarea {
   height: auto;
@@ -936,7 +933,7 @@
   color: var(--fg-3);
   font-size: 11px;
 }
-.settings-field :is(.settings-input, .settings-select, .settings-textarea) {
+.settings-field :is(.settings-input, .settings-textarea) {
   width: 100%;
   max-width: none;
   min-width: 0;
