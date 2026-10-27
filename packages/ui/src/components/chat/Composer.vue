@@ -5,7 +5,7 @@ import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
-import { planQueueMove, planQueueView, queueDraftText, queuePreview, splitPromptBlocks, type PromptBlock } from "../../shared/queue-view.ts";
+import { planQueueCard, planQueueMove, planQueueView, queueDraftText, queuePreview, splitPromptBlocks, type PromptBlock } from "../../shared/queue-view.ts";
 import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
@@ -55,6 +55,8 @@ const queuePlan = computed(() =>
   planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? { steering: [], followUp: [] }),
 );
 const queuePending = computed(() => queuePlan.value.entries);
+/** 每张待发送卡片的展示内容（正文 + 附件小标签），与 queuePending 一一对应 */
+const queueCards = computed(() => queuePending.value.map((item) => planQueueCard(item.text, 160)));
 const queueBusy = ref(false);
 
 /** 排队消息编辑：预填「用户写的话」，附件单独列成标签，支持 Ctrl+V 粘贴图片。 */
@@ -1175,13 +1177,29 @@ const argHint = computed(() => {
                 </button>
               </span>
             </div>
+            <!-- 附件用和编辑区一样的小标签；正文只留用户写的话 -->
+            <div v-if="queueCards[i]?.attachments.length" class="queue-card-attachments">
+              <span
+                v-for="att in queueCards[i].attachments"
+                :key="att.path"
+                class="queue-attach-chip"
+                :title="att.path"
+              >
+                <span
+                  class="queue-attach-icon"
+                  v-html="att.kind === 'session' ? icons.message : att.kind === 'directory' ? icons.folder : icons.file"
+                />
+                <span class="queue-attach-name">{{ att.name }}</span>
+              </span>
+            </div>
             <button
+              v-if="queueCards[i]?.text"
               type="button"
               class="queue-card-text"
               :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
               @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
             >
-              {{ queuePreview(item.text, 160) }}
+              {{ queueCards[i]?.text }}
             </button>
           </div>
           </div>

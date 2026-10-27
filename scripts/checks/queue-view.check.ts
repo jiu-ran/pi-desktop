@@ -9,6 +9,7 @@ import {
   queuePreview,
   stripQueueMarkers,
   planQueueMove,
+  planQueueCard,
   queueFromOrder,
   resolveQueueOrder,
   sameQueue,
@@ -92,6 +93,27 @@ assert.equal(queuePreview("多行\n\n  文本  "), "多行 文本");
 assert.equal(queuePreview(""), "（无文字内容）");
 assert.equal(queuePreview("字".repeat(200), 10), "字".repeat(10) + "…");
 assert.equal(queuePreview('<session name="C:\\s.jsonl" title="t">\n摘要\n</session>'), "[对话: C:\\s.jsonl]");
+
+// 待发送卡片：附件从小标签单独列，正文里再不能出现 `[文件: C:\…]`
+{
+  const card = planQueueCard('<file name="C:\\tmp\\note.txt">\n内容\n</file>\n顺便看下日志');
+  assert.equal(card.text, "顺便看下日志", `正文只留用户写的话，实际「${card.text}」`);
+  assert.equal(card.attachments.length, 1, `附件应该单独列成标签，实际 ${card.attachments.length}`);
+  assert.deepEqual(card.attachments[0], { kind: "file", path: "C:\\tmp\\note.txt", name: "note.txt" }, "标签要留完整路径（title）与文件名（展示）");
+  // 纯附件消息：正文为空（不显示占位），附件照常列出
+  const onlyFile = planQueueCard('<file name="C:\\a\\b.png"></file>');
+  assert.equal(onlyFile.text, "", `纯附件消息不该显示占位文字，实际「${onlyFile.text}」`);
+  assert.equal(onlyFile.attachments[0].name, "b.png");
+  // 目录 / 对话引用同样是标签，不是正文
+  const quoted = planQueueCard('<directory name="C:\\proj\\src">\n</directory>\n<session name="C:\\s.jsonl" title="t">\n摘要\n</session>\n这两个都看看');
+  assert.deepEqual(quoted.attachments.map((item) => item.kind), ["file", "directory", "session"].filter((kind) => kind !== "file"), `目录/对话也要拆成标签：${JSON.stringify(quoted.attachments)}`);
+  assert.equal(quoted.text, "这两个都看看");
+  // 没有附件时与旧的预览一致（不会把普通文字弄丢或加空行）
+  assert.equal(planQueueCard("普通的一句话").text, "普通的一句话");
+  assert.deepEqual(planQueueCard("普通的一句话").attachments, []);
+  assert.equal(planQueueCard("").text, "（无文字内容）", "真正的空消息仍给一个占位");
+  assert.equal(planQueueCard("字".repeat(200), 10).text, "字".repeat(10) + "…");
+}
 
 // 编辑框 / 撤回文本：只留用户写的话；不能带附件 XML，也不能带展示用的 [文件: …] 标签
 // （带上标签再保存就会在提示词里多出一份图片路径 —— 气泡上看到两条重复路径）

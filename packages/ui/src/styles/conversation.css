@@ -1565,6 +1565,17 @@
   min-height: 18px;
   min-width: 0;
 }
+/* 附件小标签：和编辑区同一套 chip，正文不再背一串 `[文件: C:\…]` */
+.queue-card-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 1px 0 2px;
+}
+.queue-card-attachments .queue-attach-chip {
+  padding: 1px 6px;
+  font-size: 11px;
+}
 .queue-card:hover {
   border-style: solid;
 }

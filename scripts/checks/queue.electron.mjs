@@ -49,6 +49,11 @@ export async function checkQueueInElectron(win) {
         // 正文独占一行：投递方式的下拉曾经把正文挤成窄条，两/三行才局促地折回来
         textLeft: Math.round(n.querySelector('.queue-card-text')?.getBoundingClientRect().left ?? 0),
         badgeLeft: Math.round(n.querySelector('.queue-card-badge')?.getBoundingClientRect().left ?? 0),
+        // 附件是独立小标签：正文里不能再掉一串 [文件: …]
+        chips: [...n.querySelectorAll('.queue-card-attachments .queue-attach-chip')].map((chip) => ({
+          name: chip.querySelector('.queue-attach-name')?.textContent.trim() ?? '',
+          title: chip.getAttribute('title') ?? '',
+        })),
         pillBox: (() => {
           const r = n.querySelector('.queue-card-mode .select-menu-trigger')?.getBoundingClientRect();
           return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
@@ -91,6 +96,21 @@ export async function checkQueueInElectron(win) {
     );
   }
   assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
+  // 附件换成小标签：正文只有人写的话，路径不进正文（以前是「[文件: C:\\tmp\\note.txt] 顺便看下日志」）
+  const withFile = view.cards.find((card) => card.chips.length);
+  assert.ok(withFile, `带附件的排队消息应该列出一个附件小标签：${JSON.stringify(view.cards)}`);
+  assert.deepEqual(
+    withFile.chips.map((chip) => chip.name),
+    ["note.txt"],
+    `附件标签显示文件名，实际 ${JSON.stringify(withFile.chips)}`,
+  );
+  assert.match(withFile.chips[0].title, /note\.txt$/, "标签的 title 要能看完整路径");
+  assert.equal(withFile.text, "顺便看下日志", `附件标签不能把正文弄脏，实际「${withFile.text}」`);
+  assert.equal(
+    view.cards.some((card) => card.text.includes("[文件") || card.text.includes("[目录")),
+    false,
+    `正文不该再出现 [文件: …] 这类标签：${view.cards.map((card) => card.text).join(" | ")}`,
+  );
   assert.match(view.label, /2 条待发送/, `标题应显示条数，实际「${view.label}」`);
 
   // 截图留档：人工确认排版（调试协议截图，避免拿到旧帧）

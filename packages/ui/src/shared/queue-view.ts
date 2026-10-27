@@ -10,7 +10,7 @@
  * 等它真正被 Pi 取走（队列里没有了），对话里的气泡才出现。
  */
 
-import { splitPromptMessage } from "./queue-prompt.ts";
+import { splitPromptBlocks, splitPromptMessage } from "./queue-prompt.ts";
 
 export interface QueueState {
   steering: string[];
@@ -85,6 +85,39 @@ export function queuePreview(input: string, limit = 80): string {
   const text = stripQueueMarkers(input).replace(/\s+/g, " ").trim();
   if (!text) return "（无文字内容）";
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+export interface QueueCardAttachment {
+  kind: "file" | "directory" | "session";
+  /** 未转义的绝对路径（括号里放 title，悬浮能看全） */
+  path: string;
+  /** 标签上显示的名字（只取文件名） */
+  name: string;
+}
+
+export interface QueueCardView {
+  /** 正文：只留用户写的话（附件标记已去掉），多行压成一行并截断 */
+  text: string;
+  /** 附件：卡片上用小标签列出来，不再把 `[文件: C:\…]` 掉在正文里 */
+  attachments: QueueCardAttachment[];
+}
+
+/**
+ * 待发送卡片的展示内容：正文与附件彻底分开。
+ *
+ * 队列里存的是完整提示词（前面一排 `<file>` / `<directory>` / `<session>` 块），
+ * 以前把它整個转成 `[文件: C:\tmp\note.txt] 顺便看下日志` 一行——路径比正文还长，
+ * 真正想看的文字被挤到末尾。现在块变成小标签，正文只剩人写的话。
+ */
+export function planQueueCard(prompt: string, limit = 160): QueueCardView {
+  const { blocks, message } = splitPromptBlocks(prompt);
+  const text = message.replace(/\s+/g, " ").trim();
+  const clipped = text.length <= limit ? text : `${text.slice(0, limit)}…`;
+  return {
+    attachments: blocks.map(({ kind, path, name }) => ({ kind, path, name })),
+    // 纯附件消息没有正文：不显示占位文字，只列标签
+    text: clipped || (blocks.length ? "" : "（无文字内容）"),
+  };
 }
 
 // 提示词拼装放在 queue-prompt.ts（纯函数、可单测）；这里转出去，调用方不用改 import。
