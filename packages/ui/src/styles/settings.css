@@ -132,7 +132,7 @@
   outline: none;
   background: transparent;
   color: var(--fg);
-  font: 12px var(--sans);
+  font: 12px var(--font);
 }
 .settings-search input::placeholder {
   color: var(--fg-3);
@@ -350,7 +350,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--fg-3);
-  font: 12px var(--sans);
+  font: 12px var(--font);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
@@ -523,7 +523,7 @@
   outline: none;
   background: var(--bg);
   color: var(--fg);
-  font: 12.5px var(--sans);
+  font: 12.5px var(--font);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.12s, box-shadow 0.12s;
@@ -601,7 +601,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--fg-2);
-  font: 12.5px var(--sans);
+  font: 12.5px var(--font);
   text-align: left;
   cursor: pointer;
 }
@@ -660,7 +660,7 @@
   outline: none;
   background: var(--bg);
   color: var(--fg);
-  font: 12.5px var(--sans);
+  font: 12.5px var(--font);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 .settings-select:hover,
@@ -781,7 +781,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--fg-3);
-  font: 12px var(--sans);
+  font: 12px var(--font);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }

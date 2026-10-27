@@ -1141,8 +1141,8 @@ watch(searchMatches, () => {
   align-items: center;
   justify-content: center;
   padding: 12px;
-  color: var(--text-tertiary);
+  color: var(--fg-3);
   font-size: 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line);
 }
 </style>

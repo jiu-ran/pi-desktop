@@ -1092,7 +1092,7 @@
   border-radius: 4px;
   background: var(--bg);
   color: var(--accent);
-  font: 13px/1 var(--sans);
+  font: 13px/1 var(--font);
   opacity: 0;
   cursor: pointer;
 }
@@ -1113,7 +1113,7 @@
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
   color: var(--fg);
-  font: 12px/1.5 var(--sans);
+  font: 12px/1.5 var(--font);
 }
 .diff-comment-label {
   flex: none;
@@ -1162,7 +1162,7 @@
   outline: none;
   background: var(--bg);
   color: var(--fg);
-  font: 12px/1.5 var(--sans);
+  font: 12px/1.5 var(--font);
   resize: vertical;
 }
 .diff-comment-composer textarea:focus { border-color: var(--accent); }
