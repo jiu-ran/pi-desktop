@@ -451,9 +451,18 @@ export async function checkAppearanceInElectron(win) {
     };
 
     const idle = await styleOf(0);
+    // 合成鼠标事件偶尔会丢：窗口不在前台、或上一次 pointer 就停在同一像素，Chromium 不再重算 hover。
+    // 这里左右斜一下再读一次，避免把偶发当成回归。
+    const hoverOf = async (index, rect) => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await move(rect.x + (attempt % 2 ? 1 : 0), rect.y + (attempt % 2 ? 1 : 0));
+        const style = await styleOf(index);
+        if (style.bg !== idle.bg) return style;
+      }
+      return styleOf(index);
+    };
     for (const [index, rect] of rects.entries()) {
-      await move(rect.x, rect.y);
-      const hover = await styleOf(index);
+      const hover = await hoverOf(index, rect);
       assert.notEqual(hover.bg, idle.bg, `「${rect.label}」悬停要有背景反馈，实际仍是 ${hover.bg}`);
       await move(rect.x, rect.y, 1, "mousePressed");
       const press = await styleOf(index);
@@ -464,8 +473,7 @@ export async function checkAppearanceInElectron(win) {
       await wait(120);
     }
 
-    await move(rects[2].x, rects[2].y);
-    const closeHover = await styleOf(2);
+    const closeHover = await hoverOf(2, rects[2]);
     assert.ok(
       closeHover.bg.startsWith("rgb(196, 43, 28)"),
       `关闭按钮悬停要是系统报警红 rgb(196, 43, 28)，实际 ${closeHover.bg}`,

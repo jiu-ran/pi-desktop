@@ -5,6 +5,7 @@ import "markstream-vue/index.css";
 const CursorMermaid = defineAsyncComponent(() => import("./CursorMermaid.vue"));
 import MarkdownCodeBlock from "./MarkdownCodeBlock.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
+import { imageRef, imageTargets, replaceImageTargets } from "../../shared/local-image.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
 
 import { extractMermaidCodes, watchMermaidExport } from "./mermaid-export.ts";
@@ -26,7 +27,7 @@ const props = withDefaults(
   },
 );
 
-const { theme, plugins, bus } = useKernel();
+const { theme, plugins, bus, workbench } = useKernel();
 const currentTheme = computed(() => theme.currentTheme());
 const isDark = computed(() => currentTheme.value.scheme === "dark");
 const codeTheme = computed(() => currentTheme.value.codeTheme);
@@ -127,7 +128,7 @@ const mermaidProps = computed(() =>
   mermaidEnabled.value ? mermaidOptions(onMermaidError) : undefined,
 );
 
-const themedContent = computed(() => props.content);
+const themedContent = computed(() => renderedContent.value);
 
 watch(() => props.streaming, syncMermaidStates);
 const renderKey = computed(() => `${props.mode}:${mermaidEnabled.value ? "mermaid" : "plain"}:${isDark.value ? "dark" : "light"}`);
@@ -143,6 +144,56 @@ watch([mermaidEnabled, isDark], () => {
 
 let stopFit: (() => void) | null = null;
 let stopExport: (() => void) | null = null;
+
+/* ---------- 本地图片：`![](C:\Users\…\a.png)` 要能真的显示出来 ---------- */
+/** 读盘结果缓存：同一张图挂在很多条消息里时不重复读（值存 Promise 以去重并发） */
+const imageCache = new Map<string, Promise<string | null>>();
+
+function readLocalImage(imagePath: string): Promise<string | null> {
+  const cached = imageCache.get(imagePath);
+  if (cached) return cached;
+  const pending = workbench
+    .readWorkspaceFile(imagePath)
+    .then((data) => data.preview?.dataUrl ?? null)
+    .catch(() => null);
+  imageCache.set(imagePath, pending);
+  return pending;
+}
+
+/** 把 markdown 里的本地图片换成 data URL（远程地址 / data URL 原样留着） */
+async function resolveMarkdownImages(markdown: string): Promise<string> {
+  if (!markdown.includes("![")) return markdown;
+  const targets = imageTargets(markdown);
+  if (!targets.length) return markdown;
+  const replacements: Array<{ target: (typeof targets)[number]; text: string }> = [];
+  for (const target of targets) {
+    const ref = imageRef(target.src);
+    if (ref.kind !== "local") continue;
+    const dataUrl = await readLocalImage(ref.path);
+    // 读不到就保留原样，让 markstream 自己报「加载失败」
+    if (dataUrl) replacements.push({ target, text: dataUrl });
+  }
+  return replacements.length ? replaceImageTargets(markdown, replacements) : markdown;
+}
+
+/** 逆向后交给 markstream 的内容；本地图片已经就绪才替换 */
+const renderedContent = ref(props.content);
+let contentToken = 0;
+watch(
+  () => props.content,
+  async (next) => {
+    const token = ++contentToken;
+    let resolved = next;
+    try {
+      resolved = await resolveMarkdownImages(next);
+    } catch {
+      resolved = next;
+    }
+    if (token === contentToken) renderedContent.value = resolved;
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   if (root.value) {
     stopFit = watchMermaidFit(root.value, (area, changed) => {
