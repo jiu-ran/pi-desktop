@@ -4,6 +4,7 @@ import MarkdownRender, { removeCustomComponents, setCustomComponents } from "mar
 import "markstream-vue/index.css";
 const CursorMermaid = defineAsyncComponent(() => import("./CursorMermaid.vue"));
 import MarkdownCodeBlock from "./MarkdownCodeBlock.vue";
+import ImageLightbox from "../../components/chat/ImageLightbox.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { imageRef, imageTargets, replaceImageTargets } from "../../shared/local-image.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
@@ -170,13 +171,70 @@ async function resolveMarkdownImages(markdown: string): Promise<string> {
     const ref = imageRef(target.src);
     if (ref.kind !== "local") continue;
     const dataUrl = await readLocalImage(ref.path);
-    // 读不到就保留原样，让 markstream 自己报「加载失败」
-    if (dataUrl) replacements.push({ target, text: dataUrl });
+    // markstream 会把 svg 图片整块丢掉（连占位都不留），这里不替换，
+    // 让原路径留着走它的「加载失败」占位，至少能看出有问题。
+    if (dataUrl && !dataUrl.startsWith("data:image/svg+xml")) replacements.push({ target, text: dataUrl });
   }
   return replacements.length ? replaceImageTargets(markdown, replacements) : markdown;
 }
 
-/** 逆向后交给 markstream 的内容；本地图片已经就绪才替换 */
+/* ---------- 点图片放大 ---------- */
+const previewIndex = ref<number | null>(null);
+const previewImages = ref<Array<{ src: string; name?: string }>>([]);
+
+function markdownImages(): HTMLImageElement[] {
+  const container = root.value;
+  if (!container) return [];
+  return [...container.querySelectorAll<HTMLImageElement>(".md img")].filter((img) => Boolean(img.getAttribute("src")));
+}
+
+function openImageZoom(img: HTMLImageElement): void {
+  const images = markdownImages();
+  const index = images.indexOf(img);
+  if (index < 0) return;
+  previewImages.value = images.map((item, position) => ({
+    src: item.getAttribute("src") ?? "",
+    name: item.getAttribute("alt")?.trim() || `图片 ${position + 1}`,
+  }));
+  previewIndex.value = index;
+}
+
+/** 点图片 → 放大；键盘 Enter / 空格 等同点击 */
+function onMarkdownClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const img = target.closest("img");
+  if (!(img instanceof HTMLImageElement) || !root.value?.contains(img)) return;
+  if (!(img.closest(".md") instanceof HTMLElement)) return;
+  event.preventDefault();
+  openImageZoom(img);
+}
+
+function onMarkdownKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const target = event.target;
+  if (!(target instanceof HTMLImageElement) || !root.value?.contains(target)) return;
+  event.preventDefault();
+  openImageZoom(target);
+}
+
+/** 图片要能聚焦、能看出可以点（markstream 重渲染会重建节点，这里补一遍） */
+function decorateImages(): void {
+  for (const img of markdownImages()) {
+    if (img.dataset.zoom === "1") continue;
+    img.dataset.zoom = "1";
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    // markstream 默认把 title 设成 alt，这里补上「可以点」的提示
+    const alt = img.getAttribute("alt")?.trim() ?? "";
+    img.title = alt ? `${alt}（点击放大）` : "点击放大";
+    img.setAttribute("aria-label", `${alt || "图片"}（点击放大）`);
+  }
+}
+
+let decorateObserver: MutationObserver | null = null;
+
+/** 渲染完成后交给 markstream 的内容（本地图片已就绪才替换） */
 const renderedContent = ref(props.content);
 let contentToken = 0;
 watch(
@@ -189,7 +247,10 @@ watch(
     } catch {
       resolved = next;
     }
-    if (token === contentToken) renderedContent.value = resolved;
+    if (token === contentToken) {
+      renderedContent.value = resolved;
+      void nextTick(decorateImages);
+    }
   },
   { immediate: true },
 );
@@ -205,6 +266,9 @@ onMounted(() => {
       () => extractMermaidCodes(props.content),
       (message) => bus.emit("notify", { level: "error", text: message }),
     );
+    decorateImages();
+    decorateObserver = new MutationObserver(() => decorateImages());
+    decorateObserver.observe(root.value, { childList: true, subtree: true });
   }
 });
 function highlightQuery(): void {
@@ -245,13 +309,15 @@ watch([() => props.content, () => props.query, () => props.streaming], () => {
 onMounted(() => void nextTick(highlightQuery));
 onBeforeUnmount(() => {
   removeCustomComponents(mermaidCustomId);
+  decorateObserver?.disconnect();
+  decorateObserver = null;
   stopFit?.();
   stopExport?.();
 });
 </script>
 
 <template>
-  <div ref="root" class="md-body" :class="className">
+  <div ref="root" class="md-body" :class="className" @click="onMarkdownClick" @keydown="onMarkdownKeydown">
     <MarkdownRender
       :key="renderKey"
       class="md"
@@ -265,5 +331,6 @@ onBeforeUnmount(() => {
       :custom-id="mermaidCustomId"
       :mermaid-props="mermaidProps"
     />
+    <ImageLightbox v-model:index="previewIndex" :items="previewImages" />
   </div>
 </template>

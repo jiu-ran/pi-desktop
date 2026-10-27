@@ -426,6 +426,7 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   ".bmp": "image/bmp",
   ".ico": "image/x-icon",
   ".avif": "image/avif",
+  ".svg": "image/svg+xml",
 };
 
 const TEXT_PREVIEW_MAX = 20 * 1024 * 1024;

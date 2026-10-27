@@ -635,6 +635,17 @@
 .md :where(th) { background: var(--bg-1); font-weight: 600; }
 .md :where(blockquote) { margin: 10px 0; padding: 2px 12px; border-left: 2px solid var(--line-2); color: var(--fg-2); }
 .md :where(a) { color: var(--accent); text-decoration: none; }
+/* 图片：能点开放大（指针提示 + 聚焦轮廓）。
+   注意特异性：markstream 会给图片加 `.cursor-pointer`（0,2,0），
+   所以这里不能用 `.md :where(img)`（0,1,0）。 */
+.md-body .md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+.md-body .md img:hover { filter: brightness(1.04); }
+.md-body .md img:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .md :where(a:hover) { text-decoration: underline; }
 .md :where(hr) { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .md > :last-child { margin-bottom: 0; }

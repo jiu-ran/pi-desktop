@@ -62,7 +62,7 @@ export async function checkLocalImagesInElectron(win) {
       return true;
     })()`);
     await poll(
-      `[...document.querySelectorAll('.md-body img')].filter((img) => (img.getAttribute('src') ?? '').startsWith('data:image/png')).length >= 2`,
+      `[...document.querySelectorAll('.md-body img')].filter((img) => (img.getAttribute('src') ?? '').startsWith('data:image/png')).length >= 3`,
       "以绝对路径 / file URL 贴的图片都应被读出来",
     );
 
@@ -87,6 +87,50 @@ export async function checkLocalImagesInElectron(win) {
 
     // 读不到的路径：markstream 自己报「加载失败」，不是静默空白
     assert.match(result.text, /加载失败|failed to load/i, `找不到的文件要给提示：${result.text}`);
+
+    // ---- 点图片放大：聊天里的 markdown 图片也要能点开看 ----
+    const zoomability = JSON.parse(await evaluate(`(() => {
+      const images = [...document.querySelectorAll(".md-body .md img")];
+      return JSON.stringify(images.map((img) => ({
+        role: img.getAttribute("role") ?? "",
+        tabindex: img.getAttribute("tabindex") ?? "",
+        title: img.getAttribute("title") ?? "",
+        label: img.getAttribute("aria-label") ?? "",
+        cursor: getComputedStyle(img).cursor,
+      })));
+    })()`));
+    assert.ok(zoomability.length >= 3, `应该有三张图：${JSON.stringify(zoomability)}`);
+    for (const item of zoomability) {
+      assert.equal(item.role, "button", `图片要能点（role=button）：${JSON.stringify(item)}`);
+      assert.equal(item.tabindex, "0", `图片要能键盘聚焦：${JSON.stringify(item)}`);
+      assert.equal(item.cursor, "zoom-in", `鼠标要提示可放大，实际 ${item.cursor}`);
+      assert.match(item.title, /放大/, `要有悬停提示：${item.title}`);
+      assert.match(item.label, /放大/, `要有无障碍名称：${item.label}`);
+    }
+
+    // 点第一张 → 放大层出现，并且就是被点的那张
+    const clicked = await evaluate(`(() => {
+      const img = document.querySelector(".md-body .md img");
+      img.click();
+      return img.getAttribute("src") ?? "";
+    })()`);
+    await poll(`Boolean(document.querySelector(".image-lightbox"))`, "点图片应打开放大层");
+    const opened = JSON.parse(await evaluate(`(() => {
+      const box = document.querySelector(".image-lightbox");
+      const img = box?.querySelector("img");
+      return JSON.stringify({
+        same: (img?.getAttribute("src") ?? "") === ${JSON.stringify(clicked)},
+        count: box?.querySelector(".image-lightbox-count")?.textContent.trim() ?? "",
+        name: box?.querySelector(".image-lightbox-name")?.textContent.trim() ?? "",
+      });
+    })()`));
+    assert.equal(opened.same, true, `放大层应是点击的那张图：${JSON.stringify(opened)}`);
+    assert.match(opened.count, /^1 \/ 3$/, `在三张图里应显示 1 / 3，实际「${opened.count}」`);
+    assert.equal(opened.name, "外部的图", `放大层要带 alt 名，实际「${opened.name}」`);
+
+    // Esc 关掉，不能把滚动锁留下
+    await win.webContents.executeJavaScript(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })), true`, true);
+    await poll(`!document.querySelector(".image-lightbox")`, "Esc 应关掉放大层");
 
     console.log("[local-images]", JSON.stringify(result));
   } finally {
