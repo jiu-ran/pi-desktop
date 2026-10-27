@@ -23,6 +23,7 @@ npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编�
 ```
 
 发布前请对照 [`docs/release-review.md`](docs/release-review.md) 的清单执行依赖审计、冒烟、打包与手工验收。
+升级 `@earendil-works/pi-coding-agent` 前后，按 [`docs/pi-compatibility.md`](docs/pi-compatibility.md) 复查为适配 Pi 而保留的行为。
 
 完整终端使用 `node-pty`（N-API 原生模块）：Windows / macOS 使用随依赖提供的预构建产物；Linux 安装依赖时需要 `python3`、`make`、`g++`（例如先安装 `build-essential python3`）。npm 12 若提示安装脚本被拦截，运行 `npm install-scripts approve node-pty`。原生模块通过 `asarUnpack` 随包解压分发，打包阶段不重复进行 Electron ABI 重编译。
 
@@ -145,9 +146,9 @@ main.ts                 组合根：创建内核、注册内置插件
 | 宿主 | `electron/pi-host.ts` | Pi Worker 池、白名单 RPC、文件系统操作 |
 | 自检 | `scripts/checks/` | transcript、会话历史分页、会话标题、Diff、宿主、删除、附件、文件树和 Mermaid 高度检查 |
 
-## 架构图
+## 架构
 
-模块边界和插件生命周期见 [`docs/modularization.svg`](docs/modularization.svg)。
+模块边界（谁能做什么、谁不能做什么）与插件归属规则见 [`docs/product-boundary.md`](docs/product-boundary.md)；改 Pi 适配时要复查的地方见 [`docs/pi-compatibility.md`](docs/pi-compatibility.md)。
 
 ## 复制行为
 

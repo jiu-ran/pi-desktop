@@ -51,7 +51,3 @@ export function formatTokens(value?: number | null): string {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
   return String(value);
 }
-
-export function lineCount(text?: string | null): number {
-  return text ? String(text).split(/\r?\n/).length : 0;
-}

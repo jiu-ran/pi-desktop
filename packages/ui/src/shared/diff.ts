@@ -173,9 +173,3 @@ export function collectChanges(blocks: any[] = []): ChangeFileItem[] {
   return [...files.values()];
 }
 
-export function totals(files: ChangeFileItem[]): { added: number; removed: number } {
-  return files.reduce(
-    (acc, f) => ({ added: acc.added + f.added, removed: acc.removed + f.removed }),
-    { added: 0, removed: 0 },
-  );
-}

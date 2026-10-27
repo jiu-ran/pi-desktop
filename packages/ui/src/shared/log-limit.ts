@@ -15,9 +15,3 @@ export function normalizeLogMaxBytes(value: unknown): number {
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_LOG_MAX_BYTES;
   return Math.max(1024 * 1024, Math.min(128 * 1024 * 1024, raw));
 }
-
-export function formatLogBytes(bytes: number): string {
-  const mb = Number(bytes) / (1024 * 1024);
-  if (!Number.isFinite(mb) || mb <= 0) return "0 MB";
-  return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1).replace(/\.0$/, "")} MB`;
-}

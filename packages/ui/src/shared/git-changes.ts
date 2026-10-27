@@ -143,10 +143,3 @@ export function badgeKind(change: RepoChange): string {
   if (code === "R" || code === "C") return "重命名";
   return "修改";
 }
-
-/** 展示用的状态字符：暂存区优先，其次是工作区。 */
-export function changeCode(change: RepoChange, staged: boolean): string {
-  if (change.untracked) return "?";
-  const code = staged ? change.index : change.worktree;
-  return !code || code === " " || code === "?" ? "M" : code;
-}
