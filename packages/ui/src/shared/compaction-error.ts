@@ -26,7 +26,7 @@ export function explainCompactionFailure(message: string | null | undefined): Co
   if (/hit the token cap|summary is incomplete/i.test(raw)) {
     return {
       reason: "写摘要时撞到模型的输出上限，摘要被截断了",
-      hint: "多半是思考等级把输出预算花在推理上；已自动用 off 重试一次，仍不行就把默认思考等级调低，或换输出上限更大的模型",
+      hint: "多半是思考等级把输出预算花在推理上；手动 /compact 会自动降成 off 重试一次，自动压缩不会——把默认思考等级调低后重发即可，或换输出上限更大的模型",
     };
   }
 
@@ -35,6 +35,14 @@ export function explainCompactionFailure(message: string | null | undefined): Co
     return {
       reason: "写摘要的模型调用失败了",
       hint: "检查模型是否可用、额度是否用尽；网络或限流恢复后再试一次",
+    };
+  }
+
+  // 自动压缩（上下文到阈值 / 溢出恢复）失败：上游会加这两层前缀
+  if (/Auto-compaction failed|Context overflow recovery failed/i.test(raw)) {
+    return {
+      reason: "自动压缩没能完成",
+      hint: "这一轮的内容还在，重发一次即可再试；反复失败就先把默认思考等级调低，或换 context 更大的模型",
     };
   }
 

@@ -19,9 +19,20 @@ const capped = explainCompactionFailure(
 assert.ok(capped, "输出上限截断要被识别");
 assert.match(capped!.reason, /输出上限/, `原因要指出是输出上限：${capped!.reason}`);
 assert.match(capped!.hint, /思考等级/, `建议要提到思考等级：${capped!.hint}`);
-assert.match(capped!.hint, /重试/, `要说明会自动重试一次：${capped!.hint}`);
+assert.ok(capped!.hint.includes("/compact"), `要点明只有手动 /compact 会重试：${capped!.hint}`);
+assert.match(capped!.hint, /自动压缩不会/, `不能对自动压缩谎称会重试：${capped!.hint}`);
 
-// ---- 2. 摘要调用失败 / 上下文过大 / 取消 ----
+// ---- 2. 自动压缩（上游会加前缀）也要能翻成中文 ----
+for (const prefix of ["Auto-compaction failed: ", "Context overflow recovery failed: "]) {
+  const auto = explainCompactionFailure(`${prefix}Compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete`);
+  assert.ok(auto, `自动压缩失败要能识别：${prefix}`);
+  assert.match(auto!.reason, /输出上限/, `自动压缩里也是输出上限这条原因：${auto!.reason}`);
+  const generic = explainCompactionFailure(`${prefix}model returned 500`);
+  assert.ok(generic, `认不出的自动压缩错误也要给「自动压缩」这个方向：${prefix}`);
+  assert.match(generic!.reason, /自动压缩/, `${prefix} → ${generic!.reason}`);
+}
+
+// ---- 2b. 摘要调用失败 / 上下文过大 / 取消 ----
 assert.match(explainCompactionFailure("Summarization failed: 401 Unauthorized")?.reason ?? "", /模型调用失败/);
 assert.match(explainCompactionFailure("context window exceeded")?.reason ?? "", /超出模型/);
 assert.match(explainCompactionFailure("Compaction aborted by user")?.reason ?? "", /取消/);
@@ -37,7 +48,7 @@ const text = compactionFailureText(
 );
 assert.ok(text.startsWith("上下文压缩失败："), `要以中文前缀开头：${text}`);
 assert.match(text, /输出上限/);
-assert.match(text, /重试|换成/, `要带上可操作的建议：${text}`);
+assert.match(text, /思考等级|换成/, `要带上可操作的建议：${text}`);
 assert.equal(text.includes("Summarization failed"), false, "已知错误不该把英文原文直接甩给用户");
 
 const unknown = compactionFailureText("weird failure");
