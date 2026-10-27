@@ -55,7 +55,7 @@ const queuePlan = computed(() =>
   planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? { steering: [], followUp: [] }),
 );
 const queuePending = computed(() => queuePlan.value.entries);
-/** 每张待发送卡片的展示内容（正文 + 附件小标签），与 queuePending 一一对应 */
+/** 每张待发送卡片的展示内容（正文 + 附件名），与 queuePending 一一对应 */
 const queueCards = computed(() => queuePending.value.map((item) => planQueueCard(item.text, 160)));
 const queueBusy = ref(false);
 
@@ -295,15 +295,6 @@ async function onQueueDrop(index: number, event: DragEvent): Promise<void> {
   } finally {
     queueBusy.value = false;
   }
-}
-
-/** 分组说明：只在每组第一条前面出现一次，一眼看出会怎么发出去 */
-function queueGroupNote(index: number): string {
-  const list = queuePending.value;
-  const item = list[index];
-  if (!item) return "";
-  if (list.findIndex((entry) => entry.mode === item.mode) !== index) return "";
-  return item.mode === "steer" ? "引导 · 立刻插入当前回合" : "排队 · 本轮结束后按顺序发送";
 }
 
 /** 卡片给读屏的名字：第几条、怎么发、写了什么 */
@@ -1129,113 +1120,103 @@ const argHint = computed(() => {
         </div>
       </div>
       <div v-else-if="queuePending.length" class="queue-strip">
+        <!-- 一条细栏：条数 + 全部撤回（不占视觉重心） -->
         <div class="queue-strip-head">
-          <span class="queue-label">
-            <span class="queue-dot" />
-            {{ queuePending.length }} 条待发送
-          </span>
-          <span class="queue-head-hint">拖动排序 · 聚焦后 Alt+↑ / Alt+↓</span>
+          <span class="queue-label">{{ queuePending.length }} 条待发送</span>
           <button type="button" class="queue-recall" :disabled="queueBusy" @click="recallQueue">全部撤回</button>
         </div>
         <!-- 卡片单独一层：排队很长时只滚这一层，表头和输入框不动 -->
         <div class="queue-list" role="list">
-        <template v-for="(item, i) in queuePending" :key="i">
-          <div v-if="queueGroupNote(i)" class="queue-group-note" :class="item.mode">
-            {{ queueGroupNote(i) }}
-            <span class="queue-group-line" />
-          </div>
-          <div
-            class="queue-card"
-            :class="[
-              item.mode,
-              {
-                dragging: queueDrag === i,
-                'drop-before': queueDrop && queueDrop.index === i && !queueDrop.after,
-                'drop-after': queueDrop && queueDrop.index === i && queueDrop.after,
-                'can-drag': !queueBusy,
-              },
-            ]"
-            :draggable="!queueBusy"
-            tabindex="0"
-            role="listitem"
-            :aria-label="queueCardLabel(i)"
-            @dragstart="onQueueDragStart(i, $event)"
-            @dragover="onQueueDragOver(i, $event)"
-            @drop="onQueueDrop(i, $event)"
-            @dragend="onQueueDragEnd"
-            @keydown.alt.up.prevent="moveQueued(i, -1)"
-            @keydown.alt.down.prevent="moveQueued(i, 1)"
-          >
-          <span
-            class="queue-card-grip"
-            title="拖动调整发送顺序（聚焦后 Alt+↑ / Alt+↓）"
-            aria-hidden="true"
-          />
-          <div class="queue-card-main">
-            <!-- 控制条在上、正文在下：正文永远占满整行，不被下拉按钮挤成窄条 -->
-            <div class="queue-card-bar">
-              <SelectMenu
-                class="queue-card-mode"
-                size="sm"
-                :model-value="item.mode"
-                :disabled="queueBusy"
-                align="left"
-                aria-label="这条消息怎么发出去"
-                title="引导 = 立刻插入当前回合；排队 = 等本轮结束再发"
-                :options="[
-                  { value: 'steer', label: '引导', hint: '立刻插入' },
-                  { value: 'followUp', label: '排队', hint: '本轮结束' },
-                ]"
-                @change="(mode) => switchQueuedMode(item, mode as 'steer' | 'followUp')"
-              />
-              <span class="queue-card-actions">
-                <button
-                  type="button"
-                  class="queue-card-edit"
-                  aria-label="编辑这条消息"
-                  @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  class="queue-card-withdraw"
-                  :disabled="queueBusy"
-                  :aria-label="`撤回这条消息：${queuePreview(item.text, 40)}`"
-                  @click="withdrawQueued(item)"
-                >
-                  撤回
-                </button>
-              </span>
-            </div>
-            <!-- 附件用和编辑区一样的小标签；正文只留用户写的话 -->
-            <div v-if="queueCards[i]?.attachments.length" class="queue-card-attachments">
-              <span
-                v-for="att in queueCards[i].attachments"
-                :key="att.path"
-                class="queue-attach-chip"
-                :title="att.path"
-              >
-                <span
-                  class="queue-attach-icon"
-                  v-html="att.kind === 'session' ? icons.message : att.kind === 'directory' ? icons.folder : icons.file"
-                />
-                <span class="queue-attach-name">{{ att.name }}</span>
-              </span>
-            </div>
-            <button
-              v-if="queueCards[i]?.text"
-              type="button"
-              class="queue-card-text"
-              :title="queuePreview(item.text, 400)"
-              :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
-              @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
+          <template v-for="(item, i) in queuePending" :key="i">
+            <div
+              class="queue-card"
+              :class="[
+                item.mode,
+                {
+                  dragging: queueDrag === i,
+                  'drop-before': queueDrop && queueDrop.index === i && !queueDrop.after,
+                  'drop-after': queueDrop && queueDrop.index === i && queueDrop.after,
+                  'can-drag': !queueBusy,
+                },
+              ]"
+              :draggable="!queueBusy"
+              tabindex="0"
+              role="listitem"
+              :aria-label="queueCardLabel(i)"
+              @dragstart="onQueueDragStart(i, $event)"
+              @dragover="onQueueDragOver(i, $event)"
+              @drop="onQueueDrop(i, $event)"
+              @dragend="onQueueDragEnd"
+              @keydown.alt.up.prevent="moveQueued(i, -1)"
+              @keydown.alt.down.prevent="moveQueued(i, 1)"
             >
-              {{ queueCards[i]?.text }}
-            </button>
-          </div>
-          </div>
-        </template>
+              <span
+                class="queue-card-grip"
+                title="拖动调整发送顺序（聚焦后 Alt+↑ / Alt+↓）"
+                aria-hidden="true"
+              />
+              <div class="queue-card-main">
+                <!-- 附件单独一行：只要文件名（不要图标、不要大小） -->
+                <div v-if="queueCards[i]?.attachments.length" class="queue-card-files">
+                  <span
+                    v-for="att in queueCards[i].attachments"
+                    :key="att.path"
+                    class="queue-file-name"
+                    :title="att.path"
+                  >{{ att.name }}</span>
+                </div>
+                <!-- 投递方式 + 单行正文 + 悬停才现的图标操作 -->
+                <div class="queue-card-line">
+                  <SelectMenu
+                    class="queue-card-mode"
+                    size="sm"
+                    :model-value="item.mode"
+                    :disabled="queueBusy"
+                    align="left"
+                    aria-label="这条消息怎么发出去"
+                    title="引导 = 立刻插入当前回合；排队 = 等本轮结束再发"
+                    :options="[
+                      { value: 'steer', label: '引导', hint: '立刻插入' },
+                      { value: 'followUp', label: '排队', hint: '本轮结束' },
+                    ]"
+                    @change="(mode) => switchQueuedMode(item, mode as 'steer' | 'followUp')"
+                  />
+                  <button
+                    v-if="queueCards[i]?.text"
+                    type="button"
+                    class="queue-card-text"
+                    :title="queuePreview(item.text, 400)"
+                    :aria-label="`编辑这条消息：${queuePreview(item.text, 40)}`"
+                    @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
+                  >
+                    {{ queueCards[i]?.text }}
+                  </button>
+                  <span v-else class="queue-card-text is-empty">（只有附件）</span>
+                  <span class="queue-card-actions">
+                    <button
+                      type="button"
+                      class="queue-card-icon"
+                      title="编辑这条消息"
+                      aria-label="编辑这条消息"
+                      @click="openQueueEdit({ mode: item.mode, prompt: item.text })"
+                    >
+                      <span v-html="icons.edit" />
+                    </button>
+                    <button
+                      type="button"
+                      class="queue-card-icon is-withdraw"
+                      :disabled="queueBusy"
+                      :title="`撤回这条消息：${queuePreview(item.text, 40)}`"
+                      :aria-label="`撤回这条消息：${queuePreview(item.text, 40)}`"
+                      @click="withdrawQueued(item)"
+                    >
+                      <span v-html="icons.undo" />
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
 

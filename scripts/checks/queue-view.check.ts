@@ -99,7 +99,12 @@ assert.equal(queuePreview('<session name="C:\\s.jsonl" title="t">\n摘要\n</ses
   const card = planQueueCard('<file name="C:\\tmp\\note.txt">\n内容\n</file>\n顺便看下日志');
   assert.equal(card.text, "顺便看下日志", `正文只留用户写的话，实际「${card.text}」`);
   assert.equal(card.attachments.length, 1, `附件应该单独列成标签，实际 ${card.attachments.length}`);
-  assert.deepEqual(card.attachments[0], { kind: "file", path: "C:\\tmp\\note.txt", name: "note.txt" }, "标签要留完整路径（title）与文件名（展示）");
+  assert.deepEqual(
+    card.attachments[0],
+    { kind: "file", path: "C:\\tmp\\note.txt", name: "note.txt" },
+    "标签要留完整路径（title）与文件名（展示）",
+  );
+  // 附件只要名字（不画图标、不算大小），完整路径放 title
   // 纯附件消息：正文为空（不显示占位），附件照常列出
   const onlyFile = planQueueCard('<file name="C:\\a\\b.png"></file>');
   assert.equal(onlyFile.text, "", `纯附件消息不该显示占位文字，实际「${onlyFile.text}」`);

@@ -69,6 +69,9 @@ const MAP = {
   pull: "arrow--down",
   history: "time",
   minus: "subtract",
+  /** 队列卡片：编辑 / 撤回 */
+  edit: "edit",
+  undo: "undo",
 };
 
 /** 每个图标在界面里的默认边长（沿用旧图标表，避免布局跳动） */
@@ -103,6 +106,8 @@ const SIZE = {
   pull: 14,
   history: 14,
   minus: 14,
+  edit: 13,
+  undo: 13,
 };
 
 function readIcon(name) {

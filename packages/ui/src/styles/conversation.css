@@ -1528,21 +1528,6 @@
   gap: 8px;
   padding: 0 2px;
 }
-.queue-head-hint {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  margin-right: 2px;
-  color: var(--fg-3);
-  font-size: 10.5px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.75;
-}
-@container (max-width: 560px) {
-  .queue-head-hint { display: none; }
-}
 /* 卡片自己滚：排上十几条也不会把输入框顶出窗口 */
 .queue-list {
   display: flex;
@@ -1554,14 +1539,15 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+/* 方案 A：极简紧凑 —— 附件一行 + 单行正文，尽量少占高度 */
 .queue-label {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   flex: none;
-  color: var(--accent);
-  font-size: 11.5px;
-  font-weight: 600;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-weight: 500;
 }
 .queue-dot {
   width: 6px;
@@ -1579,13 +1565,13 @@
   align-items: stretch;
   gap: 3px;
   min-width: 0;
-  padding: 5px 8px 6px 5px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line-2));
+  padding: 6px 9px 6px 5px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 26%, var(--line-2));
   border-radius: 9px;
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
+  background: color-mix(in srgb, var(--accent) 2%, var(--bg-2));
   color: var(--fg-2);
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: 1.5;
   outline: none;
 }
 .queue-card:focus-visible {
@@ -1593,63 +1579,79 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
-/* 控制条（待发送 / 投递方式 / 编辑撤回）在上，正文在下占满整行 */
+/* 附件一行 + 正文一行，两行都从左缘开始 */
 .queue-card-main {
   display: flex;
   flex: 1;
   min-width: 0;
+  min-height: 36px;
   flex-direction: column;
-  gap: 1px;
+  justify-content: center;
+  gap: 3px;
 }
-.queue-card-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 18px;
-  min-width: 0;
-}
-/* 附件小标签：和编辑区同一套 chip，正文不再背一串 `[文件: C:\…]` */
-.queue-card-attachments {
+.queue-card-files {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 1px 0 2px;
+  align-items: baseline;
+  gap: 1px 14px;
+  min-width: 0;
 }
-.queue-card-attachments .queue-attach-chip {
-  padding: 1px 6px;
-  font-size: 11px;
+/* 只要文件名：不要类型图标，也不要大小；淡底块让这行有归属，不至于像凭空多出来的一行 */
+.queue-file-name {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg-2);
+  font: 11.5px/17px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 投递方式 + 单行正文 + 悬停才现的图标操作 */
+.queue-card-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 20px;
 }
 .queue-card:hover {
   border-style: solid;
 }
-/* 「待发送」只在表头报一次（N 条待发送），卡片上不再重复一遍 */
 .queue-card-actions {
   display: flex;
   flex: none;
-  gap: 2px;
   align-items: center;
-  margin-left: auto;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
-.queue-card-edit,
-.queue-card-withdraw {
+.queue-card:hover .queue-card-actions,
+.queue-card:focus-within .queue-card-actions,
+.queue-card:focus-visible .queue-card-actions { opacity: 1; }
+.queue-card-icon {
+  display: grid;
   flex: none;
-  padding: 1px 6px;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--fg-3);
-  font-size: 11px;
   cursor: pointer;
 }
-.queue-card-edit:hover {
-  background: var(--hover);
-  color: var(--fg);
-}
-.queue-card-withdraw:hover {
+.queue-card-icon svg { width: 13px; height: 13px; }
+.queue-card-icon:hover { background: var(--hover); color: var(--fg); }
+.queue-card-icon.is-withdraw:hover {
   background: color-mix(in srgb, var(--del-fg) 14%, transparent);
   color: var(--del-fg);
 }
-.queue-card-withdraw:disabled { opacity: 0.5; cursor: not-allowed; }
+.queue-card-icon:disabled { opacity: 0.4; cursor: not-allowed; }
 /* 投递方式：小号下拉（引导 / 排队），带说明，比原来「点一下翻面」的标签清楚。
    注意特异性：`.select-menu.is-sm .select-menu-trigger` 是 0,3,0，这里必须压过它才有 18px 高。 */
 .queue-card .queue-card-mode.is-sm {
@@ -1662,15 +1664,15 @@
   padding: 0 5px 0 7px;
   gap: 3px;
   border: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 16px;
 }
 .queue-card.steer .queue-card-mode.is-sm .select-menu-trigger {
-  background: color-mix(in srgb, var(--warn, var(--accent)) 16%, transparent);
+  background: color-mix(in srgb, var(--warn, var(--accent)) 12%, transparent);
   color: var(--warn, var(--accent));
 }
 .queue-card .queue-card-mode.is-sm .select-menu-trigger:hover:not(:disabled) {
@@ -1685,23 +1687,7 @@
 .queue-card .queue-card-mode.is-sm .select-menu-caret svg { width: 9px; height: 9px; }
 .queue-card .queue-card-mode.is-sm .select-menu-caret { opacity: 0.75; }
 
-/* 分组说明：一行小红/小蓝字 + 一条淡分隔线，不做「整行居中分隔条」抢戏 */
-.queue-group-note {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 3px 2px 0 16px;
-  color: var(--fg-3);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-}
-.queue-group-note.steer { color: color-mix(in srgb, var(--warn, var(--accent)) 70%, var(--fg-3)); }
-.queue-group-line {
-  flex: 1;
-  height: 1px;
-  background: currentColor;
-  opacity: 0.14;
-}
+/* 分组说明：方案 A 里去掉了（投递方式胶囊已经说明怎么发） */
 
 /* 拖拽把手：2×3 点阵（radial-gradient 画，不用图标）；平时淡、悬停/聚焦才亮 */
 .queue-card-grip {
@@ -1735,23 +1721,22 @@
 .queue-card.drop-after { box-shadow: 0 2px 0 0 var(--accent), 0 5px 12px -6px var(--accent); }
 .queue-card.dragging * { pointer-events: none; }
 .queue-card-text {
-  display: -webkit-box;
-  width: 100%;
+  flex: 1 1 auto;
+  display: block;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
   border: 0;
   background: transparent;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
   color: var(--fg-2);
   font: inherit;
   text-align: left;
-  white-space: pre-wrap;
-  word-break: break-word;
-  cursor: text;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.queue-card-text:hover { color: var(--fg); text-decoration: underline dotted; }
+.queue-card-text.is-empty { color: var(--fg-3); font-style: italic; cursor: default; }
+.queue-card-text:hover { color: var(--fg); }
 /* 排队消息的内联编辑区 */
 /* 编辑态：标题在上、编辑框占满整行，读起来更像「在改一条消息」 */
 .queue-strip-editing {
@@ -1847,15 +1832,15 @@
 }
 .queue-recall {
   flex: none;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--line-2);
-  border-radius: 6px;
+  height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--fg-3);
-  font-size: 11.5px;
+  font-size: 11px;
 }
-.queue-recall:hover { background: var(--hover); color: var(--fg); }
+.queue-recall:hover { background: var(--hover); color: var(--del-fg); }
 .queue-recall:disabled { opacity: 0.5; }
 
 /* 斜杠命令菜单：分组列表 + 底部按键提示 */

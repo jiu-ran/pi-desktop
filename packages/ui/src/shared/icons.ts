@@ -55,6 +55,8 @@ export const icons = {
   pull: '<svg class="pi-icon" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12.3 9.3 8.5 13.1 8.5 1 7.5 1 7.5 13.1 3.7 9.3 3 10 8 15 13 10z"/></svg>',
   history: '<svg class="pi-icon" viewBox="0 0 32 32" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M16,30A14,14,0,1,1,30,16,14,14,0,0,1,16,30ZM16,4A12,12,0,1,0,28,16,12,12,0,0,0,16,4Z"/><path d="M20.59 22 15 16.41 15 7 17 7 17 15.58 22 20.59 20.59 22z"/></svg>',
   minus: '<svg class="pi-icon" viewBox="0 0 32 32" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 15H24V17H8z"/></svg>',
+  edit: '<svg class="pi-icon" viewBox="0 0 32 32" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M2 26H30V28H2z"/><path d="M25.4,9c0.8-0.8,0.8-2,0-2.8c0,0,0,0,0,0l-3.6-3.6c-0.8-0.8-2-0.8-2.8,0c0,0,0,0,0,0l-15,15V24h6.4L25.4,9z M20.4,4L24,7.6	l-3,3L17.4,7L20.4,4z M6,22v-3.6l10-10l3.6,3.6l-10,10H6z"/></svg>',
+  undo: '<svg class="pi-icon" viewBox="0 0 32 32" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M20,10H7.8149l3.5874-3.5859L10,5,4,11,10,17l1.4023-1.4146L7.8179,12H20a6,6,0,0,1,0,12H12v2h8a8,8,0,0,0,0-16Z"/></svg>',
 } as const;
 
 export type IconName = keyof typeof icons;

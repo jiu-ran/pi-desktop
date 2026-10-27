@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 /**
  * 排队展示回归（纯渲染侧，不请求模型）：
@@ -18,9 +21,16 @@ export async function checkQueueInElectron(win) {
     throw new Error(`排队展示检查超时：${label}`);
   };
 
+  // 真存在的一个附件：类型徽标与大小都是按磁盘上的文件算的
+  const attachDir = await mkdtemp(path.join(tmpdir(), "pi-queue-attach-"));
+  const attachFile = path.join(attachDir, "note.txt");
+  await writeFile(attachFile, "x".repeat(2048));
+
   const ids = JSON.parse(await evaluate(`(() => {
     const thread = window.__piDesktop.workbench.active.value.activeThread;
-    const prompt = '<file name="C:\\\\tmp\\\\note.txt">\\n内容\\n</file>\\n顺便看下日志';
+    // 注意：路径原样拼进去，不要再转义反斜杠 —— 否则按这个路径去查文件大小会找不到
+    const attach = ${JSON.stringify(attachFile)};
+    const prompt = '<file name="' + attach + '">' + String.fromCharCode(10) + '内容' + String.fromCharCode(10) + '</file>' + String.fromCharCode(10) + '顺便看下日志';
     thread.transcript.removeBlock("queue-a");
     thread.transcript.removeBlock("queue-b");
     const a = thread.transcript.pushUser("顺便看下日志", 0, { queueText: prompt });
@@ -33,6 +43,8 @@ export async function checkQueueInElectron(win) {
   })()`));
 
   await poll("document.querySelectorAll('.queue-card').length === 2", "两条排队消息都应列在输入框上方");
+  // 附件大小要过一趟 IPC，等它回填后再读快照
+  await poll("Boolean(document.querySelector('.queue-file-name'))", "附件文件名出现");
 
   const view = JSON.parse(await evaluate(`(() => {
     const cards = [...document.querySelectorAll('.queue-card')];
@@ -49,6 +61,7 @@ export async function checkQueueInElectron(win) {
         grip: Boolean(n.querySelector('.queue-card-grip')),
         // 把手平时隐起来，悬停才现形
         gripOpacity: n.querySelector('.queue-card-grip') ? getComputedStyle(n.querySelector('.queue-card-grip')).opacity : null,
+        gripTitle: n.querySelector('.queue-card-grip')?.getAttribute('title') ?? '',
       })),
       listRole: document.querySelector('.queue-list')?.getAttribute('role') ?? '',
       listScrollable: (() => {
@@ -57,30 +70,46 @@ export async function checkQueueInElectron(win) {
         return { maxHeight: getComputedStyle(list).maxHeight, overflowY: getComputedStyle(list).overflowY };
       })(),
       headHint: document.querySelector('.queue-head-hint')?.textContent.trim() ?? '',
-      edits: cards.map((n) => Boolean(n.querySelector('.queue-card-edit'))),
+      icons: cards.map((n) => ({
+        count: n.querySelectorAll('.queue-card-icon').length,
+        actionsOpacity: n.querySelector('.queue-card-actions') ? getComputedStyle(n.querySelector('.queue-card-actions')).opacity : null,
+        edit: Boolean(n.querySelector('.queue-card-icon:not(.is-withdraw)')),
+        withdraw: n.querySelector('.queue-card-icon.is-withdraw')?.getAttribute('title') ?? '',
+      })),
       cards: cards.map((n) => ({
         tag: n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim() ?? '',
         text: n.querySelector('.queue-card-text')?.textContent.trim() ?? '',
-        title: n.getAttribute('title') ?? '',
-        // 正文独占一行：投递方式的下拉曾经把正文挤成窄条，两/三行才局促地折回来
+        // 投递方式与正文同一行：正文跟在胶囊后面，不再独占一行
         textLeft: Math.round(n.querySelector('.queue-card-text')?.getBoundingClientRect().left ?? 0),
         pillLeft: Math.round(n.querySelector('.queue-card-mode')?.getBoundingClientRect().left ?? 0),
-        // 长预览只挂在正文上（以前挂整张卡片，悬停「编辑」也弹一大段）
+        textOnPillLine: (() => {
+          const text = n.querySelector('.queue-card-text')?.getBoundingClientRect();
+          const pill = n.querySelector('.queue-card-mode')?.getBoundingClientRect();
+          if (!text || !pill) return false;
+          const sameRow = Math.abs(text.top + text.height / 2 - (pill.top + pill.height / 2)) <= 6;
+          return sameRow && text.left >= pill.right - 2;
+        })(),
+        // 正文单行截断：高度应该只有一行
+        textLines: (() => {
+          const text = n.querySelector('.queue-card-text');
+          if (!text) return 0;
+          const lineHeight = parseFloat(getComputedStyle(text).lineHeight) || 1;
+          return Math.round(text.getBoundingClientRect().height / lineHeight);
+        })(),
         cardTitle: n.getAttribute('title') ?? '',
-        // 附件是独立小标签：正文里不能再掉一串 [文件: …]
-        chips: [...n.querySelectorAll('.queue-card-attachments .queue-attach-chip')].map((chip) => ({
-          name: chip.querySelector('.queue-attach-name')?.textContent.trim() ?? '',
-          title: chip.getAttribute('title') ?? '',
+        // 附件是独立一行：类型徽标 + 文件名 + 大小
+        files: [...n.querySelectorAll('.queue-file-name')].map((file) => ({
+          name: file.textContent.trim(),
+          title: file.getAttribute('title') ?? '',
+          aboveText: (() => {
+            const box = file.getBoundingClientRect();
+            const text = n.querySelector('.queue-card-text')?.getBoundingClientRect();
+            return Boolean(text && box.bottom <= text.top + 2);
+          })(),
         })),
         pillBox: (() => {
           const r = n.querySelector('.queue-card-mode .select-menu-trigger')?.getBoundingClientRect();
           return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
-        })(),
-        // 正文应该在下拉下方（同一行放不下时才会掉行，现在是结构上就分两行）
-        textBelowPill: (() => {
-          const text = n.querySelector('.queue-card-text')?.getBoundingClientRect();
-          const pill = n.querySelector('.queue-card-mode')?.getBoundingClientRect();
-          return Boolean(text && pill && text.top >= pill.bottom);
         })(),
       })),
       label: document.querySelector('.queue-label')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
@@ -95,9 +124,17 @@ export async function checkQueueInElectron(win) {
   assert.equal(view.cards.length, 2, `队列里的两条都应列在输入框上方，实际 ${view.cards.length}`);
   assert.deepEqual(view.badges, ["", ""], "「待发送」只在表头报一次，卡片上不重复");
   assert.equal(view.listRole, "list", "待发送区应是列表语义");
-  assert.match(view.headHint, /Alt/, `表头要提示键盘排序：${view.headHint}`);
+  assert.equal(view.headHint, "", "表头不再堆提示文字（提示放进把手的 title）");
+  assert.ok(
+    view.cardRoles.every((role) => role.gripTitle.includes("Alt")),
+    `键盘排序的提示要在把手 title 里：${JSON.stringify(view.cardRoles.map((role) => role.gripTitle))}`,
+  );
   assert.deepEqual(view.listScrollable?.overflowY, "auto", "排很多条时只滚卡片区（不顶输入框）");
-  assert.deepEqual(view.edits, [true, true], "每条都要能点开编辑");
+  assert.equal(
+    await evaluate("document.querySelectorAll('.queue-card-edit, .queue-card-withdraw').length"),
+    0,
+    "旧版的文本按钮（编辑 / 撤回）不该再存在，现在是图标",
+  );
   for (const [index, role] of view.cardRoles.entries()) {
     assert.equal(role.role, "listitem", `第 ${index + 1} 条应是 listitem`);
     assert.equal(role.tabindex, "0", `第 ${index + 1} 条要能聚焦（Alt+↑/↓ 排序的前提）`);
@@ -111,36 +148,54 @@ export async function checkQueueInElectron(win) {
     view.cards.some((card) => card.text === "只存在于队列里的消息"),
     `队列里那条没有气泡的消息应显示在卡片上：${view.cards.map((c) => c.text).join(" | ")}`,
   );
-  assert.ok(view.recall, "待发送区要有撤回按钮");
-  // 卡片排版：控制条（待发送 + 投递方式 + 编辑/撤回）在上，正文在下并占满整行
+  // 方案 A 的排版：附件一行（徽标 + 文件名 + 大小），正文与投递方式同一行、单行截断
   for (const card of view.cards) {
     assert.ok(card.pillBox, "每条卡片都要有一个投递方式下拉");
     // `.select-menu.is-sm .select-menu-trigger` 是 0,3,0：拿不到 18px 高说明特异性又被打回去了
     assert.ok(card.pillBox.h <= 20, `投递方式应该是小号胶囊，实测 ${card.pillBox.h}px 高`);
     assert.ok(card.pillBox.w <= 64, `投递方式不该撑成大按钮，实测 ${card.pillBox.w}px 宽`);
-    assert.equal(card.textBelowPill, true, "正文要在控制条下面，不能再被下拉挤在同一行里");
-    assert.ok(
-      Math.abs(card.textLeft - card.pillLeft) <= 6,
-      `正文与投递方式要左对齐（正文 ${card.textLeft} vs 胶囊 ${card.pillLeft}）`,
-    );
+    assert.equal(card.textOnPillLine, true, "正文要和投递方式排在同一行（方案 A）");
+    assert.equal(card.textLines <= 1, true, `正文只能占一行，实际 ${card.textLines} 行`);
+    assert.equal(card.cardTitle, "", "整张卡片不再挂长 title（它会遮蔽按钮的 tooltip）");
   }
-  assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
-  // 附件换成小标签：正文只有人写的话，路径不进正文（以前是「[文件: C:\\tmp\\note.txt] 顺便看下日志」）
-  const withFile = view.cards.find((card) => card.chips.length);
-  assert.ok(withFile, `带附件的排队消息应该列出一个附件小标签：${JSON.stringify(view.cards)}`);
+  // 图标操作：默认隐起来，悬停才现；两个都要有可读名称
   assert.deepEqual(
-    withFile.chips.map((chip) => chip.name),
-    ["note.txt"],
-    `附件标签显示文件名，实际 ${JSON.stringify(withFile.chips)}`,
+    view.icons.map((item) => item.count),
+    [2, 2],
+    `每张卡片要有编辑 / 撤回两个图标按钮：${JSON.stringify(view.icons)}`,
   );
-  assert.match(withFile.chips[0].title, /note\.txt$/, "标签的 title 要能看完整路径");
-  assert.equal(withFile.text, "顺便看下日志", `附件标签不能把正文弄脏，实际「${withFile.text}」`);
+  assert.ok(
+    view.icons.every((item) => item.actionsOpacity === "0"),
+    `图标操作默认要隐起来（悬停才现），实际 ${view.icons.map((item) => item.actionsOpacity).join(",")}`,
+  );
+  assert.ok(view.icons.every((item) => item.edit), "要有编辑按钮");
+  assert.ok(view.icons.every((item) => item.withdraw.includes("撤回")), "撤回按钮要有可读名称");
+
+  assert.equal(view.leaksMarkers, false, "卡片上不能出现附件 XML");
+  // 附件行：只有文件名（不画图标、不算大小），且排在正文上面
+  const withFile = view.cards.find((card) => card.files.length);
+  assert.ok(withFile, `带附件的排队消息应该列出附件行：${JSON.stringify(view.cards)}`);
+  assert.deepEqual(
+    withFile.files.map((file) => file.name),
+    ["note.txt"],
+    `附件行要写文件名，实际 ${JSON.stringify(withFile.files)}`,
+  );
+  assert.match(withFile.files[0].title, /note\.txt$/, "附件要有完整路径的 title");
+  assert.equal(withFile.files[0].aboveText, true, "附件行要在正文上面");
+  // 用户明确不要的东西：类型图标不要，大小也不要
+  assert.equal(
+    await evaluate("document.querySelectorAll('.queue-file-badge, .queue-file-size, .queue-file svg').length"),
+    0,
+    "附件行不该再有类型图标或文件大小",
+  );
+  assert.equal(withFile.text, "顺便看下日志", `附件不能把正文弄脏，实际「${withFile.text}」`);
   assert.equal(
     view.cards.some((card) => card.text.includes("[文件") || card.text.includes("[目录")),
     false,
     `正文不该再出现 [文件: …] 这类标签：${view.cards.map((card) => card.text).join(" | ")}`,
   );
   assert.match(view.label, /2 条待发送/, `标题应显示条数，实际「${view.label}」`);
+  assert.ok(view.recall, "全部撤回要保留");
 
   // 截图留档：人工确认排版（调试协议截图，避免拿到旧帧）
   const shot = async (name) => {
@@ -184,7 +239,7 @@ export async function checkQueueInElectron(win) {
         'draggable: node.getAttribute("draggable"),' +
         'grip: Boolean(node.querySelector(".queue-card-grip")),' +
         'text: (node.querySelector(".queue-card-text")?.textContent || "").trim(),' +
-        'withdraw: (node.querySelector(".queue-card-withdraw")?.textContent || "").trim(),' +
+        'withdraw: (node.querySelector(".queue-card-icon.is-withdraw")?.getAttribute("title") || "").includes("撤回") ? "撤回" : "",' +
       '})))',
     );
     const cards = JSON.parse(rawCards);
@@ -194,12 +249,11 @@ export async function checkQueueInElectron(win) {
     assert.ok(cards.every((item) => item.modeLabel.length > 0), "投递方式按钮要有可读的无障碍名称");
     assert.ok(cards.every((item) => item.draggable === "true"), "卡片要可拖拽（拖拽排序）");
     assert.ok(cards.every((item) => item.grip), "卡片要显示拖拽把手（点阵用 CSS 画，不是内联 svg）");
-    assert.deepEqual(cards.map((item) => item.withdraw), ["撤回", "撤回"], "每条都要有撤回按钮");
+    assert.deepEqual(cards.map((item) => item.withdraw), ["撤回", "撤回"], "每条都要有撤回图标（title 里写清）");
 
-    // 分组说明：排队那一组第一条前面要有一句「本轮结束后按顺序发送」
+    // 方案 A 没有分组说明：投递方式胶囊已经说明怎么发
     const notes = JSON.parse(await evaluate("JSON.stringify([...document.querySelectorAll('.queue-group-note')].map((n) => n.textContent.trim()))"));
-    assert.equal(notes.length, 1, `只有一组时应只有一条分组说明，实际 ${JSON.stringify(notes)}`);
-    assert.match(notes[0], /排队 · 本轮结束后/, `分组说明要写清投递时机：${notes[0]}`);
+    assert.deepEqual(notes, [], `方案 A 里不再有分组说明行，实际 ${JSON.stringify(notes)}`);
   }
 
   // ---- 投递方式下拉：两个选项，选中项带勾 ----
@@ -277,9 +331,7 @@ export async function checkQueueInElectron(win) {
     const notes = JSON.parse(
       await evaluate("JSON.stringify([...document.querySelectorAll('.queue-group-note')].map((n) => n.textContent.replace(/\\s+/g, ' ').trim()))"),
     );
-    assert.equal(notes.length, 2, `引导 / 排队各要有一句说明，实际 ${JSON.stringify(notes)}`);
-    assert.match(notes[0], /引导 · 立刻插入/, `第一组是引导：${notes[0]}`);
-    assert.match(notes[1], /排队 · 本轮结束后/, `第二组是排队：${notes[1]}`);
+    assert.deepEqual(notes, [], `方案 A 里不再有分组说明行，实际 ${JSON.stringify(notes)}`);
 
     const modes = JSON.parse(await evaluate("JSON.stringify([...document.querySelectorAll('.queue-card')].map((n) => n.querySelector('.queue-card-mode .select-menu-value')?.textContent.trim()))"));
     assert.deepEqual(modes, ["引导", "排队", "排队"], `卡片要各自标出投递方式：${JSON.stringify(modes)}`);
@@ -365,10 +417,10 @@ export async function checkQueueInElectron(win) {
     const card = [...document.querySelectorAll('.queue-card')]
       .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('顺便看下日志'));
     if (!card) return false;
-    card.querySelector('.queue-card-edit')?.click();
+    card.querySelector('.queue-card-icon:not(.is-withdraw)')?.click();
     return true;
   })()`);
-  assert.ok(openedAttached, "带附件的排队卡片上应有「编辑」按钮");
+  assert.ok(openedAttached, "带附件的排队卡片上应有编辑图标");
   await poll("Boolean(document.querySelector('.queue-editor textarea'))", "打开带附件的排队消息");
   {
     const attached = JSON.parse(await evaluate(`(() => {
@@ -523,13 +575,13 @@ export async function checkQueueInElectron(win) {
     "取消不应提交编辑",
   );
 
-  // 4) 卡片右侧的「编辑」按钮同样能进入编辑
+  // 4) 卡片右侧的编辑图标同样能进入编辑
   await evaluate(`(() => {
     const card = [...document.querySelectorAll('.queue-card')]
       .find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
-    card?.querySelector('.queue-card-edit')?.click();
+    card?.querySelector('.queue-card-icon:not(.is-withdraw)')?.click();
     return Boolean(card);
-  })()`).then((ok) => assert.ok(ok, "待发送卡片上应有「编辑」按钮"));
+  })()`).then((ok) => assert.ok(ok, "待发送卡片上应有编辑图标"));
   await poll("Boolean(document.querySelector('.queue-editor textarea'))", "卡片上的编辑应打开编辑框");
   {
     const value = await evaluate("document.querySelector('.queue-editor textarea').value");
@@ -553,13 +605,16 @@ export async function checkQueueInElectron(win) {
     const buttons = JSON.parse(await evaluate(`(() => JSON.stringify(
       [...document.querySelectorAll('.queue-card')].map((card) => ({
         text: card.querySelector('.queue-card-text')?.textContent.trim().slice(0, 12) ?? '',
-        actions: [...card.querySelectorAll('.queue-card-actions button')].map((n) => n.textContent.trim()),
+        actions: [...card.querySelectorAll('.queue-card-actions button')].map(
+          (n) => n.getAttribute('aria-label') ?? n.getAttribute('title') ?? '',
+        ),
       })),
     ))()`));
     assert.ok(buttons.length >= 1, "应有待发送卡片");
     for (const card of buttons) {
-      assert.ok(card.actions.includes("编辑"), `每条都要有「编辑」：${card.text}`);
-      assert.ok(card.actions.includes("撤回"), `每条都要有「撤回」：${card.text}`);
+      assert.equal(card.actions.length, 2, `每张卡片两个图标：${card.text}`);
+      assert.ok(card.actions[0]?.includes("编辑"), `第一个图标是编辑：${JSON.stringify(card.actions)}`);
+      assert.ok(card.actions[1]?.includes("撤回"), `第二个图标是撤回：${JSON.stringify(card.actions)}`);
     }
   }
   // 点第二条的「撤回」：只撤回那一条，参数带原始提示词
@@ -567,7 +622,7 @@ export async function checkQueueInElectron(win) {
     const cards = [...document.querySelectorAll('.queue-card')];
     const card = cards.find((n) => (n.querySelector('.queue-card-text')?.textContent ?? '').includes('只存在于队列里'));
     if (!card) return false;
-    card.querySelector('.queue-card-withdraw')?.click();
+    card.querySelector('.queue-card-icon.is-withdraw')?.click();
     return true;
   })()`).then((ok) => assert.ok(ok, "应能找到那条待发送卡片"));
   await wait(300);
@@ -723,5 +778,36 @@ export async function checkQueueInElectron(win) {
     return true;
   })()`);
 
+  // ---- 文件名优先：窄窗口 + 超长名字，名字不能被徽标 / 体积挤没 ----
+  {
+    const [width, height] = win.getSize();
+    const longName = path.join(attachDir, "a-very-long-screenshot-name-for-the-queue-card-2026.png");
+    await writeFile(longName, "x".repeat(1024 * 1024));
+    await evaluate(`(() => {
+      const thread = window.__piDesktop.workbench.active.value.activeThread;
+      const attach = ${JSON.stringify(longName)};
+      const prompt = '<file name="' + attach + '">' + String.fromCharCode(10) + 'x' + String.fromCharCode(10) + '</file>' + String.fromCharCode(10) + '看图';
+      thread.queue = { steering: [], followUp: [prompt] };
+      return true;
+    })()`);
+    win.setSize(760, 800);
+    await poll("Boolean(document.querySelector('.queue-file-name'))", "长名字附件出现");
+    await wait(400);
+    const fileView = JSON.parse(
+      await evaluate(`(() => {
+        const file = document.querySelector('.queue-file-name');
+        return JSON.stringify({
+          name: file?.textContent?.trim() ?? '',
+          nameWidth: Math.round(file?.getBoundingClientRect().width ?? 0),
+        });
+      })()`),
+    );
+    assert.match(fileView.name, /^a-very-long/, `文件名要在，实际「${fileView.name}」`);
+    assert.ok(fileView.nameWidth >= 60, `窄窗口下文件名仍要看得见，实测 ${fileView.nameWidth}px`);
+    win.setSize(width, height);
+    await wait(300);
+  }
+
+  await rm(attachDir, { recursive: true, force: true }).catch(() => {});
   console.log("[queue] PASS 单次展示 / 气泡标记 / 卡片预览 / 编辑 / 撤回入口 / 清空回收", ids.a, ids.b);
 }
