@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
-import { COMPACT_RPC_TIMEOUT_MS, runCompact } from "./compact-wait.ts";
+import { COMPACT_RPC_TIMEOUT_MS, runCompactResilient } from "./compact-wait.ts";
 import { clearSessionHistoryCache, readSessionHistory, readSessionHistoryPage } from "./session-history.ts";
 import { firstUserTitle } from "./session-title.ts";
 import { readSessionName } from "./session-name.ts";
@@ -2262,7 +2262,15 @@ export class PiHost {
     if (method === "compact") {
       // 压缩上下文要调模型总结整段对话，动辄一两分钟，远超上游 RpcClient 的 30 秒单命令超时。
       // 超时只代表「客户端不等了」，Pi 进程仍在压缩 —— 改成等 compaction_end 事件（见 compact-wait.ts）。
-      const outcome = await runCompact(client, restored[0]);
+      // 摘要可能因为「思考 token 吃掉输出预算」被截断（generation hit the token cap）：
+      // 这种情况临时把思考等级降到 off 重试一次，结束后还原（见 runCompactResilient）。
+      const outcome = await runCompactResilient(client, restored[0], {
+        getThinkingLevel: async () => (await client.getState())?.thinkingLevel,
+        setThinkingLevel: (level) => client.setThinkingLevel(level),
+      });
+      if (outcome.retriedFrom) {
+        log.pi("warn", "compaction", `摘要撞到输出上限，已用 off 思考等级重试（原来是 ${outcome.retriedFrom}）`);
+      }
       if (outcome.slow) {
         log.pi("warn", "compaction", `压缩超过 ${COMPACT_RPC_TIMEOUT_MS / 1000} 秒才完成，已改为等待 compaction_end 事件`);
         return { slow: true };

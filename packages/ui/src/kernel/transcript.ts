@@ -1,5 +1,6 @@
 // 重试 / 压缩状态卡片的归并思路参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。
 import { splitAttachmentMarkers, type MessageAttachment } from "../shared/attachments.ts";
+import { compactionFailureText } from "../shared/compaction-error.ts";
 import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
 import { formatTokens } from "../shared/util.ts";
 import { localizeNotification } from "../shared/notify-text.ts";
@@ -421,7 +422,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           ? `上下文已压缩：${formatTokens(result.tokensBefore)} → ${formatTokens(result.estimatedTokensAfter)} tokens`
           : event.aborted
             ? "上下文压缩已取消"
-            : `上下文压缩失败${event.errorMessage ? `：${event.errorMessage}` : ""}`;
+            : compactionFailureText(event.errorMessage ? String(event.errorMessage) : "");
         if (notice) {
           notice.text = text;
           notice.level = result || event.aborted ? "info" : "error";

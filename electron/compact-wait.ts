@@ -94,3 +94,58 @@ export async function runCompact(
   }
   return { slow: true, value: undefined };
 }
+
+/**
+ * 摘要撞输出上限：上游 `stopReason === "length"` 时报
+ * `Summarization failed: generation hit the token cap and the summary is incomplete`。
+ *
+ * 写摘要那一次调用用的输出预算是 `min(0.8 × reserveTokens, model.maxTokens)`（默认 16384 × 0.8
+ * ≈ 13107），并且**沿用会话当前的思考等级**——推理模型的思考 token 也算在这笔预算里。
+ * 思考等级高的时候，模型常常把预算全花在推理上，摘要就被截断了；同一段对话换个时间重跑
+ * 可能又成功，所以看起来时好时坏。
+ *
+ * 对策：这一次压缩临时用 `off` 重试（摘要不需要思考），结束后把等级还原。
+ */
+export function isTokenCapFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /hit the token cap|summary is incomplete/i.test(message);
+}
+
+export interface CompactLevelHooks {
+  /** 当前思考等级（拿不到就返回 undefined，此时不重试） */
+  getThinkingLevel(): Promise<string | undefined> | string | undefined;
+  setThinkingLevel(level: string): Promise<void> | void;
+}
+
+export type ResilientCompactOutcome = CompactOutcome & {
+  /** 是否因为输出上限重试过（值为重试前的思考等级） */
+  retriedFrom?: string;
+};
+
+/**
+ * 带「降思考等级重试」的压缩。
+ *
+ * 只有**输出上限截断**才重试，其它错误原样抛出（重试救不了，白白多等一两分钟）。
+ * 重试前后都还原思考等级，失败也还原。
+ */
+export async function runCompactResilient(
+  client: CompactClient,
+  instructions: string | undefined,
+  hooks: CompactLevelHooks,
+  options: CompactOptions = {},
+): Promise<ResilientCompactOutcome> {
+  try {
+    return await runCompact(client, instructions, options);
+  } catch (error) {
+    if (!isTokenCapFailure(error)) throw error;
+    const previous = await hooks.getThinkingLevel();
+    if (!previous || previous === "off") throw error;
+    await hooks.setThinkingLevel("off");
+    try {
+      const outcome = await runCompact(client, instructions, options);
+      return { ...outcome, retriedFrom: previous };
+    } finally {
+      await hooks.setThinkingLevel(previous);
+    }
+  }
+}

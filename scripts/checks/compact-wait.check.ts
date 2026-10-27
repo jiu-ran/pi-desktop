@@ -3,7 +3,9 @@ import {
   COMPACT_FINISH_TIMEOUT_MS,
   COMPACT_RPC_TIMEOUT_MS,
   isCompactTimeout,
+  isTokenCapFailure,
   runCompact,
+  runCompactResilient,
 } from "../../electron/compact-wait.ts";
 
 /** 假客户端：可以控制「命令什么时候回 / 回什么」以及「事件什么时候来」 */
@@ -122,6 +124,103 @@ async function main(): Promise<void> {
     });
     await assert.rejects(() => runCompact(client, undefined), /Model not found/);
     assert.equal(client.listening, 0);
+  }
+
+  // 8. 摘要撞输出上限：临时把思考等级降到 off 重试一次，成功后还原等级
+  {
+    const levels: string[] = [];
+    let calls = 0;
+    const client = fakeClient({
+      respond: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error(
+            "Compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete",
+          );
+        }
+        return { ok: true };
+      },
+    });
+    const outcome = await runCompactResilient(client, undefined, {
+      getThinkingLevel: async () => "high",
+      setThinkingLevel: (level) => {
+        levels.push(level);
+      },
+    });
+    assert.equal(calls, 2, "要重试一次");
+    assert.deepEqual(levels, ["off", "high"], "先降级、结束后还原");
+    assert.equal(outcome.slow, false);
+    assert.equal(outcome.retriedFrom, "high");
+  }
+
+  // 9. 思考等级本来就是 off：不重试（重试也救不了），原错误抛出
+  {
+    let calls = 0;
+    const client = fakeClient({
+      respond: async () => {
+        calls += 1;
+        throw new Error("Summarization failed: generation hit the token cap and the summary is incomplete");
+      },
+    });
+    await assert.rejects(
+      () =>
+        runCompactResilient(client, undefined, {
+          getThinkingLevel: () => "off",
+          setThinkingLevel: () => {
+            throw new Error("不该改等级");
+          },
+        }),
+      /token cap/,
+    );
+    assert.equal(calls, 1, "off 就不再重试");
+  }
+
+  // 10. 重试也失败：错误抛出，但思考等级必须还原
+  {
+    const levels: string[] = [];
+    const client = fakeClient({
+      respond: async () => {
+        throw new Error("Summarization failed: generation hit the token cap and the summary is incomplete");
+      },
+    });
+    await assert.rejects(
+      () =>
+        runCompactResilient(client, undefined, {
+          getThinkingLevel: () => "medium",
+          setThinkingLevel: (level) => {
+            levels.push(level);
+          },
+        }),
+      /token cap/,
+    );
+    assert.deepEqual(levels, ["off", "medium"], "失败也要还原等级");
+  }
+
+  // 11. 其它错误不重试（重试救不了，白等一两分钟）
+  {
+    let calls = 0;
+    const client = fakeClient({
+      respond: async () => {
+        calls += 1;
+        throw new Error("Model not found: foo/bar");
+      },
+    });
+    await assert.rejects(
+      () =>
+        runCompactResilient(client, undefined, {
+          getThinkingLevel: () => "high",
+          setThinkingLevel: () => {
+            throw new Error("不该改等级");
+          },
+        }),
+      /Model not found/,
+    );
+    assert.equal(calls, 1);
+    assert.equal(isTokenCapFailure(new Error("Model not found: foo/bar")), false);
+    assert.equal(
+      isTokenCapFailure(new Error("Summarization failed: generation hit the token cap and the summary is incomplete")),
+      true,
+    );
   }
 
   console.log("[compact-wait] ok");
