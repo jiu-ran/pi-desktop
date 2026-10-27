@@ -32,8 +32,15 @@ const themeModeHint = computed(() => {
 const fileIconLabel = computed(
   () => (FILE_ICON_THEMES.find((item) => item.id === appSettings.fileIconTheme) ?? FILE_ICON_THEMES[0]).label,
 );
-/** 预览只显示文件名（路径太长会把预览挤掉） */
-const fileIconPreview = FILE_ICON_SAMPLES.map((path) => ({ path, name: path.split("/").pop() ?? path }));
+/**
+ * 预览只显示文件名（路径太长会把预览挤掉）。
+ * 额外给两枚「文件夹」样本：文件夹按名字换形状/配色（src 蓝、node_modules 红、.git 换图形）。
+ */
+const fileIconPreview = [
+  { path: "src", name: "src/", folder: true },
+  { path: "node_modules", name: "node_modules/", folder: true },
+  ...FILE_ICON_SAMPLES.map((path) => ({ path, name: path.split("/").pop() ?? path, folder: false })),
+];
 const accentCustom = computed(() => normalizeHex(appSettings.accentCustom, ACCENTS[0].color));
 const accentColor = computed(() =>
   appSettings.accent === "custom"
@@ -346,7 +353,7 @@ class="settings-segment"
     <div class="settings-row settings-row-preview">
       <div class="settings-fileicon-preview">
         <span v-for="item in fileIconPreview" :key="item.path" class="settings-fileicon-sample" :title="item.path">
-          <FileIcon :name="item.path" :size="16" />
+          <FileIcon :name="item.path" :size="16" :is-folder="item.folder" />
           <small>{{ item.name }}</small>
         </span>
       </div>

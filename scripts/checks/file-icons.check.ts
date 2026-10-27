@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import {
   FILE_ICON_SAMPLES,
   FILE_ICON_THEMES,
+  badgeFamily,
+  badgeText,
   contrastInk,
   fileExtension,
   fileIconEntry,
+  folderStyle,
   resolveFileIcon,
 } from "../../packages/ui/src/shared/file-icons.ts";
 import { setiIcons } from "../../packages/ui/src/shared/seti-icons.ts";
@@ -53,9 +56,9 @@ assert.equal(setiOf("report.xlsx"), "xls");
 assert.equal(setiOf("font.woff2"), "font");
 assert.equal(setiOf("app.exe"), "windows");
 assert.equal(setiOf("tool.dll"), "windows");
-assert.equal(setiOf("mystery.zzz"), "default", "认不出来的扩展名退回 default");
-assert.equal(setiOf("no-extension"), "default");
-assert.equal(setiOf(""), "default", "空名字不能崩");
+assert.equal(setiOf("mystery.zzz"), "unknown", "认不出来的扩展名走徽标兜底（不是空白纸页）");
+assert.equal(setiOf("no-extension"), "unknown");
+assert.equal(setiOf(""), "unknown", "空名字不能崩");
 
 // ---- 3. 特殊文件名 / 点开头 / 大小写 ----
 assert.equal(setiOf("Dockerfile"), "docker");
@@ -67,6 +70,48 @@ assert.equal(setiOf("uv.lock"), "lock");
 assert.equal(setiOf("AGENTS.md"), "markdown");
 assert.equal(setiOf("Cargo.toml"), "rust", "大小写不敏感");
 assert.equal(setiOf("/abs/path/src/index.ts"), "typescript", "带目录的完整路径也能认");
+
+// ---- 3b. Seti 缺失的类型用徽标兜底，永远有东西可看 ----
+// 常见但 Seti 没有的扩展名，全部走徽标
+for (const [name, badge] of [
+  ["a.txt", "TXT"],
+  ["a.log", "LOG"],
+  ["a.bib", "BIB"],
+  ["a.rst", "RST"],
+  ["a.org", "ORG"],
+  ["a.xyz", "XYZ"],
+  ["Procfile", "PRO"],
+  ["mystery.zzz", "ZZZ"],
+] as const) {
+  const view = resolveFileIcon(name);
+  assert.equal(view.ink, "badge", `${name} 应该走徽标兜底`);
+  assert.equal(view.badge, badge, `${name} 的徽标文字应为 ${badge}`);
+  assert.ok(view.badge.length >= 2 && view.badge.length <= 4, `${name} 徽标长度异常：${view.badge}`);
+  assert.match(view.color, /^#[0-9a-f]{6}$/, `${name} 徽标要有配色`);
+}
+// 有 Seti 图形的仍然画图形
+for (const name of ["a.ts", "a.png", "README.md", "package.json", "a.avro", "a.apk", "deck.pptx"]) {
+  assert.equal(resolveFileIcon(name).ink, "glyph", `${name} 应该画 Seti 图形`);
+}
+// 徽标配色按大类走
+assert.equal(badgeFamily("a.txt"), "doc");
+assert.equal(badgeFamily("a.png"), "media");
+assert.equal(badgeFamily("a.mp4"), "video");
+assert.equal(badgeFamily("a.zzz"), "default");
+assert.equal(badgeText("a.HEIC"), "HEIC");
+
+// ---- 3c. 文件夹：按名字区分形状与配色 ----
+assert.equal(folderStyle("src").color, "#4f8fb3", "src 用源码色");
+assert.equal(folderStyle("tests").color, "#3f9070", "test 用测试色");
+assert.equal(folderStyle("dist").color, "#b98a4d", "dist 用产物色");
+assert.equal(folderStyle(".git").seti, "git_folder", ".git 换成 Git 文件夹图形");
+assert.equal(folderStyle("node_modules").seti, "npm", "node_modules 用 npm 图形");
+assert.equal(folderStyle("random-folder").seti, "folder", "普通文件夹保持 Seti 文件夹形状");
+assert.equal(folderStyle("random-folder").color, "#7f8ca6");
+const srcFolder = resolveFileIcon("src", { isFolder: true });
+assert.equal(srcFolder.isFolder, true);
+assert.equal(srcFolder.color, "#4f8fb3", "文件夹的最终颜色来自用途配色");
+assert.equal(srcFolder.ink, "glyph");
 
 // ---- 4. 引用的图标名必须都在 seti-icons 里 ----
 // 直接从源码里扫一遍：以后加类型写了不存在的名字，这里立刻报
@@ -80,7 +125,9 @@ const referenced = new Set<string>();
 for (const match of tableSource.matchAll(/\[\s*"([a-z0-9_-]+)",\s*"[^"]*"\s*\]/gi)) referenced.add(match[1]!);
 referenced.add("default");
 assert.ok(referenced.size > 50, `扫到的图标名太少（${referenced.size}），说明匹配规则失效了`);
-const unknown = [...referenced].filter((name) => !setiIcons[name]);
+// `unknown` 是「走徽标兜底」的哨兵值，必须**不存在**于 seti-icons 里（否则又变回空白纸页）
+assert.equal(setiIcons.unknown, undefined, "unknown 不能被真的定义成图标");
+const unknown = [...referenced].filter((name) => name !== "unknown" && !setiIcons[name]);
 assert.deepEqual(unknown, [], `这些图标名在 seti-icons.ts 里不存在：${unknown.join(", ")}`);
 
 // ---- 5. 每个 Seti 图标都要有颜色和路径 ----
@@ -118,8 +165,11 @@ assert.equal(contrastInk("bad-color"), "#ffffff", "非法颜色退回白字");
 const folder = resolveFileIcon("src", { isFolder: true });
 assert.equal(folder.seti, "folder");
 assert.equal(folder.isFolder, true);
-assert.equal(folder.label, "文件夹");
+assert.equal(folder.label, "源码", "src 文件夹带用途名称");
 assert.ok(folder.body.includes("currentColor"));
+const plainFolder = resolveFileIcon("whatever", { isFolder: true });
+assert.equal(plainFolder.label, "文件夹");
+assert.equal(plainFolder.ink, "glyph");
 
 // ---- 8. 预览样例要覆盖多种类型 ----
 const sampleSeti = new Set(FILE_ICON_SAMPLES.map((sample) => resolveFileIcon(sample).seti));

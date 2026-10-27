@@ -6,11 +6,12 @@ import { resolveFileIcon, type FileIconThemeId } from "../../shared/file-icons.t
 /**
  * 文件类型图标（文件树 / 打开中的标签页 / 设置页预览共用）。
  *
- * 形状来自 Seti UI（32 网格，SVG 里的 fill 已换成 `currentColor`），这里只负责
- * 按主题决定「有没有底色」和「图标什么颜色」：
+ * 形状来自 Seti UI（32 网格，SVG 里的 fill 已换成 `currentColor`）；Seti 没有覆盖的
+ * 类型（`.txt`、`.ppt`、`.heic`…）退到「扩展名徽标」，保证任何文件都有可辨识的样子。
+ * 主题只决定「有没有底色」和「什么颜色」：
  * - `seti`：Seti 原色，无底色；
  * - `mono`：跟随正文颜色，无底色；
- * - `block`：品牌色方块 + 反白图标。
+ * - `block`：品牌色方块 + 反白内容。
  */
 const props = withDefaults(
   defineProps<{
@@ -39,7 +40,7 @@ const markup = computed(
 <template>
   <span
     class="file-icon"
-    :class="[`is-${view.theme}`, { 'is-folder': view.isFolder }]"
+    :class="[`is-${view.theme}`, `is-${view.ink}`, { 'is-folder': view.isFolder }]"
     :data-seti="view.seti"
     :data-theme="view.theme"
     :title="view.label"
@@ -51,6 +52,7 @@ const markup = computed(
       height: `${size}px`,
     }"
   >
-    <span class="file-icon-glyph" v-html="markup" />
+    <span v-if="view.ink === 'badge'" class="file-icon-badge" :data-len="view.badge.length">{{ view.badge }}</span>
+    <span v-else class="file-icon-glyph" v-html="markup" />
   </span>
 </template>

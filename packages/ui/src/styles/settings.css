@@ -465,9 +465,16 @@
   padding-top: 4px;
   padding-bottom: 14px;
 }
-.settings-fileicon-preview {
+/*
+ * 这里要压过 `.settings-row > :not(.settings-row-info):not(.settings-plugin-meta) { flex: none }`
+ * （它带两个 :not()，特异性 0,3,0），否则预览行会被当成「不参与压缩的控件」而撑出横向滚动条。
+ */
+.settings-body .settings-row.settings-row-preview > .settings-fileicon-preview {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
+  /* min-width: 0 才允许在窄窗口下收缩，否则按最长一行撑开、把设置页顶出横向滚动条 */
+  min-width: 0;
   gap: 8px 14px;
 }
 .settings-fileicon-sample {
@@ -480,6 +487,10 @@
 .settings-fileicon-sample small {
   font-size: 11.5px;
   color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
 }
 .settings-row.is-disabled {
   opacity: 0.5;

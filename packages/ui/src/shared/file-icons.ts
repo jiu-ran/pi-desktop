@@ -28,6 +28,58 @@ type Entry = readonly [seti: string, label: string];
 
 /** 扩展名（小写）→ 图标 */
 const BY_EXTENSION: Record<string, Entry> = {
+  // ---- 补齐：Seti 没有专属图形，按语义归到最近的图标 ----
+  odp: ["word", "演示文稿"],
+  pps: ["word", "演示文稿"],
+  ppsx: ["word", "演示文稿"],
+  key: ["word", "Keynote"],
+  pages: ["word", "Pages"],
+  dot: ["word", "Word 模板"],
+  dotx: ["word", "Word 模板"],
+  epub: ["word", "电子书"],
+  mobi: ["word", "电子书"],
+  azw3: ["word", "电子书"],
+  xlsm: ["xls", "Excel"],
+  numbers: ["xls", "Numbers"],
+  avro: ["db", "Avro"],
+  orc: ["db", "ORC"],
+  mdb: ["db", "Access"],
+  dbf: ["db", "dBase"],
+  plist: ["config", "plist"],
+  heic: ["image", "HEIC"],
+  heif: ["image", "HEIF"],
+  eps: ["image", "EPS"],
+  raw: ["image", "RAW"],
+  dng: ["image", "DNG"],
+  cr2: ["image", "Canon RAW"],
+  nef: ["image", "Nikon RAW"],
+  m4v: ["video", "视频"],
+  wmv: ["video", "视频"],
+  flv: ["video", "视频"],
+  mpg: ["video", "视频"],
+  mpeg: ["video", "视频"],
+  ogv: ["video", "视频"],
+  opus: ["audio", "音频"],
+  wma: ["audio", "音频"],
+  mid: ["audio", "MIDI"],
+  midi: ["audio", "MIDI"],
+  lz: ["zip", "压缩包"],
+  lz4: ["zip", "压缩包"],
+  z: ["zip", "压缩包"],
+  cab: ["zip", "压缩包"],
+  iso: ["zip", "镜像"],
+  dmg: ["zip", "磁盘映像"],
+  pkg: ["zip", "安装包"],
+  deb: ["zip", "Debian 包"],
+  rpm: ["zip", "RPM 包"],
+  apk: ["zip", "Android 包"],
+  ipa: ["zip", "iOS 包"],
+  ear: ["zip", "EAR"],
+  xhtml: ["html", "XHTML"],
+  hcl: ["config", "HCL"],
+  nix: ["config", "Nix"],
+  ksh: ["shell", "Ksh"],
+  pyw: ["python", "Python"],
   // ---- 前端 ----
   ts: ["typescript", "TypeScript"],
   tsx: ["typescript", "TypeScript"],
@@ -39,7 +91,7 @@ const BY_EXTENSION: Record<string, Entry> = {
   cjs: ["javascript", "JavaScript"],
   vue: ["vue", "Vue"],
   svelte: ["svelte", "Svelte"],
-  astro: ["default", "Astro"],
+  astro: ["html", "Astro"],
   html: ["html", "HTML"],
   htm: ["html", "HTML"],
   css: ["css", "CSS"],
@@ -66,8 +118,8 @@ const BY_EXTENSION: Record<string, Entry> = {
   rb: ["ruby", "Ruby"],
   php: ["php", "PHP"],
   swift: ["swift", "Swift"],
-  m: ["default", "Objective-C"],
-  mm: ["default", "Objective-C++"],
+  m: ["c", "Objective-C"],
+  mm: ["cpp", "Objective-C++"],
   scala: ["scala", "Scala"],
   sc: ["scala", "Scala"],
   lua: ["lua", "Lua"],
@@ -75,7 +127,7 @@ const BY_EXTENSION: Record<string, Entry> = {
   zig: ["zig", "Zig"],
   ex: ["elixir", "Elixir"],
   exs: ["elixir", "Elixir"],
-  erl: ["default", "Erlang"],
+  erl: ["unknown", "Erlang"],
   hs: ["haskell", "Haskell"],
   clj: ["clojure", "Clojure"],
   cljs: ["clojure", "ClojureScript"],
@@ -90,9 +142,9 @@ const BY_EXTENSION: Record<string, Entry> = {
   pl: ["perl", "Perl"],
   asm: ["asm", "汇编"],
   s: ["asm", "汇编"],
-  sol: ["default", "Solidity"],
-  proto: ["default", "Protobuf"],
-  groovy: ["default", "Groovy"],
+  sol: ["unknown", "Solidity"],
+  proto: ["unknown", "Protobuf"],
+  groovy: ["java", "Groovy"],
   // ---- 脚本 / 配置 ----
   sh: ["shell", "Shell"],
   bash: ["shell", "Bash"],
@@ -125,8 +177,8 @@ const BY_EXTENSION: Record<string, Entry> = {
   md: ["markdown", "Markdown"],
   mdx: ["markdown", "MDX"],
   markdown: ["markdown", "Markdown"],
-  txt: ["default", "文本"],
-  log: ["default", "日志"],
+  txt: ["unknown", "文本"],
+  log: ["unknown", "日志"],
   tex: ["tex", "TeX"],
   csv: ["csv", "CSV"],
   tsv: ["csv", "TSV"],
@@ -137,16 +189,16 @@ const BY_EXTENSION: Record<string, Entry> = {
   sqlite: ["db", "SQLite"],
   sqlite3: ["db", "SQLite"],
   sql: ["db", "SQL"],
-  parquet: ["default", "Parquet"],
+  parquet: ["db", "Parquet"],
   doc: ["word", "Word"],
   docx: ["word", "Word"],
   rtf: ["word", "RTF"],
   odt: ["word", "文档"],
-  ppt: ["default", "演示文稿"],
-  pptx: ["default", "演示文稿"],
+  ppt: ["word", "演示文稿"],
+  pptx: ["word", "演示文稿"],
   pdf: ["pdf", "PDF"],
-  diff: ["default", "补丁"],
-  patch: ["default", "补丁"],
+  diff: ["git", "补丁"],
+  patch: ["git", "补丁"],
   // ---- 媒体 ----
   png: ["image", "PNG"],
   jpg: ["image", "JPEG"],
@@ -192,13 +244,13 @@ const BY_EXTENSION: Record<string, Entry> = {
   war: ["zip", "WAR"],
   exe: ["windows", "可执行文件"],
   dll: ["windows", "动态库"],
-  so: ["default", "动态库"],
-  dylib: ["default", "动态库"],
-  bin: ["default", "二进制"],
+  so: ["unknown", "动态库"],
+  dylib: ["unknown", "动态库"],
+  bin: ["unknown", "二进制"],
   wasm: ["wasm", "WebAssembly"],
   wat: ["wasm", "WebAssembly 文本"],
-  o: ["default", "目标文件"],
-  class: ["default", "Java 类"],
+  o: ["unknown", "目标文件"],
+  class: ["unknown", "Java 类"],
   lock: ["lock", "锁文件"],
   sum: ["lock", "校验文件"],
 };
@@ -272,8 +324,64 @@ const BY_FILENAME: Record<string, Entry> = {
 
 /** 文件夹：Seti 只有一种文件夹形状，展开状态靠左侧箭头表示 */
 const FOLDER: Entry = ["folder", "文件夹"];
-/** 认不出来的文件 */
-const FALLBACK: Entry = ["default", "文件"];
+
+/**
+ * 特殊文件夹：按名字换形状或换色。
+ *
+ * Seti 只有 `folder` / `git_folder` 两种文件夹形状，所以这里做两件事：
+ * - 有语义对应的（`.git`、`node_modules`、`config`…）直接用那个图标；
+ * - 其余保持文件夹形状，但按用途换颜色 —— 文件树里一眼能分出「代码 / 测试 / 产出 / 文档」。
+ */
+const BY_FOLDER: Record<string, { seti?: string; color?: string; label?: string }> = {
+  ".git": { seti: "git_folder", color: "#e0503a", label: "Git 目录" },
+  ".github": { seti: "git_folder", color: "#e0503a", label: "GitHub 配置" },
+  ".vscode": { seti: "config", color: "#3d8fd1", label: "编辑器配置" },
+  ".config": { seti: "config", color: "#7b86c9", label: "配置" },
+  "__pycache__": { color: "#4a7fb5", label: "Python 缓存" },
+  "node_modules": { seti: "npm", color: "#c0392b", label: "依赖目录" },
+  src: { color: "#4f8fb3", label: "源码" },
+  source: { color: "#4f8fb3", label: "源码" },
+  lib: { color: "#4f8fb3", label: "库" },
+  app: { color: "#4f8fb3", label: "应用" },
+  packages: { color: "#4f8fb3", label: "包" },
+  test: { color: "#3f9070", label: "测试" },
+  tests: { color: "#3f9070", label: "测试" },
+  __tests__: { color: "#3f9070", label: "测试" },
+  spec: { color: "#3f9070", label: "测试" },
+  specs: { color: "#3f9070", label: "测试" },
+  e2e: { color: "#3f9070", label: "端到端测试" },
+  docs: { color: "#8d97a6", label: "文档" },
+  doc: { color: "#8d97a6", label: "文档" },
+  documentation: { color: "#8d97a6", label: "文档" },
+  assets: { color: "#9a6cc4", label: "资源" },
+  static: { color: "#9a6cc4", label: "静态资源" },
+  images: { color: "#9a6cc4", label: "图片" },
+  img: { color: "#9a6cc4", label: "图片" },
+  media: { color: "#c65fa0", label: "媒体" },
+  build: { color: "#b98a4d", label: "构建产物" },
+  dist: { color: "#b98a4d", label: "构建产物" },
+  out: { color: "#b98a4d", label: "构建产物" },
+  output: { color: "#b98a4d", label: "构建产物" },
+  target: { color: "#b98a4d", label: "构建产物" },
+  coverage: { color: "#b98a4d", label: "覆盖率报告" },
+  config: { seti: "config", color: "#7b86c9", label: "配置" },
+  configs: { seti: "config", color: "#7b86c9", label: "配置" },
+  scripts: { seti: "shell", color: "#8f98a8", label: "脚本" },
+  tools: { seti: "shell", color: "#8f98a8", label: "工具" },
+  bin: { color: "#77808f", label: "可执行文件" },
+  vendor: { color: "#8d97a6", label: "第三方代码" },
+  migrations: { seti: "db", color: "#3f9070", label: "数据库迁移" },
+};
+
+/** 文件夹配色（Seti 的 folder.svg 是单色，颜色靠这里给） */
+const FOLDER_COLOR = "#7f8ca6";
+/**
+ * 认不出来的文件。
+ *
+ * 用一个**不存在于 seti-icons 的图标名**（不是 `default`）：这样 `resolveFileIcon`
+ * 会走到「扩展名徽标」分支，而不是让所有未知类型都长成同一张空白纸页。
+ */
+const FALLBACK: Entry = ["unknown", "文件"];
 
 const EMPTY_VIEW = {
   theme: "seti" as FileIconThemeId,
@@ -283,6 +391,85 @@ const EMPTY_VIEW = {
   inkColor: "#8b929e",
   body: "",
   isFolder: false,
+};
+
+/** 画法：Seti 图形 / 扩展名徽标 */
+export type FileIconInk = "glyph" | "badge";
+
+/**
+ * Seti 没有覆盖的类型用「扩展名徽标」兜底。
+ *
+ * Seti 只有 169 个图标，`.txt`、`.ppt`、`.heic`、`.apk` 这类它本来就没有；
+ * 与其所有人共用一个空白纸页，不如把扩展名写成缩写（TXT / PPT / HEIC），
+ * 再按大类上色 —— 任何一个扩展名都能有可辨识的样子。
+ */
+const BADGE_COLORS: Record<string, string> = {
+  doc: "#5c7fa8",
+  data: "#3f9070",
+  media: "#9a6cc4",
+  video: "#c65fa0",
+  audio: "#b9812a",
+  archive: "#b98d4d",
+  binary: "#77808f",
+  code: "#5b8def",
+  config: "#7b86c9",
+  default: "#8d97a6",
+};
+
+/** 扩展名 → 徽标配色的大类 */
+const BADGE_FAMILY: Record<string, string> = {
+  // 徽标兜底只在「Seti 没有这个类型」时用到，所以这里列的是**掉到兜底的**那些扩展名
+  txt: "doc",
+  log: "doc",
+  rtf: "doc",
+  rst: "doc",
+  org: "doc",
+  bib: "doc",
+  adoc: "doc",
+  asciidoc: "doc",
+  diff: "doc",
+  patch: "doc",
+  csv: "data",
+  tsv: "data",
+  db: "data",
+  sqlite: "data",
+  parquet: "data",
+  avro: "data",
+  png: "media",
+  jpg: "media",
+  jpeg: "media",
+  gif: "media",
+  svg: "media",
+  heic: "media",
+  webp: "media",
+  mp4: "video",
+  mov: "video",
+  webm: "video",
+  mp3: "audio",
+  wav: "audio",
+  flac: "audio",
+  zip: "archive",
+  tar: "archive",
+  gz: "archive",
+  "7z": "archive",
+  rar: "archive",
+  iso: "archive",
+  dmg: "archive",
+  so: "binary",
+  dylib: "binary",
+  bin: "binary",
+  o: "binary",
+  class: "binary",
+  pyc: "binary",
+  exe: "binary",
+  erl: "code",
+  sol: "code",
+  proto: "code",
+  hcls: "code",
+  yml: "config",
+  yaml: "config",
+  toml: "config",
+  ini: "config",
 };
 
 export interface FileIconView {
@@ -297,6 +484,10 @@ export interface FileIconView {
   /** SVG 内容（fill 已换成 currentColor） */
   body: string;
   isFolder: boolean;
+  /** 画法：有 Seti 图形就画图形，没有就画扩展名徽标 */
+  ink: FileIconInk;
+  /** 徽标文字（`ink === "badge"` 时有值），2–4 个字符 */
+  badge: string;
 }
 
 /** 取扩展名：`a.d.ts` → `ts`；`.gitignore` → `""`（点开头的算特殊文件名） */
@@ -316,11 +507,25 @@ export function fileName(name: string): string {
  * 命中的类型。优先级：文件夹 → 特殊文件名 → `.env.local` 这类前缀回退 →
  * 扩展名 → 点开头当配置 → 兜底。
  */
+/** 文件夹的样式（形状 + 颜色 + 名称） */
+export function folderStyle(name: string): { seti: string; color: string; label: string } {
+  const base = fileName(name).toLowerCase() || String(name ?? "").trim().toLowerCase();
+  const hit = BY_FOLDER[base] ?? (base.startsWith(".") ? BY_FOLDER[base.split("/")[0]!] : undefined);
+  return {
+    seti: hit?.seti ?? "folder",
+    color: hit?.color ?? FOLDER_COLOR,
+    label: hit?.label ?? "文件夹",
+  };
+}
+
 export function fileIconEntry(
   name: string,
   options: { isFolder?: boolean } = {},
 ): Entry {
-  if (options.isFolder) return FOLDER;
+  if (options.isFolder) {
+    const style = folderStyle(name);
+    return [style.seti, style.label];
+  }
   const base = fileName(name).toLowerCase();
   if (!base) return FALLBACK;
   const special = BY_FILENAME[base];
@@ -359,6 +564,20 @@ export function contrastInk(color: string): string {
   return luminance > 0.32 ? "#12141a" : "#ffffff";
 }
 
+/** 徽标文字：扩展名（最多 4 位，大写），没有扩展名就用名字前 3 个字 */
+export function badgeText(name: string): string {
+  const ext = fileExtension(name);
+  if (ext) return ext.slice(0, 4).toUpperCase();
+  const base = fileName(name).replace(/[^a-zA-Z0-9]/g, "");
+  return (base.slice(0, 3) || "FILE").toUpperCase();
+}
+
+/** 徽标配色的大类（认不出来按 default） */
+export function badgeFamily(name: string): string {
+  const ext = fileExtension(name);
+  return (ext && BADGE_FAMILY[ext]) || "default";
+}
+
 /** 解析成界面要用的视图 */
 export function resolveFileIcon(
   name: string,
@@ -366,18 +585,41 @@ export function resolveFileIcon(
 ): FileIconView {
   const theme: FileIconThemeId = options.theme ?? "seti";
   const [seti, label] = fileIconEntry(name, { isFolder: options.isFolder });
-  const icon = setiIcons[seti] ?? setiIcons.default;
-  if (!icon) return { ...EMPTY_VIEW, theme };
+  const icon = setiIcons[seti];
+  // 文件夹的配色按用途走（src / test / dist…），不跟着 folder.svg 的灰色走
+  const color = options.isFolder ? folderStyle(name).color : (icon?.color ?? BADGE_COLORS.default!);
   const inkColor =
-    theme === "block" ? contrastInk(icon.color) : theme === "mono" ? "var(--fg-2)" : icon.color;
+    theme === "block" ? contrastInk(color) : theme === "mono" ? "var(--fg-2)" : color;
+
+  // Seti 有这个图标就画图形，没有就退到扩展名徽标（永远有东西可看）
+  if (icon) {
+    return {
+      theme,
+      seti,
+      label,
+      color,
+      inkColor,
+      body: icon.body,
+      isFolder: Boolean(options.isFolder),
+      ink: "glyph",
+      badge: "",
+    };
+  }
   return {
     theme,
     seti,
-    label,
-    color: icon.color,
-    inkColor,
-    body: icon.body,
-    isFolder: Boolean(options.isFolder),
+    label: label === "文件" ? "未知类型" : label,
+    color: BADGE_COLORS[badgeFamily(name)] ?? BADGE_COLORS.default!,
+    inkColor:
+      theme === "block"
+        ? contrastInk(BADGE_COLORS[badgeFamily(name)] ?? BADGE_COLORS.default!)
+        : theme === "mono"
+          ? "var(--fg-2)"
+          : BADGE_COLORS[badgeFamily(name)] ?? BADGE_COLORS.default!,
+    body: "",
+    isFolder: false,
+    ink: "badge",
+    badge: badgeText(name),
   };
 }
 
