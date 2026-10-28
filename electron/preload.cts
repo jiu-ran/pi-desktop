@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   gitWorktrees: (cwd: string) => ipcRenderer.invoke("pi:git-worktrees", cwd),
   gitWorktreeCreate: (cwd: string, name: string) => ipcRenderer.invoke("pi:git-worktree-create", cwd, name),
   gitWorktreeRemove: (cwd: string, target: string) => ipcRenderer.invoke("pi:git-worktree-remove", cwd, target),
+  gitClone: (url: string, target: string) => ipcRenderer.invoke("pi:git-clone", url, target),
   completePaths: (cwd: string, query: string) => ipcRenderer.invoke("pi:complete-paths", cwd, query),
   restart: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:restart", cwd, sessionFile),
   sessions: (cwd: string) => ipcRenderer.invoke("pi:sessions", cwd),

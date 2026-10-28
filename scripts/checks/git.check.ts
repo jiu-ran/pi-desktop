@@ -230,6 +230,23 @@ try {
   assert(badgeCode(badgeSample({ index: "M", worktree: " " })) === "M", "暂存修改应显示 M");
   assert(badgeKind(badgeSample({ index: "M", worktree: " " })) === "修改", "修改应归为修改");
 
+  // 从 Git 克隆：目标目录由界面推导（位置 + 仓库名），主进程复核后再执行
+  const cloneParent = await mkdtemp(path.join(tmpdir(), "pi-desktop-clone-"));
+  try {
+    const cloned = await host.gitClone(root, path.join(cloneParent, "cloned-repo"));
+    assert(cloned.ok, "克隆应成功");
+    assert(existsSync(path.join(cloned.path, "a.txt")), "克隆目录里应有仓库文件");
+    assert(path.basename(cloned.path) === "cloned-repo", "克隆目录名应与传入的一致");
+    assert((await host.gitOverview(cloned.path)).isRepo, "克隆结果应是 Git 仓库");
+    // 目标非空 / 位置不存在 / 相对路径 / 选项形态的地址：都得在跑 git 之前拒掉
+    await expectReject(() => host.gitClone(root, path.join(cloneParent, "cloned-repo")), "目标非空时应拒绝克隆");
+    await expectReject(() => host.gitClone(root, path.join(cloneParent, "nope", "x")), "位置不存在时应拒绝");
+    await expectReject(() => host.gitClone(root, "relative/target"), "相对路径应拒绝");
+    await expectReject(() => host.gitClone("--upload-pack=calc", path.join(cloneParent, "opt")), "选项形态的地址应拒绝");
+  } finally {
+    await rm(cloneParent, { recursive: true, force: true });
+  }
+
   console.log("git", commit.overview.branch, commit.overview.commits.length, "merged", merged.length);
   console.log("OK");
 } finally {

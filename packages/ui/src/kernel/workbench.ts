@@ -724,6 +724,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return task;
   }
 
+  /** 只选目录、不打开：克隆弹窗的「位置」用得上 */
+  async function chooseDirectory(): Promise<string | null> {
+    if (!host?.chooseDirectory) return null;
+    return host.chooseDirectory();
+  }
+
   async function chooseAndOpen(): Promise<void> {
     const cwd = await host.chooseDirectory();
     if (cwd) await open(cwd);
@@ -804,6 +810,19 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (branchChange) bus.emit("git:branch-changed", { cwd: target });
     if (state.activeCwd === target) bus.emit("files:changed", { directory: "" });
     return result;
+  }
+
+  /**
+   * 克隆仓库到 target 目录并直接打开。
+   *
+   * 目标路径由界面用 `cloneTargetPath` 推导（位置 + 地址里的仓库名），主进程再复核一次
+   * 绝对路径 / 父目录 / 目标是否为空，所以这里不再重复校验。
+   */
+  async function cloneRepository(url: string, target: string): Promise<string> {
+    if (!host?.gitClone) throw new Error("当前环境不支持克隆仓库");
+    const result = await host.gitClone(url, target);
+    await open(result.path);
+    return result.path;
   }
 
   async function gitWorktrees(): Promise<GitWorktree[]> {
@@ -2384,6 +2403,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     init,
     dispose,
     open,
+    chooseDirectory,
     chooseAndOpen,
     listDirectory,
     readFile: readWorkspaceFile,
@@ -2399,6 +2419,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     gitInspect,
     gitAction,
     gitWorktrees,
+    cloneRepository,
     createGitWorktree,
     removeGitWorktree,
     completePaths,

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons, projectPathKey, relativeTime } from "../../shared/util.ts";
+import { openCloneDialog } from "../../services/clone-dialog.ts";
 import { askConfirm, askPrompt, openMenu } from "./ui.ts";
 
 export type SessionWorkState = "running" | "compacting" | "error" | "done" | "active" | "idle";
@@ -325,13 +326,21 @@ async function renameTask(group: any, item: any): Promise<void> {
   await workbench.renameSession(name);
   info("已重命名任务");
 }
+
+/** 「+」按钮的两个入口：本地文件夹、从 Git 克隆 */
+function openProjectMenu(event: MouseEvent): void {
+  openMenu(event, [
+    { label: "打开文件夹…", icon: icons.folder, hint: "Ctrl+O", run: () => void workbench.chooseAndOpen() },
+    { label: "从 Git 克隆…", icon: icons.branch, run: () => openCloneDialog() },
+  ]);
+}
 </script>
 
 <template>
   <div class="tasks pane-body">
     <div class="tasks-head">
       <span class="tasks-title">项目与会话</span>
-      <button class="icon-btn" title="打开项目目录 (Ctrl+O)" @click="workbench.chooseAndOpen()" v-html="icons.folder" />
+      <button class="icon-btn" title="打开文件夹，或从 Git 克隆 (Ctrl+O)" aria-label="打开文件夹或克隆仓库" @click="openProjectMenu" v-html="icons.folderAdd" />
     </div>
     <div class="tasks-search">
       <span class="tasks-search-icon" v-html="icons.search" />

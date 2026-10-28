@@ -27,6 +27,8 @@ const MAP = {
   /** 会话块用的气泡图标（与 chat 同一个字形） */
   message: "chat",
   folder: "folder",
+  /** 「打开文件夹 / 克隆」入口：文件夹右下角带加号 */
+  folderAdd: "folder--add",
   file: "document",
   code: "code",
   json: "data--1",

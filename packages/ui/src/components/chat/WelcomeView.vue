@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
+import { openCloneDialog } from "../../services/clone-dialog.ts";
 import { displayProjectName, icons, projectPathKey, shortPath } from "../../shared/util.ts";
 
 const { workbench, plugins } = useKernel();
@@ -42,6 +43,9 @@ const recent = computed(() => {
         <div class="welcome-actions">
           <button class="btn primary large welcome-open" @click="workbench.chooseAndOpen()">
             <span v-html="icons.folder" />打开项目
+          </button>
+          <button class="btn large welcome-open" @click="openCloneDialog()">
+            <span v-html="icons.branch" />从 Git 克隆
           </button>
           <span class="version-tag">Pi {{ state.pi.version }}</span>
         </div>

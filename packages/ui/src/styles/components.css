@@ -935,6 +935,34 @@
 .modal-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
 .modal-message { margin: 0 0 12px; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+/* 从 Git 克隆：两个输入行 + 目标路径提示，沿用设置页的控件高度与聚焦描边 */
+.clone-dialog { width: min(520px, 92vw); }
+.clone-dialog .modal-title { margin-bottom: 12px; }
+.clone-field { margin: 0 0 12px; }
+.clone-label { display: block; margin: 0 0 6px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.clone-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+.clone-input::placeholder { color: var(--fg-3); }
+.clone-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.clone-input[readonly] { cursor: pointer; }
+.clone-input:disabled { opacity: 0.6; }
+.clone-location { position: relative; display: block; }
+.clone-location .clone-input { padding-right: 36px; }
+.clone-browse { position: absolute; top: 1px; right: 1px; width: 30px; height: 30px; border-radius: 0 6px 6px 0; }
+.clone-target { margin: 0 0 10px; color: var(--fg-3); font-size: 11.5px; overflow-wrap: anywhere; }
+.clone-target code { padding: 1px 5px; border-radius: 4px; background: var(--bg-2); color: var(--fg-2); font: 11px var(--mono); }
+.clone-error { margin: 0 0 10px; color: var(--err); font-size: 11.5px; overflow-wrap: anywhere; }
+.clone-dialog .modal-actions { margin-top: 0; }
+.clone-dialog .btn .mini-spinner { margin-right: 6px; }
 
 /* 命令面板 */
 .palette {

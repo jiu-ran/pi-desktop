@@ -714,6 +714,8 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return null;
     return host.authorizeWorkspace(result.filePaths[0]);
   });
+  // 克隆不是「工作区内的 Git 操作」：调用方还没有项目，所以不进 workspaceChannels
+  handle("pi:git-clone", (url: string, target: string) => host.gitClone(url, target));
   // 剪贴板图片（Ctrl+V）：写入临时目录后作为普通附件加入，不入仓、不污染工作区
   handle("pi:save-pasted-image", async (payload: { name?: string; mimeType?: string; data?: string } = {}) => {
     const mime = String(payload.mimeType ?? "image/png").toLowerCase();

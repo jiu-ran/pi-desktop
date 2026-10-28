@@ -217,6 +217,13 @@ export interface GitWorktreeRemoveResult {
   path: string;
 }
 
+export interface GitCloneResult {
+  ok: true;
+  /** 克隆完成的目录（绝对路径） */
+  path: string;
+  message: string;
+}
+
 export type McpExposureMode = "codemode" | "deferred" | "direct" | "hidden";
 
 export interface McpServerItem {
@@ -469,6 +476,7 @@ export interface PiDesktopBridge {
   gitWorktrees: (cwd: string) => Promise<GitWorktree[]>;
   gitWorktreeCreate: (cwd: string, name: string) => Promise<GitWorktreeCreateResult>;
   gitWorktreeRemove: (cwd: string, target: string) => Promise<GitWorktreeRemoveResult>;
+  gitClone: (url: string, target: string) => Promise<GitCloneResult>;
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;
   sessions: (cwd: string) => Promise<any[]>;

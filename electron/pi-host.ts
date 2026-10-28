@@ -283,6 +283,13 @@ export interface GitWorktreeRemoveResult {
   path: string;
 }
 
+export interface GitCloneResult {
+  ok: true;
+  /** 克隆完成的目录（已 resolve 的绝对路径） */
+  path: string;
+  message: string;
+}
+
 export interface WorkerSlot {
   client: RpcClient;
   sessionFile: string;
@@ -617,9 +624,14 @@ function gitError(error: unknown): Error {
   return new Error(e?.message ?? String(error));
 }
 
-async function gitRun(cwd: string, args: string[], maxBuffer = 4 * 1024 * 1024): Promise<string> {
+async function gitRun(cwd: string, args: string[], maxBuffer = 4 * 1024 * 1024, env?: NodeJS.ProcessEnv): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer, windowsHide: true });
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      maxBuffer,
+      windowsHide: true,
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
     return stdout;
   } catch (error) {
     throw gitError(error);
@@ -1845,6 +1857,36 @@ export class PiHost {
       branch: entry.branch,
       path: entry.path,
     };
+  }
+
+  /**
+   * 把仓库克隆到指定目录（「从 Git 克隆」入口）。
+   *
+   * 目标路径由界面用 `cloneTargetPath` 推导后传进来，这里负责复核：
+   * 必须是绝对路径、父目录存在、目标为空或不存在 —— 克隆是往用户目录里写东西，
+   * 不能只靠渲染进程的一句「应该没问题」。
+   */
+  async gitClone(url: string, target: string): Promise<GitCloneResult> {
+    const source = String(url ?? "").trim();
+    if (!source) throw new Error("仓库地址不能为空");
+    // 以 - 开头会被 git 当成选项；控制字符会打断 execFile 的参数传递
+    if (source.startsWith("-")) throw new Error("仓库地址不能以 - 开头");
+    if (/[\u0000-\u001f\u007f]/.test(source)) throw new Error("仓库地址包含非法字符");
+    const raw = String(target ?? "").trim();
+    if (!raw) throw new Error("请选择克隆到的位置");
+    if (!path.isAbsolute(raw)) throw new Error("位置必须是绝对路径");
+    const dest = path.resolve(raw);
+    const parent = path.dirname(dest);
+    const parentInfo = await stat(parent).catch(() => null);
+    if (!parentInfo?.isDirectory()) throw new Error("位置不存在或不是目录");
+    const existing = await stat(dest).catch(() => null);
+    if (existing) {
+      if (!existing.isDirectory()) throw new Error("目标位置已存在同名文件");
+      if ((await readdir(dest)).length) throw new Error("目标目录已存在且不为空，请换一个位置");
+    }
+    // 需要交互式登录的仓库在没有终端时会一直等：显式关掉凭据提示，让它直接报错
+    await gitRun(parent, ["clone", "--", source, dest], 8 * 1024 * 1024, { GIT_TERMINAL_PROMPT: "0" });
+    return { ok: true, path: await realpath(dest), message: `已克隆 ${source}` };
   }
 
   async completePaths(cwd: string, query = ""): Promise<WorkspaceEntry[]> {
