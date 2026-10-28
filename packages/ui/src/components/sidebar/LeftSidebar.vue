@@ -442,16 +442,6 @@ function openProjectMenu(event: MouseEvent): void {
           <li v-if="!group.sessions.length" class="task-empty">{{ query ? "没有匹配的任务" : "还没有任务" }}</li>
         </ul>
       </section>
-
-      <div v-if="!projects.length" class="tasks-empty">
-        <span class="tasks-empty-mark" aria-hidden="true" v-html="icons.folderAdd" />
-        <p>还没有打开项目</p>
-        <span class="tasks-empty-copy">打开本地文件夹，或从 Git 克隆一个仓库，就可以开始任务。</span>
-        <div class="tasks-empty-actions">
-          <button class="btn" @click="workbench.chooseAndOpen()">打开文件夹</button>
-          <button class="btn" @click="openCloneDialog()">从 Git 克隆</button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
