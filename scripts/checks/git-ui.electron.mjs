@@ -32,7 +32,7 @@ export async function checkGitUiInElectron(win) {
     `视图 ${name}`,
   );
   const switchTo = name => click(
-    `document.querySelector(${JSON.stringify(`.git-branch-row[aria-label="切换分支 ${name}"]`)})`,
+    `document.querySelector(${JSON.stringify(`.git-branch-hit[aria-label="切换分支 ${name}"]`)})`,
     `切换分支 ${name}`,
   );
   const refresh = () => click(`document.querySelector('.git-sc-toolbar button[title="刷新"]')`, "刷新");
@@ -64,7 +64,7 @@ export async function checkGitUiInElectron(win) {
     const blocked = await evaluate("window.__piDesktop.workbench.gitAction('switchBranch',{branch:'refs/heads/main'}).then(()=>false,()=>true)");
     assert(blocked, "未保存草稿必须阻止切换分支");
     await evaluate("window.__piDesktop.stage.activeTab.value.dirty=false; true");
-    await poll("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))", "切换主分支入口");
+    await poll("Boolean(document.querySelector('.git-branch-hit[aria-label=\"切换分支 main\"]'))", "切换主分支入口");
     await switchTo("main");
     await poll("window.__piDesktop.workbench.active.value.branch === 'main' && !window.__piDesktop.stage.tabs.some(t=>t.pluginId==='files')", "切换后清除旧源码标签");
 
@@ -231,11 +231,11 @@ export async function checkGitUiInElectron(win) {
     await tab("分支");
     // 分支视图可能是异步重建的：入口没出现就再点一次「分支」标签，避免偶发空列表。
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (await evaluate("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))")) break;
+      if (await evaluate("Boolean(document.querySelector('.git-branch-hit[aria-label=\"切换分支 main\"]'))")) break;
       await tab("分支");
       await wait(300);
     }
-    await poll("Boolean(document.querySelector('.git-branch-row[aria-label=\"切换分支 main\"]'))", "有改动时分支入口");
+    await poll("Boolean(document.querySelector('.git-branch-hit[aria-label=\"切换分支 main\"]'))", "有改动时分支入口");
     await switchTo("main"); await wait(150);
     assert.equal(await evaluate("window.__piDesktop.workbench.active.value.branch"), "feature/new-ui", "脏工作区不得切换分支");
     assert.equal(await readFile(path.join(dir, "a.txt"), "utf8"), "three\n");
