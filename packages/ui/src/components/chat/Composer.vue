@@ -1365,7 +1365,6 @@ const argHint = computed(() => {
               :items="modelItems"
               :value="modelValue"
               :label="modelLabel"
-              :icon="icons.model"
               :title="`模型：${modelValue}`"
               filterable
               @pick="(item) => workbench.setModel(item.model)"
