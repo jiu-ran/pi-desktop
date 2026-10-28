@@ -930,7 +930,7 @@
 .turn-step-live { flex: none; color: var(--accent); }
 .turn-step-time {
   flex: none;
-  color: var(--fg-3);
+  color: var(--fg-2);
   font: 10.5px var(--mono);
   opacity: 0.75;
   white-space: nowrap;
@@ -2175,41 +2175,54 @@
 /* 欢迎页 */
 .welcome {
   position: relative;
+  flex: 1;
   display: grid;
   place-items: safe center;
-  overflow: hidden auto;
-  padding: 48px 24px;
+  min-height: 0;
+  overflow: auto;
+  padding: 40px 24px 48px;
 }
 .welcome-glow {
   position: absolute;
-  top: 8%;
+  top: 6%;
   left: 50%;
-  width: min(720px, 100%);
-  height: 420px;
+  width: min(760px, 100%);
+  height: 460px;
   transform: translateX(-50%);
-  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 7%, transparent), transparent 64%);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 8%, transparent), transparent 66%);
   pointer-events: none;
 }
-.welcome-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 16px; width: min(540px, 100%); text-align: center; }
+.welcome-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(560px, 100%); text-align: center; }
 .welcome-logo {
-  width: 66px;
-  height: 66px;
+  width: 68px;
+  height: 68px;
   border: 1px solid color-mix(in srgb, var(--line-2) 72%, transparent);
-  border-radius: 17px;
+  border-radius: 18px;
   object-fit: cover;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
 }
-.welcome-card h1 { margin: 2px 0 0; font-size: 29px; font-weight: 650; letter-spacing: -0.04em; }
-.welcome-card p { max-width: 430px; margin: -6px 0 0; color: var(--fg-2); font-size: 13px; line-height: 1.7; }
-.welcome-actions { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.welcome-card h1 { margin: 0; font-size: 29px; font-weight: 650; letter-spacing: -0.04em; }
+.welcome-heading { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.welcome-version {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 66%, transparent);
+  border-radius: 999px;
+  color: var(--fg-3);
+  font: 10.5px var(--mono);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.welcome-card p { max-width: 460px; margin: 0; color: var(--fg-2); font-size: 13px; line-height: 1.7; }
+.welcome-sub { max-width: 460px; text-wrap: balance; }
+.welcome-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin-top: 2px; }
 .welcome-open { display: inline-flex; align-items: center; gap: 7px; }
 .welcome-open svg { display: block; opacity: 0.9; }
-.welcome-features { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px 16px; color: var(--fg-3); font-size: 11.5px; }
-.welcome-features span { display: inline-flex; align-items: center; gap: 5px; }
-.welcome-features i { display: grid; color: var(--fg-3); }
-.welcome-features svg { width: 13px; height: 13px; }
-.welcome-hint { display: flex; align-items: center; gap: 6px; margin: 2px 0 0 !important; color: var(--fg-3) !important; font-size: 11px !important; }
-.welcome-hint span { opacity: 0.55; }
+.welcome-features { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.welcome-features li { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); border-radius: 999px; color: var(--fg-2); font-size: 11px; }
+.welcome-features li span { display: grid; color: var(--fg-3); }
+.welcome-features svg { width: 12px; height: 12px; }
+.welcome-hint { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 16px; margin: 4px 0 0 !important; color: var(--fg-2) !important; font-size: 11px !important; }
+.welcome-hint span { display: inline-flex; align-items: center; gap: 5px; }
 .welcome-hint kbd { padding: 0 4px; border-color: color-mix(in srgb, var(--line-2) 70%, transparent); background: transparent; font-size: 9.5px; line-height: 16px; }
 .recent { display: flex; flex-direction: column; gap: 0; width: min(470px, 100%); margin-top: 6px; padding: 10px 6px 6px; border: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--bg-1) 58%, transparent); text-align: left; }
 .eyebrow { margin: 0 0 4px 8px !important; color: var(--fg-3) !important; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; }

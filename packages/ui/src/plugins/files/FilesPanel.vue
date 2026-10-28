@@ -223,8 +223,8 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
       <button type="button" class="btn" @click="refresh">重试</button>
     </div>
     <div v-else-if="!ws" class="files-state">
-      <span>请先在左侧选择或打开一个项目目录</span>
-      <button type="button" class="btn" @click="chooseProject">打开目录</button>
+      <span>打开文件夹或克隆仓库后，这里会显示文件树</span>
+      <button type="button" class="btn" @click="chooseProject">打开文件夹</button>
     </div>
     <template v-else-if="filter.trim()">
       <div v-if="searching" class="files-state"><span class="mini-spinner" />正在搜索文件…</div>

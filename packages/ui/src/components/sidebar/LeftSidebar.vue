@@ -444,9 +444,13 @@ function openProjectMenu(event: MouseEvent): void {
       </section>
 
       <div v-if="!projects.length" class="tasks-empty">
+        <span class="tasks-empty-mark" aria-hidden="true" v-html="icons.folderAdd" />
         <p>还没有打开项目</p>
-        <span>打开本地目录后即可创建任务。</span>
-        <button class="btn" @click="workbench.chooseAndOpen()">打开项目目录</button>
+        <span class="tasks-empty-copy">打开本地文件夹，或从 Git 克隆一个仓库，就可以开始任务。</span>
+        <div class="tasks-empty-actions">
+          <button class="btn" @click="workbench.chooseAndOpen()">打开文件夹</button>
+          <button class="btn" @click="openCloneDialog()">从 Git 克隆</button>
+        </div>
       </div>
     </div>
   </div>
