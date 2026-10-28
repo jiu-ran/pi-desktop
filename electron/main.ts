@@ -1,6 +1,6 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -93,6 +93,56 @@ const DEV_URL = (() => {
   return "http://127.0.0.1:1420";
 })();
 const DEV_ORIGIN = new URL(DEV_URL).origin;
+// 渲染进程崩溃时留一份本地转储（不上传）：没有 dump 时只能看到 "crashed" 两个字，
+// 有 dump 才能拿给 Chromium 的符号工具看栈。
+try {
+  crashReporter.start({ uploadToServer: false, productName: "Pi Desktop" });
+} catch (error) {
+  log.warn("app", `崩溃转储不可用：${(error as Error)?.message ?? error}`);
+}
+
+/** 渲染进程崩溃记录（跨启动累计，只留最近 24 小时），用来判断要不要关掉硬件加速 */
+const RENDERER_CRASH_FILE = () => path.join(app.getPath("userData"), "renderer-crashes.json");
+const RENDERER_CRASH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function readRecentRendererCrashes(): Array<{ at: number; reason: string }> {
+  try {
+    const parsed = JSON.parse(readFileSync(RENDERER_CRASH_FILE(), "utf8"));
+    if (!Array.isArray(parsed)) return [];
+    const now = Date.now();
+    return parsed.filter(
+      (item): item is { at: number; reason: string } =>
+        typeof item?.at === "number" && now - item.at < RENDERER_CRASH_WINDOW_MS,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function recordRendererCrash(reason: string): number {
+  const next = [...readRecentRendererCrashes(), { at: Date.now(), reason }];
+  try {
+    writeFileSync(RENDERER_CRASH_FILE(), JSON.stringify(next.slice(-20)), "utf8");
+  } catch {
+    // 记不下就算了：退避策略只是兜底，不能因为写文件失败影响崩溃恢复
+  }
+  return next.length;
+}
+
+// 硬件加速是 Chromium 偶发崩溃最常见的来源。连续崩到一定次数就先关掉它，
+// 让应用以软件渲染跑起来 —— 分辨率低一点，总比随机黑屏强。
+const gpuDisabledByEnv = process.env.PI_DESKTOP_DISABLE_GPU === "1";
+const recentCrashCount = readRecentRendererCrashes().length;
+if (gpuDisabledByEnv || recentCrashCount >= 3) {
+  app.disableHardwareAcceleration();
+  log.warn(
+    "app",
+    gpuDisabledByEnv
+      ? "已按 PI_DESKTOP_DISABLE_GPU=1 关闭硬件加速"
+      : `已关闭硬件加速：最近 24 小时渲染进程崩溃 ${recentCrashCount} 次`,
+  );
+}
+
 let mainWindow: BrowserWindow | null = null;
 let terminalFocused = false;
 
@@ -490,8 +540,51 @@ function createWindow() {
   });
   startRendererWatchdog(mainWindow);
   void armRendererDebugger(mainWindow);
+  // 渲染进程崩溃后窗口会停在纯黑：页面没了、主进程还在、也没人重建它，用户只能重启。
+  // 所以崩溃就自动重载；一分钟内连崩三次说明那个页面一加载就崩，改用原生对话框，
+  // 别在崩溃循环里空转（原生对话框不依赖渲染进程，黑屏时仍然能用）。
+  const rendererCrashes: number[] = [];
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     log.error("renderer", `渲染进程退出：${details?.reason ?? "unknown"}（exitCode=${details?.exitCode ?? "?"}）`);
+    if (details?.reason === "clean-exit") return;
+    // 崩溃时把各进程内存写进日志：OOM 引起的崩溃在这里会很明显
+    try {
+      const metrics = app.getAppMetrics().map((item) => {
+        const mem = item.memory ?? ({} as (typeof item)["memory"]);
+        return `${item.type}#${item.pid} ${Math.round((mem.workingSetSize ?? 0) / 1024)}MB`;
+      });
+      log.error("renderer", `崩溃时进程内存：${metrics.join(" · ")}`);
+    } catch {
+      // 指标拿不到不影响恢复
+    }
+    log.warn("renderer", `最近 24 小时第 ${recordRendererCrash(details?.reason ?? "unknown")} 次崩溃`);
+    const now = Date.now();
+    rendererCrashes.push(now);
+    while (rendererCrashes.length && now - rendererCrashes[0]! > 60_000) rendererCrashes.shift();
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+    if (rendererCrashes.length < 3) {
+      setTimeout(() => {
+        if (!window.isDestroyed()) window.webContents.reload();
+      }, 800);
+      return;
+    }
+    rendererCrashes.length = 0;
+    void dialog
+      .showMessageBox(window, {
+        type: "error",
+        title: "界面渲染进程崩溃",
+        message: "界面进程反复崩溃，窗口已经无法继续显示。",
+        detail: `原因：${details?.reason ?? "unknown"}（exitCode=${details?.exitCode ?? "?"}）。\n日志目录里的 renderer.log / app.log 有对应记录。`,
+        buttons: ["重新加载界面", "退出"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then((result) => {
+        if (window.isDestroyed()) return;
+        if (result.response === 0) window.webContents.reload();
+        else app.quit();
+      });
   });
   mainWindow.webContents.on("will-prevent-unload", (event) => {
     const choice = dialog.showMessageBoxSync(mainWindow!, {

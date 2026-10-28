@@ -131,7 +131,8 @@ main.ts                 组合根：创建内核、注册内置插件
 - [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。窗口禁止附加 `webview`，导航按允许列表校验，打包版限制单实例。
 - 文件写入由 [`electron/atomic-file.ts`](electron/atomic-file.ts) 统一串行化并原子替换；宿主在写入前校验调用方持有的内容版本，发现外部修改时拒绝覆盖。
 - IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
-- 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。文本读取上限为 20 MB；超过 2 MB 的文本以只读大文件模式打开，保存上限为 20 MB。
+- 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。
+- 渲染进程崩溃（Chromium 层面的 `crashed`，不是 JS 异常）时窗口本来会停在纯黑：现在会自动重载，一分钟内连崩三次改用原生对话框给出「重新加载界面 / 退出」；同时开启本地崩溃转储（不上传），日志里能查到 `renderer.log` 的对应记录。若最近 24 小时崩溃 3 次以上，下次启动会自动关闭硬件加速（也可用 `PI_DESKTOP_DISABLE_GPU=1` 手动关闭）。
 
 ## 关键目录与文件
 
