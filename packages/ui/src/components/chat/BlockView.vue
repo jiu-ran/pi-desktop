@@ -37,6 +37,10 @@ const props = defineProps<{
   headless?: boolean;
 }>();
 
+// 搜索只覆盖正文（用户消息 + 助手回复）：思考、工具与提示块既不计数，也不高亮，
+// 否则会出现「页面上标黄了但计数里没有」的错位。
+const bodyQuery = computed(() => (props.block.kind === "user" || props.block.kind === "text" ? props.query : ""));
+
 // 时间线里展开的步骤：卡片与思考块都别再画自己的头部（上面那行已经写过）
 provide("piBlockHeadless", toRef(props, "headless"));
 </script>
@@ -45,24 +49,23 @@ provide("piBlockHeadless", toRef(props, "headless"));
   <UserMessage
     v-if="block.kind === 'user'"
     :block="block"
-    :query="query"
+    :query="bodyQuery"
     :collapse-long="collapseLong"
     :queued="queued"
   />
-  <AssistantText v-else-if="block.kind === 'text'" :block="block" :query="query" :copy-text="copyText" />
-  <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" :query="query" />
-  <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" :query="query" />
+  <AssistantText v-else-if="block.kind === 'text'" :block="block" :query="bodyQuery" :copy-text="copyText" />
+  <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" />
+  <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" />
   <template v-else-if="block.kind === 'tool'">
-    <BashTool v-if="block.name === 'bash'" :block="block" :query="query" />
-    <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" :query="query" />
-    <ReadTool v-else-if="block.name === 'read'" :block="block" :query="query" />
+    <BashTool v-if="block.name === 'bash'" :block="block" />
+    <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" />
+    <ReadTool v-else-if="block.name === 'read'" :block="block" />
     <component
       :is="pluginRendererFor(block.name ?? '')"
       v-else-if="pluginRendererFor(block.name ?? '')"
       :block="block"
-      :query="query"
     />
-    <GenericTool v-else :block="block" :query="query" />
+    <GenericTool v-else :block="block" />
   </template>
   <div v-else class="block-fallback" :data-kind="block.kind">
     <span class="fallback-tag">{{ block.kind }}</span>

@@ -43,11 +43,21 @@ assert.equal(isLiveTool(step("l1", "bash", {}, { status: "running" })), true);
 assert.equal(isLiveTool({ kind: "thinking", id: "l2", streaming: true }), true);
 assert.equal(isLiveTool(step("l3", "bash")), false);
 
-// 对话搜索与工具卡自动展开共用同一份文本提取规则。
-const bashBlock = { name: "bash", args: { command: "ls scripts/checks" } };
-assert.deepEqual(searchableText(bashBlock).split(String.fromCharCode(10)), ["bash", '{"command":"ls scripts/checks"}']);
-assert.equal(blockMatchesQuery(bashBlock, "scripts/checks"), true);
-assert.equal(blockMatchesQuery({ output: "all good" }, "failed"), false);
-assert.equal(blockMatchesQuery({ text: "abc" }, "  "), false);
+// 对话搜索只覆盖正文：用户消息与助手回复的文字。
+assert.equal(searchableText({ kind: "text", text: "改了 diff.ts" }), "改了 diff.ts");
+assert.equal(blockMatchesQuery({ kind: "text", text: "改了 diff.ts" }, "diff"), true);
+assert.equal(blockMatchesQuery({ kind: "user", text: "看一下 diff" }, "DIFF"), true, "大小写不敏感");
+// 思考、工具参数 / 输出、提示块都不参与搜索
+assert.equal(blockMatchesQuery({ kind: "thinking", text: "先看 diff.ts" }, "diff"), false, "思考不参与搜索");
+assert.equal(
+  blockMatchesQuery({ kind: "tool", name: "bash", args: { command: "ls scripts/checks" } }, "scripts/checks"),
+  false,
+  "工具参数不参与搜索",
+);
+assert.equal(blockMatchesQuery({ kind: "tool", output: "all good" }, "good"), false, "工具输出不参与搜索");
+assert.equal(blockMatchesQuery({ kind: "notice", text: "扩展出错" }, "扩展"), false, "提示块不参与搜索");
+// 运行中的内容不搜：流式输出的正文、pending / running 的块都跳过
+assert.equal(blockMatchesQuery({ kind: "text", text: "正在生成", streaming: true }, "生成"), false, "流式内容不参与搜索");
+assert.equal(blockMatchesQuery({ kind: "text", text: "abc" }, "  "), false, "空搜索词不匹配");
 
 console.log("activity OK 单步描述 / 失败判定 / 搜索文本");

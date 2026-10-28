@@ -23,7 +23,6 @@ const props = defineProps<{
   added?: number | null;
   removed?: number | null;
   /** 当前搜索命中该组内的块：强制展开并高亮 */
-  searchHit?: boolean;
 }>();
 
 defineEmits<{ toggle: [] }>();
@@ -40,7 +39,7 @@ const statText = computed(() => {
 <template>
   <section
     class="activity-group"
-    :class="{ expanded, live: group.live, errored: group.errored, 'search-hit': searchHit }"
+    :class="{ expanded, live: group.live, errored: group.errored }"
     :data-activity-id="group.id"
     :data-live="group.live"
     :data-errored="group.errored"

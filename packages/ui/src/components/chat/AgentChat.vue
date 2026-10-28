@@ -27,6 +27,7 @@ const stick = ref(true);
 const searchOpen = ref(false);
 const searchQuery = ref("");
 const searchIndex = ref(0);
+const searchInput = ref<HTMLInputElement | null>(null);
 let searchFocusToken = 0;
 /** 用户手动展开/收起活动组的覆盖状态；未设置时默认折叠，搜索命中的组强制展开。 */
 const activityOverrides = ref<Record<string, boolean>>({});
@@ -290,7 +291,12 @@ function onSearchKey(event: KeyboardEvent): void {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f" || !ws.value) return;
   event.preventDefault();
   searchOpen.value = true;
-  void nextTick(() => scroller.value?.parentElement?.querySelector<HTMLInputElement>(".chat-search-input")?.focus());
+  // 打开后直接把光标放进输入框（选中已有内容，重新按 Ctrl+F 可以直接改写）。
+  // 之前靠 scroller 的父节点去找输入框，但搜索条和滚动区是兄弟，永远找不着，得再点一次。
+  void nextTick(() => {
+    searchInput.value?.focus();
+    searchInput.value?.select();
+  });
 }
 
 // 加载更多消息
@@ -585,18 +591,12 @@ function openOutline(id: string): void {
 const searchMatches = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) return [];
-  return (ws.value?.blocks ?? []).filter((block: any) => blockText(block).toLowerCase().includes(query));
+  // 在「渲染出来的块」上匹配：还在队列里、界面上看不到的乐观气泡不算命中
+  return visibleBlocks.value.filter((block: any) => blockText(block).toLowerCase().includes(query));
 });
 
-function groupHasSearchHit(group: { entries: Array<{ block: any }> }): boolean {
-  // 只展开当前命中所在的组，避免一次搜索把整页几十个活动组全部撑开。
-  const current = searchMatches.value[searchIndex.value];
-  return Boolean(current && group.entries.some((entry) => entry.block.id === current.id));
-}
-
+// 搜索只覆盖正文，活动组里全是工具步骤，所以这里不再需要「命中就展开整组」的分支。
 function activityOpen(group: { id: string; entries: Array<{ block: any }> }): boolean {
-  // 搜索命中优先于手动折叠，保证上一个 / 下一个命中总能滚到目标块。
-  if (groupHasSearchHit(group)) return true;
   const override = activityOverrides.value[group.id];
   if (override !== undefined) return override;
   // 默认收起：错误仍通过折叠头的红色徽标提示，避免一次展开几十个工具。
@@ -604,16 +604,14 @@ function activityOpen(group: { id: string; entries: Array<{ block: any }> }): bo
   return activityMode.value === "expanded";
 }
 
-/** 时间线里某一步的细节卡片是否展开；搜索命中时全开 */
+/** 时间线里某一步的细节卡片是否展开 */
 function stepOpen(group: { id: string; entries: Array<{ block: any }> }, blockId: string): boolean {
-  if (groupHasSearchHit(group)) return true;
   const override = stepOverrides.value[`${group.id}|${blockId}`];
   if (override !== undefined) return override;
   return activityMode.value === "expanded";
 }
 
 function toggleStep(group: { id: string; entries: Array<{ block: any }> }, blockId: string): void {
-  if (groupHasSearchHit(group)) return;
   const id = `${group.id}|${blockId}`;
   stepOverrides.value = { ...stepOverrides.value, [id]: !stepOpen(group, blockId) };
 }
@@ -648,14 +646,12 @@ watch(activityMode, () => {
 });
 
 function runOpen(group: { id: string; entries: Array<{ block: any }> }, row: { steps: Array<{ block: { id: string } }> }): boolean {
-  if (groupHasSearchHit(group)) return true;
   const override = runOverrides.value[runKey(group, row)];
   if (override !== undefined) return override;
   // 「展开」模式下把所有细节摊开，合并行也一样展开
   return activityMode.value === "expanded";
 }
 function toggleRun(group: { id: string; entries: Array<{ block: any }> }, row: { steps: Array<{ block: { id: string } }> }): void {
-  if (groupHasSearchHit(group)) return;
   const key = runKey(group, row);
   runOverrides.value = { ...runOverrides.value, [key]: !runOpen(group, row) };
 }
@@ -682,7 +678,6 @@ function toggleAllActivity(): void {
 }
 
 function toggleActivity(group: { id: string; entries: Array<{ block: any }> }): void {
-  if (groupHasSearchHit(group)) return;
   activityOverrides.value = {
     ...activityOverrides.value,
     [group.id]: !activityOpen(group),
@@ -694,6 +689,8 @@ function toggleSearch(): void {
   if (!searchOpen.value) {
     searchQuery.value = "";
     searchIndex.value = 0;
+    // 关掉搜索把焦点还给输入框，接着打字就行，不用再点一下
+    void nextTick(() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus());
   }
 }
 
@@ -737,7 +734,16 @@ watch(searchMatches, () => {
     <template v-else>
       <div v-if="searchOpen" class="chat-search" role="search">
         <span class="chat-search-icon" v-html="icons.search" />
-        <input v-model="searchQuery" class="chat-search-input" placeholder="搜索当前对话" aria-label="搜索当前对话" @keydown.enter.prevent="moveSearch(1)" @keydown.esc="toggleSearch">
+        <input
+          ref="searchInput"
+          v-model="searchQuery"
+          class="chat-search-input"
+          placeholder="搜索对话正文"
+          aria-label="搜索对话正文"
+          title="只搜索用户消息与回复正文；思考、工具输出和正在生成的内容不参与"
+          @keydown.enter.prevent="moveSearch(1)"
+          @keydown.esc="toggleSearch"
+        >
         <span class="chat-search-count">{{ searchMatches.length ? searchIndex + 1 : 0 }}/{{ searchMatches.length }}</span>
         <button type="button" title="上一个" aria-label="上一个匹配" @click="moveSearch(-1)">↑</button>
         <button type="button" title="下一个" aria-label="下一个匹配" @click="moveSearch(1)">↓</button>
@@ -822,7 +828,6 @@ watch(searchMatches, () => {
                 :added="turnStat(item.group).added"
                 :removed="turnStat(item.group).removed"
                 :expanded="activityOpen(item.group)"
-                :search-hit="groupHasSearchHit(item.group)"
                 :class="{
                   'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)),
                   'activity-compact': activityMode === 'compact',

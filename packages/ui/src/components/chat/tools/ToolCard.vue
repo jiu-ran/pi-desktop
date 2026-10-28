@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
-import { blockMatchesQuery } from "../../../shared/search-text.ts";
 
 const props = withDefaults(
   defineProps<{
@@ -14,8 +13,6 @@ const props = withDefaults(
     added?: number | null;
     removed?: number | null;
     defaultOpen?: boolean;
-    /** 搜索词命中时自动展开工具正文，确保 mark 已挂载并能滚动到命中位置 */
-    query?: string;
   }>(),
   {
     verb: "",
@@ -42,14 +39,6 @@ watch(
     if (value) open.value = true;
   },
 );
-watch(
-  () => props.query,
-  (query) => {
-    if (blockMatchesQuery(props.block, query)) open.value = true;
-  },
-  { immediate: true },
-);
-
 const running = computed(() => props.block.status === "running" || props.block.status === "pending");
 const duration = computed(() => {
   const ms = props.block.durationMs;
