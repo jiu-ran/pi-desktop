@@ -189,11 +189,23 @@ function pushWindowState(): void {
 
 function maximizeToWorkArea(win: BrowserWindow): void {
   const display = screen.getDisplayMatching(win.getBounds());
-  fauxRestoreBounds = win.getNormalBounds();
+  // 记的是「当前窗口」的矩形：原生最大化状态下 getNormalBounds() 才是普通尺寸，
+  // 其它情况直接用 getBounds()，这样还原一定回到点击前的位置。
+  fauxRestoreBounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
   fauxMaximized = true;
   suppressMoveUntil = Date.now() + 400;
-  if (win.isMaximized()) win.unmaximize();
+  // 只有在原生最大化状态才需要先 unmaximize：否则这一步会让窗口先缩回原尺寸、
+  // 再被 setContentBounds 撑开，看起来就是一次闪烁。
+  const shrinking = win.isMaximized();
+  if (shrinking) win.setOpacity(0);
+  if (shrinking) win.unmaximize();
   win.setContentBounds(maximizedContentBounds(display));
+  if (shrinking) {
+    // 等这一帧画完再显示，中间的「缩回再撑开」就不会被看到
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.setOpacity(1);
+    }, 80);
+  }
   log.info(
     "window",
     `最大化 → 客户区 ${display.workArea.width + MAXIMIZE_OVERSCAN * 2}×${display.workArea.height + MAXIMIZE_OVERSCAN * 2}（原尺寸 ${fauxRestoreBounds?.width ?? 0}×${fauxRestoreBounds?.height ?? 0}）`,
