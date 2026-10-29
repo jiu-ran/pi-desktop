@@ -67,6 +67,10 @@ jobs:
           npm ci
           npm ci --prefix packages/ui
 
+      # 桌面端会话跑的是本机 pi（不内置）：`npm run check` 里的 host 检查与冒烟都要真起进程
+      - name: Install Pi CLI
+        run: npm install -g @earendil-works/pi-coding-agent@1.2.0
+
       - name: Prepare POSIX PTY helper permissions
         if: runner.os != 'Windows'
         shell: bash

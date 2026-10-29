@@ -5,9 +5,9 @@ import { existsSync } from "node:fs";
 import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { findExecutableOnPath } from "./pi-entry.ts";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { COMPACT_RPC_TIMEOUT_MS, runCompactResilient } from "./compact-wait.ts";
 import { clearSessionHistoryCache, readSessionHistory, readSessionHistoryPage } from "./session-history.ts";
@@ -253,6 +253,11 @@ export interface PiHostOptions {
   trash?: (file: string) => Promise<any>;
   /** Pi Desktop 托管的隔离工作区根目录 */
   worktreeRoot?: string;
+  /**
+   * 本机 Pi CLI 的 `dist/cli.js` 入口。
+   * 桌面端不内置 Pi 的推理与工具执行，会话一律跑用户自己装的那份（见 docs/product-boundary.md）。
+   */
+  piEntry?: () => Promise<string>;
 }
 
 export interface GitWorktree {
@@ -343,11 +348,6 @@ async function readHeadText(file: string, size: number, maxBytes = 128 * 1024): 
 function normSessionFile(file = ""): string {
   if (!file) return "";
   return process.platform === "win32" ? path.resolve(file).toLowerCase() : path.resolve(file);
-}
-
-function cliPath(): string {
-  const entry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")).replace("app.asar", "app.asar.unpacked");
-  return path.join(path.dirname(entry), "cli.js");
 }
 
 /** 与 Pi 的 getDefaultSessionDir 保持同一编码规则。 */
@@ -966,13 +966,38 @@ export class PiHost {
   private startAttempts = new Map<string, number>();
   private closing = false;
 
-  constructor({ emit, trash, worktreeRoot }: PiHostOptions) {
+  /** 本机 pi 入口的解析器（主进程注入），解析结果缓存到 piEntryCache */
+  private piEntryResolver?: () => Promise<string>;
+  private piEntryCache = "";
+
+  constructor({ emit, trash, worktreeRoot, piEntry }: PiHostOptions) {
     this.emit = emit;
     this.trash = trash ?? ((file: string) => unlink(file));
     this.clients = new Map();
     this.starting = new Map();
     this.maxIdleWorkers = 3;
     this.worktreeRoot = path.resolve(worktreeRoot ?? path.join(homedir(), ".pi-desktop", "worktrees"));
+    this.piEntryResolver = piEntry;
+  }
+
+  /** 设置里换了 Pi 路径、或刚更新完 Pi 之后调用：下次启动 worker 时重新解析。 */
+  invalidatePiEntry(): void {
+    this.piEntryCache = "";
+  }
+
+  /** 本机 Pi CLI 的 JS 入口；找不到就抛中文错误（界面据此提示安装或指定路径）。 */
+  async piEntry(): Promise<string> {
+    if (this.piEntryCache) return this.piEntryCache;
+    if (!this.piEntryResolver) throw new Error("没有配置本机 Pi 入口解析器");
+    const entry = await this.piEntryResolver();
+    if (!entry) throw new Error("没有找到本机 Pi CLI，请先安装 pi 或到「设置 → Pi CLI」指定路径");
+    // RpcClient 内部是 spawn("node", …)：没有 node 就起不来，提前给出可读的提示
+    if (!findExecutableOnPath("node")) {
+      throw new Error("没有找到 node：Pi CLI 需要 Node.js 才能启动，请把 node 加进 PATH（或改用 npm 安装的 pi）");
+    }
+    this.piEntryCache = entry;
+    log.pi("info", "worker", `使用本机 pi：${entry}`);
+    return entry;
   }
 
   private workspaceKey(cwd: string): string {
@@ -1071,7 +1096,7 @@ export class PiHost {
     pool: WorkspaceClientPool,
     options: { targetSessionFile?: string; pickLatestOnInit?: boolean; parentSession?: string } = {},
   ): Promise<WorkerSlot> {
-    const client = new RpcClient({ cliPath: cliPath(), cwd });
+    const client = new RpcClient({ cliPath: await this.piEntry(), cwd });
     const slot: WorkerSlot = {
       client,
       sessionFile: "",
@@ -1162,7 +1187,7 @@ export class PiHost {
   private warmStandbyWorker(cwd: string, pool: WorkspaceClientPool): void {
     if (pool.standbySlot || pool.standbyPromise) return;
     const promise = (async (): Promise<WorkerSlot | null> => {
-      const client = new RpcClient({ cliPath: cliPath(), cwd });
+      const client = new RpcClient({ cliPath: await this.piEntry(), cwd });
       const slot: WorkerSlot = {
         client,
         sessionFile: "",
@@ -2588,11 +2613,12 @@ export class PiHost {
   }
 
   async mcpProbe(cwd?: string): Promise<McpOverview> {
+    const piEntry = await this.piEntry();
     const targetCwd = cwd ? path.resolve(cwd) : homedir();
     const out = await new Promise<{ stdout: string; stderr: string }>((resolve) => {
       const child = execFile(
         process.execPath,
-        [cliPath(), "mcp", "list", "--json"],
+        [piEntry, "mcp", "list", "--json"],
         {
           cwd: targetCwd,
           env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0" },

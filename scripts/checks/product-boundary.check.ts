@@ -64,7 +64,9 @@ const electronFiles = await files(path.join(root, "electron"));
 for (const file of electronFiles) {
   if (path.resolve(file) === hostFile) continue;
   const source = await readFile(file, "utf8");
-  if (/@earendil-works\/pi-coding-agent/.test(source)) fail(file, "只有 Pi 宿主可以直接导入 Pi SDK");
+  // 只看真正的 import：路径推导（如 pi-entry.ts 里的包名常量）不算导入 SDK
+  if (/(?:\bfrom\s*|\bimport\s*\(\s*)['"]@earendil-works\/pi-coding-agent['"]/.test(source))
+    fail(file, "只有 Pi 宿主可以直接导入 Pi SDK");
   if (/\bcreateAgentSession\b/.test(source)) fail(file, "不得创建第二套 Agent 会话");
 }
 

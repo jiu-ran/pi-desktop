@@ -4,8 +4,9 @@
 
 ## 当前版本
 
-- Pi 包版本：`1.2.0`
-- 通信方式：本机 `pi --mode rpc` 与官方 `RpcClient`
+- Pi 包版本：`1.2.0`（**只作依赖用**：Skills 发现、Packages、MCP、SettingsManager 与类型）
+- 会话运行时：**本机安装的 pi**（`pi --mode rpc`），入口由 `electron/pi-entry.ts` 从 PATH / 设置里的自定义路径反解成 `dist/cli.js`；找不到就提示安装，不再回退到依赖里的副本
+- 通信方式：官方 `RpcClient`（内部 `spawn("node", [cliPath, "--mode", "rpc"])`，所以需要 node 在 PATH 里）
 - 白名单：`electron/pi-rpc-allowlist.ts`
 
 ## 适配项
@@ -13,6 +14,7 @@
 | 适配 | 位置 | 原因 | 删除条件 |
 |---|---|---|---|
 | 使用 RPC 而非进程内 SDK 会话 | `electron/pi-host.ts` | 保持桌面端与 Pi 进程隔离 | Pi 提供受支持的嵌入式主机 API 且产品决定改变运行方式 |
+| 会话跑本机 pi，不用依赖里的副本 | `electron/pi-entry.ts` | 产品边界要求不内置 Pi 的推理与工具执行；用户 `pi update` 后桌面端要立刻用上新版本 | Pi 官方提供「指定 CLI 入口」的正规 API，或不再需要 node 在 PATH 里 |
 | 使用 `DefaultResourceLoader` 发现 Skills | `electron/pi-host.ts` | 普通 `loadSkills` 不扫描 Pi 实际使用的全部 Skills 目录 | Pi 公开稳定的完整 Skills 发现 API |
 | 附件在发送前转换为文件和图片内容 | `electron/pi-host.ts` | 当前 RPC 提示接口接收文本和图片，不接收桌面端附件对象 | Pi 提示接口原生支持受控文件附件 |
 | 界面缓存派生自 RPC 快照和事件 | `packages/ui/src/kernel` | 界面需要立即响应，但不能变成第二份会话记录 | 界面能直接订阅 Pi 的完整只读状态并仍满足响应要求 |

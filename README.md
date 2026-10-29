@@ -8,6 +8,7 @@
 
 - **预构建安装包 / 便携包**：前往 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载对应系统的最新版本（Windows `.exe` / `.zip`、macOS `.dmg` / `.zip`、Linux `.AppImage` / `.tar.gz`）。
 - **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）；从源码构建还需要 Node.js `>= 22.18.0`。
+  会话跑的就是这份本机 `pi`（入口由 `electron/pi-entry.ts` 从 PATH 或「设置 → Pi CLI」的自定义路径反解），所以 `pi update` 之后桌面端当场就是新版本；没装 `pi` 时应用能打开但不会启动会话。
 
 ## 从源码运行与打包
 

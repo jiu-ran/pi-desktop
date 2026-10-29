@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiHost, readRecent, writeRecent, forgetRecent } from "./pi-host.ts";
+import { piCliEntryFromExecutable, resolvePiEntryFromSystem } from "./pi-entry.ts";
 import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager, MANUAL_CHECK_CACHE_MS } from "./network/update.ts";
@@ -200,6 +201,7 @@ const host = new PiHost({
   },
   trash: (file) => shell.trashItem(file),
   worktreeRoot: path.join(app.getPath("userData"), "worktrees"),
+  piEntry: resolvePiEntry,
 });
 
 const terminalHost = new TerminalHost({
@@ -215,6 +217,25 @@ async function authorizedCwd(cwd: string): Promise<string> {
 }
 
 export const PI_NPM_PACKAGE = ["@earendil-works", "pi-coding-agent"].join("/");
+
+/** 设置里手动指定的 Pi 路径（空 = 只从 PATH 识别）；会话启动时也按它解析 */
+let piCustomPath = "";
+
+/**
+ * 解析本机 Pi 的 `dist/cli.js`：先看手动路径 / PATH，再看 npm 全局 node_modules。
+ * 桌面端不跑内置 Pi（见 docs/product-boundary.md），拿不到入口就直接报错，让界面提示安装。
+ */
+async function resolvePiEntry(): Promise<string> {
+  const located = await locatePi(piCustomPath);
+  if (!located.found) throw new Error(located.error ?? "没有找到本机 Pi CLI，请先安装 pi 或到「设置 → Pi CLI」指定路径");
+  const direct = piCliEntryFromExecutable(located.path);
+  if (direct) return direct;
+  const fallback = await resolvePiEntryFromSystem(located.path);
+  if (fallback) return fallback;
+  throw new Error(
+    `已找到 pi（${located.path}），但没能定位到它的 dist/cli.js。请用 npm 安装 Pi，或在「设置 → Pi CLI」直接指定 node_modules/@earendil-works/pi-coding-agent/dist/cli.js`,
+  );
+}
 
 export interface PiLocation {
   found: boolean;
@@ -774,7 +795,12 @@ function startLagWatchdog(): void {
 app.whenReady().then(() => {
   activateLogs();
   if (!ownsInstance) return;
-  handle("pi:locate", (customPath = "") => locatePi(customPath));
+  handle("pi:locate", (customPath = "") => {
+    // 记下手动路径：会话启动时要按同一个路径解析 pi 入口
+    piCustomPath = String(customPath ?? "").trim();
+    host.invalidatePiEntry();
+    return locatePi(customPath);
+  });
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
   handle("app:check-update", (options: { manual?: boolean } = {}) =>
     appUpdateManager.check({ maxAgeMs: options?.manual ? MANUAL_CHECK_CACHE_MS : undefined }),
@@ -793,7 +819,12 @@ app.whenReady().then(() => {
     if (!isAllowedExternalUrl(url)) return false;
     return shell.openExternal(url).then(() => true, () => false);
   });
-  handle("pi:update", (customPath = "", scope: "self" | "all" = "self") => updatePi(customPath, scope === "all" ? "all" : "self"));
+  handle("pi:update", async (customPath = "", scope: "self" | "all" = "self") => {
+    const result = await updatePi(customPath, scope === "all" ? "all" : "self");
+    // Pi 刚被换过版本：下次起 worker 要重新解析入口（路径通常不变，但缓存不能留旧值）
+    if (result.ok) host.invalidatePiEntry();
+    return result;
+  });
   // 界面缩放完全由设置页控制（不再设全局快捷键，避免与输入法/阅读器冲突）。
   handle("pi:set-zoom", (factor: number) => {
     const next = Math.min(3, Math.max(0.5, Number(factor) || 1));

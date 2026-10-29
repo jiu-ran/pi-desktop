@@ -8,7 +8,9 @@ process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
 const cwd = path.join(root, "project");
 await mkdir(cwd);
 const { PiHost } = await import("../../electron/pi-host.ts");
-const host = new PiHost({ emit: () => {} });
+const { resolvePiEntryFromSystem } = await import("../../electron/pi-entry.ts");
+// 会话跑本机 pi（不内置）：这份检查会真的起进程，所以要求机器上装有 pi
+const host = new PiHost({ emit: () => {}, piEntry: () => resolvePiEntryFromSystem() });
 try {
   const authorizedCwd = await host.authorizeWorkspace(cwd);
   const [a, b] = await Promise.all([host.open(authorizedCwd), host.open(authorizedCwd)]);
