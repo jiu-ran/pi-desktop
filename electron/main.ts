@@ -147,94 +147,22 @@ let mainWindow: BrowserWindow | null = null;
 let terminalFocused = false;
 
 /**
- * Windows 原生最大化有两个副作用，直接用 win.maximize() 都躲不开：
- * 1. 客户区比工作区矮 1px（实测 1536×863 vs 1536×864），那 1px 由 DWM 画成
- *    窗口边框，深色界面 + 任务栏自动隐藏时就是底部一条亮线；
- * 2. 原生最大化会把窗口往外推 8px，圆角和 frame 边带被推出屏幕 —— 看起来是
- *    「贴满屏幕」，而只铺满工作区时圆角还在屏内，反而像没覆盖全。
- *
- * 所以自己实现：把「客户区」设成工作区往外扩 8px 的矩形，两件事一起解决
- * （实测客户区 1552×880 @(-8,-8)：上下都不再有缝，圆角出屏）。
- * 代价是 isMaximized() 永远为 false，最大化状态自己记。
+ * 最大化 / 还原一律交给系统：原生最大化会把窗口往外推 8px，圆角和边框本来就在屏外，
+ * 有缩放动画、还原也能回到原位置 —— 自己 setBounds 模拟反而会把这些都丢掉。
+ * 这里只负责把状态推给渲染进程画按钮图标。
  */
-const MAXIMIZE_OVERSCAN = 8;
-
-function maximizedContentBounds(display: Electron.Display): Electron.Rectangle {
-  const area = display.workArea;
-  return {
-    x: area.x - MAXIMIZE_OVERSCAN,
-    y: area.y - MAXIMIZE_OVERSCAN,
-    width: area.width + MAXIMIZE_OVERSCAN * 2,
-    height: area.height + MAXIMIZE_OVERSCAN * 2,
-  };
-}
-
-let fauxMaximized = false;
-let fauxRestoreBounds: Electron.Rectangle | null = null;
-/** 自己 setBounds 触发的 move 事件别当成「用户拖动」 */
-let suppressMoveUntil = 0;
-
 function windowIsMaximized(): boolean {
-  return fauxMaximized || Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
+  const win = mainWindow;
+  return Boolean(win && !win.isDestroyed() && win.isMaximized());
 }
 
 function pushWindowState(): void {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
   win.webContents.send("app:window-state", {
-    maximized: windowIsMaximized(),
+    maximized: win.isMaximized(),
     fullscreen: win.isFullScreen(),
   });
-}
-
-function maximizeToWorkArea(win: BrowserWindow): void {
-  const display = screen.getDisplayMatching(win.getBounds());
-  // 记的是「当前窗口」的矩形：原生最大化状态下 getNormalBounds() 才是普通尺寸，
-  // 其它情况直接用 getBounds()，这样还原一定回到点击前的位置。
-  fauxRestoreBounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
-  fauxMaximized = true;
-  suppressMoveUntil = Date.now() + 400;
-  // 只有在原生最大化状态才需要先 unmaximize：否则这一步会让窗口先缩回原尺寸、
-  // 再被 setContentBounds 撑开，看起来就是一次闪烁。
-  const shrinking = win.isMaximized();
-  if (shrinking) win.setOpacity(0);
-  if (shrinking) win.unmaximize();
-  win.setContentBounds(maximizedContentBounds(display));
-  if (shrinking) {
-    // 等这一帧画完再显示，中间的「缩回再撑开」就不会被看到
-    setTimeout(() => {
-      if (!win.isDestroyed()) win.setOpacity(1);
-    }, 80);
-  }
-  log.info(
-    "window",
-    `最大化 → 客户区 ${display.workArea.width + MAXIMIZE_OVERSCAN * 2}×${display.workArea.height + MAXIMIZE_OVERSCAN * 2}（原尺寸 ${fauxRestoreBounds?.width ?? 0}×${fauxRestoreBounds?.height ?? 0}）`,
-  );
-  pushWindowState();
-}
-
-function restoreWindow(win: BrowserWindow): void {
-  const display = screen.getDisplayMatching(win.getBounds());
-  const maxContent = maximizedContentBounds(display);
-  const saved = fauxRestoreBounds;
-  // 记下的尺寸必须真的比最大化小才拿来用：窗口本来就是最大化状态启动时，
-  // getNormalBounds() 有可能返回的是最大化尺寸，直接还原会出现「点了没反应」。
-  const target =
-    saved && saved.width < maxContent.width - 20 && saved.height < maxContent.height - 20 ? saved : null;
-  const fallback: Electron.Rectangle = {
-    x: Math.round(display.workArea.x + (display.workArea.width - 1400) / 2),
-    y: Math.round(display.workArea.y + (display.workArea.height - 900) / 2),
-    width: Math.min(1400, display.workArea.width),
-    height: Math.min(900, display.workArea.height),
-  };
-  fauxMaximized = false;
-  fauxRestoreBounds = null;
-  suppressMoveUntil = Date.now() + 400;
-  if (win.isMaximized()) win.unmaximize();
-  const bounds = target ?? fallback;
-  win.setBounds(bounds);
-  log.info("window", `还原窗口 → ${bounds.x},${bounds.y} ${bounds.width}×${bounds.height}`);
-  pushWindowState();
 }
 
 const host = new PiHost({
@@ -608,45 +536,8 @@ function createWindow() {
       sandbox: true,
     },
   });
-  // 双击标题栏等原生路径也会走到这里：转成铺满工作区，别留下那 1px
-  mainWindow.on("maximize", () => {
-    const win = mainWindow;
-    if (win && !win.isDestroyed() && !fauxMaximized) maximizeToWorkArea(win);
-    pushWindowState();
-  });
-  // 只同步按钮状态：从原生最大化转成铺满工作区时，这个事件会迟到几百毫秒，
-  // 凭它清掉标记会让图标停在「最大化」上（点击就没法还原了）。
+  mainWindow.on("maximize", () => pushWindowState());
   mainWindow.on("unmaximize", () => pushWindowState());
-  // 拖动假最大化的窗口 = 还原，并让标题栏留在光标附近
-  mainWindow.on("move", () => {
-    const win = mainWindow;
-    if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
-    // 只靠 suppressMoveUntil 挡自己设的 bounds：拖动过程中 getContentBounds() 可能还是
-    // 旧值，用「是否正好在最大化矩形上」判断会漏掉真正的拖动。
-    const bounds = win.getBounds();
-    const area = screen.getDisplayMatching(bounds).workArea;
-    const cursor = screen.getCursorScreenPoint();
-    const restore = fauxRestoreBounds ?? { width: 1400, height: 900 };
-    fauxMaximized = false;
-    fauxRestoreBounds = null;
-    if (win.isMaximized()) win.unmaximize();
-    win.setBounds({
-      x: Math.round(cursor.x - restore.width / 2),
-      y: Math.max(area.y, cursor.y - 16),
-      width: restore.width,
-      height: restore.height,
-    });
-    pushWindowState();
-  });
-  // 任务栏改位置 / 换显示器时工作区会变，跟着铺满
-  const followWorkArea = (): void => {
-    const win = mainWindow;
-    if (!win || win.isDestroyed() || !fauxMaximized) return;
-    suppressMoveUntil = Date.now() + 200;
-    win.setContentBounds(maximizedContentBounds(screen.getDisplayMatching(win.getBounds())));
-  };
-  screen.on("display-metrics-changed", followWorkArea);
-  screen.on("display-removed", followWorkArea);
   mainWindow.on("enter-full-screen", pushWindowState);
   mainWindow.on("leave-full-screen", pushWindowState);
 
@@ -1090,10 +981,13 @@ app.whenReady().then(() => {
     return true;
   });
   handle("app:window-toggle-maximize", () => {
-    if (!mainWindow) return false;
-    if (windowIsMaximized()) restoreWindow(mainWindow);
-    else maximizeToWorkArea(mainWindow);
-    return windowIsMaximized();
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) return false;
+    const maximize = !win.isMaximized();
+    if (maximize) win.maximize();
+    else win.unmaximize();
+    pushWindowState();
+    return maximize;
   });
   handle("app:window-close", () => {
     mainWindow?.close();
