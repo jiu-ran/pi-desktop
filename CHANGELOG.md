@@ -5,6 +5,37 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.0] - 2026-10-29
+
+桌面端不再内置 Pi：会话直接跑本机安装的 `pi`，`pi update` 之后当场生效，安装包也小了约 35 MB。另外输入框支持 `↑` / `↓` 翻历史，「有新版本」跳到正确的更新页，`update --all` 的提示不再吞掉「扩展已更新」。
+
+### 变更
+
+- **不再内置 Pi**：删掉 `@earendil-works/pi-coding-agent` 依赖（25 MB，含传递依赖约 35 MB）。RPC 客户端、设置读写、软件包与资源发现、SKILL.md 解析全部自己实现（`electron/pi-rpc.ts`、`pi-resources.ts`、`pi-entry.ts`）；会话入口从 PATH 或「设置 → Pi CLI」的自定义路径反解，找不到就提示安装。
+- **不再要求 `node` 在 PATH**：用 `process.execPath` + `ELECTRON_RUN_AS_NODE` 起 Pi 进程。
+- **扩展的安装 / 卸载 / 更新**改走本机 `pi install | remove | update`。
+- **前置条件**：本机需要能运行的 `pi`；没装时应用能打开但不会启动会话。
+
+### 新增
+
+- **输入框历史**：发过的内容存本地（最多 50 条，连续重复只留一条），`↑` / `↓` 翻阅，翻过最新一条会还原开始浏览前的草稿；只在没有选中文字且光标在首行 / 末行时接管，多行编辑不受影响。
+- **环境与快捷键页**补一行「翻阅输入过的内容 ↑ / ↓」。
+
+### 修复
+
+- **「有新版本」跳到错误页面**：徽标原来写死 `environment`，点开是「环境与快捷键」。现在桌面应用更新 → Pi Desktop 页，Pi CLI 更新 → Pi CLI 页。
+- **`update --all` 的提示吞掉「扩展已更新」**：`from === to` 只说明本体没变，现在提示「Pi 本体已是最新（x）；扩展包已按 update --all 检查」；设置页「上次更新结果」把输出从悬停提示改成可展开的几行。
+- **RPC 4 个方法没接线**：`setAutoCompaction` / `setAutoRetry` / `setSteeringMode` / `setFollowUpMode` 在白名单里却没实现，一用就是 `is not a function`。
+- **压缩上下文被误判成失败**：超时判定原来匹配上游英文文案，换成自己的客户端后永远匹配不上，大会话压缩会直接报错；现在用带标记的超时错误，改为等 `compaction_end`。
+- **git 来源的扩展显示「未安装」**：安装目录解析没处理 `git@host:owner/repo`、带端口的 `ssh://`、`owner/repo@ref`，路径算错就找不到。
+- **技能面板的「临时」筛选**：Pi SDK 内部临时安装的作用域，桌面端产不出来，选项已删。
+
+### 工程
+
+- 新增检查：`pi-rpc`（白名单 ↔ 参数表 ↔ 类实现）、`pi-resources`（来源 / 安装位置 / 资源 / frontmatter）、`pi-entry`（三种安装布局）、`prompt-history`、`pi-update`。
+- `settings-tabs` 增加源码扫描：`openSettingsModal('…')` 指向不存在的页面会报错；「有新版本」的目标抽成 `updateSettingsTab()` 纯函数。
+- 发布检查清单增加「打包产物里没有 `@earendil-works`」。
+
 ## [0.6.0] - 2026-10-29
 
 「打开」按钮变成菜单，多出「从 Git 克隆」；渲染进程崩溃会自动重载，反复崩溃就退到软件渲染，不再停在黑屏；对话搜索只看正文，`Ctrl+F` 把光标直接放进搜索框。初始页整页重做，最大化四边贴满、底部那条白线也没了。
