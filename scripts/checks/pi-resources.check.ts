@@ -35,6 +35,16 @@ try {
   assert.equal(parseSource("git:github.com/me/repo").kind, "git");
   assert.equal(parseSource("https://github.com/me/repo.git").kind, "git");
   assert.equal(parseSource("ssh://git@github.com/me/repo.git").kind, "git");
+  // git 源的 host / path 决定安装目录，@ref 与 .git 不能混进去
+  assert.deepEqual(parseSource("git:github.com/me/repo"), { kind: "git", host: "github.com", path: "me/repo" });
+  assert.deepEqual(parseSource("git:github.com/me/repo@v1.2.0"), { kind: "git", host: "github.com", path: "me/repo" }, "固定 ref 不参与目录");
+  assert.deepEqual(parseSource("git@github.com:me/repo.git"), { kind: "git", host: "github.com", path: "me/repo" }, "scp 形式");
+  assert.deepEqual(parseSource("https://github.com/me/repo.git"), { kind: "git", host: "github.com", path: "me/repo" });
+  assert.deepEqual(
+    parseSource("ssh://git@gitlab.example.com:2222/group/sub/repo.git"),
+    { kind: "git", host: "gitlab.example.com", path: "group/sub/repo" },
+    "端口不进 host，多级路径要保留",
+  );
   assert.equal(parseSource("./local-dir").kind, "local");
   assert.equal(parseSource("D:\\work\\ext").kind, "local");
 

@@ -1,9 +1,6 @@
 /**
- * ci 上游 `RpcClient.send()` 给**每条命令**都只留了 30 秒：
- *
- * ```js
- * const timeout = setTimeout(() => reject(new Error(`Timeout waiting for response to ${command.type}. …`)), 30000);
- * ```
+ * RPC 客户端（`electron/pi-rpc.ts`）给**每条命令**都只留了 30 秒
+ * （`RPC_DEFAULT_TIMEOUT_MS`）：
  *
  * 大部分命令都是毫秒级，但 `compact`（压缩上下文）要调一次模型把整段对话总结掉，
  * 大会话动辄一两分钟——30 秒必然超时。超时只是「客户端不等了」，Pi 进程那边
@@ -15,7 +12,7 @@
  * 其它错误（模型没配、进程挂了…）照原样抛出，不能被吞掉。
  */
 
-/** 上游 RpcClient 的单命令超时 */
+/** RPC 客户端的单命令超时（与 `RPC_DEFAULT_TIMEOUT_MS` 保持一致，由 pi-rpc 检查守着） */
 export const COMPACT_RPC_TIMEOUT_MS = 30_000;
 /** 压缩本身的上限：有的大会话确实很慢，给足 10 分钟 */
 export const COMPACT_FINISH_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -42,7 +39,11 @@ export type CompactOutcome =
 
 /** 只有「等 compact 响应超时」算慢，别的错误要原样抛出 */
 export function isCompactTimeout(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (!error) return false;
+  const marked = error as { rpcTimeout?: boolean; method?: string };
+  if (marked.rpcTimeout) return marked.method === "compact";
+  // 兜底：早期实现/测试里用的是英文文案
+  const message = error instanceof Error ? error.message : String(error);
   return message.includes("Timeout waiting for response to compact");
 }
 

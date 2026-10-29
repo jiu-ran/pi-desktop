@@ -281,7 +281,7 @@ export interface PiResourceItem {
   name: string;
   type: "extensions" | "skills" | "prompts" | "themes";
   enabled: boolean;
-  scope: "user" | "project" | "temporary";
+  scope: "user" | "project";
   origin: "package" | "top-level";
   source: string;
 }
@@ -299,7 +299,7 @@ export interface PiSkillItem {
   description: string;
   filePath: string;
   baseDir: string;
-  scope: "user" | "project" | "temporary";
+  scope: "user" | "project";
   origin: "package" | "top-level";
   source: string;
   disableModelInvocation: boolean;

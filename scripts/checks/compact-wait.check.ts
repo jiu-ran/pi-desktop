@@ -49,6 +49,17 @@ async function main(): Promise<void> {
   // 2. 只认 compact 的超时，别的超时/错误要能区分
   assert.equal(isCompactTimeout(timeoutError()), true);
   assert.equal(isCompactTimeout(timeoutError("prompt")), false, "prompt 超时不能被当成 compact 慢");
+  // 自己实现的 RpcTimeoutError 靠标记判断，不匹配文案
+  assert.equal(
+    isCompactTimeout(Object.assign(new Error("等待 compact 响应超时（30000ms）"), { rpcTimeout: true, method: "compact" })),
+    true,
+    "RpcTimeoutError（带 rpcTimeout 标记）要能识别",
+  );
+  assert.equal(
+    isCompactTimeout(Object.assign(new Error("等待 prompt 响应超时"), { rpcTimeout: true, method: "prompt" })),
+    false,
+    "别的命令超时不能当成压缩变慢",
+  );
   assert.equal(isCompactTimeout(new Error("Model not found")), false);
   assert.equal(isCompactTimeout(undefined), false);
 

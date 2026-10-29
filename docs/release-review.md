@@ -68,6 +68,7 @@ npx --no-install electron-builder --dir
 - [ ] `dist/win-unpacked`（或对应平台目录）能启动，界面正常渲染，标题栏、侧边栏、欢迎页没有缺失。
 - [ ] 打包版加载 `app.asar` 内的 `dist-electron/terminal-host.js` 后能启动 PTY 并正常退出：`npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar`（Windows CI 同样执行）。
 - [ ] `dist/` 中的安装包文件名、图标、版本号正确。
+- [ ] 打包产物里没有 `@earendil-works`（桌面端不内置 Pi；`find dist/win-unpacked/resources -name "*earendil*"` 应为空）。
 - [ ] `CSP` 生效但未拦截自身资源：渲染进程控制台没有 `Refused to ...` 或 `Content Security Policy` 报错。
 
 ## 5. 手工验收（每轮发布至少一遍）

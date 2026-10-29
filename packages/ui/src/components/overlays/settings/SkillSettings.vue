@@ -8,12 +8,12 @@ import SelectMenu from "../../shared/SelectMenu.vue";
 const { workbench, bus } = useKernel();
 const state = workbench.state;
 
-const skillScopeLabels: Record<string, string> = { user: "全局", project: "当前项目", temporary: "临时" };
+const skillScopeLabels: Record<string, string> = { user: "全局", project: "当前项目" };
 const skillOriginLabels: Record<string, string> = { package: "软件包", "top-level": "本地目录" };
 
 const skillsLoading = ref(false);
 const skillsData = ref<PiSkillsOverview | null>(null);
-const skillsFilter = ref<"all" | "user" | "project" | "temporary">("all");
+const skillsFilter = ref<"all" | "user" | "project">("all");
 
 const visibleSkills = computed(() => {
   const list = skillsData.value?.skills ?? [];

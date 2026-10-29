@@ -215,6 +215,16 @@ export const settingsModalState = reactive({
   tab: "conversation" as SettingsTabId,
 });
 
+/**
+ * 「有新版本」徽标该跳到哪一页。
+ *
+ * 桌面应用和 Pi CLI 各有自己的更新页：以前徽标写死 `environment`（系统分区的
+ * 环境与快捷键），点了跟更新毫无关系。放成纯函数，检查脚本能直接盯住。
+ */
+export function updateSettingsTab(kind: "app" | "pi"): SettingsTabId {
+  return kind === "app" ? "pi-desktop" : "pi-cli";
+}
+
 export function openSettingsModal(tab?: SettingsTabId): void {
   if (tab) settingsModalState.tab = tab;
   settingsModalState.open = true;

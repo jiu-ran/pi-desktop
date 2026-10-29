@@ -31,7 +31,7 @@ export const GROUPS = [
   { id: "skill", label: "技能" },
 ];
 
-const SCOPES: Record<string, string> = { user: "全局", project: "项目", temporary: "临时" };
+const SCOPES: Record<string, string> = { user: "全局", project: "项目" };
 
 export function scopeLabel(scope?: string): string {
   return (scope && SCOPES[scope]) ?? "";

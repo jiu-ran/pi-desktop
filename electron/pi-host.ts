@@ -6,7 +6,7 @@ import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, 
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { agentDirPath as resolveAgentDir, autoResources, configuredPackages, packageResources, readSettings, runPiCli, skillsFromResources, writeSettingsFile } from "./pi-resources.ts";
+import { agentDirPath as resolveAgentDir, autoResources, configuredPackages, packageResources, readSettings, runPiCli, skillsFromResources } from "./pi-resources.ts";
 import { PiRpcClient } from "./pi-rpc.ts";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { COMPACT_RPC_TIMEOUT_MS, runCompactResilient } from "./compact-wait.ts";
@@ -23,7 +23,8 @@ const execFileAsync = promisify(execFile);
 
 /**
  * PiHost：宿主侧的工作区进程池。
- * 一个工作区一个 `pi --mode rpc`，只通过官方 PiRpcClient 通信，不读写 Pi 的配置。
+ * 一个工作区一个 `pi --mode rpc`（本机安装的 pi），只通过 RPC 通信；
+ * 配置 / 软件包 / 技能的读写集中在 pi-resources.ts，桌面端不内置 Pi。
  */
 
 export interface AttachmentItem {
@@ -209,7 +210,7 @@ export interface PiResourceItem {
   name: string;
   type: "extensions" | "skills" | "prompts" | "themes";
   enabled: boolean;
-  scope: "user" | "project" | "temporary";
+  scope: "user" | "project";
   origin: "package" | "top-level";
   source: string;
 }
@@ -227,7 +228,7 @@ export interface PiSkillItem {
   description: string;
   filePath: string;
   baseDir: string;
-  scope: "user" | "project" | "temporary";
+  scope: "user" | "project";
   origin: "package" | "top-level";
   source: string;
   /** true 时只能通过 /skill:name 显式调用，不会自动注入系统提示词 */

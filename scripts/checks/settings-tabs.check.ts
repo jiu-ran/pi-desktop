@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ALL_TAB_IDS,
   SETTINGS_SECTIONS,
@@ -8,7 +11,7 @@ import {
   sectionOfTab,
   sectionTabs,
 } from "../../packages/ui/src/components/overlays/settings/settings-tabs.ts";
-import { DEFAULT_SETTINGS } from "../../packages/ui/src/services/settings.ts";
+import { DEFAULT_SETTINGS, updateSettingsTab } from "../../packages/ui/src/services/settings.ts";
 
 /**
  * 设置目录检查：分区 / 二级页 / 搜索。
@@ -105,4 +108,31 @@ assert.deepEqual(searchSettings("   "), [], "空查询不返回结果");
 // ---- 5. 设置项字段与页面不脱节：至少这一页是「对话」相关的 ----
 assert.ok("streamingMode" in DEFAULT_SETTINGS && "sendShortcut" in DEFAULT_SETTINGS, "对话页依赖的设置在默认值里都存在");
 
+
+// ---- 6. 源码里打开设置页的调用必须指向存在的页 ----
+// 之前标题栏的「有新版本」徽标传的是 'environment'（系统分区里的二级页），点一下跳到
+// 环境与快捷键 —— 这类写错 id 的调用没有类型约束，只能扫源码兜住。
+const uiRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/ui/src");
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (name.endsWith(".ts") || name.endsWith(".vue")) out.push(full);
+  }
+  return out;
+}
+const misdirected: string[] = [];
+for (const sourceFile of walk(uiRoot)) {
+  const source = readFileSync(sourceFile, "utf8");
+  for (const match of source.matchAll(/openSettingsModal\(\s*["']([\w-]+)["']/g)) {
+    if (!ALL_TAB_IDS.includes(match[1] as (typeof ALL_TAB_IDS)[number])) {
+      misdirected.push(`${path.relative(uiRoot, sourceFile)} → openSettingsModal('${match[1]}')`);
+    }
+  }
+}
+assert.deepEqual(misdirected, [], `打开了不存在的设置页：${misdirected.join(" / ")}`);
+
+// ---- 7. 「有新版本」徽标要跳到对应的更新页（以前写死 environment，点了跟更新无关）----
+assert.equal(updateSettingsTab("app"), "pi-desktop", "桌面应用有新版本时应该打开 Pi Desktop 页");
+assert.equal(updateSettingsTab("pi"), "pi-cli", "Pi CLI 有新版本时应该打开 Pi CLI 页");
 console.log(`settings-tabs OK ${SETTINGS_SECTIONS.length} 个分区 / ${SETTINGS_TABS.length} 个页面 / 搜索与归属`);

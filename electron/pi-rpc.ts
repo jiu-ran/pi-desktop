@@ -15,6 +15,23 @@ import { spawn, type ChildProcess } from "node:child_process";
 export const RPC_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * 命令超时。带上 `rpcTimeout` 标记和 `method`：调用方（例如压缩上下文）要区分
+ * 「只是客户端不等了，Pi 还在干活」和真正的失败，用标记判断比匹配文案可靠。
+ */
+export class RpcTimeoutError extends Error {
+  readonly rpcTimeout = true;
+  readonly method: string;
+  readonly timeoutMs: number;
+
+  constructor(method: string, timeoutMs: number, stderr: string) {
+    super(`等待 ${method} 响应超时（${timeoutMs}ms）${stderr ? `：${stderr.slice(-400)}` : ""}`);
+    this.name = "RpcTimeoutError";
+    this.method = method;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * 方法名（白名单里的 camelCase）→ 参数顺序。
  * 参数名用来拼 wire 上的字段名，命令类型由方法名转 snake_case 得到。
  */
@@ -149,18 +166,21 @@ export class PiRpcClient {
     const child = this.process;
     if (!child) return;
     this.stopping = true;
-    child.stdin?.end();
-    child.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve();
-      }, 1000);
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve();
+    // 进程已经退出时不要再等 exit 事件（它早就发过了），否则这里会白等 1 秒
+    if (child.exitCode === null && child.signalCode === null) {
+      child.stdin?.end();
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve();
+        }, 1000);
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
-    });
+    }
     this.process = null;
     this.rejectAll(new Error("RPC 客户端已停止"));
   }
@@ -197,7 +217,7 @@ export class PiRpcClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`等待 ${method} 响应超时（${timeoutMs}ms）${this.stderr ? `：${this.stderr.slice(-400)}` : ""}`));
+        reject(new RpcTimeoutError(method, timeoutMs, this.stderr));
       }, timeoutMs);
       this.pending.set(id, {
         timer,
@@ -269,6 +289,20 @@ export class PiRpcClient {
   setThinkingLevel(level: string): Promise<any> {
     return this.call("setThinkingLevel", [level]);
   }
+  // 下面四个是界面开关（自动压缩 / 自动重试 / 引导模式 / 追问模式）：
+  // `pi-host.ts` 是 `client[method](...)` 泛化调用的，类上少一个方法就是运行时报错
+  setAutoCompaction(enabled: boolean): Promise<any> {
+    return this.call("setAutoCompaction", [enabled]);
+  }
+  setAutoRetry(enabled: boolean): Promise<any> {
+    return this.call("setAutoRetry", [enabled]);
+  }
+  setSteeringMode(mode: string): Promise<any> {
+    return this.call("setSteeringMode", [mode]);
+  }
+  setFollowUpMode(mode: string): Promise<any> {
+    return this.call("setFollowUpMode", [mode]);
+  }
   setModel(provider: string, modelId: string): Promise<any> {
     return this.call("setModel", [provider, modelId]);
   }
@@ -304,6 +338,12 @@ export class PiRpcClient {
 
   private consume(chunk: string): void {
     this.buffer += chunk;
+    // 没换行的超大输出（坏掉的扩展、二进制垃圾）不能无限吃内存
+    if (this.buffer.length > 16 * 1024 * 1024) {
+      this.stderr += "\n[RPC] 单行超过 16 MB，已丢弃";
+      this.buffer = "";
+      return;
+    }
     let index = this.buffer.indexOf("\n");
     while (index >= 0) {
       const line = this.buffer.slice(0, index).trim();

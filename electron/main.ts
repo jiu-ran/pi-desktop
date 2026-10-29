@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, screen, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,10 +12,10 @@ import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions }
 import { createAppUpdateManager, MANUAL_CHECK_CACHE_MS } from "./network/update.ts";
 import { atomicWriteText } from "./atomic-file.ts";
 import { activity, logPerfLine, withActivity } from "./perf-log.ts";
-import { isWritableDir, log, logEvent, logStore, useAppLogs } from "./logger.ts";
+import { isWritableDir, log, logStore, useAppLogs } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
 import { cleanLegacyProjectArtifacts } from "./project-cleanup.ts";
-import type { AppUpdateCheckResult, PreparedAppUpdate } from "./network/update.ts";
+import type { AppUpdateCheckResult } from "./network/update.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ownsInstance = !app.isPackaged || app.requestSingleInstanceLock();

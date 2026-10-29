@@ -13,7 +13,7 @@ import path from "node:path";
  * 这个模块只做「从可执行文件反解出入口」这件事，纯同步、不跑子进程，
  * 方便单测（`scripts/checks/pi-entry.check.ts`）。
  */
-export const PI_RUNTIME_PACKAGE = "@earendil-works/pi-coding-agent";
+const PI_RUNTIME_PACKAGE = "@earendil-works/pi-coding-agent";
 
 /** shim 一般只有几百字节；读太大的文件说明选错了东西 */
 const SHIM_READ_LIMIT = 256 * 1024;
@@ -110,7 +110,7 @@ export async function resolvePiEntryFromSystem(executable = ""): Promise<string>
   return piEntryFromNodeModulesDir(last);
 }
 
-/** 按 PATH 找可执行文件（用来确认 `node` 在不在：RpcClient 是靠 node 启动 pi 的） */
+/** 按 PATH 找可执行文件（找 `pi` 时复用） */
 export function findExecutableOnPath(name: string, env: NodeJS.ProcessEnv = process.env): string {
   const isWin = process.platform === "win32";
   const dirs = (env.PATH ?? env.Path ?? "").split(path.delimiter).map((item) => item.trim()).filter(Boolean);

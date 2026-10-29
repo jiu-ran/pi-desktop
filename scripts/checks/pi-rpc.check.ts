@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { PI_RPC_ALLOWLIST } from "../../electron/pi-rpc-allowlist.ts";
-import { RPC_COMMAND_PARAMS, rpcCommandType } from "../../electron/pi-rpc.ts";
+import { COMPACT_RPC_TIMEOUT_MS } from "../../electron/compact-wait.ts";
+import { PiRpcClient, RPC_COMMAND_PARAMS, RPC_DEFAULT_TIMEOUT_MS, rpcCommandType } from "../../electron/pi-rpc.ts";
 
 /**
  * 自己实现的 RPC 客户端要和 Pi 的 wire 协议对得上。
@@ -13,6 +14,12 @@ import { RPC_COMMAND_PARAMS, rpcCommandType } from "../../electron/pi-rpc.ts";
 for (const method of PI_RPC_ALLOWLIST) {
   if (method === "setMaxIdleWorkers") continue; // 桌面端自己处理，不走 Pi
   assert.ok(method in RPC_COMMAND_PARAMS, `白名单方法 ${method} 没有对应的 RPC 参数表`);
+  // host 里是 client[method](...) 泛化调用的：类上没这个方法就会运行时炸
+  assert.equal(
+    typeof (PiRpcClient.prototype as any)[method],
+    "function",
+    `PiRpcClient 缺少 ${method}()：host 泛化调用会直接报 is not a function`,
+  );
 }
 
 for (const method of Object.keys(RPC_COMMAND_PARAMS)) {
@@ -45,4 +52,7 @@ assert.deepEqual(RPC_COMMAND_PARAMS.compact, ["customInstructions"]);
 assert.deepEqual(RPC_COMMAND_PARAMS.setSessionName, ["name"]);
 assert.deepEqual(RPC_COMMAND_PARAMS.bash ?? [], [], "bash 不在白名单里，不应该出现参数表");
 
-console.log(`pi-rpc OK 白名单 ${PI_RPC_ALLOWLIST.length} 个方法都有参数表 / 命令类型映射 / 关键字段顺序`);
+// 压缩上下文靠「单命令超时 30 秒」这个数值决定要不要改等事件，两处必须一致
+assert.equal(COMPACT_RPC_TIMEOUT_MS, RPC_DEFAULT_TIMEOUT_MS, "compact-wait 的超时常量与 RPC 客户端不一致");
+
+console.log(`pi-rpc OK 白名单 ${PI_RPC_ALLOWLIST.length} 个方法都有参数表 + 类实现 / 命令类型映射 / 关键字段顺序 / 超时常量一致`);

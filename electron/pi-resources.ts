@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -23,20 +23,12 @@ import path from "node:path";
  * 的逐项启用开关没有对应实现）。
  */
 
-export const RESOURCE_TYPES = ["extensions", "skills", "prompts", "themes"] as const;
-export type ResourceType = (typeof RESOURCE_TYPES)[number];
+const RESOURCE_TYPES = ["extensions", "skills", "prompts", "themes"] as const;
+type ResourceType = (typeof RESOURCE_TYPES)[number];
 
 export type SettingsRecord = Record<string, any>;
 
-export interface SettingsEntry {
-  source: string;
-  scope: "user" | "project";
-  /** 设置里写成了对象（带 autoload / 各类型过滤），不是纯字符串 */
-  filtered: boolean;
-  entry: string | SettingsRecord;
-}
-
-export interface ResourceItem {
+interface ResourceItem {
   path: string;
   name: string;
   type: ResourceType;
@@ -46,7 +38,7 @@ export interface ResourceItem {
   source: string;
 }
 
-export interface PackageEntry {
+interface PackageEntry {
   source: string;
   scope: "user" | "project";
   kind: "npm" | "git" | "local";
@@ -56,7 +48,7 @@ export interface PackageEntry {
   installedPath?: string;
 }
 
-export interface SkillItem {
+interface SkillItem {
   name: string;
   description: string;
   filePath: string;
@@ -68,7 +60,7 @@ export interface SkillItem {
 }
 
 const SKILL_FILE = "SKILL.md";
-const GIT_SOURCE = /^(git:|https?:\/\/|ssh:\/\/)|(^|\.)(github|gitlab)\.com[/:]/i;
+const GIT_SOURCE = /^(git:|https?:\/\/|ssh:\/\/|git:\/\/)|^[^@\s/]+@[^:/\s]+:|(^|\.)(github|gitlab|bitbucket)\.com[/:]/i;
 
 function isObject(value: unknown): value is SettingsRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -78,16 +70,16 @@ export function agentDirPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
 }
 
-export function projectConfigDir(cwd: string): string {
+function projectConfigDir(cwd: string): string {
   return path.join(cwd, ".pi");
 }
 
-export function settingsPaths(cwd: string, agentDir: string): { global: string; project: string } {
+function settingsPaths(cwd: string, agentDir: string): { global: string; project: string } {
   return { global: path.join(agentDir, "settings.json"), project: path.join(cwd, ".pi", "settings.json") };
 }
 
 /** 读一个 JSON 设置文件；损坏时返回空对象并带上原因（界面只展示路径，日志里能看到）。 */
-export function readSettingsFile(file: string): { value: SettingsRecord; error?: string } {
+function readSettingsFile(file: string): { value: SettingsRecord; error?: string } {
   if (!existsSync(file)) return { value: {} };
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
@@ -95,14 +87,6 @@ export function readSettingsFile(file: string): { value: SettingsRecord; error?:
   } catch (error: any) {
     return { value: {}, error: `${file}：${error?.message ?? error}` };
   }
-}
-
-/** 原子写：先写临时文件再 rename，避免 Pi 读到半个文件。 */
-export async function writeSettingsFile(file: string, value: SettingsRecord): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(temp, file);
 }
 
 export function readSettings(cwd: string, agentDir: string) {
@@ -113,9 +97,36 @@ export function readSettings(cwd: string, agentDir: string) {
   return { global: global.value, project: project.value, paths, diagnostics };
 }
 
-/** 全局 + 项目合并：项目级优先（和 Pi 的 merge 语义一致，够跑包列表与资源发现）。 */
-export function mergeSettings(settings: { global: SettingsRecord; project: SettingsRecord }): SettingsRecord {
-  return { ...settings.global, ...settings.project };
+/**
+ * 从 git 源里拆出 host 与仓库路径（安装目录就是 `<root>/<host>/<path>`）。
+ * 支持 `git:github.com/me/repo`、`git@host:me/repo`（scp）、`https://…/me/repo.git`、
+ * `ssh://git@host:端口/me/repo`，以及 `@ref` / `#ref` 这种固定分支后缀。
+ */
+function parseGitLocation(source: string): { host: string; path: string } | null {
+  const rest = source.replace(/^git:/, "").trim();
+  let host = "";
+  let repoPath = "";
+  // scp 写法（git@host:owner/repo）只在没有协议前缀时才成立：
+  // 否则 ssh://git@host:2222/… 会被误拆成 host 后面的端口当成路径
+  const scp = rest.includes("://") ? null : /^[^@\s]+@([^:/\s]+):(.+)$/.exec(rest);
+  if (scp) {
+    host = scp[1];
+    repoPath = scp[2];
+  } else {
+    try {
+      const url = new URL(rest.includes("://") ? rest : `https://${rest}`);
+      host = url.hostname;
+      repoPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    } catch {
+      return null;
+    }
+  }
+  repoPath = repoPath.replace(/\.git$/, "").replace(/#.*$/, "");
+  // `owner/repo@v1.2.0`：@ 后面是固定 ref，不参与安装目录
+  const at = repoPath.lastIndexOf("@");
+  if (at > 0) repoPath = repoPath.slice(0, at);
+  if (!host || !repoPath) return null;
+  return { host, path: repoPath };
 }
 
 export function parseSource(source: string): { kind: "npm" | "git" | "local"; name?: string; host?: string; path?: string } {
@@ -128,10 +139,8 @@ export function parseSource(source: string): { kind: "npm" | "git" | "local"; na
     return { kind: "npm", name };
   }
   if (GIT_SOURCE.test(trimmed)) {
-    const bare = trimmed.replace(/^git:/, "");
-    const normalized = bare.replace(/^ssh:\/\/[^/]+\//, "").replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
-    const [host, ...rest] = normalized.split("/");
-    return { kind: "git", host, path: rest.join("/") };
+    const git = parseGitLocation(trimmed);
+    if (git) return { kind: "git", host: git.host, path: git.path };
   }
   return { kind: "local", path: trimmed };
 }
@@ -371,7 +380,7 @@ export async function skillsFromResources(resources: ResourceItem[]): Promise<{ 
     const front = parseSkillFrontmatter(text);
     const baseDir = path.dirname(resource.path);
     const name = front.name || path.basename(baseDir);
-    if (!front.description) diagnostics.push(`${resource.path}：缺少 description，Pi 会忽略这个技能`);
+    if (!front.description) diagnostics.push(`${resource.path}：缺少 description，列表里会显示为空`);
     skills.push({
       name,
       description: front.description ?? "",

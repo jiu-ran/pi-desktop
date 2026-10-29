@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { extState } from "../../services/extension-ui.ts";
-import { openSettingsModal, settingsModalState } from "../../services/settings.ts";
+import { openSettingsModal, settingsModalState, updateSettingsTab } from "../../services/settings.ts";
 import { icons } from "../../shared/util.ts";
 import WindowControls from "./WindowControls.vue";
 
@@ -129,7 +129,7 @@ const piTitle = computed(() => {
         v-if="state.appUpdate.updateAvailable || pi.updateAvailable"
         class="status-item clickable pi-update-hint"
         :title="state.appUpdate.updateAvailable ? `Pi Desktop ${state.appUpdate.latest} 已发布，当前 ${state.appUpdate.current}` : `Pi ${pi.latest} 可用，当前 ${pi.version}`"
-        @click="openSettingsModal(state.appUpdate.updateAvailable ? 'pi-desktop' : 'pi-cli')"
+        @click="openSettingsModal(updateSettingsTab(state.appUpdate.updateAvailable ? 'app' : 'pi'))"
       >
         <span class="pi-update-dot" />
         有新版本 {{ state.appUpdate.updateAvailable ? state.appUpdate.latest : pi.latest }}
