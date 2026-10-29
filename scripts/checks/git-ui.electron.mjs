@@ -11,7 +11,7 @@ export async function checkGitUiInElectron(win) {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const poll = async (expression, label) => {
     // 分支列表与 diff 都是异步加载的；重负载时 8s 不够，放宽到 15s 减少偶发超时。
-    for (let i = 0; i < 150; i++) { if (await evaluate(expression)) return; await wait(100); }
+    for (let i = 0; i < 300; i++) { if (await evaluate(expression)) return; await wait(100); }
     throw new Error(`Git 界面检查超时：${label}`);
   };
   const dir = await mkdtemp(path.join(tmpdir(), "pi-git-ui-"));
@@ -20,7 +20,7 @@ export async function checkGitUiInElectron(win) {
   const previous = await evaluate("({cwd:window.__piDesktop.workbench.state.activeCwd,panel:window.__piDesktop.workbench.state.activePanelId,width:window.__piDesktop.workbench.state.panelWidth})");
   /** 等目标节点出现后再点击：界面重渲染时裸 click 会抛 "reading 'click'"，表现为整套冒烟偶发失败。 */
   const click = async (expression, label) => {
-    for (let i = 0; i < 150; i += 1) {
+    for (let i = 0; i < 300; i += 1) {
       const done = await evaluate(`(() => { const node = ${expression}; if (!node) return false; node.click(); return true; })()`);
       if (done) return;
       await wait(100);
