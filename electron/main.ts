@@ -147,20 +147,49 @@ let mainWindow: BrowserWindow | null = null;
 let terminalFocused = false;
 
 /**
- * 最大化 / 还原一律交给系统：原生最大化会把窗口往外推 8px，圆角和边框本来就在屏外，
- * 有缩放动画、还原也能回到原位置 —— 自己 setBounds 模拟反而会把这些都丢掉。
- * 这里只负责把状态推给渲染进程画按钮图标。
+ * 放大动画交给系统，动画结束后补一次全屏。
+ *
+ * 原生最大化的客户区比屏幕矮 1 DIP（实测 1536×863 vs 1536×864），矮掉的那条露出的
+ * 是窗口外面的桌面 —— 深色界面下就是底部一条白线。全屏的客户区正好等于屏幕
+ * （实测 1536×864），而且全屏窗口不画圆角、内容也不位移，所以等放大动画跑完
+ * （实测约 250ms）再切全屏，正好把这条缝补掉，前后只差 1 DIP。
+ *
+ * 代价：最大化状态变成 fullscreen，isMaximized() 不能直接用，统一走 windowIsMaximized()。
  */
+const FILL_SCREEN_DELAY = 260;
+let fillTimer: NodeJS.Timeout | null = null;
+let restoreAfterFullscreen = false;
+
 function windowIsMaximized(): boolean {
   const win = mainWindow;
-  return Boolean(win && !win.isDestroyed() && win.isMaximized());
+  if (!win || win.isDestroyed()) return false;
+  return win.isFullScreen() || win.isMaximized();
+}
+
+/** 放大动画结束后切全屏补齐底部那 1 DIP（macOS / Linux 有系统标题栏，不需要） */
+function fillScreenAfterMaximize(): void {
+  if (process.platform !== "win32") return;
+  if (fillTimer) clearTimeout(fillTimer);
+  fillTimer = setTimeout(() => {
+    fillTimer = null;
+    const win = mainWindow;
+    if (!win || win.isDestroyed() || win.isFullScreen() || !win.isMaximized()) return;
+    win.setFullScreen(true);
+    pushWindowState();
+  }, FILL_SCREEN_DELAY);
+}
+
+function cancelFillScreen(): void {
+  if (!fillTimer) return;
+  clearTimeout(fillTimer);
+  fillTimer = null;
 }
 
 function pushWindowState(): void {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
   win.webContents.send("app:window-state", {
-    maximized: win.isMaximized(),
+    maximized: windowIsMaximized(),
     fullscreen: win.isFullScreen(),
   });
 }
@@ -536,10 +565,24 @@ function createWindow() {
       sandbox: true,
     },
   });
-  mainWindow.on("maximize", () => pushWindowState());
-  mainWindow.on("unmaximize", () => pushWindowState());
-  mainWindow.on("enter-full-screen", pushWindowState);
-  mainWindow.on("leave-full-screen", pushWindowState);
+  mainWindow.on("maximize", () => {
+    fillScreenAfterMaximize();
+    pushWindowState();
+  });
+  mainWindow.on("unmaximize", () => {
+    cancelFillScreen();
+    pushWindowState();
+  });
+  mainWindow.on("enter-full-screen", () => pushWindowState());
+  mainWindow.on("leave-full-screen", () => {
+    const win = mainWindow;
+    // 「全屏补齐」状态下点还原：退出全屏后再退回原尺寸，动画仍是系统的
+    if (restoreAfterFullscreen && win && !win.isDestroyed()) {
+      restoreAfterFullscreen = false;
+      win.unmaximize();
+    }
+    pushWindowState();
+  });
 
   // 渲染进程卡死时没有任何日志（不重绘、不跑定时器），只有调用栈能说明它在转什么。
   // 卡死是偶发的，所以必须自动抓：Chromium 判定无响应后暂停 V8 并把栈写进日志。
@@ -983,11 +1026,21 @@ app.whenReady().then(() => {
   handle("app:window-toggle-maximize", () => {
     const win = mainWindow;
     if (!win || win.isDestroyed()) return false;
-    const maximize = !win.isMaximized();
-    if (maximize) win.maximize();
-    else win.unmaximize();
-    pushWindowState();
-    return maximize;
+    cancelFillScreen();
+    if (win.isFullScreen()) {
+      // 先退全屏，等 leave-full-screen 事件再把窗口退回原尺寸
+      restoreAfterFullscreen = true;
+      win.setFullScreen(false);
+      pushWindowState();
+      return false;
+    }
+    if (win.isMaximized()) {
+      win.unmaximize();
+      pushWindowState();
+      return false;
+    }
+    win.maximize();
+    return true;
   });
   handle("app:window-close", () => {
     mainWindow?.close();
