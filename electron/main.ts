@@ -169,24 +169,6 @@ function maximizedContentBounds(display: Electron.Display): Electron.Rectangle {
   };
 }
 
-/**
- * 是否还是「最大化尺寸」。
- *
- * 只看尺寸不看位置：拖动最大化窗口时 resize 事件也会跟着来。
- * 容差给到 8px —— Windows 移动窗口时会把外框宽高各撑 2~3px（实测 1552 → 1555），
- * 用 2px 容差会把单纯的位置变化误判成「用户改了尺寸」，标志一清，拖动还原就失效了。
- */
-const MAXIMIZED_SIZE_TOLERANCE = 8;
-
-function hasMaximizedSize(win: BrowserWindow): boolean {
-  const content = win.getContentBounds();
-  const target = maximizedContentBounds(screen.getDisplayMatching(content));
-  return (
-    Math.abs(content.width - target.width) <= MAXIMIZED_SIZE_TOLERANCE &&
-    Math.abs(content.height - target.height) <= MAXIMIZED_SIZE_TOLERANCE
-  );
-}
-
 let fauxMaximized = false;
 let fauxRestoreBounds: Electron.Rectangle | null = null;
 /** 自己 setBounds 触发的 move 事件别当成「用户拖动」 */
@@ -212,16 +194,34 @@ function maximizeToWorkArea(win: BrowserWindow): void {
   suppressMoveUntil = Date.now() + 400;
   if (win.isMaximized()) win.unmaximize();
   win.setContentBounds(maximizedContentBounds(display));
+  log.info(
+    "window",
+    `最大化 → 客户区 ${display.workArea.width + MAXIMIZE_OVERSCAN * 2}×${display.workArea.height + MAXIMIZE_OVERSCAN * 2}（原尺寸 ${fauxRestoreBounds?.width ?? 0}×${fauxRestoreBounds?.height ?? 0}）`,
+  );
   pushWindowState();
 }
 
 function restoreWindow(win: BrowserWindow): void {
-  const bounds = fauxRestoreBounds;
+  const display = screen.getDisplayMatching(win.getBounds());
+  const maxContent = maximizedContentBounds(display);
+  const saved = fauxRestoreBounds;
+  // 记下的尺寸必须真的比最大化小才拿来用：窗口本来就是最大化状态启动时，
+  // getNormalBounds() 有可能返回的是最大化尺寸，直接还原会出现「点了没反应」。
+  const target =
+    saved && saved.width < maxContent.width - 20 && saved.height < maxContent.height - 20 ? saved : null;
+  const fallback: Electron.Rectangle = {
+    x: Math.round(display.workArea.x + (display.workArea.width - 1400) / 2),
+    y: Math.round(display.workArea.y + (display.workArea.height - 900) / 2),
+    width: Math.min(1400, display.workArea.width),
+    height: Math.min(900, display.workArea.height),
+  };
   fauxMaximized = false;
   fauxRestoreBounds = null;
   suppressMoveUntil = Date.now() + 400;
   if (win.isMaximized()) win.unmaximize();
-  if (bounds) win.setBounds(bounds);
+  const bounds = target ?? fallback;
+  win.setBounds(bounds);
+  log.info("window", `还原窗口 → ${bounds.x},${bounds.y} ${bounds.width}×${bounds.height}`);
   pushWindowState();
 }
 
@@ -605,15 +605,6 @@ function createWindow() {
   // 只同步按钮状态：从原生最大化转成铺满工作区时，这个事件会迟到几百毫秒，
   // 凭它清掉标记会让图标停在「最大化」上（点击就没法还原了）。
   mainWindow.on("unmaximize", () => pushWindowState());
-  // 用户拖边缘改了尺寸：不再算作最大化
-  mainWindow.on("resize", () => {
-    const win = mainWindow;
-    if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
-    if (hasMaximizedSize(win)) return;
-    fauxMaximized = false;
-    fauxRestoreBounds = null;
-    pushWindowState();
-  });
   // 拖动假最大化的窗口 = 还原，并让标题栏留在光标附近
   mainWindow.on("move", () => {
     const win = mainWindow;
