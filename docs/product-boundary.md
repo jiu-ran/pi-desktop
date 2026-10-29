@@ -5,9 +5,9 @@ Pi Desktop 是本机 Pi Coding Agent 的桌面工作台。Pi 是唯一的 Agent�
 ## 桌面端永远不能做
 
 - 渲染进程不得导入 Node.js、Electron 主进程模块、Pi SDK，也不得自行启动 Pi。
-- 除 `electron/pi-host.ts` 外，不得导入或操作 Pi SDK。
+- 不直接依赖 Pi 的 npm 包；会话只通过 RPC 驱动本机 `pi`，配置 / 资源 / 技能的读写集中在 `electron/pi-host.ts` 与 `electron/pi-resources.ts`。
 - 应用代码不得直接调用模型服务，也不得创建第二个 Agent 会话。
-- 应用代码不得读写系统提示词、提示词模板或 Pi 的配置。
+- 除上面两个文件（宿主层）外，应用代码不得读写系统提示词、提示词模板或 Pi 的配置。
 - 渲染进程只能通过 `window.piDesktop` 使用预先声明的宿主能力。
 - 宿主调用 Pi 时只能使用明确列出的 RPC 方法，白名单位于 `electron/pi-host.ts`。
 - 桌面端不得根据消息内容自行计算 token、费用或压缩结果，这些数据只能展示 Pi 返回的结果。

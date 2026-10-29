@@ -6,8 +6,8 @@ import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, 
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { DefaultPackageManager, DefaultResourceLoader, getAgentDir, RpcClient, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { findExecutableOnPath } from "./pi-entry.ts";
+import { agentDirPath as resolveAgentDir, autoResources, configuredPackages, packageResources, readSettings, runPiCli, skillsFromResources, writeSettingsFile } from "./pi-resources.ts";
+import { PiRpcClient } from "./pi-rpc.ts";
 import { PI_RPC_ALLOWLIST } from "./pi-rpc-allowlist.ts";
 import { COMPACT_RPC_TIMEOUT_MS, runCompactResilient } from "./compact-wait.ts";
 import { clearSessionHistoryCache, readSessionHistory, readSessionHistoryPage } from "./session-history.ts";
@@ -23,7 +23,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * PiHost：宿主侧的工作区进程池。
- * 一个工作区一个 `pi --mode rpc`，只通过官方 RpcClient 通信，不读写 Pi 的配置。
+ * 一个工作区一个 `pi --mode rpc`，只通过官方 PiRpcClient 通信，不读写 Pi 的配置。
  */
 
 export interface AttachmentItem {
@@ -296,7 +296,7 @@ export interface GitCloneResult {
 }
 
 export interface WorkerSlot {
-  client: RpcClient;
+  client: PiRpcClient;
   sessionFile: string;
   streaming: boolean;
   compacting: boolean;
@@ -304,7 +304,7 @@ export interface WorkerSlot {
 }
 
 export interface WorkspaceClientPool {
-  client: RpcClient;
+  client: PiRpcClient;
   activeSessionFile: string;
   workers: Map<string, WorkerSlot>;
   standbySlot?: WorkerSlot | null;
@@ -991,10 +991,6 @@ export class PiHost {
     if (!this.piEntryResolver) throw new Error("没有配置本机 Pi 入口解析器");
     const entry = await this.piEntryResolver();
     if (!entry) throw new Error("没有找到本机 Pi CLI，请先安装 pi 或到「设置 → Pi CLI」指定路径");
-    // RpcClient 内部是 spawn("node", …)：没有 node 就起不来，提前给出可读的提示
-    if (!findExecutableOnPath("node")) {
-      throw new Error("没有找到 node：Pi CLI 需要 Node.js 才能启动，请把 node 加进 PATH（或改用 npm 安装的 pi）");
-    }
     this.piEntryCache = entry;
     log.pi("info", "worker", `使用本机 pi：${entry}`);
     return entry;
@@ -1096,7 +1092,7 @@ export class PiHost {
     pool: WorkspaceClientPool,
     options: { targetSessionFile?: string; pickLatestOnInit?: boolean; parentSession?: string } = {},
   ): Promise<WorkerSlot> {
-    const client = new RpcClient({ cliPath: await this.piEntry(), cwd });
+    const client = new PiRpcClient({ entry: await this.piEntry(), cwd });
     const slot: WorkerSlot = {
       client,
       sessionFile: "",
@@ -1187,7 +1183,7 @@ export class PiHost {
   private warmStandbyWorker(cwd: string, pool: WorkspaceClientPool): void {
     if (pool.standbySlot || pool.standbyPromise) return;
     const promise = (async (): Promise<WorkerSlot | null> => {
-      const client = new RpcClient({ cliPath: await this.piEntry(), cwd });
+      const client = new PiRpcClient({ entry: await this.piEntry(), cwd });
       const slot: WorkerSlot = {
         client,
         sessionFile: "",
@@ -1299,7 +1295,7 @@ export class PiHost {
 
   async start(cwd: string, attempt = this.startAttempts.get(cwd) ?? 0): Promise<void> {
     const pool: WorkspaceClientPool = {
-      client: null as unknown as RpcClient,
+      client: null as unknown as PiRpcClient,
       activeSessionFile: "",
       workers: new Map(),
     };
@@ -2132,7 +2128,7 @@ export class PiHost {
     throw new Error("当前工作区没有可用的会话 Worker");
   }
 
-  require(cwd: string, sessionFile?: string): RpcClient {
+  require(cwd: string, sessionFile?: string): PiRpcClient {
     return this.resolveSlot(cwd, sessionFile).client;
   }
 
@@ -2328,7 +2324,7 @@ export class PiHost {
     }
 
     if (method === "compact") {
-      // 压缩上下文要调模型总结整段对话，动辄一两分钟，远超上游 RpcClient 的 30 秒单命令超时。
+      // 压缩上下文要调模型总结整段对话，动辄一两分钟，远超上游 PiRpcClient 的 30 秒单命令超时。
       // 超时只代表「客户端不等了」，Pi 进程仍在压缩 —— 改成等 compaction_end 事件（见 compact-wait.ts）。
       // 摘要可能因为「思考 token 吃掉输出预算」被截断（generation hit the token cap）：
       // 这种情况临时把思考等级降到 off 重试一次，结束后还原（见 runCompactResilient）。
@@ -2460,7 +2456,7 @@ export class PiHost {
 
   async stopAll(): Promise<void> {
     this.closing = true;
-    const allClients: RpcClient[] = [];
+    const allClients: PiRpcClient[] = [];
     const starting = [...this.starting.values()];
     const standbyDisposals: Promise<void>[] = [];
     for (const pool of this.clients.values()) {
@@ -2483,7 +2479,7 @@ export class PiHost {
   private mcpProbeCache = new Map<string, { state?: string; tools?: string[]; error?: string; resources?: boolean }>();
 
   private agentDirPath(): string {
-    return process.env.PI_CODING_AGENT_DIR || getAgentDir() || path.join(homedir(), ".pi", "agent");
+    return resolveAgentDir();
   }
 
   private mcpConfigFile(scope: "global" | "project", cwd?: string): string {
@@ -2843,16 +2839,13 @@ export class PiHost {
 
   // ---------- Pi 软件包管理 ----------
 
-  private createPackageManager(cwd?: string) {
+  /** 读全局 + 项目设置，算出当前配置的软件包（含是否已安装）。 */
+  private loadPackageState(cwd?: string) {
     const agentDir = this.agentDirPath();
     const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
-    const settingsManager = SettingsManager.create(effectiveCwd, agentDir, { projectTrusted: true });
-    const packageManager = new DefaultPackageManager({
-      cwd: effectiveCwd,
-      agentDir,
-      settingsManager,
-    });
-    return { agentDir, effectiveCwd, settingsManager, packageManager };
+    const settings = readSettings(effectiveCwd, agentDir);
+    const packages = configuredPackages(settings.global, settings.project, effectiveCwd, agentDir);
+    return { agentDir, effectiveCwd, settings, packages };
   }
 
   private normalizeInstallSource(rawSource: string, cwd?: string): string {
@@ -2900,53 +2893,29 @@ export class PiHost {
 
   async packagesOverview(cwd?: string): Promise<PiPackagesOverview> {
     if (cwd) await assertRealWorkspacePath(cwd, path.resolve(cwd));
-    const { agentDir, effectiveCwd, packageManager } = this.createPackageManager(cwd);
+    const { agentDir, effectiveCwd, settings, packages: configured } = this.loadPackageState(cwd);
     const globalSettingsPath = path.join(agentDir, "settings.json");
     const projectSettingsPath = cwd ? path.join(effectiveCwd, ".pi", "settings.json") : "";
 
-    const configured = packageManager.listConfiguredPackages();
-    let resolved = { extensions: [], skills: [], prompts: [], themes: [] } as any;
-    try {
-      resolved = await packageManager.resolve(async () => "skip");
-    } catch {
-      // ignore resolution errors on missing packages
-    }
-
-    const resources: PiResourceItem[] = [];
-    const resourceTypes = ["extensions", "skills", "prompts", "themes"] as const;
-    for (const type of resourceTypes) {
-      for (const item of resolved[type] ?? []) {
-        if (item?.metadata?.source === "builtin") continue;
-        resources.push({
-          path: item.path,
-          name: path.basename(item.path),
-          type,
-          enabled: Boolean(item.enabled),
-          scope: item.metadata?.scope ?? "user",
-          origin: item.metadata?.origin ?? "top-level",
-          source: item.metadata?.source ?? "local",
-        });
-      }
-    }
+    // 顶层自动发现的资源在前，包内声明的资源在后（与 Pi 的优先级一致）
+    const resources: PiResourceItem[] = autoResources(settings, effectiveCwd, agentDir);
+    for (const entry of configured) resources.push(...packageResources(entry, settings));
 
     const packages: PiPackageItem[] = [];
     for (const item of configured) {
-      const kind = this.classifySourceKind(item.source);
       let displayName = item.source.replace(/^npm:/, "").replace(/^git:/, "");
       let version: string | undefined;
       let description: string | undefined;
 
       if (item.installedPath) {
         const pkgJsonPath = path.join(item.installedPath, "package.json");
-        if (existsSync(pkgJsonPath)) {
-          try {
-            const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
-            if (pkgJson.name) displayName = pkgJson.name;
-            if (pkgJson.version) version = String(pkgJson.version);
-            if (pkgJson.description) description = String(pkgJson.description);
-          } catch {
-            // ignore malformed package.json
-          }
+        try {
+          const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
+          if (pkgJson.name) displayName = pkgJson.name;
+          if (pkgJson.version) version = String(pkgJson.version);
+          if (pkgJson.description) description = String(pkgJson.description);
+        } catch {
+          // package.json 缺失或损坏：只影响显示的版本号
         }
       }
 
@@ -2954,60 +2923,51 @@ export class PiHost {
       if (item.installedPath) {
         const normRoot = path.resolve(item.installedPath).toLowerCase();
         for (const res of resources) {
-          const normRes = path.resolve(res.path).toLowerCase();
-          if (normRes.startsWith(normRoot)) {
-            counts[res.type] += 1;
-          }
+          if (res.origin !== "package") continue;
+          if (path.resolve(res.path).toLowerCase().startsWith(normRoot)) counts[res.type] += 1;
         }
       }
 
       packages.push({
         source: item.source,
         scope: item.scope,
-        kind,
+        kind: item.kind,
         displayName,
         version,
         description,
         installed: Boolean(item.installedPath),
         installedPath: item.installedPath,
-        filtered: Boolean(item.filtered),
+        filtered: item.filtered,
         counts,
       });
     }
 
-    return {
-      agentDir,
-      globalSettingsPath,
-      projectSettingsPath,
-      packages,
-      resources,
-    };
+    return { agentDir, globalSettingsPath, projectSettingsPath, packages, resources };
   }
 
   async packagesInstall(cwd: string, payload: { source: string; local?: boolean }): Promise<PiPackagesOverview> {
     const local = Boolean(payload?.local);
-    if (local && !cwd) {
-      throw new Error("当前未打开项目目录，无法安装到项目级配置");
-    }
+    if (local && !cwd) throw new Error("当前未打开项目目录，无法安装到项目级配置");
     const normalized = this.normalizeInstallSource(payload?.source ?? "", cwd);
-    const { packageManager, settingsManager } = this.createPackageManager(cwd);
-    await packageManager.installAndPersist(normalized, { local });
-    await settingsManager.flush();
+    const entry = await this.piEntry();
+    const result = await runPiCli(entry, ["install", normalized, ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined);
+    if (result.code !== 0) throw new Error(`安装失败：${result.output.slice(-400) || "pi install 异常退出"}`);
     return this.packagesOverview(cwd);
   }
 
   async packagesRemove(cwd: string, payload: { source: string; local?: boolean }): Promise<PiPackagesOverview> {
     const local = Boolean(payload?.local);
-    const { packageManager, settingsManager } = this.createPackageManager(cwd);
-    await packageManager.removeAndPersist(payload.source, { local });
-    await settingsManager.flush();
+    const entry = await this.piEntry();
+    const result = await runPiCli(entry, ["remove", String(payload?.source ?? ""), ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined);
+    if (result.code !== 0) throw new Error(`卸载失败：${result.output.slice(-400) || "pi remove 异常退出"}`);
     return this.packagesOverview(cwd);
   }
 
   async packagesUpdate(cwd: string, payload?: { source?: string }): Promise<PiPackagesOverview> {
-    const { packageManager, settingsManager } = this.createPackageManager(cwd);
-    await packageManager.update(payload?.source || undefined);
-    await settingsManager.flush();
+    const entry = await this.piEntry();
+    const target = payload?.source ? ["--extension", String(payload.source)] : ["--extensions"];
+    const result = await runPiCli(entry, ["update", ...target], cwd ? path.resolve(cwd) : undefined);
+    if (result.code !== 0) throw new Error(`更新失败：${result.output.slice(-400) || "pi update 异常退出"}`);
     return this.packagesOverview(cwd);
   }
 
@@ -3017,6 +2977,7 @@ export class PiHost {
     const effectiveCwd = cwd || homedir();
     const globalSkillsDir = path.join(agentDir, "skills");
     const projectSkillsDir = cwd ? path.join(effectiveCwd, ".pi", "skills") : "";
+    const { settings, packages: configured } = this.loadPackageState(cwd);
     const userAgentsSkillsDir = path.join(homedir(), ".agents", "skills");
     const directories = new Map<string, string>([
       [path.resolve(globalSkillsDir), "全局技能目录"],
@@ -3031,25 +2992,16 @@ export class PiHost {
       if (parent === dir) break;
       dir = parent;
     }
-    const loader = new DefaultResourceLoader({ cwd: effectiveCwd, agentDir });
-    await loader.reload();
-    const result = loader.getSkills();
+    const resources = autoResources({ global: settings.global, project: settings.project }, effectiveCwd, agentDir);
+    for (const item of configured) resources.push(...packageResources(item, { global: settings.global, project: settings.project }));
+    const { skills, diagnostics } = await skillsFromResources(resources);
     return {
       agentDir,
       globalSkillsDir,
       projectSkillsDir,
       directories: [...directories].map(([skillPath, label]) => ({ label, path: skillPath })),
-      skills: result.skills.map((skill) => ({
-        name: skill.name,
-        description: skill.description,
-        filePath: skill.filePath,
-        baseDir: skill.baseDir,
-        scope: skill.sourceInfo.scope,
-        origin: skill.sourceInfo.origin,
-        source: skill.sourceInfo.source,
-        disableModelInvocation: skill.disableModelInvocation,
-      })),
-      diagnostics: result.diagnostics.map((item) => item.message ?? String(item)),
+      skills,
+      diagnostics,
     };
   }
 }
