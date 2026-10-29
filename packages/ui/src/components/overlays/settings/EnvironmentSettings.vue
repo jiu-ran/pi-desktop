@@ -56,6 +56,7 @@ async function restartActiveProcess(): Promise<void> {
       <div class="settings-shortcut-item"><span>停止当前正在执行的任务</span><kbd>Esc</kbd></div>
       <div class="settings-shortcut-item"><span>引用项目文件或目录</span><kbd>@</kbd></div>
       <div class="settings-shortcut-item"><span>打开斜杠命令菜单</span><kbd>/</kbd></div>
+      <div class="settings-shortcut-item"><span>翻阅输入过的内容</span><kbd>↑ / ↓</kbd></div>
     </div>
   </div>
 </template>

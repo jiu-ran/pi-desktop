@@ -18,6 +18,7 @@ import {
     type QueuedEntry,
   } from "../shared/queue-view.ts";
 import { rebuildPrompt } from "../shared/queue-prompt.ts";
+import { piUpdateToast } from "../shared/pi-update.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -178,7 +179,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       updateAvailable: false,
       checking: false,
       updating: false,
-      lastUpdate: null as null | { from: string; to: string; at: number; log: string },
+      lastUpdate: null as null | { from: string; to: string; at: number; log: string; scope?: "self" | "all" },
     },
     appUpdate: {
       current: "",
@@ -2107,18 +2108,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       await refreshPi(customPath);
       state.pi.latest = result.to || state.pi.latest;
       state.pi.updateAvailable = false;
-      state.pi.lastUpdate = { from: result.from, to: result.to, at: Date.now(), log: result.log };
+      // 记下更新范围：scope=all 时即使 Pi 本体没变，扩展包也可能被更新过，提示要能说清
+      state.pi.lastUpdate = { from: result.from, to: result.to, at: Date.now(), log: result.log, scope: scope === "all" ? "all" : "self" };
       // 工作区里的 pi 进程是启动时拉起的：不重启就还在跑旧版本
       const refreshed = await restartIdleWorkspaces();
       const suffix = refreshed.skipped
         ? `（${refreshed.skipped} 个正在输出的任务会在本轮结束后才用上新版本）`
         : "";
-      bus.emit("notify", {
-        level: "info",
-        text: result.from === result.to
-          ? `Pi 已是最新（${result.to || state.pi.version}），无需更新`
-          : `Pi 已从 ${result.from || "未知版本"} 更新到 ${result.to}${suffix}`,
-      });
+      // from === to 只说明「Pi 本体没变」：scope=all 时扩展包可能刚被更新过，
+      // 只说「无需更新」会把这件事整个吞掉（措辞见 shared/pi-update.ts）。
+      const text = piUpdateToast(
+        { from: result.from, to: result.to, scope: scope === "all" ? "all" : "self" },
+        state.pi.version,
+      );
+      bus.emit("notify", { level: "info", text: result.from === result.to ? text : `${text}${suffix}` });
       bus.emit("pi:updated", { ...state.pi.lastUpdate });
       return true;
     } catch (error: any) {

@@ -76,6 +76,9 @@ export async function checkComposerDraftInElectron(win) {
   await poll(hasAttachmentDraft, "附件写入草稿");
   console.log("[composer-draft] 附件已写入草稿");
 
+  // 输入框历史（↑/↓）也种在重载前：组件只在挂载时读一次
+  await evaluate(`localStorage.setItem("pi-desktop:prompt-history", JSON.stringify(["第一句历史", "第二句历史"])), true`);
+
   // 重新加载渲染进程：等同关闭再打开应用（localStorage 保留）
   await win.webContents.reload();
   await poll("Boolean(window.__piDesktop)", "重载后内核可用", 30000);
@@ -94,6 +97,25 @@ export async function checkComposerDraftInElectron(win) {
     "重启后应恢复附件",
   );
   console.log("[composer-draft] 重启后已恢复附件");
+
+  // ↑ / ↓ 翻历史：接管条件（无选中、光标在首/末行）与边界（最旧一条、还原草稿）
+  const pressArrow = async (key) => {
+    await evaluate(`(() => {
+      const el = document.querySelector('.composer-field textarea');
+      el.focus();
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: '${key}', bubbles: true }));
+      return true;
+    })()`);
+    await wait(120);
+    return evaluate(`document.querySelector('.composer-field textarea').value`);
+  };
+  assert.equal(await pressArrow("ArrowUp"), "第二句历史", "第一次 ↑ 应显示最新一条历史");
+  assert.equal(await pressArrow("ArrowUp"), "第一句历史", "再次 ↑ 翻到更早的一条");
+  assert.equal(await pressArrow("ArrowUp"), "第一句历史", "最旧一条再按 ↑ 不应变化");
+  assert.equal(await pressArrow("ArrowDown"), "第二句历史", "↓ 往回翻");
+  assert.equal(await pressArrow("ArrowDown"), draft, "↓ 翻过最新一条应还原原来的草稿");
+  assert.equal(await pressArrow("ArrowDown"), draft, "已经在草稿上再按 ↓ 不应变化");
+  console.log("[composer-draft] 历史 ↑↓ 翻阅与草稿还原正常");
 
   // 会话里不允许出现无名工具块（空「工具」卡片）
   const ghostTools = await evaluate(`(() => {
@@ -128,5 +150,5 @@ export async function checkComposerDraftInElectron(win) {
   await wait(900);
   assert.equal(await evaluate(stored), false, "清空输入后应删除草稿");
 
-  console.log("[composer-draft] PASS 落盘 / 重启恢复正文与附件 / 清空删除 / 无空工具卡片");
+  console.log("[composer-draft] PASS 落盘 / 重启恢复正文与附件 / 历史 ↑↓ / 清空删除 / 无空工具卡片");
 }

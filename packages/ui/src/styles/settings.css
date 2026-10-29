@@ -708,6 +708,27 @@
   font: 11.5px/1.6 var(--mono);
   word-break: break-all;
 }
+.pi-update-log {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.pi-update-log pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--fg-2);
+  font: 11.5px/1.55 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .settings-inline-icon {
   display: inline-grid;
   flex: none;

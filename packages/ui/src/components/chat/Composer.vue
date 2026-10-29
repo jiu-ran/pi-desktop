@@ -10,6 +10,8 @@ import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
+import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
+import { readStorage, writeStorage } from "../../shared/storage.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
 import Picker from "./Picker.vue";
 import SlashMenu from "./SlashMenu.vue";
@@ -39,6 +41,60 @@ const pathItems = ref<WorkspaceEntry[]>([]);
 const pathList = ref<HTMLElement | null>(null);
 const pathLoading = ref(false);
 let pathRequest = 0;
+
+/**
+ * 发过的内容留在本地（最多 50 条）：↑ / ↓ 在输入框里翻阅。
+ * 与草稿分开存 —— 草稿是「没发出去的」，历史是「已经发出去的」。
+ */
+const PROMPT_HISTORY_KEY = "pi-desktop:prompt-history";
+
+function loadPromptHistory(): string[] {
+  try {
+    const parsed = JSON.parse(readStorage(PROMPT_HISTORY_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+const promptHistory = ref<string[]>(loadPromptHistory());
+const historyState = ref<PromptHistoryState>({ ...EMPTY_HISTORY_STATE });
+
+function rememberPrompt(text: string): void {
+  const next = appendPromptHistory(promptHistory.value, text);
+  if (next === promptHistory.value) return;
+  promptHistory.value = next;
+  writeStorage(PROMPT_HISTORY_KEY, JSON.stringify(next));
+}
+
+/**
+ * ↑ / ↓ 翻历史。只有在「没有选中文字」且光标在首行（↑）/ 末行（↓）时才接管，
+ * 否则多行编辑时上下键会被吃掉。返回 true 表示这次事件已经处理。
+ */
+function recallPrompt(direction: -1 | 1): boolean {
+  const element = input.value;
+  const current = draft.value;
+  if (element && element.selectionStart !== element.selectionEnd) return false;
+  const caret = element?.selectionStart ?? current.length;
+  const step =
+    direction === -1
+      ? caretOnFirstLine(current, caret)
+        ? recallPrevious(promptHistory.value, historyState.value, current)
+        : null
+      : caretOnLastLine(current, caret)
+        ? recallNext(promptHistory.value, historyState.value)
+        : null;
+  if (!step) return false;
+  historyState.value = step.state;
+  draft.value = step.text;
+  void nextTick(() => {
+    const target = input.value;
+    if (!target) return;
+    target.selectionStart = target.selectionEnd = target.value.length;
+    autosize();
+  });
+  return true;
+}
 
 const draft = computed({
   get: () => ws.value?.draft ?? "",
@@ -925,6 +981,10 @@ async function submit(): Promise<void> {
   const sent = await workbench.send(text, { mode: mode.value });
   // 发送失败（附件失效、Worker 未就绪等）时把正文放回输入框，避免用户白打一段字。
   if (!sent && !draft.value) draft.value = text;
+  if (sent) {
+    rememberPrompt(text);
+    historyState.value = { ...EMPTY_HISTORY_STATE };
+  }
 }
 
 async function stop(): Promise<void> {
@@ -993,6 +1053,17 @@ function onKeydown(event: KeyboardEvent): void {
       }
     }
   }
+  if (
+    (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+    !event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    recallPrompt(event.key === "ArrowUp" ? -1 : 1)
+  ) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === "Enter") {
     const useCtrl = appSettings.sendShortcut === "ctrl-enter";
     const shouldSend = useCtrl ? event.ctrlKey || event.metaKey : !event.shiftKey && !event.ctrlKey && !event.metaKey;
@@ -1034,7 +1105,10 @@ onBeforeUnmount(() => {
 });
 watch(
   () => ws.value?.sessionFile,
-  () => nextTick(focus),
+  () => {
+    historyState.value = { ...EMPTY_HISTORY_STATE };
+    nextTick(focus);
+  },
 );
 
 const placeholder = computed(() => {

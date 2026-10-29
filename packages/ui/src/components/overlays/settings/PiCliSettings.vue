@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { appSettings } from "../../../services/settings.ts";
+import { piUpdateSummary } from "../../../shared/pi-update.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import SelectMenu from "../../shared/SelectMenu.vue";
 
@@ -89,6 +90,13 @@ async function copyPiPath(): Promise<void> {
   }
 }
 
+const updateLogOpen = ref(false);
+/** 上次更新的摘要：scope=all 时要说清「扩展包也检查过」，措辞与提示条共用（见 shared/pi-update.ts）。 */
+const updateSummary = computed(() => {
+  const update = state.pi.lastUpdate;
+  return update ? piUpdateSummary(update, state.pi.version) : "";
+});
+const updateLogLines = computed(() => String(state.pi.lastUpdate?.log ?? "").split(/\r?\n/).filter(Boolean).slice(-30));
 function formatPiUpdateTime(at: number): string {
   try {
     return new Date(at).toLocaleString();
@@ -205,7 +213,13 @@ onMounted(() => {
     <div v-if="state.pi.lastUpdate" class="settings-row">
       <div class="settings-row-info">
         <strong>上次更新结果</strong>
-        <span :title="state.pi.lastUpdate.log">{{ state.pi.lastUpdate.from === state.pi.lastUpdate.to ? `已确认最新（${state.pi.lastUpdate.to || state.pi.version}）` : `已从 ${state.pi.lastUpdate.from || "未知版本"} 更新到 ${state.pi.lastUpdate.to}` }} · {{ formatPiUpdateTime(state.pi.lastUpdate.at) }}</span>
+        <span>{{ updateSummary }} · {{ formatPiUpdateTime(state.pi.lastUpdate.at) }}</span>
+        <div v-if="updateLogLines.length" class="pi-update-log" :class="{ open: updateLogOpen }">
+          <button type="button" class="btn ghost small" :aria-expanded="updateLogOpen" @click="updateLogOpen = !updateLogOpen">
+            {{ updateLogOpen ? "收起输出" : `查看输出（${updateLogLines.length} 行）` }}
+          </button>
+          <pre v-if="updateLogOpen">{{ updateLogLines.join("\n") }}</pre>
+        </div>
       </div>
     </div>
   </div>
