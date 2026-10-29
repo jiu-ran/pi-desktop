@@ -75,7 +75,7 @@ async function checkout(branch: GitBranch): Promise<void> {
         <p v-if="!group.items.length" class="git-view-hint">{{ loading ? '读取中…' : query ? '没有匹配的分支' : group.remote ? '没有远程分支，可先获取更新' : '暂无本地分支' }}</p>
         <button v-for="branch in group.items" :key="branch.ref" class="git-branch-row" type="button" :class="{ current: branch.current }"
           :disabled="!writable || branch.current || Boolean(branch.worktreePath)" :aria-label="`${branch.current ? '当前分支' : '切换分支'} ${branch.name}`"
-          :title="branch.worktreePath ? `已在工作区使用：${branch.worktreePath}` : `${branch.name}\n${branch.subject}\n${branch.upstream || '无上游分支'}`" @click="checkout(branch)">
+          :title="!branch.current && branch.worktreePath ? `已在工作区使用：${branch.worktreePath}` : `${branch.name}\n${branch.subject}\n${branch.upstream || '无上游分支'}`" @click="checkout(branch)">
           <span class="git-branch-icon" v-html="branch.current ? icons.check : icons.branch" />
           <span class="git-branch-main"><strong>{{ branch.name }}</strong><small>{{ branch.hash }} · {{ branch.subject }}</small><small v-if="branch.upstream">{{ branch.upstream }} {{ branch.tracking }}</small></span>
           <span class="git-branch-tag">{{ branch.current ? '当前' : branch.worktreePath ? '已占用' : branch.remote ? '跟踪…' : '切换' }}</span>

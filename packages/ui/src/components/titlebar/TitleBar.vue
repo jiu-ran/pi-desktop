@@ -44,6 +44,10 @@ function showSidebar(): void {
   state.sidebarOpen = true;
 }
 
+function toggleGitPanel(): void {
+  workbench.togglePanel("git");
+}
+
 function togglePanelArea(): void {
   if (hasOpenPanel.value) {
     workbench.closePanel();
@@ -101,7 +105,13 @@ const piTitle = computed(() => {
       />
       <nav v-if="ws" class="crumbs">
         <button class="crumb" :title="ws.cwd" @click="showSidebar"><span class="crumb-text">{{ ws.name }}</span></button>
-        <span v-if="ws.branch" class="crumb crumb-branch" :title="`分支 ${ws.branch}`"><span v-html="icons.branch" /><span class="crumb-text">{{ ws.branch }}</span></span>
+        <button
+          v-if="ws.branch"
+          type="button"
+          class="crumb crumb-branch"
+          :title="`当前分支：${ws.branch} · 点击切换版本控制面板`"
+          @click="toggleGitPanel"
+        ><span v-html="icons.branch" /><span class="crumb-text">{{ ws.branch }}</span></button>
         <span class="crumb-slash">/</span>
         <span class="crumb-title" :title="title">
           <span

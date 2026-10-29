@@ -143,3 +143,31 @@ export function badgeKind(change: RepoChange): string {
   if (code === "R" || code === "C") return "重命名";
   return "修改";
 }
+
+/**
+ * 隔离工作区合并回基础分支发生冲突时，生成交给该工作区 Pi 解决冲突的提示词。
+ */
+export function buildWorktreeConflictPrompt({
+  worktreeBranch,
+  targetBranch,
+  conflicts,
+}: {
+  worktreeBranch: string;
+  targetBranch: string;
+  conflicts: readonly string[];
+}): string {
+  const branch = String(worktreeBranch || "").trim() || "HEAD";
+  const target = String(targetBranch || "").trim() || "main";
+  const files = conflicts.map((file) => String(file).trim()).filter(Boolean);
+  const lines = [
+    `当前隔离工作区分支 \`${branch}\` 在合并回基础分支 \`${target}\` 时发生冲突（合并已自动中止，主工作区保持干净）。`,
+  ];
+  if (files.length) {
+    lines.push("", "冲突文件：", ...files.map((file) => `- \`${file}\``));
+  }
+  lines.push(
+    "",
+    `请在本工作区执行 \`git rebase ${target}\`，逐个解决上述冲突文件后继续变基（\`git add\` 并 \`git rebase --continue\`），不要丢弃双方的有效改动；完成后确认工作区干净，以便重新合并到 \`${target}\`。`,
+  );
+  return lines.join("\n");
+}

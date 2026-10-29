@@ -11,6 +11,12 @@ export function projectPathKey(value = ""): string {
   return /^[A-Za-z]:(?:\/|$)/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
 }
 
+export function sameProjectPath(a = "", b = ""): boolean {
+  const keyA = projectPathKey(a);
+  const keyB = projectPathKey(b);
+  return Boolean(keyA && keyB && keyA === keyB);
+}
+
 export function shortPath(value = "", keep = 2): string {
   const parts = String(value).split(/[\\/]/).filter(Boolean);
   return parts.length <= keep ? value : `…/${parts.slice(-keep).join("/")}`;

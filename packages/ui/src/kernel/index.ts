@@ -12,6 +12,8 @@ import { saveFileTab } from "../plugins/files/save.ts";
 import type { FileStageData } from "../plugins/files/state.ts";
 import type { StageTab } from "./stage.ts";
 import { askConfirm } from "../components/sidebar/ui.ts";
+import { openWorktreeDialog } from "../services/worktree-dialog.ts";
+import { sameProjectPath } from "../shared/util.ts";
 
 export const KERNEL_KEY = Symbol("pi-desktop-kernel");
 
@@ -27,12 +29,12 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
     host,
     bus,
     async beforeGitBranchChange(cwd: string) {
-      return !stage.allTabs.value.some(tab => tab.pluginId === "files" && tab.dirty && tabCwd(tab) === cwd);
+      return !stage.allTabs.value.some(tab => tab.pluginId === "files" && tab.dirty && sameProjectPath(tabCwd(tab), cwd));
     },
     async beforeRemoveWorkspace(cwd: string) {
       // 移除项目会卸载舞台，先兜住该项目未保存的草稿：能自动保存就直接保存，
       // 关掉自动保存时必须由用户确认放弃。
-      const dirty = stage.allTabs.value.filter(tab => tab.pluginId === "files" && tab.dirty && tabCwd(tab) === cwd);
+      const dirty = stage.allTabs.value.filter(tab => tab.pluginId === "files" && tab.dirty && sameProjectPath(tabCwd(tab), cwd));
       if (!dirty.length) return true;
       if (appSettings.autoSave !== "off") {
         try {
@@ -140,6 +142,19 @@ export function createKernel({ host = typeof window !== "undefined" ? window.piD
       category: "任务",
       keybinding: "Ctrl+N",
       run: () => workbench.newSession(),
+    },
+    {
+      id: "worktree.create",
+      title: "新建 Git Worktree（隔离工作区与对话）…",
+      category: "项目",
+      run: () => {
+        const ws = workbench.active.value;
+        openWorktreeDialog({
+          cwd: ws?.cwd,
+          sessionFile: (ws?.blocks?.length ?? 0) > 0 ? ws?.sessionFile : "",
+          initialPrompt: ws?.draft ?? "",
+        });
+      },
     },
     {
       id: "sidebar.toggle",

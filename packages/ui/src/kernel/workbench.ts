@@ -30,7 +30,11 @@ import type {
   GitOverview,
   GitBranch,
   GitWorktree,
+  GitWorktreeCreateOptions,
   GitWorktreeCreateResult,
+  GitWorktreeMergeOptions,
+  GitWorktreeMergeResult,
+  GitWorktreeRemoveOptions,
   GitWorktreeRemoveResult,
   McpExposureMode,
   McpOverview,
@@ -779,10 +783,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     await host.deleteWorkspaceEntry(ws.cwd, relative);
   }
 
-  async function gitOverview(): Promise<GitOverview> {
-    const ws = active.value;
-    if (!ws || !host?.gitOverview) return emptyGitOverview();
-    return host.gitOverview(ws.cwd);
+  async function gitOverview(fromCwd?: string): Promise<GitOverview> {
+    const targetCwd = fromCwd || active.value?.cwd || "";
+    if (!targetCwd || !host?.gitOverview) return emptyGitOverview();
+    return host.gitOverview(targetCwd);
   }
 
   async function gitInspect(kind: "commit" | "working" | "staged" | "unstaged", target: string): Promise<GitInspectResult> {
@@ -791,9 +795,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.gitInspect(ws.cwd, kind, target);
   }
 
-  async function gitBranches(): Promise<GitBranch[]> {
-    const ws = active.value;
-    return ws && host?.gitBranches ? host.gitBranches(ws.cwd) : [];
+  async function gitBranches(fromCwd?: string): Promise<GitBranch[]> {
+    const targetCwd = fromCwd || active.value?.cwd || "";
+    return targetCwd && host?.gitBranches ? host.gitBranches(targetCwd) : [];
   }
 
   async function gitAction(action: GitActionName, payload: GitActionPayload = {}, cwd?: string): Promise<GitActionResult> {
@@ -826,28 +830,100 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return result.path;
   }
 
-  async function gitWorktrees(): Promise<GitWorktree[]> {
-    const ws = active.value;
-    if (!ws || !host?.gitWorktrees) return [];
-    return host.gitWorktrees(ws.cwd);
+  async function gitWorktrees(fromCwd?: string): Promise<GitWorktree[]> {
+    const targetCwd = fromCwd || active.value?.cwd || "";
+    if (!targetCwd || !host?.gitWorktrees) return [];
+    return host.gitWorktrees(targetCwd);
   }
 
-  async function createGitWorktree(name: string): Promise<GitWorktreeCreateResult> {
-    const ws = active.value;
-    if (!ws || !host?.gitWorktreeCreate) throw new Error("没有打开的工作区");
-    return host.gitWorktreeCreate(ws.cwd, name);
+  async function createGitWorktree(
+    name: string,
+    options?: GitWorktreeCreateOptions,
+    fromCwd?: string,
+  ): Promise<GitWorktreeCreateResult> {
+    const targetCwd = fromCwd || active.value?.cwd || "";
+    if (!targetCwd || !host?.gitWorktreeCreate) throw new Error("没有打开的工作区");
+    const result = await host.gitWorktreeCreate(targetCwd, name, options);
+    bus.emit("git:worktree-changed", { cwd: targetCwd, worktree: result.worktree });
+    return result;
   }
 
-  async function removeGitWorktree(target: string): Promise<GitWorktreeRemoveResult> {
+  async function removeGitWorktree(
+    target: string,
+    options?: GitWorktreeRemoveOptions,
+    fromCwd?: string,
+  ): Promise<GitWorktreeRemoveResult> {
     const ws = active.value;
     if (!ws || !host?.gitWorktreeRemove) throw new Error("没有打开的工作区");
-    const cwd = ws.cwd;
-    if (workspaces.has(target)) {
-      // 移除工作树会删除目录：用户取消保存未保存草稿时必须中止，不能继续删。
-      const removed = await removeProject(target);
+    const targetKey = projectPathKey(target);
+    const targetWs = findWorkspace(target);
+    if (targetWs) {
+      // 移除工作树会删除目录：先关闭该项目（兜住运行中任务与未保存草稿），用户取消时不能切换工作区或继续删。
+      const removed = await removeProject(targetWs.cwd);
       if (removed?.cancelled) throw new Error("已取消移除工作树：仍有未保存的文件修改");
+    } else if (targetKey && state.recent.some(item => projectPathKey(item) === targetKey)) {
+      if (host?.forget) {
+        state.recent = await host.forget(target).catch(() => state.recent.filter(item => projectPathKey(item) !== targetKey));
+      } else {
+        state.recent = state.recent.filter(item => projectPathKey(item) !== targetKey);
+      }
     }
-    return host.gitWorktreeRemove(cwd, target);
+    let cwd = fromCwd || active.value?.cwd || ws.cwd;
+    if (fromCwd && projectPathKey(fromCwd) !== targetKey && projectPathKey(active.value?.cwd ?? "") !== projectPathKey(fromCwd)) {
+      await open(fromCwd);
+      cwd = active.value?.cwd || fromCwd;
+    }
+    return host.gitWorktreeRemove(cwd, target, options);
+  }
+
+  async function mergeGitWorktree(options: GitWorktreeMergeOptions): Promise<GitWorktreeMergeResult> {
+    const ws = active.value;
+    if (!ws || !host?.gitWorktreeMerge) throw new Error("没有打开的工作区");
+    const worktreeWs = findWorkspace(options.worktreePath);
+    if (worktreeWs?.hasAnyRunning) {
+      throw new Error("隔离工作区仍有 Agent 任务运行中，请等待结束后再合并");
+    }
+    if (ws.hasAnyRunning) {
+      throw new Error("当前工作区有 Agent 任务运行中，请等待结束后再合并");
+    }
+    const worktrees = host?.gitWorktrees ? await host.gitWorktrees(ws.cwd).catch(() => [] as GitWorktree[]) : [];
+    const primaryEntry = worktrees.find(item => item.primary);
+    const primaryCwd = primaryEntry?.path || ws.cwd;
+    const primaryWs = findWorkspace(primaryCwd);
+    if (primaryWs?.hasAnyRunning) {
+      throw new Error("主工作区仍有 Agent 任务运行中，请等待结束后再合并");
+    }
+    if (!(await beforeGitBranchChange(worktreeWs?.cwd || options.worktreePath))) {
+      throw new Error("请先保存或关闭隔离工作区中未保存的文件，再执行合并");
+    }
+    if (projectPathKey(primaryCwd) !== projectPathKey(options.worktreePath) && !(await beforeGitBranchChange(primaryWs?.cwd || primaryCwd))) {
+      throw new Error("请先保存或关闭主工作区中未保存的文件，再执行合并");
+    }
+    if (
+      projectPathKey(ws.cwd) !== projectPathKey(options.worktreePath)
+      && projectPathKey(ws.cwd) !== projectPathKey(primaryCwd)
+      && !(await beforeGitBranchChange(ws.cwd))
+    ) {
+      throw new Error("请先保存或关闭当前工作区中未保存的文件，再执行合并");
+    }
+    const result = await host.gitWorktreeMerge(ws.cwd, options);
+    if (result.ok) {
+      const resolvedPrimaryWs = findWorkspace(result.primaryPath);
+      const primaryTargetCwd = resolvedPrimaryWs?.cwd || result.primaryPath;
+      if (resolvedPrimaryWs) resolvedPrimaryWs.branch = result.targetBranch;
+      bus.emit("git:branch-changed", { cwd: primaryTargetCwd });
+      if (result.strategy === "rebase") {
+        const resolvedWorktreeWs = findWorkspace(options.worktreePath);
+        bus.emit("git:branch-changed", { cwd: resolvedWorktreeWs?.cwd || options.worktreePath });
+      }
+      if (
+        projectPathKey(state.activeCwd) === projectPathKey(result.primaryPath)
+        || (result.strategy === "rebase" && projectPathKey(state.activeCwd) === projectPathKey(options.worktreePath))
+      ) {
+        bus.emit("files:changed", { directory: "" });
+      }
+    }
+    return result;
   }
 
   async function completePaths(query = ""): Promise<WorkspaceEntry[]> {
@@ -2402,6 +2478,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   return {
     state,
     workspaces,
+    findWorkspace,
     active,
     init,
     dispose,
@@ -2425,6 +2502,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     cloneRepository,
     createGitWorktree,
     removeGitWorktree,
+    mergeGitWorktree,
     completePaths,
     addFiles,
     addSessionAttachment,

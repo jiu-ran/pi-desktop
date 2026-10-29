@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons, projectPathKey, relativeTime } from "../../shared/util.ts";
 import { openCloneDialog } from "../../services/clone-dialog.ts";
+import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { askConfirm, askPrompt, openMenu } from "./ui.ts";
 
 export type SessionWorkState = "running" | "compacting" | "error" | "done" | "active" | "idle";
@@ -284,6 +285,11 @@ async function clearProject(group: any): Promise<void> {
 function projectMenu(event: MouseEvent, group: any): void {
   openMenu(event, [
     { label: "新建任务", icon: icons.plus, run: () => newTask(group.cwd).catch(fail) },
+    {
+      label: "新建隔离工作区 (Worktree)…",
+      icon: icons.branch,
+      run: () => openWorktreeDialog({ cwd: group.cwd }),
+    },
     { label: "在文件管理器中显示", icon: icons.folder, run: () => workbench.reveal(group.cwd) },
     { label: "复制路径", icon: icons.copy, run: () => navigator.clipboard.writeText(group.cwd).then(() => info("已复制路径")) },
     { separator: true },
@@ -299,6 +305,17 @@ function taskMenu(event: MouseEvent, group: any, item: any): void {
       label: "打开",
       icon: icons.chat,
       run: () => selectSession(group, item).catch(fail),
+    },
+    {
+      label: "在新建 Worktree 中继续此任务…",
+      icon: icons.branch,
+      run: () =>
+        openWorktreeDialog({
+          cwd: group.cwd,
+          sessionFile: item.path,
+          sessionTitle: item.title,
+          initialName: item.title,
+        }),
     },
     {
       label: "重命名任务…",
@@ -327,11 +344,17 @@ async function renameTask(group: any, item: any): Promise<void> {
   info("已重命名任务");
 }
 
-/** 「+」按钮的两个入口：本地文件夹、从 Git 克隆 */
+/** 「+」按钮的入口：本地文件夹、从 Git 克隆、新建隔离工作区 */
 function openProjectMenu(event: MouseEvent): void {
   openMenu(event, [
     { label: "打开文件夹…", icon: icons.folder, hint: "Ctrl+O", run: () => void workbench.chooseAndOpen() },
     { label: "从 Git 克隆…", icon: icons.branch, run: () => openCloneDialog() },
+    {
+      label: "新建隔离工作区 (Worktree)…",
+      icon: icons.branch,
+      disabled: !state.activeCwd,
+      run: () => openWorktreeDialog({ cwd: state.activeCwd }),
+    },
   ]);
 }
 </script>
@@ -368,7 +391,15 @@ function openProjectMenu(event: MouseEvent): void {
         >
           <span class="project-caret" v-html="group.open ? icons.chevronDown : icons.chevronRight" />
           <span class="project-name">{{ group.name }}</span>
-          <span v-if="group.branch" class="project-branch"><span v-html="icons.branch" />{{ group.branch }}</span>
+          <button
+            v-if="group.branch"
+            type="button"
+            class="project-branch"
+            :title="`当前分支：${group.branch} · 点击新建 Worktree`"
+            @click.stop="openWorktreeDialog({ cwd: group.cwd })"
+          >
+            <span v-html="icons.branch" />{{ group.branch }}
+          </button>
           <span v-if="group.count" class="project-count" :title="`${group.count} 个任务`">{{ group.count > 99 ? "99+" : group.count }}</span>
           <span v-if="group.ws?.status === 'starting'" class="project-status starting">
             <span class="mini-spinner" />启动中

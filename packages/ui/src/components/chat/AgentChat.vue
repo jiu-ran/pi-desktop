@@ -13,6 +13,7 @@ import { activeOutlineIndex } from "../../shared/outline.ts";
 import { deriveTurnItems, formatStepDuration, stepsElapsedMs, turnDurationLabel, turnStat, type TurnGroup } from "../../shared/activity-turns.ts";
 import { buildTimelineRows, type TimelineRow } from "../../shared/timeline-rows.ts";
 import { appSettings } from "../../services/settings.ts";
+import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { searchableText } from "../../shared/search-text.ts";
 import ActivityGroup from "./ActivityGroup.vue";
 import BlockView from "./BlockView.vue";
@@ -792,6 +793,17 @@ watch(searchMatches, () => {
             <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
             <p class="empty-intro">选一个起点，或直接在下方描述任务。Pi 会读代码、改文件，并运行命令。</p>
+            <div class="empty-wt-bar">
+              <button
+                type="button"
+                class="empty-wt-btn"
+                title="基于指定分支或提交创建隔离工作区，并在新 Worktree 中开启对话"
+                @click="openWorktreeDialog({ cwd: ws.cwd, initialPrompt: ws.draft ?? '' })"
+              >
+                <span class="empty-wt-icon" v-html="icons.branch" />
+                <span>在独立 Git Worktree（隔离工作区）中开启对话…</span>
+              </button>
+            </div>
             <div class="starter-grid">
               <button v-for="p in prompts" :key="p.label" class="starter" @click="fillPrompt(p.text)">
                 <span class="starter-icon" v-html="p.icon" />

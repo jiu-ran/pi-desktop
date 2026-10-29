@@ -149,6 +149,8 @@ export interface GitOverview {
   commits: GitCommitNode[];
   userName: string;
   userEmail: string;
+  worktreeRoot?: string;
+  repoKey?: string;
 }
 
 export interface GitBranch {
@@ -189,6 +191,8 @@ export interface GitInspectResult {
   diff: string;
 }
 
+export type GitWorktreeMergeStrategy = "squash" | "merge" | "rebase";
+
 export interface GitWorktree {
   path: string;
   branch: string;
@@ -202,12 +206,48 @@ export interface GitWorktree {
   /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
   managed: boolean;
   exists: boolean;
+  /** 创建时记录的目标基础分支（合并时默认回到该分支） */
+  baseBranch?: string;
+  /** 创建时所基于的起点（分支名或提交短哈希） */
+  baseRef?: string;
+  /** 创建时的起点提交哈希 */
+  baseCommit?: string;
+  /** 工作区是否有未提交或未跟踪改动 */
+  dirty?: boolean;
+  /** 相对目标基础分支领先的提交数（待合并提交数） */
+  ahead?: number;
+  /** 相对目标基础分支落后的提交数 */
+  behind?: number;
+}
+
+export interface GitWorktreeCreateOptions {
+  /** 分支策略：create（新建分支，默认）/ existing（检出已有本地或远程分支） */
+  branchMode?: "create" | "existing";
+  /** 自定义分支名称（create 模式下为新分支名，如 "feat/login"；existing 检出远程分支时为本地跟踪分支名） */
+  branchName?: string;
+  /** existing 模式下要检出的已有分支（完整 ref 或分支名） */
+  existingBranch?: string;
+  /** 起点引用：本地分支、远程分支或提交哈希（省略时为当前 HEAD） */
+  startPoint?: string;
+  /** 合并回的目标基础分支（省略时取起点对应的本地分支或主工作区当前分支；传空字符串 "" 表示暂不绑定） */
+  baseBranch?: string;
+  /** 自定义 Worktree 存放的目标目录绝对路径（省略时使用默认托管目录） */
+  targetDir?: string;
+  /** 创建后要复制迁移到新 Worktree 的源会话文件路径（.jsonl） */
+  sourceSessionFile?: string;
 }
 
 export interface GitWorktreeCreateResult {
   ok: true;
   message: string;
   worktree: GitWorktree;
+  /** 当传入 sourceSessionFile 时，返回复制到新 Worktree 会话目录后的新会话文件路径 */
+  sessionFile?: string;
+}
+
+export interface GitWorktreeRemoveOptions {
+  /** 移除隔离工作区目录后，是否同时删除对应的本地分支 */
+  deleteBranch?: boolean;
 }
 
 export interface GitWorktreeRemoveResult {
@@ -215,6 +255,37 @@ export interface GitWorktreeRemoveResult {
   message: string;
   branch: string;
   path: string;
+  branchDeleted?: boolean;
+}
+
+export interface GitWorktreeMergeOptions {
+  /** 要合并的隔离工作区路径 */
+  worktreePath: string;
+  /** 目标本地分支（省略时使用该工作区记录的 baseBranch 或主工作区当前分支） */
+  targetBranch?: string;
+  /** 合并方式：squash（压缩成一个提交）/ merge（合并提交）/ rebase（变基后快进） */
+  strategy?: GitWorktreeMergeStrategy;
+  /** 提交说明（用于 squash 或 merge 方式；省略时自动生成） */
+  message?: string;
+}
+
+export interface GitWorktreeMergeResult {
+  ok: boolean;
+  conflict?: boolean;
+  conflicts?: string[];
+  message: string;
+  /** 主工作区目录（合并执行位置） */
+  primaryPath: string;
+  /** 隔离工作区目录 */
+  worktreePath: string;
+  /** 隔离工作区分支 */
+  worktreeBranch: string;
+  /** 合并目标分支 */
+  targetBranch: string;
+  /** 合并方式 */
+  strategy: GitWorktreeMergeStrategy;
+  /** 合并后主工作区 HEAD 短哈希 */
+  commit?: string;
 }
 
 export interface GitCloneResult {
@@ -474,8 +545,9 @@ export interface PiDesktopBridge {
   gitInspect: (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => Promise<GitInspectResult>;
   gitAction: (cwd: string, action: GitActionName, payload?: GitActionPayload) => Promise<GitActionResult>;
   gitWorktrees: (cwd: string) => Promise<GitWorktree[]>;
-  gitWorktreeCreate: (cwd: string, name: string) => Promise<GitWorktreeCreateResult>;
-  gitWorktreeRemove: (cwd: string, target: string) => Promise<GitWorktreeRemoveResult>;
+  gitWorktreeCreate: (cwd: string, name: string, options?: GitWorktreeCreateOptions) => Promise<GitWorktreeCreateResult>;
+  gitWorktreeRemove: (cwd: string, target: string, options?: GitWorktreeRemoveOptions) => Promise<GitWorktreeRemoveResult>;
+  gitWorktreeMerge: (cwd: string, options: GitWorktreeMergeOptions) => Promise<GitWorktreeMergeResult>;
   gitClone: (url: string, target: string) => Promise<GitCloneResult>;
   completePaths: (cwd: string, query: string) => Promise<WorkspaceEntry[]>;
   restart: (cwd: string, sessionFile?: string) => Promise<any>;

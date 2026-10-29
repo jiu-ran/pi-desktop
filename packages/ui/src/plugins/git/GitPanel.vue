@@ -2,14 +2,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import GitBranches from "./GitBranches.vue";
+import SelectMenu, { type SelectOption } from "../../components/shared/SelectMenu.vue";
 import "../../styles/git.css";
 import { useKernel } from "../../kernel/use-kernel.ts";
+import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { icons } from "../../shared/util.ts";
-import { askConfirm, askPrompt } from "../../components/sidebar/ui.ts";
+import { askConfirm } from "../../components/sidebar/ui.ts";
 import { collectChanges } from "../../shared/diff.ts";
+import { appendDraft } from "../../shared/review.ts";
 import {
   badgeCode,
   badgeKind,
+  buildWorktreeConflictPrompt,
   isSessionOnly,
   isStaged,
   isUnstaged,
@@ -18,7 +22,16 @@ import {
   type RepoChange,
 } from "../../shared/git-changes.ts";
 import { buildChangeTree, flattenChangeTree, type ChangeTreeRow } from "../../shared/git-tree.ts";
-import type { GitActionName, GitActionPayload, GitCommitNode, GitOverview, GitWorktree } from "../../env.d.ts";
+import type {
+  GitActionName,
+  GitActionPayload,
+  GitBranch,
+  GitCommitNode,
+  GitOverview,
+  GitWorktree,
+  GitWorktreeMergeResult,
+  GitWorktreeMergeStrategy,
+} from "../../env.d.ts";
 import { overviewState, type GitDiffSource, type GitStageData } from "./state.ts";
 
 type PanelRow = ChangeTreeRow;
@@ -45,8 +58,20 @@ const worktreesOpen = computed({ get: () => view.value === "worktrees", set: (va
 const filter = ref("");
 const sessionOnly = ref(false);
 const worktrees = ref<GitWorktree[]>([]);
+const worktreeBranches = ref<GitBranch[]>([]);
 const worktreeBusy = ref("");
 const worktreeError = ref("");
+const createFormOpen = ref(false);
+const createName = ref("");
+const createStartOption = ref("HEAD");
+const createCustomRef = ref("");
+const createBaseBranch = ref("");
+const createNameInput = ref<HTMLInputElement | null>(null);
+const mergingWorktreePath = ref("");
+const mergeTargetBranch = ref("");
+const mergeStrategy = ref<GitWorktreeMergeStrategy>("squash");
+const mergeMessage = ref("");
+const mergeConflict = ref<GitWorktreeMergeResult | null>(null);
 const commitMessage = ref("");
 const commitInput = ref<HTMLTextAreaElement | null>(null);
 /** 提交框高度跟随内容（不可手动拖拽），上限由 CSS max-height 控制。 */
@@ -118,7 +143,11 @@ watch(
     filter.value = "";
     sessionOnly.value = false;
     worktrees.value = [];
+    worktreeBranches.value = [];
     worktreeError.value = "";
+    createFormOpen.value = false;
+    mergingWorktreePath.value = "";
+    mergeConflict.value = null;
     collapsedFolders.clear();
     collapsedGroups.clear();
     overview.value = null;
@@ -138,18 +167,111 @@ function scheduleRefresh(): void {
   }, 600);
 }
 
-// 隔离工作区：从当前 HEAD 派生独立分支与目录，作为新项目打开（参考 ThinkRail 的 worktree 工作区）。
+// 隔离工作区：从指定阶段（分支或提交）派生独立分支与目录，并在完成后合并回基础分支。
+const primaryWorktree = computed(() => worktrees.value.find((item) => item.primary) ?? null);
+const localBranches = computed(() => worktreeBranches.value.filter((b) => !b.remote));
+const remoteBranches = computed(() => worktreeBranches.value.filter((b) => b.remote));
+
+const defaultBaseBranchName = computed(() => {
+  const current = overview.value?.branch ?? "";
+  if (current && !current.startsWith("pi/") && localBranches.value.some((b) => b.name === current)) {
+    return current;
+  }
+  const primaryBranch = primaryWorktree.value?.branch ?? "";
+  if (primaryBranch && localBranches.value.some((b) => b.name === primaryBranch)) {
+    return primaryBranch;
+  }
+  return localBranches.value[0]?.name ?? current ?? "main";
+});
+
+const startPointOptions = computed<SelectOption[]>(() => {
+  const opts: SelectOption[] = [
+    {
+      value: "HEAD",
+      label: `当前 HEAD (${overview.value?.branch || "游离"})`,
+      hint: "当前状态",
+    },
+  ];
+  for (const b of localBranches.value) {
+    opts.push({
+      value: b.ref,
+      label: b.name,
+      hint: `本地 · ${b.hash}`,
+    });
+  }
+  for (const b of remoteBranches.value) {
+    opts.push({
+      value: b.ref,
+      label: b.name,
+      hint: `远程 · ${b.hash}`,
+    });
+  }
+  const recentCommits = (overview.value?.commits ?? []).filter((c) => Boolean(c.hash)).slice(0, 12);
+  for (const c of recentCommits) {
+    const title = c.subject.length > 22 ? `${c.subject.slice(0, 22)}…` : c.subject;
+    opts.push({
+      value: `commit:${c.hash}`,
+      label: `${c.shortHash} · ${title}`,
+      hint: "提交",
+    });
+  }
+  opts.push({
+    value: "__custom__",
+    label: "指定提交哈希 / 引用…",
+    hint: "手动输入",
+  });
+  return opts;
+});
+
+const baseBranchOptions = computed<SelectOption[]>(() => {
+  const list: SelectOption[] = localBranches.value.map((b) => ({
+    value: b.name,
+    label: b.name,
+    hint: b.name === primaryWorktree.value?.branch ? "主工作区" : b.hash,
+  }));
+  if (!list.length && defaultBaseBranchName.value) {
+    list.push({ value: defaultBaseBranchName.value, label: defaultBaseBranchName.value });
+  }
+  return list;
+});
+
+watch(createStartOption, (selected) => {
+  if (selected.startsWith("refs/heads/")) {
+    const name = selected.slice("refs/heads/".length);
+    if (localBranches.value.some((b) => b.name === name)) {
+      createBaseBranch.value = name;
+      return;
+    }
+  }
+  if (selected.startsWith("refs/remotes/")) {
+    const rest = selected.slice("refs/remotes/".length);
+    const short = rest.includes("/") ? rest.slice(rest.indexOf("/") + 1) : rest;
+    const match = localBranches.value.find((b) => b.name === short);
+    createBaseBranch.value = match ? match.name : defaultBaseBranchName.value;
+    return;
+  }
+  if (!createBaseBranch.value) {
+    createBaseBranch.value = defaultBaseBranchName.value;
+  }
+});
+
 async function loadWorktrees(): Promise<void> {
   if (!ws.value?.cwd || !overview.value?.isRepo) {
     worktrees.value = [];
+    worktreeBranches.value = [];
     return;
   }
   const cwd = ws.value.cwd;
   const current = request;
   try {
-    const result = await workbench.gitWorktrees();
+    const [result, branches] = await Promise.all([
+      workbench.gitWorktrees(),
+      workbench.gitBranches().catch(() => [] as GitBranch[]),
+    ]);
     if (ws.value?.cwd !== cwd || current !== request) return;
     worktrees.value = result;
+    worktreeBranches.value = branches;
+    if (!createBaseBranch.value) createBaseBranch.value = defaultBaseBranchName.value;
     worktreeError.value = "";
   } catch (err: any) {
     if (ws.value?.cwd !== cwd || current !== request) return;
@@ -169,22 +291,141 @@ function isWorktreeActive(worktree: GitWorktree): boolean {
   return pathKey(ws.value.cwd) === pathKey(worktree.path);
 }
 
-async function createWorktree(): Promise<void> {
-  const name = await askPrompt({
-    title: "新建隔离工作区",
-    message: "从当前 HEAD 创建独立分支和工作目录，并在新项目中打开。适合并行运行互不干扰的任务；改动不会影响当前工作区。",
-    label: "任务名",
-    placeholder: "例如 fix-login",
-    confirmLabel: "创建",
+function openCreateWorktreeModal(): void {
+  openWorktreeDialog({
+    cwd: ws.value?.cwd,
+    sessionFile: (ws.value?.blocks?.length ?? 0) > 0 ? ws.value?.sessionFile : "",
+    initialPrompt: ws.value?.draft ?? "",
   });
+}
+
+function toggleCreateWorktreeForm(): void {
+  if (!canCreateWorktree.value) return;
+  openCreateWorktreeModal();
+}
+
+async function submitCreateWorktree(): Promise<void> {
+  const name = createName.value.trim();
   if (!name || !canCreateWorktree.value) return;
+  let startPoint = "HEAD";
+  if (createStartOption.value === "__custom__") {
+    startPoint = createCustomRef.value.trim();
+    if (!startPoint) {
+      worktreeError.value = "请输入起点提交哈希或分支名";
+      return;
+    }
+  } else if (createStartOption.value.startsWith("commit:")) {
+    startPoint = createStartOption.value.slice("commit:".length);
+  } else {
+    startPoint = createStartOption.value;
+  }
+  const baseBranch = createBaseBranch.value || defaultBaseBranchName.value;
   worktreeBusy.value = "create";
   worktreeError.value = "";
   try {
-    const result = await workbench.createGitWorktree(name);
+    const result = await workbench.createGitWorktree(name, { startPoint, baseBranch });
+    createFormOpen.value = false;
+    createName.value = "";
+    createCustomRef.value = "";
     bus.emit("notify", { level: "info", text: result.message });
     await workbench.open(result.worktree.path);
     await loadWorktrees();
+  } catch (err: any) {
+    worktreeError.value = err?.message ?? String(err);
+    bus.emit("notify", { level: "error", text: worktreeError.value });
+  } finally {
+    worktreeBusy.value = "";
+  }
+}
+
+function toggleMergeWorktreeForm(worktree: GitWorktree): void {
+  if (mergingWorktreePath.value === worktree.path) {
+    mergingWorktreePath.value = "";
+    return;
+  }
+  createFormOpen.value = false;
+  mergingWorktreePath.value = worktree.path;
+  mergeTargetBranch.value = worktree.baseBranch || defaultBaseBranchName.value;
+  mergeStrategy.value = "squash";
+  mergeMessage.value = "";
+  worktreeError.value = "";
+}
+
+async function resolveConflictWithPi(conflict: GitWorktreeMergeResult): Promise<void> {
+  const prompt = buildWorktreeConflictPrompt({
+    worktreeBranch: conflict.worktreeBranch,
+    targetBranch: conflict.targetBranch,
+    conflicts: conflict.conflicts ?? [],
+  });
+  await workbench.open(conflict.worktreePath);
+  const targetWs = workbench.findWorkspace(conflict.worktreePath) ?? workbench.active.value;
+  const nextDraft = appendDraft(targetWs?.draft ?? "", prompt);
+  if (targetWs) targetWs.draft = nextDraft;
+  bus.emit("composer:set", { cwd: conflict.worktreePath, text: nextDraft });
+  mergeConflict.value = null;
+  bus.emit("notify", {
+    level: "info",
+    text: `已切换到 ${conflict.worktreeBranch} 并将变基解决冲突指令填入输入框`,
+  });
+}
+
+async function submitMergeWorktree(worktree: GitWorktree): Promise<void> {
+  if (worktreeBusy.value || busy.value) return;
+  const targetBranch = mergeTargetBranch.value || worktree.baseBranch || defaultBaseBranchName.value;
+  worktreeBusy.value = worktree.path;
+  worktreeError.value = "";
+  mergeConflict.value = null;
+  try {
+    const result = await workbench.mergeGitWorktree({
+      worktreePath: worktree.path,
+      targetBranch,
+      strategy: mergeStrategy.value,
+      message: mergeStrategy.value === "rebase" ? undefined : mergeMessage.value.trim() || undefined,
+    });
+    if (!result.ok && result.conflict) {
+      mergeConflict.value = result;
+      mergingWorktreePath.value = "";
+      const filesPreview = (result.conflicts ?? []).slice(0, 8).map((f) => `• ${f}`).join("\n");
+      const more = (result.conflicts?.length ?? 0) > 8 ? `\n…等共 ${result.conflicts!.length} 个文件` : "";
+      const ask = await askConfirm({
+        title: "合并存在冲突（已自动中止）",
+        message: `将 ${result.worktreeBranch} 合并到 ${result.targetBranch} 时发现冲突：\n${filesPreview}${more}\n\n主工作区与隔离工作区均已恢复干净。是否打开该隔离工作区，并将「变基到 ${result.targetBranch} 解决冲突」填入输入框交给 Pi？`,
+        confirmLabel: "交给 Pi 解决冲突",
+      });
+      if (ask) {
+        await resolveConflictWithPi(result);
+      }
+      return;
+    }
+    mergingWorktreePath.value = "";
+    mergeMessage.value = "";
+    bus.emit("notify", { level: "info", text: result.message });
+    await load();
+    if (worktree.managed) {
+      const cleanup = await askConfirm({
+        title: "合并成功 — 是否清理隔离工作区？",
+        message: `${result.message}\n\n是否现在移除该隔离工作区目录？点击「取消」将保留该工作区。`,
+        confirmLabel: "移除工作区",
+        check: worktree.branch ? { label: `同时删除本地分支 ${worktree.branch}`, value: true } : null,
+      });
+      if (cleanup) {
+        worktreeBusy.value = worktree.path;
+        try {
+          const removed = await workbench.removeGitWorktree(
+            worktree.path,
+            { deleteBranch: cleanup.checked },
+            result.primaryPath,
+          );
+          bus.emit("notify", { level: "info", text: removed.message });
+          await load();
+        } catch (err: any) {
+          worktreeError.value = err?.message ?? String(err);
+          bus.emit("notify", { level: "error", text: worktreeError.value });
+        } finally {
+          worktreeBusy.value = "";
+        }
+      }
+    }
   } catch (err: any) {
     worktreeError.value = err?.message ?? String(err);
     bus.emit("notify", { level: "error", text: worktreeError.value });
@@ -207,20 +448,23 @@ async function openWorktree(worktree: GitWorktree): Promise<void> {
 }
 
 async function removeWorktree(worktree: GitWorktree): Promise<void> {
+  const dirtyWarn = worktree.dirty ? "注意：该工作区仍有未提交的改动，移除后这些未提交改动会丢失！" : "未提交的改动会一起丢失。";
   const confirmed = await askConfirm({
     title: "移除隔离工作区",
-    message: `将删除目录：
-${worktree.path}
-
-未提交的改动会一起丢失；分支 ${worktree.branch || "detached"} 会保留。`,
+    message: `将删除目录：\n${worktree.path}\n\n${dirtyWarn}`,
     confirmLabel: "移除",
     danger: true,
+    check: worktree.branch ? { label: `同时删除本地分支 ${worktree.branch}`, value: false } : null,
   });
   if (!confirmed) return;
   worktreeBusy.value = worktree.path;
   worktreeError.value = "";
   try {
-    const result = await workbench.removeGitWorktree(worktree.path);
+    const result = await workbench.removeGitWorktree(
+      worktree.path,
+      { deleteBranch: confirmed.checked },
+      primaryWorktree.value?.path,
+    );
     bus.emit("notify", { level: "info", text: result.message });
     await load();
   } catch (err: any) {
@@ -240,6 +484,9 @@ const stopEvents = bus.on("pi:event", ({ event }: { event: any }) => {
   if (type === "agent_settled" || type === "tool_execution_end" || type === "message_end") scheduleRefresh();
 });
 const stopFiles = bus.on("files:changed", scheduleRefresh);
+const stopWorktreeChanged = bus.on("git:worktree-changed", () => {
+  void loadWorktrees();
+});
 watch(view, value => { if (value === "worktrees") void loadWorktrees(); });
 
 onMounted(() => {
@@ -249,6 +496,7 @@ onBeforeUnmount(() => {
   request += 1;
   stopEvents();
   stopFiles();
+  stopWorktreeChanged();
   if (refreshTimer) clearTimeout(refreshTimer);
 });
 
@@ -522,6 +770,16 @@ function reveal(change: RepoChange): void {
       </button>
       <span class="git-sc-spacer" />
       <button
+        v-if="hasRepo"
+        type="button"
+        class="btn small git-sc-wt-btn"
+        title="新建 Git Worktree（隔离工作区与对话）"
+        :disabled="!canCreateWorktree"
+        @click="openCreateWorktreeModal"
+      >
+        <span v-html="icons.branch" />+ 工作树
+      </button>
+      <button
         type="button"
         class="icon-btn small"
         title="刷新"
@@ -592,59 +850,213 @@ function reveal(change: RepoChange): void {
           <button
             type="button"
             class="icon-btn small"
-            title="新建隔离工作区"
+            :title="createFormOpen ? '收起新建面板' : '新建隔离工作区'"
             :disabled="!canCreateWorktree"
-            @click="createWorktree"
-            v-html="icons.plus"
+            @click="toggleCreateWorktreeForm"
+            v-html="createFormOpen ? icons.close : icons.plus"
           />
         </div>
-        <p class="git-worktree-hint">从当前 HEAD 派生独立分支和目录，作为新项目打开。适合并行运行互不干扰的任务，改动不会影响当前工作区。</p>
-        <div v-if="worktreeError" class="git-error"><span>{{ worktreeError }}</span></div>
+        <p class="git-worktree-hint">基于指定分支或提交创建独立工作区，作为新项目并行运行任务；完成后可一键合并回基础分支。</p>
+
+        <form v-if="createFormOpen" class="git-worktree-form" @submit.prevent="submitCreateWorktree">
+          <div class="git-wt-form-title">新建隔离工作区</div>
+          <label class="git-wt-field">
+            <span>任务名称</span>
+            <input
+              ref="createNameInput"
+              v-model="createName"
+              class="git-wt-input"
+              placeholder="例如 fix-login（生成分支 pi/fix-login）"
+              spellcheck="false"
+              @keydown.esc.stop.prevent="createFormOpen = false"
+            />
+          </label>
+          <div class="git-wt-field">
+            <span>基于阶段（起点）</span>
+            <SelectMenu
+              v-model="createStartOption"
+              :options="startPointOptions"
+              size="sm"
+              width="100%"
+              aria-label="选择起点阶段"
+            />
+            <input
+              v-if="createStartOption === '__custom__'"
+              v-model="createCustomRef"
+              class="git-wt-input"
+              placeholder="输入提交哈希（如 a1b2c3d）或分支 / 标签"
+              spellcheck="false"
+            />
+          </div>
+          <div class="git-wt-field">
+            <span>合并目标基础分支</span>
+            <SelectMenu
+              v-model="createBaseBranch"
+              :options="baseBranchOptions"
+              size="sm"
+              width="100%"
+              aria-label="选择合并目标基础分支"
+            />
+          </div>
+          <div class="git-wt-form-actions">
+            <button type="button" class="btn small" @click="createFormOpen = false">取消</button>
+            <button
+              type="submit"
+              class="btn small primary"
+              :disabled="!createName.trim() || (createStartOption === '__custom__' && !createCustomRef.trim()) || Boolean(worktreeBusy)"
+            >
+              {{ worktreeBusy === "create" ? "创建中…" : "创建并打开" }}
+            </button>
+          </div>
+        </form>
+
+        <div v-if="mergeConflict" class="git-wt-conflict">
+          <div class="git-wt-conflict-head">
+            <strong>合并存在冲突（已自动中止，主工作区保持干净）</strong>
+            <button type="button" class="icon-btn small" title="关闭" @click="mergeConflict = null" v-html="icons.close" />
+          </div>
+          <p class="git-wt-conflict-sub">{{ mergeConflict.worktreeBranch }} → {{ mergeConflict.targetBranch }}</p>
+          <ul v-if="mergeConflict.conflicts?.length" class="git-wt-conflict-files">
+            <li v-for="file in mergeConflict.conflicts" :key="file">{{ file }}</li>
+          </ul>
+          <div class="git-wt-form-actions">
+            <button type="button" class="btn small primary" @click="resolveConflictWithPi(mergeConflict)">
+              交给 Pi 解决冲突
+            </button>
+          </div>
+        </div>
+
+        <div v-if="worktreeError" class="git-error">
+          <span>{{ worktreeError }}</span>
+          <button type="button" class="icon-btn small" title="关闭" @click="worktreeError = ''" v-html="icons.close" />
+        </div>
         <p v-if="!hasRepo" class="list-empty">当前项目还不是 Git 仓库</p>
         <p v-else-if="!overview?.hasCommits" class="list-empty">提交第一个版本后才能创建隔离工作区</p>
         <div class="git-worktree-list">
           <div
             v-for="worktree in worktrees"
             :key="worktree.path"
-            class="git-worktree-row"
-            :class="{ primary: worktree.primary, active: isWorktreeActive(worktree), missing: !worktree.exists }"
+            class="git-worktree-item"
           >
-            <span class="git-worktree-icon" v-html="icons.branch" />
-            <div class="git-worktree-main">
-              <strong>{{ worktree.branch || (worktree.head ? worktree.head.slice(0, 7) : 'detached HEAD') }}</strong>
-              <small :title="worktree.path">{{ worktree.path }}</small>
+            <div
+              class="git-worktree-row"
+              :class="{ primary: worktree.primary, active: isWorktreeActive(worktree), missing: !worktree.exists }"
+            >
+              <span class="git-worktree-icon" v-html="icons.branch" />
+              <div class="git-worktree-main">
+                <div class="git-worktree-title-row">
+                  <strong>{{ worktree.branch || (worktree.head ? worktree.head.slice(0, 7) : 'detached HEAD') }}</strong>
+                  <span v-if="!worktree.primary && worktree.ahead" class="git-wt-badge ahead" :title="`领先基础分支 ${worktree.ahead} 个提交`">↑{{ worktree.ahead }}</span>
+                  <span v-if="!worktree.primary && worktree.behind" class="git-wt-badge behind" :title="`落后基础分支 ${worktree.behind} 个提交`">↓{{ worktree.behind }}</span>
+                  <span v-if="!worktree.primary && worktree.dirty" class="git-wt-badge dirty" title="该工作区有未提交改动">未提交</span>
+                </div>
+                <small v-if="!worktree.primary && worktree.baseBranch" class="git-worktree-base">
+                  目标 {{ worktree.baseBranch }}<template v-if="worktree.baseRef && worktree.baseRef !== worktree.baseBranch"> · 起点 {{ worktree.baseRef }}</template>
+                </small>
+                <small :title="worktree.path">{{ worktree.path }}</small>
+              </div>
+              <span v-if="worktree.primary" class="git-worktree-tag">主工作区</span>
+              <span v-else-if="worktree.managed" class="git-worktree-tag">隔离</span>
+              <span v-else class="git-worktree-tag">外部</span>
+              <div class="git-worktree-actions">
+                <button
+                  v-if="!worktree.primary && worktree.branch && worktree.exists"
+                  type="button"
+                  class="git-wt-merge-trigger"
+                  :class="{ active: mergingWorktreePath === worktree.path }"
+                  :title="`将 ${worktree.branch} 合并到 ${worktree.baseBranch || '基础分支'}`"
+                  :disabled="Boolean(worktreeBusy)"
+                  @click="toggleMergeWorktreeForm(worktree)"
+                >
+                  合并
+                </button>
+                <button
+                  v-if="!worktree.primary && !isWorktreeActive(worktree)"
+                  type="button"
+                  class="icon-btn small"
+                  title="在新项目中打开"
+                  :disabled="Boolean(worktreeBusy) || !worktree.exists"
+                  @click="openWorktree(worktree)"
+                  v-html="icons.folder"
+                />
+                <button
+                  type="button"
+                  class="icon-btn small"
+                  title="在文件管理器中显示"
+                  :disabled="!worktree.exists"
+                  @click="revealWorktree(worktree)"
+                  v-html="icons.reveal"
+                />
+                <button
+                  v-if="worktree.managed && !isWorktreeActive(worktree)"
+                  type="button"
+                  class="icon-btn small danger"
+                  title="移除隔离工作区"
+                  :disabled="Boolean(worktreeBusy)"
+                  @click="removeWorktree(worktree)"
+                  v-html="icons.trash"
+                />
+              </div>
             </div>
-            <span v-if="worktree.primary" class="git-worktree-tag">主工作区</span>
-            <span v-else-if="worktree.managed" class="git-worktree-tag">隔离</span>
-            <span v-else class="git-worktree-tag">外部</span>
-            <div class="git-worktree-actions">
-              <button
-                v-if="!worktree.primary && !isWorktreeActive(worktree)"
-                type="button"
-                class="icon-btn small"
-                title="在新项目中打开"
-                :disabled="Boolean(worktreeBusy) || !worktree.exists"
-                @click="openWorktree(worktree)"
-                v-html="icons.folder"
-              />
-              <button
-                type="button"
-                class="icon-btn small"
-                title="在文件管理器中显示"
-                :disabled="!worktree.exists"
-                @click="revealWorktree(worktree)"
-                v-html="icons.reveal"
-              />
-              <button
-                v-if="worktree.managed && !isWorktreeActive(worktree)"
-                type="button"
-                class="icon-btn small danger"
-                title="移除隔离工作区"
-                :disabled="Boolean(worktreeBusy)"
-                @click="removeWorktree(worktree)"
-                v-html="icons.trash"
-              />
-            </div>
+
+            <form
+              v-if="mergingWorktreePath === worktree.path"
+              class="git-worktree-form git-worktree-merge-form"
+              @submit.prevent="submitMergeWorktree(worktree)"
+            >
+              <div class="git-wt-form-title">合并 {{ worktree.branch }} 到基础分支</div>
+              <div class="git-wt-field">
+                <span>目标基础分支</span>
+                <SelectMenu
+                  v-model="mergeTargetBranch"
+                  :options="baseBranchOptions"
+                  size="sm"
+                  width="100%"
+                  aria-label="选择合并目标分支"
+                />
+              </div>
+              <div class="git-wt-field">
+                <span>合并方式</span>
+                <div class="git-wt-strategies" role="radiogroup" aria-label="合并方式">
+                  <button
+                    v-for="opt in [
+                      { id: 'squash', label: '压缩 (Squash)', desc: '压成 1 个提交' },
+                      { id: 'merge', label: '合并 (Merge)', desc: '保留分支历史' },
+                      { id: 'rebase', label: '变基 (Rebase)', desc: '线性快进合并' },
+                    ]"
+                    :key="opt.id"
+                    type="button"
+                    class="git-wt-strategy-btn"
+                    :class="{ active: mergeStrategy === opt.id }"
+                    :title="opt.desc"
+                    @click="mergeStrategy = opt.id as GitWorktreeMergeStrategy"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+              <label v-if="mergeStrategy !== 'rebase'" class="git-wt-field">
+                <span>提交说明（可选）</span>
+                <input
+                  v-model="mergeMessage"
+                  class="git-wt-input"
+                  :placeholder="`留空自动生成合并 ${worktree.branch} 的说明`"
+                  spellcheck="false"
+                />
+              </label>
+              <p v-if="worktree.dirty" class="git-wt-form-warn">该工作区仍有未提交改动，请先提交后再合并。</p>
+              <p v-else-if="!worktree.ahead" class="git-wt-form-hint">该分支暂无领先于目标分支的新提交。</p>
+              <div class="git-wt-form-actions">
+                <button type="button" class="btn small" @click="mergingWorktreePath = ''">取消</button>
+                <button
+                  type="submit"
+                  class="btn small primary"
+                  :disabled="Boolean(worktreeBusy) || Boolean(worktree.dirty) || !worktree.ahead"
+                >
+                  {{ worktreeBusy === worktree.path ? "合并中…" : `合并到 ${mergeTargetBranch}` }}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
         <p v-if="!worktrees.some((worktree) => !worktree.primary)" class="git-worktree-empty">还没有隔离工作区。点击右上角 + 新建一个。</p>

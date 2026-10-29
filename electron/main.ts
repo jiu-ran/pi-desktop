@@ -248,7 +248,10 @@ export interface PiLocation {
 
 function runCommand(command: string, args: string[], timeoutMs = 30000): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { shell: true, timeout: timeoutMs });
+    // Node.js 22 (DEP0190): 启用 shell: true 时若传递 args 数组会触发 DeprecationWarning。
+    // 将命令与参数拼成单一命令行字符串传入，彻底消除警告并确保 Windows 下 .cmd shim 正常执行。
+    const cmdLine = args.length ? `${command} ${args.join(" ")}` : command;
+    const child = spawn(cmdLine, { shell: true, timeout: timeoutMs, windowsHide: true });
     let output = "";
     child.stdout?.on("data", (chunk) => { output += chunk; });
     child.stderr?.on("data", (chunk) => { output += chunk; });
@@ -722,7 +725,7 @@ const workspaceChannels = new Set([
   "pi:forget", "pi:snapshot", "pi:prepare-attachments", "pi:prepare-session-attachments", "pi:list-directory",
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
-  "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:complete-paths", "pi:restart", "pi:sessions",
+  "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:git-worktree-merge", "pi:complete-paths", "pi:restart", "pi:sessions",
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
@@ -966,12 +969,13 @@ app.whenReady().then(() => {
   handle("pi:git-branches", (cwd: string) => host.gitBranches(cwd));
   handle("pi:git-action", (cwd: string, action: any, payload: any) => host.gitAction(cwd, action, payload));
   handle("pi:git-worktrees", (cwd: string) => host.gitWorktrees(cwd));
-  handle("pi:git-worktree-create", (cwd: string, name: string) => host.gitWorktreeCreate(cwd, name));
-  handle("pi:git-worktree-remove", async (cwd: string, target: string) => {
-    const result = await host.gitWorktreeRemove(cwd, target);
+  handle("pi:git-worktree-create", (cwd: string, name: string, options?: any) => host.gitWorktreeCreate(cwd, name, options));
+  handle("pi:git-worktree-remove", async (cwd: string, target: string, options?: any) => {
+    const result = await host.gitWorktreeRemove(cwd, target, options);
     await forgetRecent(recentFile(), path.resolve(target));
     return result;
   });
+  handle("pi:git-worktree-merge", (cwd: string, options: any) => host.gitWorktreeMerge(cwd, options));
   handle("pi:git-inspect", (cwd: string, kind: "commit" | "working" | "staged" | "unstaged", target: string) => host.gitInspect(cwd, kind, target));
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));

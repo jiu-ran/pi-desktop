@@ -34,7 +34,7 @@ export async function listGitBranches(root: string): Promise<GitBranch[]> {
     const [ref, head, hash, subject, upstream, tracking, worktreePath, symbolic] = line.split("\0");
     if (!ref || symbolic || !/^refs\/(heads|remotes)\//.test(ref)) return [];
     return [{ ref, name: ref.replace(/^refs\/(heads|remotes)\//, ""), remote: ref.startsWith("refs/remotes/"),
-      current: head === "*", hash, subject, upstream, tracking, worktreePath }];
+      current: head === "*", hash, subject, upstream, tracking, worktreePath: head === "*" ? "" : worktreePath }];
   });
 }
 

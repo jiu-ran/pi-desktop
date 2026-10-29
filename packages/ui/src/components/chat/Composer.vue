@@ -10,6 +10,7 @@ import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { appSettings } from "../../services/settings.ts";
+import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
 import { readStorage, writeStorage } from "../../shared/storage.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -1077,7 +1078,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 const offSet = bus.on("composer:set", ({ cwd, sessionFile, text }: { cwd: string; sessionFile?: string; text: string }) => {
-  const target = workbench.workspaces.get(cwd);
+  const target = workbench.findWorkspace(cwd);
   if (!target) return;
   if (sessionFile) {
     const thread = target.getThread?.(sessionFile);
@@ -1451,6 +1452,20 @@ const argHint = computed(() => {
               :icon="icons.brain"
               title="思考等级"
               @pick="(item) => workbench.setThinking(String(item.value))"
+            />
+            <button
+              v-if="ws"
+              type="button"
+              class="bar-btn"
+              title="创建 Git Worktree（隔离工作区）并加载当前对话或草稿"
+              @click="
+                openWorktreeDialog({
+                  cwd: ws.cwd,
+                  sessionFile: (ws.blocks?.length ?? 0) > 0 ? ws.sessionFile : '',
+                  initialPrompt: draft,
+                })
+              "
+              v-html="icons.branch"
             />
           </div>
           <div class="composer-right">

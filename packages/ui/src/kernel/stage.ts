@@ -1,4 +1,5 @@
 import { computed, reactive } from "vue";
+import { projectPathKey } from "../shared/util.ts";
 
 /**
  * 3 区域（内容展示区）控制器：
@@ -37,18 +38,20 @@ export function createStage() {
   let workspace = "";
   const allTabs = computed(() => [...new Set([...state.tabs, ...[...workspaces.values()].flatMap((saved) => saved.tabs)])]);
   function switchWorkspace(cwd: string): void {
-    if (cwd === workspace) return;
+    const key = projectPathKey(cwd) || cwd;
+    if (key === workspace) return;
     workspaces.set(workspace, { tabs: [...state.tabs], activeKey: state.activeKey });
-    workspace = cwd;
-    const saved = workspaces.get(cwd);
+    workspace = key;
+    const saved = workspaces.get(key);
     state.tabs.splice(0, state.tabs.length, ...(saved?.tabs ?? []));
     state.activeKey = saved?.activeKey ?? "";
-    workspaces.delete(cwd);
+    workspaces.delete(key);
   }
 
   function removeWorkspace(cwd: string): void {
-    workspaces.delete(cwd);
-    if (workspace === cwd) clear();
+    const key = projectPathKey(cwd) || cwd;
+    workspaces.delete(key);
+    if (workspace === key) clear();
   }
 
   const activeKey = computed(() => state.activeKey);
@@ -127,7 +130,8 @@ export function createStage() {
   }
 
   function closeWorkspaceTabs(cwd: string, predicate: (tab: StageTab) => boolean): void {
-    const saved = cwd === workspace ? state : workspaces.get(cwd);
+    const key = projectPathKey(cwd) || cwd;
+    const saved = key === workspace ? state : workspaces.get(key);
     if (!saved) return;
     saved.tabs.splice(0, saved.tabs.length, ...saved.tabs.filter(tab => !predicate(tab)));
     if (!saved.tabs.some(tab => tab.key === saved.activeKey)) saved.activeKey = saved.tabs[0]?.key ?? "";

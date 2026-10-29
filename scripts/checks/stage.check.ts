@@ -74,4 +74,13 @@ stage.switchWorkspace("C:/b");
 stage.removeWorkspace("C:/b");
 if (Number(stage.tabs.length) !== 0 || stage.activeKey.value !== "") throw new Error("removing the active project should clear the stage");
 
+// Windows 盘符大小写与斜杠分隔符差异不应导致舞台页签存档或分支切换清理失效
+stage.switchWorkspace("C:\\Repo\\App\\");
+stage.open({ pluginId: "files", tabId: "index.ts", title: "index.ts", dirty: false, data: { cwd: "C:\\Repo\\App" } });
+stage.switchWorkspace("c:/repo/app");
+if (Number(stage.tabs.length) !== 1) throw new Error("same project path with different casing/slashes should not swap out tabs");
+stage.closeWorkspaceTabs("C:/REPO/APP/", (tab) => !tab.dirty);
+if (Number(stage.tabs.length) !== 0) throw new Error("closeWorkspaceTabs should match workspace regardless of path casing/slashes");
+stage.removeWorkspace("c:\\repo\\app");
+
 console.log("stage OK");

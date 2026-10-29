@@ -1,6 +1,6 @@
 // 隔离工作区的分支命名与托管边界参考 ThinkRail（Apache-2.0），见 THIRD-PARTY-NOTICES.md。
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { open as openFileHandle, readdir, readFile, mkdir, lstat, stat, unlink, writeFile, rename, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -122,6 +122,10 @@ export interface GitOverview {
   commits: GitCommitNode[];
   userName: string;
   userEmail: string;
+  /** 默认托管隔离工作区根目录（如 ~/.pi-desktop/worktrees） */
+  worktreeRoot?: string;
+  /** 主仓库根目录的 8 位哈希前缀 */
+  repoKey?: string;
 }
 
 export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
@@ -261,6 +265,8 @@ export interface PiHostOptions {
   piEntry?: () => Promise<string>;
 }
 
+export type GitWorktreeMergeStrategy = "squash" | "merge" | "rebase";
+
 export interface GitWorktree {
   path: string;
   branch: string;
@@ -274,12 +280,48 @@ export interface GitWorktree {
   /** 由 Pi Desktop 创建、可以安全移除的隔离工作区 */
   managed: boolean;
   exists: boolean;
+  /** 创建时记录的目标基础分支（合并时默认回到该分支） */
+  baseBranch?: string;
+  /** 创建时所基于的起点（分支名或提交短哈希） */
+  baseRef?: string;
+  /** 创建时的起点提交哈希 */
+  baseCommit?: string;
+  /** 工作区是否有未提交或未跟踪改动 */
+  dirty?: boolean;
+  /** 相对目标基础分支领先的提交数（待合并提交数） */
+  ahead?: number;
+  /** 相对目标基础分支落后的提交数 */
+  behind?: number;
+}
+
+export interface GitWorktreeCreateOptions {
+  /** 分支策略：create（新建分支，默认）/ existing（检出已有本地或远程分支） */
+  branchMode?: "create" | "existing";
+  /** 自定义分支名称（create 模式下为新分支名，如 "feat/login"；existing 检出远程分支时为本地跟踪分支名） */
+  branchName?: string;
+  /** existing 模式下要检出的已有分支（完整 ref 或分支名） */
+  existingBranch?: string;
+  /** 起点引用：本地分支、远程分支或提交哈希（省略时为当前 HEAD） */
+  startPoint?: string;
+  /** 合并回的目标基础分支（省略时取起点对应的本地分支或主工作区当前分支；传空字符串 "" 表示暂不绑定） */
+  baseBranch?: string;
+  /** 自定义 Worktree 存放的目标目录绝对路径（省略时使用默认托管目录） */
+  targetDir?: string;
+  /** 创建后要复制迁移到新 Worktree 的源会话文件路径（.jsonl） */
+  sourceSessionFile?: string;
 }
 
 export interface GitWorktreeCreateResult {
   ok: true;
   message: string;
   worktree: GitWorktree;
+  /** 当传入 sourceSessionFile 时，返回复制到新 Worktree 会话目录后的新会话文件路径 */
+  sessionFile?: string;
+}
+
+export interface GitWorktreeRemoveOptions {
+  /** 移除隔离工作区目录后，是否同时删除对应的本地分支 */
+  deleteBranch?: boolean;
 }
 
 export interface GitWorktreeRemoveResult {
@@ -287,6 +329,37 @@ export interface GitWorktreeRemoveResult {
   message: string;
   branch: string;
   path: string;
+  branchDeleted?: boolean;
+}
+
+export interface GitWorktreeMergeOptions {
+  /** 要合并的隔离工作区路径 */
+  worktreePath: string;
+  /** 目标本地分支（省略时使用该工作区记录的 baseBranch 或主工作区当前分支） */
+  targetBranch?: string;
+  /** 合并方式：squash（压缩成一个提交）/ merge（合并提交）/ rebase（变基后快进） */
+  strategy?: GitWorktreeMergeStrategy;
+  /** 提交说明（用于 squash 或 merge 方式；省略时自动生成） */
+  message?: string;
+}
+
+export interface GitWorktreeMergeResult {
+  ok: boolean;
+  conflict?: boolean;
+  conflicts?: string[];
+  message: string;
+  /** 主工作区目录（合并执行位置） */
+  primaryPath: string;
+  /** 隔离工作区目录 */
+  worktreePath: string;
+  /** 隔离工作区分支 */
+  worktreeBranch: string;
+  /** 合并目标分支 */
+  targetBranch: string;
+  /** 合并方式 */
+  strategy: GitWorktreeMergeStrategy;
+  /** 合并后主工作区 HEAD 短哈希 */
+  commit?: string;
 }
 
 export interface GitCloneResult {
@@ -829,6 +902,37 @@ function assertReadableSessionFile(cwd: string, file: string): string {
   return path.resolve(file);
 }
 
+/**
+ * 将源会话文件（.jsonl）克隆到目标工作区（例如新建的 Git Worktree）的会话目录中，
+ * 同时更新首行 session 头的 cwd、id 与 timestamp，使目标工作区打开时可直接加载完整对话上下文。
+ */
+async function cloneSessionToWorkspace(srcFile: string, targetCwd: string): Promise<string> {
+  const raw = await readFile(srcFile, "utf8");
+  const lines = raw.split(/\r?\n/);
+  const nowIso = new Date().toISOString();
+  const newId = randomUUID();
+  if (lines.length > 0 && lines[0]!.trim()) {
+    try {
+      const head = JSON.parse(lines[0]!);
+      if (head && typeof head === "object" && head.type === "session") {
+        head.cwd = targetCwd;
+        head.id = newId;
+        head.timestamp = nowIso;
+        lines[0] = JSON.stringify(head);
+      }
+    } catch {
+      // 保持原样
+    }
+  }
+  const destDir = sessionDir(targetCwd);
+  await mkdir(destDir, { recursive: true });
+  const fileName = `${nowIso.replace(/[:.]/g, "-")}_${newId}.jsonl`;
+  const destFile = path.join(destDir, fileName);
+  const content = lines.join("\n").endsWith("\n") ? lines.join("\n") : `${lines.join("\n")}\n`;
+  await atomicWriteText(destFile, content);
+  return destFile;
+}
+
 export async function listSessions(cwd: string, keepFile: string | Iterable<string> = ""): Promise<SessionSummary[]> {
   const dir = sessionDir(cwd);
   let names: string[] = [];
@@ -1023,6 +1127,21 @@ export class PiHost {
     if (typeof cwd === "string" && cwd.trim()) this.authorizedWorkspaces.delete(this.workspaceKey(cwd));
   }
 
+  private resolvePoolKey(cwd: string): string {
+    if (this.clients.has(cwd) || this.starting.has(cwd)) return cwd;
+    const registered = this.authorizedWorkspaces.get(this.workspaceKey(cwd));
+    if (registered && (this.clients.has(registered) || this.starting.has(registered))) {
+      return registered;
+    }
+    for (const key of this.clients.keys()) {
+      if (samePath(key, cwd)) return key;
+    }
+    for (const key of this.starting.keys()) {
+      if (samePath(key, cwd)) return key;
+    }
+    return registered ?? cwd;
+  }
+
   /** @param timeoutMs 启动等待上限（测试可传更小的值） */
   async open(cwd: string, timeoutMs = START_TIMEOUT_MS) {
     if (this.closing) throw new Error("Pi 宿主正在关闭");
@@ -1067,6 +1186,7 @@ export class PiHost {
    * 这里把这一槽 worker 丢掉，工作区保持可用，用户换一个会话即可继续。
    */
   private async discardBrokenSlot(cwd: string, client: any): Promise<void> {
+    cwd = this.resolvePoolKey(cwd);
     const pool = this.clients.get(cwd);
     if (!pool) return;
     for (const [key, slot] of [...pool.workers.entries()]) {
@@ -1079,10 +1199,12 @@ export class PiHost {
 
   /** 只清掉这个工作区的 worker，不等待可能还挂着的启动流程。 */
   private async discardWorkspace(cwd: string): Promise<void> {
+    cwd = this.resolvePoolKey(cwd);
     const pool = this.clients.get(cwd);
     if (!pool) return;
     log.pi("warn", "worker", `丢弃工作区 worker：${cwd}`);
     this.clients.delete(cwd);
+    await this.disposeStandby(pool).catch(() => {});
     const clients = [...pool.workers.values()].map((slot) => slot.client);
     pool.workers.clear();
     await Promise.allSettled(clients.map((client) => client.stop()));
@@ -1549,6 +1671,11 @@ export class PiHost {
       });
     }
 
+    const listOut = await gitProbe(root, ["worktree", "list", "--porcelain"]);
+    const firstWorktree = parseWorktreeList(listOut)[0]?.path;
+    const primaryRoot = firstWorktree ? await realpath(firstWorktree).catch(() => firstWorktree) : root;
+    const repoKey = createHash("sha1").update(primaryRoot).digest("hex").slice(0, 8);
+
     return {
       isRepo: true,
       root,
@@ -1564,6 +1691,8 @@ export class PiHost {
       commits,
       userName: userName.trim(),
       userEmail: userEmail.trim(),
+      worktreeRoot: this.worktreeRoot,
+      repoKey,
     };
   }
 
@@ -1753,25 +1882,84 @@ export class PiHost {
     };
   }
 
-/** 列出当前仓库的 worktree；managed 表示由 Pi Desktop 创建、可安全移除。 */
+  /** 列出当前仓库的 worktree；managed 表示由 Pi Desktop 创建、可安全移除。 */
   async gitWorktrees(cwd: string): Promise<GitWorktree[]> {
     const workspace = path.resolve(cwd);
     await assertRealWorkspacePath(cwd, workspace);
     const root = await gitRepoRoot(workspace);
     if (!root) return [];
     const out = await gitProbe(root, ["worktree", "list", "--porcelain"]);
+    const parsed = parseWorktreeList(out);
+    if (!parsed.length) return [];
+    // git worktree list 的第一项固定是主工作区（即使当前 cwd 是某个关联 worktree）。
+    const primaryRoot = await realpath(parsed[0]!.path).catch(() => parsed[0]!.path);
+    const primaryBranch = parsed[0]!.branch || (await gitProbe(primaryRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
     const managedRoot = await realpath(this.worktreeRoot).catch(() => this.worktreeRoot);
-    return Promise.all(parseWorktreeList(out).map(async item => {
+
+    // 读取记录在仓库 config 中的隔离工作区基线与托管标记（branch.<name>.piBase* / piManaged）
+    const configOut = await gitProbe(primaryRoot, ["config", "--get-regexp", "^branch\\..*\\.pi(base|managed)"]);
+    const branchMeta = new Map<string, { baseBranch?: string; baseRef?: string; baseCommit?: string; managed?: boolean }>();
+    for (const line of configOut.split(/\r?\n/)) {
+      const match = /^branch\.(.+)\.(pibasebranch|pibaseref|pibasecommit|pimanaged)\s+(.*)$/i.exec(line.trim());
+      if (!match) continue;
+      const [, branchName, field, val] = match;
+      const entry = branchMeta.get(branchName!) ?? {};
+      const lower = field!.toLowerCase();
+      if (lower === "pibasebranch") entry.baseBranch = val!.trim();
+      else if (lower === "pibaseref") entry.baseRef = val!.trim();
+      else if (lower === "pibasecommit") entry.baseCommit = val!.trim();
+      else if (lower === "pimanaged") entry.managed = val!.trim().toLowerCase() === "true";
+      branchMeta.set(branchName!, entry);
+    }
+
+    return Promise.all(parsed.map(async (item) => {
       const canonical = await realpath(item.path).catch(() => item.path);
-      return { ...item, path: canonical,
-        primary: samePath(canonical, root),
-        managed: pathWithin(managedRoot, canonical) && !samePath(canonical, root),
-        exists: existsSync(canonical) };
+      const primary = samePath(canonical, primaryRoot);
+      const meta = item.branch ? branchMeta.get(item.branch) : undefined;
+      const managed = !primary && (pathWithin(managedRoot, canonical) || Boolean(meta?.managed));
+      const exists = existsSync(canonical);
+      const baseBranch = !primary ? (meta?.baseBranch || primaryBranch || undefined) : undefined;
+      const baseRef = !primary ? (meta?.baseRef || baseBranch) : undefined;
+      const baseCommit = !primary ? meta?.baseCommit : undefined;
+
+      let dirty = false;
+      let ahead = 0;
+      let behind = 0;
+      if (!primary && exists) {
+        const statusOut = await gitProbe(canonical, ["status", "--porcelain=v1", "-uall"]);
+        dirty = Boolean(statusOut.trim());
+        if (baseBranch && item.head) {
+          const hasBase = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${baseBranch}`])).trim();
+          if (hasBase) {
+            const counts = (await gitProbe(primaryRoot, [
+              "rev-list",
+              "--left-right",
+              "--count",
+              `refs/heads/${baseBranch}...${item.head}`,
+            ])).trim();
+            const [behindRaw, aheadRaw] = counts.split(/\s+/);
+            behind = Number(behindRaw) || 0;
+            ahead = Number(aheadRaw) || 0;
+          }
+        }
+      }
+
+      return {
+        ...item,
+        path: canonical,
+        primary,
+        managed,
+        exists,
+        ...(baseBranch ? { baseBranch } : {}),
+        ...(baseRef ? { baseRef } : {}),
+        ...(baseCommit ? { baseCommit } : {}),
+        ...(!primary ? { dirty, ahead, behind } : {}),
+      };
     }));
   }
 
-  /** 从当前 HEAD 创建隔离工作区（独立分支 + 独立目录）。 */
-  async gitWorktreeCreate(cwd: string, name: string): Promise<GitWorktreeCreateResult> {
+  /** 从指定分支或提交（默认当前 HEAD）创建隔离工作区（支持自定义分支名、检出已有分支、自定义目录与克隆会话）。 */
+  async gitWorktreeCreate(cwd: string, name: string, options: GitWorktreeCreateOptions = {}): Promise<GitWorktreeCreateResult> {
     const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const root = await gitRepoRoot(workspace);
@@ -1780,40 +1968,259 @@ export class PiHost {
     const head = (await gitProbe(root, ["rev-parse", "--verify", "HEAD"])).trim();
     if (!head) throw new Error("仓库还没有提交，无法创建隔离工作区");
 
-    const slug = worktreeSlug(name);
-    if (!slug) throw new Error("任务名不能为空");
-    const repoKey = createHash("sha1").update(workspace).digest("hex").slice(0, 8);
-    await mkdir(this.worktreeRoot, { recursive: true });
-    const managedRoot = await realpath(this.worktreeRoot);
-    const baseDir = path.join(managedRoot, `${repoKey}-${slug}`);
+    const listOut = await gitProbe(root, ["worktree", "list", "--porcelain"]);
+    const parsedWorktrees = parseWorktreeList(listOut);
+    const firstWorktree = parsedWorktrees[0]?.path;
+    const primaryRoot = firstWorktree ? await realpath(firstWorktree).catch(() => firstWorktree) : root;
+
+    const branches = await listGitBranches(primaryRoot);
+    const primaryBranch = (await gitProbe(primaryRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+    const currentBranch = (await gitProbe(root, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+    const defaultBaseBranch =
+      (currentBranch && !currentBranch.startsWith("pi/") ? currentBranch : "") ||
+      primaryBranch ||
+      branches.find((b) => !b.remote)?.name ||
+      "main";
+
+    const branchMode = options?.branchMode === "existing" ? "existing" : "create";
+    const customBranchInput = String(options?.branchName ?? "").trim().replace(/^refs\/heads\//, "");
+
+    const validateBranchFormat = async (candidate: string): Promise<string> => {
+      if (
+        !candidate ||
+        candidate.length > 240 ||
+        candidate.startsWith("-") ||
+        candidate === "HEAD" ||
+        /[\x00-\x20\x7f]/.test(candidate)
+      ) {
+        throw new Error("无效的分支名称（不能包含空白或以 - 开头）");
+      }
+      if (!(await gitProbe(primaryRoot, ["check-ref-format", "--branch", candidate])).trim()) {
+        throw new Error("无效的 Git 分支名称，请换一个名称");
+      }
+      return candidate;
+    };
+
+    let baseCommit = head;
+    let baseRef = currentBranch || head.slice(0, 7);
+    let inferredBaseBranch = defaultBaseBranch;
     let branch = "";
-    let target = "";
-    let reserved = false;
-    for (let index = 1; index <= 100; index += 1) {
-      branch = `pi/${slug}${index === 1 ? "" : `-${index}`}`;
-      target = `${baseDir}${index === 1 ? "" : `-${index}`}`;
-      const exists = (await gitProbe(root, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
-      if (!exists && !existsSync(target)) {
-        reserved = true;
-        break;
+    let checkoutExistingLocal = false;
+    let trackRemoteRef = "";
+
+    if (branchMode === "existing") {
+      const rawExisting = String(options?.existingBranch ?? "").trim();
+      if (!rawExisting) throw new Error("请选择要检出的已有分支");
+      const match = branches.find((b) => b.ref === rawExisting || b.name === rawExisting);
+      if (!match) throw new Error(`找不到要检出的分支：${rawExisting}`);
+
+      if (!match.remote) {
+        const occupied = parsedWorktrees.find((w) => w.branch === match.name);
+        if (occupied || match.current || match.worktreePath) {
+          throw new Error(`分支 ${match.name} 已在工作区使用（${occupied?.path || match.worktreePath || root}），不能在多个工作树重复检出`);
+        }
+        branch = await validateBranchFormat(match.name);
+        checkoutExistingLocal = true;
+        baseCommit = (await gitProbe(primaryRoot, ["rev-parse", "--verify", match.ref])).trim() || head;
+        baseRef = match.name;
+        inferredBaseBranch = match.name === defaultBaseBranch
+          ? (branches.find((b) => !b.remote && b.name !== match.name)?.name || defaultBaseBranch)
+          : defaultBaseBranch;
+      } else {
+        const stripped = match.name.includes("/") ? match.name.slice(match.name.indexOf("/") + 1) : match.name;
+        const localName = await validateBranchFormat(customBranchInput || stripped);
+        const occupied = parsedWorktrees.find((w) => w.branch === localName);
+        if (occupied) {
+          throw new Error(`本地分支 ${localName} 已在工作区使用（${occupied.path}），请指定其他本地跟踪分支名`);
+        }
+        const localExists = Boolean((await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${localName}`])).trim());
+        branch = localName;
+        if (localExists) {
+          checkoutExistingLocal = true;
+        } else {
+          trackRemoteRef = match.ref;
+        }
+        baseCommit = (await gitProbe(primaryRoot, ["rev-parse", "--verify", match.ref])).trim() || head;
+        baseRef = match.name;
+        inferredBaseBranch = defaultBaseBranch;
+      }
+    } else {
+      const rawStart = String(options?.startPoint ?? "").trim();
+      if (rawStart && rawStart !== "HEAD") {
+        if (rawStart.startsWith("-") || /[\x00-\x20\x7f]|@\{|\.\./.test(rawStart)) {
+          throw new Error("无效的起点分支或提交");
+        }
+        const resolved = (await gitProbe(primaryRoot, ["rev-parse", "--verify", "--end-of-options", `${rawStart}^{commit}`])).trim();
+        if (!resolved) throw new Error(`找不到指定的起点分支或提交：${rawStart}`);
+        baseCommit = resolved;
+
+        const localMatch = branches.find((b) => !b.remote && (b.ref === rawStart || b.name === rawStart));
+        const remoteMatch = branches.find((b) => b.remote && (b.ref === rawStart || b.name === rawStart));
+        if (localMatch) {
+          baseRef = localMatch.name;
+          inferredBaseBranch = localMatch.name;
+        } else if (remoteMatch) {
+          baseRef = remoteMatch.name;
+          const stripped = remoteMatch.name.includes("/") ? remoteMatch.name.slice(remoteMatch.name.indexOf("/") + 1) : remoteMatch.name;
+          const correspondingLocal = branches.find((b) => !b.remote && b.name === stripped);
+          inferredBaseBranch = correspondingLocal ? correspondingLocal.name : defaultBaseBranch;
+        } else {
+          baseRef = resolved.slice(0, 7);
+          inferredBaseBranch = defaultBaseBranch;
+        }
       }
     }
-    if (!reserved) throw new Error("同名隔离工作区过多，请换一个任务名");
-    if (!(await gitProbe(root, ["check-ref-format", "--branch", branch])).trim()) {
-      throw new Error("任务名无法生成合法的 Git 分支名，请换一个名称");
+
+    let baseBranch = inferredBaseBranch;
+    if (options?.baseBranch !== undefined) {
+      const rawBaseBranch = String(options.baseBranch ?? "").trim().replace(/^refs\/heads\//, "");
+      if (!rawBaseBranch) {
+        baseBranch = "";
+      } else {
+        if (!branches.some((b) => !b.remote && b.name === rawBaseBranch)) {
+          throw new Error(`目标基础分支不存在：${rawBaseBranch}`);
+        }
+        baseBranch = rawBaseBranch;
+      }
+    }
+    if (baseBranch && branch && baseBranch === branch) {
+      baseBranch = "";
+    }
+
+    const rawSeed = String(name || customBranchInput || branch);
+    const slug = worktreeSlug(rawSeed.replace(/^pi[/-]+/i, "")) || worktreeSlug(rawSeed);
+    if (!slug) throw new Error("任务名或分支名不能为空");
+
+    const repoKey = createHash("sha1").update(primaryRoot).digest("hex").slice(0, 8);
+    await mkdir(this.worktreeRoot, { recursive: true });
+    const managedRoot = await realpath(this.worktreeRoot);
+    const rawTargetDir = String(options?.targetDir ?? "").trim();
+
+    let target = "";
+    if (rawTargetDir) {
+      if (!path.isAbsolute(rawTargetDir)) throw new Error("隔离工作区目录必须是绝对路径");
+      target = path.resolve(rawTargetDir);
+      if (
+        samePath(target, primaryRoot) ||
+        samePath(target, root) ||
+        pathWithin(target, primaryRoot) ||
+        pathWithin(path.join(primaryRoot, ".git"), target)
+      ) {
+        throw new Error("隔离工作区目录不能是当前仓库根目录、其上级目录或 .git 内部");
+      }
+      if (existsSync(target)) {
+        const info = await stat(target).catch(() => null);
+        if (!info?.isDirectory()) throw new Error("目标路径已存在且不是文件夹");
+        const existingEntries = await readdir(target);
+        if (existingEntries.length > 0) {
+          throw new Error("目标文件夹非空，请选择空文件夹或修改目标目录名称");
+        }
+      }
+      if (branchMode === "create") {
+        if (customBranchInput) {
+          branch = await validateBranchFormat(customBranchInput);
+          const exists = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
+          if (exists) throw new Error(`本地分支 ${branch} 已存在，请换一个分支名或改选「检出已有分支」`);
+        } else {
+          let reserved = false;
+          for (let index = 1; index <= 100; index += 1) {
+            const candidate = `pi/${slug}${index === 1 ? "" : `-${index}`}`;
+            const exists = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${candidate}`])).trim();
+            if (!exists) {
+              branch = candidate;
+              reserved = true;
+              break;
+            }
+          }
+          if (!reserved) throw new Error("同名隔离工作区分支过多，请换一个任务名");
+          await validateBranchFormat(branch);
+        }
+      }
+    } else {
+      const baseDir = path.join(managedRoot, `${repoKey}-${slug}`);
+      if (branchMode === "create" && customBranchInput) {
+        branch = await validateBranchFormat(customBranchInput);
+        const exists = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
+        if (exists) throw new Error(`本地分支 ${branch} 已存在，请换一个分支名或改选「检出已有分支」`);
+        let reservedDir = false;
+        for (let index = 1; index <= 100; index += 1) {
+          const candidateDir = `${baseDir}${index === 1 ? "" : `-${index}`}`;
+          if (!existsSync(candidateDir)) {
+            target = candidateDir;
+            reservedDir = true;
+            break;
+          }
+        }
+        if (!reservedDir) throw new Error("同名隔离工作区目录过多，请换一个名称或自定义目录");
+      } else if (branchMode === "existing") {
+        let reservedDir = false;
+        for (let index = 1; index <= 100; index += 1) {
+          const candidateDir = `${baseDir}${index === 1 ? "" : `-${index}`}`;
+          if (!existsSync(candidateDir)) {
+            target = candidateDir;
+            reservedDir = true;
+            break;
+          }
+        }
+        if (!reservedDir) throw new Error("同名隔离工作区目录过多，请自定义存放目录");
+      } else {
+        let reserved = false;
+        for (let index = 1; index <= 100; index += 1) {
+          branch = `pi/${slug}${index === 1 ? "" : `-${index}`}`;
+          target = `${baseDir}${index === 1 ? "" : `-${index}`}`;
+          const exists = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();
+          if (!exists && !existsSync(target)) {
+            reserved = true;
+            break;
+          }
+        }
+        if (!reserved) throw new Error("同名隔离工作区过多，请换一个任务名");
+        await validateBranchFormat(branch);
+      }
+    }
+
+    if (baseBranch && baseBranch === branch) {
+      baseBranch = "";
     }
 
     await mkdir(path.dirname(target), { recursive: true });
-    await gitRun(root, ["worktree", "add", "-b", branch, target, head]);
+    if (branchMode === "existing") {
+      if (checkoutExistingLocal) {
+        await gitRun(primaryRoot, ["worktree", "add", target, branch]);
+      } else {
+        await gitRun(primaryRoot, ["worktree", "add", "--track", "-b", branch, target, trackRemoteRef]);
+      }
+    } else {
+      await gitRun(primaryRoot, ["worktree", "add", "-b", branch, target, baseCommit]);
+    }
+
+    await gitProbe(primaryRoot, ["config", `branch.${branch}.piManaged`, "true"]);
+    if (baseBranch) await gitProbe(primaryRoot, ["config", `branch.${branch}.piBaseBranch`, baseBranch]);
+    if (baseRef) await gitProbe(primaryRoot, ["config", `branch.${branch}.piBaseRef`, baseRef]);
+    if (baseCommit) await gitProbe(primaryRoot, ["config", `branch.${branch}.piBaseCommit`, baseCommit]);
+
     const canonicalTarget = await realpath(target);
+    this.authorizedWorkspaces.set(this.workspaceKey(canonicalTarget), canonicalTarget);
+
+    let clonedSessionFile: string | undefined;
+    const rawSourceSession = String(options?.sourceSessionFile ?? "").trim();
+    if (rawSourceSession) {
+      const verifiedSession = assertReadableSessionFile(cwd, rawSourceSession);
+      clonedSessionFile = await cloneSessionToWorkspace(verifiedSession, canonicalTarget);
+    }
+
     const worktree = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, canonicalTarget));
     return {
       ok: true,
-      message: `已创建隔离工作区（${branch}）`,
+      message:
+        branchMode === "existing"
+          ? `已检出分支 ${branch} 创建隔离工作区`
+          : `已基于 ${baseRef} 创建隔离工作区（${branch}）`,
+      ...(clonedSessionFile ? { sessionFile: clonedSessionFile } : {}),
       worktree: worktree ?? {
         path: canonicalTarget,
         branch,
-        head,
+        head: baseCommit,
         detached: false,
         bare: false,
         locked: false,
@@ -1821,32 +2228,41 @@ export class PiHost {
         primary: false,
         managed: true,
         exists: true,
+        ...(baseBranch ? { baseBranch } : {}),
+        ...(baseRef ? { baseRef } : {}),
+        ...(baseCommit ? { baseCommit } : {}),
+        dirty: false,
+        ahead: 0,
+        behind: 0,
       },
     };
   }
 
-  /** 移除由 Pi Desktop 创建的工作区；分支会保留，未合并的提交不会丢失。 */
-  async gitWorktreeRemove(cwd: string, target: string): Promise<GitWorktreeRemoveResult> {
+  /** 移除由 Pi Desktop 创建的工作区；默认保留分支，也可选择同时删除本地分支。 */
+  async gitWorktreeRemove(cwd: string, target: string, options: GitWorktreeRemoveOptions = {}): Promise<GitWorktreeRemoveResult> {
     const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
     const root = await gitRepoRoot(workspace);
     if (!root) throw new Error("当前目录不是 Git 仓库");
     if (!samePath(root, workspace)) throw new Error("请在仓库根目录移除隔离工作区");
+    const allWorktrees = await this.gitWorktrees(cwd);
+    const primary = allWorktrees.find((item) => item.primary);
+    const primaryRoot = primary ? await realpath(primary.path).catch(() => primary.path) : root;
     const canonicalTarget = await realpath(path.resolve(target)).catch(() => path.resolve(target));
-    const entry = (await this.gitWorktrees(cwd)).find((item) => samePath(item.path, canonicalTarget));
+    const entry = allWorktrees.find((item) => samePath(item.path, canonicalTarget));
     if (!entry) throw new Error("该目录不是当前仓库的 worktree");
     if (entry.primary) throw new Error("不能移除仓库的主工作区");
     if (!entry.managed) throw new Error("只能移除由 Pi Desktop 创建的隔离工作区");
     if (samePath(entry.path, workspace)) throw new Error("不能移除当前正在使用的工作区");
-    const inUse = [...this.clients.keys()].some((cwd) => samePath(cwd, entry.path))
-      || [...this.starting.keys()].some((cwd) => samePath(cwd, entry.path));
+    const inUse = [...this.clients.keys()].some((itemCwd) => samePath(itemCwd, entry.path))
+      || [...this.starting.keys()].some((itemCwd) => samePath(itemCwd, entry.path));
     if (inUse) throw new Error("该隔离工作区仍有 Pi 进程在运行，请先切换到其他项目再移除");
 
     if (entry.exists) {
       let lastError: unknown = null;
       for (let attempt = 0; attempt < 6; attempt += 1) {
         try {
-          await gitRun(root, ["worktree", "remove", "--force", entry.path]);
+          await gitRun(primaryRoot, ["worktree", "remove", "--force", entry.path]);
           lastError = null;
           break;
         } catch (error) {
@@ -1872,13 +2288,218 @@ export class PiHost {
         await rm(entry.path, { recursive: true, force: true }).catch(() => {});
       }
     }
-    await gitProbe(root, ["worktree", "prune"]);
+    await gitProbe(primaryRoot, ["worktree", "prune"]);
+    let branchDeleted = false;
+    if (options?.deleteBranch && entry.branch) {
+      const deletedOut = await gitProbe(primaryRoot, ["branch", "-D", entry.branch]);
+      branchDeleted = Boolean(deletedOut.trim());
+    }
+    const label = entry.branch || entry.head.slice(0, 7) || "detached";
     return {
       ok: true,
-      message: `已移除隔离工作区（${entry.branch || entry.head.slice(0, 7) || "detached"}）`,
+      message: branchDeleted ? `已移除隔离工作区并删除分支 ${entry.branch}` : `已移除隔离工作区（${label}）`,
       branch: entry.branch,
       path: entry.path,
+      branchDeleted,
     };
+  }
+
+  /**
+   * 将隔离工作区中的提交合并回目标基础分支（在主工作区执行）。
+   * 支持 squash（压缩成一个提交）、merge（合并提交 --no-ff）和 rebase（线性变基后快进）。
+   * 若遇到冲突则自动中止并恢复主工作区与隔离工作区为干净状态，返回冲突文件列表。
+   */
+  async gitWorktreeMerge(cwd: string, options: GitWorktreeMergeOptions): Promise<GitWorktreeMergeResult> {
+    const workspace = await realpath(path.resolve(cwd));
+    await assertRealWorkspacePath(cwd, workspace);
+    const root = await gitRepoRoot(workspace);
+    if (!root) throw new Error("当前目录不是 Git 仓库");
+
+    const allWorktrees = await this.gitWorktrees(workspace);
+    const primary = allWorktrees.find((item) => item.primary);
+    if (!primary || !primary.exists) throw new Error("找不到仓库的主工作区");
+    const primaryRoot = await realpath(primary.path).catch(() => primary.path);
+    this.authorizedWorkspaces.set(this.workspaceKey(primaryRoot), primaryRoot);
+
+    const rawTarget = String(options?.worktreePath ?? "").trim();
+    if (!rawTarget) throw new Error("请指定要合并的隔离工作区");
+    const canonicalWorktree = await realpath(path.resolve(rawTarget)).catch(() => path.resolve(rawTarget));
+    const entry = allWorktrees.find((item) => samePath(item.path, canonicalWorktree));
+    if (!entry) throw new Error("该目录不是当前仓库的 worktree");
+    if (entry.primary) throw new Error("不能将主工作区合并到自身");
+    if (!entry.exists) throw new Error("隔离工作区目录不存在");
+    if (!entry.branch) throw new Error("隔离工作区处于游离 HEAD 状态，请先在工作区内创建分支后再合并");
+
+    return withFileWrite(path.join(primaryRoot, ".git-pi-operation"), async () => {
+      for (const checkPath of [primaryRoot, entry.path]) {
+        const pool = [...this.clients.entries()].find(([k]) => samePath(k, checkPath))?.[1];
+        if (pool && [...pool.workers.values()].some((slot) => slot.streaming || slot.compacting)) {
+          throw new Error("相关工作区仍有 Agent 任务正在运行，请等待任务结束后再合并");
+        }
+      }
+
+      const targetBranch = String(options?.targetBranch || entry.baseBranch || primary.branch || "")
+        .trim()
+        .replace(/^refs\/heads\//, "");
+      if (!targetBranch) throw new Error("请指定要合并到的目标基础分支");
+      if (targetBranch === entry.branch) throw new Error("目标基础分支不能与隔离工作区分支相同");
+      const targetRef = `refs/heads/${targetBranch}`;
+      if (!(await gitProbe(primaryRoot, ["show-ref", "--verify", targetRef])).trim()) {
+        throw new Error(`目标基础分支不存在：${targetBranch}`);
+      }
+
+      const strategy: GitWorktreeMergeStrategy =
+        options?.strategy === "merge" || options?.strategy === "rebase" || options?.strategy === "squash"
+          ? options.strategy
+          : "squash";
+
+      if ((await gitProbe(entry.path, ["status", "--porcelain=v1", "-uall"])).trim()) {
+        throw new Error(`隔离工作区（${entry.branch}）仍有未提交或未跟踪的改动，请先在隔离工作区提交后再合并`);
+      }
+      if ((await gitProbe(primaryRoot, ["status", "--porcelain=v1", "-uall"])).trim()) {
+        throw new Error(`主工作区（${primary.branch || primaryRoot}）有未提交或未跟踪的改动，请先在主工作区处理后再合并`);
+      }
+
+      const counts = (await gitProbe(primaryRoot, [
+        "rev-list",
+        "--left-right",
+        "--count",
+        `${targetRef}...refs/heads/${entry.branch}`,
+      ])).trim();
+      const [, aheadRaw] = counts.split(/\s+/);
+      const ahead = Number(aheadRaw) || 0;
+      if (ahead <= 0) {
+        throw new Error(`分支 ${entry.branch} 没有领先于 ${targetBranch} 的新提交，无需合并`);
+      }
+
+      const currentPrimaryBranch = (await gitProbe(primaryRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+      if (currentPrimaryBranch !== targetBranch) {
+        const occupiedOther = allWorktrees.find((w) => !w.primary && w.branch === targetBranch);
+        if (occupiedOther) {
+          throw new Error(`目标分支 ${targetBranch} 当前已在另一工作区检出：${occupiedOther.path}`);
+        }
+        await gitRun(primaryRoot, ["switch", "--no-guess", "--", targetBranch]);
+      }
+
+      const customMessage = String(options?.message ?? "").trim();
+      if (customMessage.length > 5000) throw new Error("合并提交说明过长（上限 5000 字）");
+      let commitMessage = customMessage;
+      if (!commitMessage) {
+        if (ahead === 1) {
+          const singleSubject = (await gitProbe(primaryRoot, ["log", "-1", "--format=%s", `refs/heads/${entry.branch}`])).trim();
+          commitMessage = singleSubject || `合并 ${entry.branch} 到 ${targetBranch}`;
+        } else {
+          const subjects = (await gitProbe(primaryRoot, [
+            "log",
+            "--reverse",
+            "--format=- %s",
+            `${targetRef}..refs/heads/${entry.branch}`,
+          ])).trim();
+          commitMessage = `合并 ${entry.branch} 到 ${targetBranch}` + (subjects ? `\n\n${subjects}` : "");
+        }
+      }
+
+      const collectConflicts = async (dir: string): Promise<string[]> => {
+        const unmerged = (await gitProbe(dir, ["diff", "--name-only", "--diff-filter=U"])).trim();
+        if (unmerged) {
+          return [...new Set(unmerged.split(/\r?\n/).map((s) => s.trim()).filter(Boolean))];
+        }
+        const status = parseGitStatus(await gitProbe(dir, ["status", "--porcelain=v1", "-z"]));
+        return status
+          .filter((f) => f.index === "U" || f.worktree === "U" || (f.index === "A" && f.worktree === "A") || (f.index === "D" && f.worktree === "D"))
+          .map((f) => f.path);
+      };
+
+      if (strategy === "squash") {
+        try {
+          await gitRun(primaryRoot, ["merge", "--squash", `refs/heads/${entry.branch}`]);
+        } catch (error) {
+          const conflicts = await collectConflicts(primaryRoot);
+          await gitProbe(primaryRoot, ["reset", "--hard", "HEAD"]);
+          await gitProbe(primaryRoot, ["clean", "-fd"]);
+          if (conflicts.length) {
+            return {
+              ok: false,
+              conflict: true,
+              conflicts,
+              message: `合并 ${entry.branch} 到 ${targetBranch} 时发生冲突（共 ${conflicts.length} 个文件），已自动中止合并并恢复主工作区`,
+              primaryPath: primaryRoot,
+              worktreePath: entry.path,
+              worktreeBranch: entry.branch,
+              targetBranch,
+              strategy,
+            };
+          }
+          throw error;
+        }
+        const stagedAfterSquash = (await gitProbe(primaryRoot, ["status", "--porcelain=v1"])).trim();
+        if (!stagedAfterSquash) {
+          await gitProbe(primaryRoot, ["reset", "--hard", "HEAD"]);
+          throw new Error(`分支 ${entry.branch} 的改动内容已包含在 ${targetBranch} 中，无需生成新提交`);
+        }
+        await gitRun(primaryRoot, ["commit", "-m", commitMessage]);
+      } else if (strategy === "merge") {
+        try {
+          await gitRun(primaryRoot, ["merge", "--no-ff", "-m", commitMessage, `refs/heads/${entry.branch}`]);
+        } catch (error) {
+          const conflicts = await collectConflicts(primaryRoot);
+          await gitProbe(primaryRoot, ["merge", "--abort"]);
+          await gitProbe(primaryRoot, ["reset", "--hard", "HEAD"]);
+          if (conflicts.length) {
+            return {
+              ok: false,
+              conflict: true,
+              conflicts,
+              message: `合并 ${entry.branch} 到 ${targetBranch} 时发生冲突（共 ${conflicts.length} 个文件），已自动中止合并并恢复主工作区`,
+              primaryPath: primaryRoot,
+              worktreePath: entry.path,
+              worktreeBranch: entry.branch,
+              targetBranch,
+              strategy,
+            };
+          }
+          throw error;
+        }
+      } else {
+        // rebase：先在隔离工作区线性变基到目标分支最新提交，成功后再在主工作区快进合并
+        try {
+          await gitRun(entry.path, ["rebase", targetRef]);
+        } catch (error) {
+          const conflicts = await collectConflicts(entry.path);
+          await gitProbe(entry.path, ["rebase", "--abort"]);
+          await gitProbe(entry.path, ["reset", "--hard", "HEAD"]);
+          if (conflicts.length) {
+            return {
+              ok: false,
+              conflict: true,
+              conflicts,
+              message: `将 ${entry.branch} 变基到 ${targetBranch} 时发生冲突（共 ${conflicts.length} 个文件），已中止变基并恢复工作区干净`,
+              primaryPath: primaryRoot,
+              worktreePath: entry.path,
+              worktreeBranch: entry.branch,
+              targetBranch,
+              strategy,
+            };
+          }
+          throw error;
+        }
+        await gitRun(primaryRoot, ["merge", "--ff-only", `refs/heads/${entry.branch}`]);
+      }
+
+      completionCache.delete(completionKey(primaryRoot));
+      const shortCommit = (await gitProbe(primaryRoot, ["rev-parse", "--short", "HEAD"])).trim();
+      const strategyLabel = strategy === "squash" ? "压缩合并" : strategy === "rebase" ? "变基快进" : "合并提交";
+      return {
+        ok: true,
+        message: `已通过${strategyLabel}将 ${entry.branch} 合入 ${targetBranch}${shortCommit ? `（${shortCommit}）` : ""}`,
+        primaryPath: primaryRoot,
+        worktreePath: entry.path,
+        worktreeBranch: entry.branch,
+        targetBranch,
+        strategy,
+        commit: shortCommit,
+      };
+    });
   }
 
   /**
@@ -2059,6 +2680,7 @@ export class PiHost {
   }
 
   async snapshot(cwd: string, sessionFile?: string) {
+    cwd = this.resolvePoolKey(cwd);
     const pool = this.requirePool(cwd);
     const slot = this.resolveSlot(cwd, sessionFile);
     const client = slot.client;
@@ -2110,7 +2732,7 @@ export class PiHost {
   }
 
   requirePool(cwd: string): WorkspaceClientPool {
-    const entry = this.clients.get(cwd);
+    const entry = this.clients.get(this.resolvePoolKey(cwd));
     if (!entry) throw new Error("这个工作区还没有启动 Pi");
     return entry;
   }
@@ -2134,6 +2756,7 @@ export class PiHost {
   }
 
   async call(cwd: string, method: string, args: any[] = [], sessionFile?: string) {
+    cwd = this.resolvePoolKey(cwd);
     const allowed = new Set<string>(PI_RPC_ALLOWLIST);
     if (!allowed.has(method)) throw new Error(`不允许的 RPC 方法：${method}`);
     if (method === "setMaxIdleWorkers") {
@@ -2206,25 +2829,50 @@ export class PiHost {
       const standby = await this.claimStandbyWorker(pool);
       if (standby) {
         const initialFile = standby.sessionFile;
-        if (normSessionFile(initialFile) !== normSessionFile(targetFile)) {
-          const switched = await standby.client.switchSession(targetFile);
-          if (switched?.cancelled) return switched;
-          if (initialFile) unlink(initialFile).catch(() => {});
+        try {
+          if (normSessionFile(initialFile) !== normSessionFile(targetFile)) {
+            const switched = await standby.client.switchSession(targetFile).catch((error: any) => {
+              if (isBrokenSessionError(error)) {
+                throw new Error(`这个会话文件读不出来（可能已损坏或被其它工具改写过）：${path.basename(targetFile)}。文件已保留，换一个会话或新建会话即可继续。`);
+              }
+              throw error;
+            });
+            if (switched?.cancelled) {
+              if (!pool.standbySlot && this.clients.get(cwd) === pool) {
+                pool.standbySlot = standby;
+              } else {
+                if (initialFile && await isKnownEmptySession(initialFile)) {
+                  await unlink(initialFile).catch(() => {});
+                }
+                await standby.client.stop().catch(() => {});
+              }
+              return switched;
+            }
+            if (initialFile && await isKnownEmptySession(initialFile)) {
+              unlink(initialFile).catch(() => {});
+            }
+          }
+          const st = await standby.client.getState();
+          standby.sessionFile = st.sessionFile ?? targetFile;
+          standby.streaming = Boolean(st.isStreaming);
+          standby.compacting = Boolean(st.isCompacting);
+          standby.lastState = st;
+          pool.workers.set(normSessionFile(standby.sessionFile), standby);
+          pool.client = standby.client;
+          pool.activeSessionFile = standby.sessionFile;
+          return {
+            cancelled: false,
+            sessionFile: standby.sessionFile,
+            state: st,
+            workerStates: this.getWorkerStates(pool),
+          };
+        } catch (error) {
+          if (initialFile && await isKnownEmptySession(initialFile)) {
+            await unlink(initialFile).catch(() => {});
+          }
+          await standby.client.stop().catch(() => {});
+          throw error;
         }
-        const st = await standby.client.getState();
-        standby.sessionFile = st.sessionFile ?? targetFile;
-        standby.streaming = Boolean(st.isStreaming);
-        standby.compacting = Boolean(st.isCompacting);
-        standby.lastState = st;
-        pool.workers.set(normSessionFile(standby.sessionFile), standby);
-        pool.client = standby.client;
-        pool.activeSessionFile = standby.sessionFile;
-        return {
-          cancelled: false,
-          sessionFile: standby.sessionFile,
-          state: st,
-          workerStates: this.getWorkerStates(pool),
-        };
       }
       const spawned = await this.spawnWorker(cwd, pool, { targetSessionFile: targetFile });
       return {
@@ -2270,29 +2918,49 @@ export class PiHost {
       const standby = await this.claimStandbyWorker(pool);
       if (standby) {
         const initialFile = standby.sessionFile;
-        if (restored[0]) {
-          const created = await standby.client.newSession(restored[0]);
-          if (created?.cancelled) return created;
-          if (initialFile) unlink(initialFile).catch(() => {});
-          const st = await standby.client.getState();
-          standby.sessionFile = st.sessionFile ?? "";
-          standby.streaming = Boolean(st.isStreaming);
-          standby.compacting = Boolean(st.isCompacting);
-          standby.lastState = st;
+        try {
+          if (restored[0]) {
+            const created = await standby.client.newSession(restored[0]);
+            if (created?.cancelled) {
+              if (!pool.standbySlot && this.clients.get(cwd) === pool) {
+                pool.standbySlot = standby;
+              } else {
+                if (initialFile && await isKnownEmptySession(initialFile)) {
+                  await unlink(initialFile).catch(() => {});
+                }
+                await standby.client.stop().catch(() => {});
+              }
+              return created;
+            }
+            if (initialFile && await isKnownEmptySession(initialFile)) {
+              unlink(initialFile).catch(() => {});
+            }
+            const st = await standby.client.getState();
+            standby.sessionFile = st.sessionFile ?? "";
+            standby.streaming = Boolean(st.isStreaming);
+            standby.compacting = Boolean(st.isCompacting);
+            standby.lastState = st;
+          }
+          if (standby.sessionFile) {
+            pool.workers.set(normSessionFile(standby.sessionFile), standby);
+          }
+          pool.client = standby.client;
+          pool.activeSessionFile = standby.sessionFile;
+          const sessions = await this.sessions(cwd);
+          return {
+            cancelled: false,
+            sessionFile: standby.sessionFile,
+            state: standby.lastState,
+            sessions,
+            workerStates: this.getWorkerStates(pool),
+          };
+        } catch (error) {
+          if (initialFile && await isKnownEmptySession(initialFile)) {
+            await unlink(initialFile).catch(() => {});
+          }
+          await standby.client.stop().catch(() => {});
+          throw error;
         }
-        if (standby.sessionFile) {
-          pool.workers.set(normSessionFile(standby.sessionFile), standby);
-        }
-        pool.client = standby.client;
-        pool.activeSessionFile = standby.sessionFile;
-        const sessions = await this.sessions(cwd);
-        return {
-          cancelled: false,
-          sessionFile: standby.sessionFile,
-          state: standby.lastState,
-          sessions,
-          workerStates: this.getWorkerStates(pool),
-        };
       }
       const spawned = await this.spawnWorker(cwd, pool, { parentSession: restored[0] });
       const sessions = await this.sessions(cwd);
@@ -2372,6 +3040,7 @@ export class PiHost {
   }
 
   async restart(cwd: string, sessionFile?: string) {
+    cwd = this.resolvePoolKey(cwd);
     const pool = this.clients.get(cwd);
     const targetFile = sessionFile || pool?.activeSessionFile || "";
     if (pool) {
@@ -2395,6 +3064,7 @@ export class PiHost {
   }
 
   async close(cwd: string): Promise<boolean> {
+    cwd = this.resolvePoolKey(cwd);
     await this.starting.get(cwd)?.catch(() => {});
     const pool = this.clients.get(cwd);
     if (!pool) return false;
@@ -2406,6 +3076,7 @@ export class PiHost {
   }
 
   async deleteSession(cwd: string, file: string): Promise<SessionSummary[]> {
+    cwd = this.resolvePoolKey(cwd);
     const target = assertSessionFile(cwd, file);
     const targetKey = normSessionFile(target);
     const pool = this.clients.get(cwd);
@@ -2441,6 +3112,7 @@ export class PiHost {
   }
 
   async deleteAllSessions(cwd: string): Promise<{ deleted: number; failed: number }> {
+    cwd = this.resolvePoolKey(cwd);
     if (this.clients.has(cwd)) throw new Error("请先关闭该项目的 Pi 进程");
     const items = await listSessions(cwd);
     const results = await Promise.allSettled(items.map((item) => this.trash(assertSessionFile(cwd, item.path))));
@@ -2449,6 +3121,7 @@ export class PiHost {
   }
 
   sessions(cwd: string): Promise<SessionSummary[]> {
+    cwd = this.resolvePoolKey(cwd);
     const pool = this.clients.get(cwd);
     if (!pool) return listSessions(cwd);
     const keepFiles = [pool.activeSessionFile, ...[...pool.workers.values()].map((w) => w.sessionFile)].filter(Boolean);
