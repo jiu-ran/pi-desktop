@@ -147,13 +147,46 @@ let mainWindow: BrowserWindow | null = null;
 let terminalFocused = false;
 
 /**
- * Windows 原生最大化会让客户区比工作区矮 1px（实测 1536×863 vs 1536×864），
- * 这 1px 由 DWM 画成窗口边框；深色界面下就是底部一条亮线
- * （任务栏自动隐藏时更明显，因为那 1px 正好压在任务栏的露边位置上）。
- * 所以最大化改成「取消原生最大化 + 把窗口铺满工作区」：客户区 = 工作区，
- * 没有缝隙也就没有那条线（实测底部三行亮度 217 → 8）。
+ * Windows 原生最大化有两个副作用，直接用 win.maximize() 都躲不开：
+ * 1. 客户区比工作区矮 1px（实测 1536×863 vs 1536×864），那 1px 由 DWM 画成
+ *    窗口边框，深色界面 + 任务栏自动隐藏时就是底部一条亮线；
+ * 2. 原生最大化会把窗口往外推 8px，圆角和 frame 边带被推出屏幕 —— 看起来是
+ *    「贴满屏幕」，而只铺满工作区时圆角还在屏内，反而像没覆盖全。
+ *
+ * 所以自己实现：把「客户区」设成工作区往外扩 8px 的矩形，两件事一起解决
+ * （实测客户区 1552×880 @(-8,-8)：上下都不再有缝，圆角出屏）。
  * 代价是 isMaximized() 永远为 false，最大化状态自己记。
  */
+const MAXIMIZE_OVERSCAN = 8;
+
+function maximizedContentBounds(display: Electron.Display): Electron.Rectangle {
+  const area = display.workArea;
+  return {
+    x: area.x - MAXIMIZE_OVERSCAN,
+    y: area.y - MAXIMIZE_OVERSCAN,
+    width: area.width + MAXIMIZE_OVERSCAN * 2,
+    height: area.height + MAXIMIZE_OVERSCAN * 2,
+  };
+}
+
+/**
+ * 是否还是「最大化尺寸」。
+ *
+ * 只看尺寸不看位置：拖动最大化窗口时 resize 事件也会跟着来。
+ * 容差给到 8px —— Windows 移动窗口时会把外框宽高各撑 2~3px（实测 1552 → 1555），
+ * 用 2px 容差会把单纯的位置变化误判成「用户改了尺寸」，标志一清，拖动还原就失效了。
+ */
+const MAXIMIZED_SIZE_TOLERANCE = 8;
+
+function hasMaximizedSize(win: BrowserWindow): boolean {
+  const content = win.getContentBounds();
+  const target = maximizedContentBounds(screen.getDisplayMatching(content));
+  return (
+    Math.abs(content.width - target.width) <= MAXIMIZED_SIZE_TOLERANCE &&
+    Math.abs(content.height - target.height) <= MAXIMIZED_SIZE_TOLERANCE
+  );
+}
+
 let fauxMaximized = false;
 let fauxRestoreBounds: Electron.Rectangle | null = null;
 /** 自己 setBounds 触发的 move 事件别当成「用户拖动」 */
@@ -178,7 +211,7 @@ function maximizeToWorkArea(win: BrowserWindow): void {
   fauxMaximized = true;
   suppressMoveUntil = Date.now() + 400;
   if (win.isMaximized()) win.unmaximize();
-  win.setBounds(display.workArea);
+  win.setContentBounds(maximizedContentBounds(display));
   pushWindowState();
 }
 
@@ -576,9 +609,7 @@ function createWindow() {
   mainWindow.on("resize", () => {
     const win = mainWindow;
     if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
-    const content = win.getContentBounds();
-    const area = screen.getDisplayMatching(content).workArea;
-    if (Math.abs(content.width - area.width) <= 2 && Math.abs(content.height - area.height) <= 2) return;
+    if (hasMaximizedSize(win)) return;
     fauxMaximized = false;
     fauxRestoreBounds = null;
     pushWindowState();
@@ -587,9 +618,10 @@ function createWindow() {
   mainWindow.on("move", () => {
     const win = mainWindow;
     if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
+    // 只靠 suppressMoveUntil 挡自己设的 bounds：拖动过程中 getContentBounds() 可能还是
+    // 旧值，用「是否正好在最大化矩形上」判断会漏掉真正的拖动。
     const bounds = win.getBounds();
     const area = screen.getDisplayMatching(bounds).workArea;
-    if (Math.abs(bounds.x - area.x) <= 1 && Math.abs(bounds.y - area.y) <= 1) return;
     const cursor = screen.getCursorScreenPoint();
     const restore = fauxRestoreBounds ?? { width: 1400, height: 900 };
     fauxMaximized = false;
@@ -608,7 +640,7 @@ function createWindow() {
     const win = mainWindow;
     if (!win || win.isDestroyed() || !fauxMaximized) return;
     suppressMoveUntil = Date.now() + 200;
-    win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+    win.setContentBounds(maximizedContentBounds(screen.getDisplayMatching(win.getBounds())));
   };
   screen.on("display-metrics-changed", followWorkArea);
   screen.on("display-removed", followWorkArea);
