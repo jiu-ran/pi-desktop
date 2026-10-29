@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, crashReporter, dialog, ipcMain, screen, shell } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, stat as fsStat, writeFile } from "node:fs/promises";
@@ -145,6 +145,52 @@ if (gpuDisabledByEnv || recentCrashCount >= 3) {
 
 let mainWindow: BrowserWindow | null = null;
 let terminalFocused = false;
+
+/**
+ * Windows 原生最大化会让客户区比工作区矮 1px（实测 1536×863 vs 1536×864），
+ * 这 1px 由 DWM 画成窗口边框；深色界面下就是底部一条亮线
+ * （任务栏自动隐藏时更明显，因为那 1px 正好压在任务栏的露边位置上）。
+ * 所以最大化改成「取消原生最大化 + 把窗口铺满工作区」：客户区 = 工作区，
+ * 没有缝隙也就没有那条线（实测底部三行亮度 217 → 8）。
+ * 代价是 isMaximized() 永远为 false，最大化状态自己记。
+ */
+let fauxMaximized = false;
+let fauxRestoreBounds: Electron.Rectangle | null = null;
+/** 自己 setBounds 触发的 move 事件别当成「用户拖动」 */
+let suppressMoveUntil = 0;
+
+function windowIsMaximized(): boolean {
+  return fauxMaximized || Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
+}
+
+function pushWindowState(): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send("app:window-state", {
+    maximized: windowIsMaximized(),
+    fullscreen: win.isFullScreen(),
+  });
+}
+
+function maximizeToWorkArea(win: BrowserWindow): void {
+  const display = screen.getDisplayMatching(win.getBounds());
+  fauxRestoreBounds = win.getNormalBounds();
+  fauxMaximized = true;
+  suppressMoveUntil = Date.now() + 400;
+  if (win.isMaximized()) win.unmaximize();
+  win.setBounds(display.workArea);
+  pushWindowState();
+}
+
+function restoreWindow(win: BrowserWindow): void {
+  const bounds = fauxRestoreBounds;
+  fauxMaximized = false;
+  fauxRestoreBounds = null;
+  suppressMoveUntil = Date.now() + 400;
+  if (win.isMaximized()) win.unmaximize();
+  if (bounds) win.setBounds(bounds);
+  pushWindowState();
+}
 
 const host = new PiHost({
   emit(payload) {
@@ -517,15 +563,55 @@ function createWindow() {
       sandbox: true,
     },
   });
-  const pushWindowState = (): void => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send("app:window-state", {
-      maximized: mainWindow.isMaximized(),
-      fullscreen: mainWindow.isFullScreen(),
+  // 双击标题栏等原生路径也会走到这里：转成铺满工作区，别留下那 1px
+  mainWindow.on("maximize", () => {
+    const win = mainWindow;
+    if (win && !win.isDestroyed() && !fauxMaximized) maximizeToWorkArea(win);
+    pushWindowState();
+  });
+  // 只同步按钮状态：从原生最大化转成铺满工作区时，这个事件会迟到几百毫秒，
+  // 凭它清掉标记会让图标停在「最大化」上（点击就没法还原了）。
+  mainWindow.on("unmaximize", () => pushWindowState());
+  // 用户拖边缘改了尺寸：不再算作最大化
+  mainWindow.on("resize", () => {
+    const win = mainWindow;
+    if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
+    const content = win.getContentBounds();
+    const area = screen.getDisplayMatching(content).workArea;
+    if (Math.abs(content.width - area.width) <= 2 && Math.abs(content.height - area.height) <= 2) return;
+    fauxMaximized = false;
+    fauxRestoreBounds = null;
+    pushWindowState();
+  });
+  // 拖动假最大化的窗口 = 还原，并让标题栏留在光标附近
+  mainWindow.on("move", () => {
+    const win = mainWindow;
+    if (!win || win.isDestroyed() || !fauxMaximized || Date.now() < suppressMoveUntil) return;
+    const bounds = win.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    if (Math.abs(bounds.x - area.x) <= 1 && Math.abs(bounds.y - area.y) <= 1) return;
+    const cursor = screen.getCursorScreenPoint();
+    const restore = fauxRestoreBounds ?? { width: 1400, height: 900 };
+    fauxMaximized = false;
+    fauxRestoreBounds = null;
+    if (win.isMaximized()) win.unmaximize();
+    win.setBounds({
+      x: Math.round(cursor.x - restore.width / 2),
+      y: Math.max(area.y, cursor.y - 16),
+      width: restore.width,
+      height: restore.height,
     });
+    pushWindowState();
+  });
+  // 任务栏改位置 / 换显示器时工作区会变，跟着铺满
+  const followWorkArea = (): void => {
+    const win = mainWindow;
+    if (!win || win.isDestroyed() || !fauxMaximized) return;
+    suppressMoveUntil = Date.now() + 200;
+    win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
   };
-  mainWindow.on("maximize", pushWindowState);
-  mainWindow.on("unmaximize", pushWindowState);
+  screen.on("display-metrics-changed", followWorkArea);
+  screen.on("display-removed", followWorkArea);
   mainWindow.on("enter-full-screen", pushWindowState);
   mainWindow.on("leave-full-screen", pushWindowState);
 
@@ -970,16 +1056,16 @@ app.whenReady().then(() => {
   });
   handle("app:window-toggle-maximize", () => {
     if (!mainWindow) return false;
-    if (mainWindow.isMaximized()) mainWindow.unmaximize();
-    else mainWindow.maximize();
-    return mainWindow.isMaximized();
+    if (windowIsMaximized()) restoreWindow(mainWindow);
+    else maximizeToWorkArea(mainWindow);
+    return windowIsMaximized();
   });
   handle("app:window-close", () => {
     mainWindow?.close();
     return true;
   });
   handle("app:window-state", () => ({
-    maximized: Boolean(mainWindow?.isMaximized()),
+    maximized: windowIsMaximized(),
     fullscreen: Boolean(mainWindow?.isFullScreen()),
   }));
 
