@@ -99,22 +99,27 @@ export async function checkComposerDraftInElectron(win) {
   console.log("[composer-draft] 重启后已恢复附件");
 
   // ↑ / ↓ 翻历史：接管条件（无选中、光标在首/末行）与边界（最旧一条、还原草稿）
-  const pressArrow = async (key) => {
+  const inputValue = () => evaluate("document.querySelector('.composer-field textarea')?.value ?? null");
+  const pressArrow = async (key, expected, label) => {
     await evaluate(`(() => {
       const el = document.querySelector('.composer-field textarea');
       el.focus();
       el.dispatchEvent(new KeyboardEvent('keydown', { key: '${key}', bubbles: true }));
       return true;
     })()`);
-    await wait(120);
-    return evaluate(`document.querySelector('.composer-field textarea').value`);
+    // 输入框的值是 Vue 渲染出来的，改完不会立刻反映到 DOM：轮询而不是死等固定毫秒
+    try {
+      await poll(`document.querySelector('.composer-field textarea')?.value === ${JSON.stringify(expected)}`, label, 5000);
+    } catch (error) {
+      throw new Error(`${label}（期望 ${JSON.stringify(expected)}，实际 ${JSON.stringify(await inputValue())}）`);
+    }
   };
-  assert.equal(await pressArrow("ArrowUp"), "第二句历史", "第一次 ↑ 应显示最新一条历史");
-  assert.equal(await pressArrow("ArrowUp"), "第一句历史", "再次 ↑ 翻到更早的一条");
-  assert.equal(await pressArrow("ArrowUp"), "第一句历史", "最旧一条再按 ↑ 不应变化");
-  assert.equal(await pressArrow("ArrowDown"), "第二句历史", "↓ 往回翻");
-  assert.equal(await pressArrow("ArrowDown"), draft, "↓ 翻过最新一条应还原原来的草稿");
-  assert.equal(await pressArrow("ArrowDown"), draft, "已经在草稿上再按 ↓ 不应变化");
+  await pressArrow("ArrowUp", "第二句历史", "第一次 ↑ 应显示最新一条历史");
+  await pressArrow("ArrowUp", "第一句历史", "再次 ↑ 翻到更早的一条");
+  await pressArrow("ArrowUp", "第一句历史", "最旧一条再按 ↑ 不应变化");
+  await pressArrow("ArrowDown", "第二句历史", "↓ 往回翻");
+  await pressArrow("ArrowDown", draft, "↓ 翻过最新一条应还原原来的草稿");
+  await pressArrow("ArrowDown", draft, "已经在草稿上再按 ↓ 不应变化");
   console.log("[composer-draft] 历史 ↑↓ 翻阅与草稿还原正常");
 
   // 会话里不允许出现无名工具块（空「工具」卡片）
