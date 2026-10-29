@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -9,10 +9,15 @@ import { badgeCode, badgeKind, buildWorktreeConflictPrompt, isSessionOnly, isSta
 import { buildChangeTree, flattenChangeTree } from "../../packages/ui/src/shared/git-tree.ts";
 
 const execFileAsync = promisify(execFile);
-const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-git-"));
-const worktreeRoot = await mkdtemp(path.join(tmpdir(), "pi-desktop-worktrees-"));
+const root = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-git-")));
+const worktreeRoot = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-worktrees-")));
 const host = new PiHost({ emit() {}, worktreeRoot });
 const assert = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
+const samePath = (a: string, b: string) => {
+  const normA = path.resolve(a).replace(/\\/g, "/").toLowerCase();
+  const normB = path.resolve(b).replace(/\\/g, "/").toLowerCase();
+  return normA === normB;
+};
 const expectReject = async (run: () => Promise<unknown>, message: string) => {
   let rejected = false;
   try { await run(); } catch { rejected = true; }
@@ -152,16 +157,16 @@ try {
   const worktrees = await host.gitWorktrees(root);
   assert(worktrees.some((item) => item.primary), "列表应包含主工作区");
   assert(
-    worktrees.some((item) => item.managed && item.path === created.worktree.path),
+    worktrees.some((item) => item.managed && samePath(item.path, created.worktree.path)),
     "列表应包含新建的隔离工作区",
   );
   // 从隔离工作区内部调用 gitWorktrees 也应正确识别主工作区与托管状态
   const worktreesFromInside = await host.gitWorktrees(created.worktree.path);
-  assert(worktreesFromInside.find((item) => item.primary)?.path === root, "在隔离工作区内查询时主工作区仍应是主仓库");
-  assert(worktreesFromInside.find((item) => item.path === created.worktree.path)?.managed === true, "在隔离工作区内查询自身仍应是 managed");
+  assert(samePath(worktreesFromInside.find((item) => item.primary)?.path ?? "", root), "在隔离工作区内查询时主工作区仍应是主仓库");
+  assert(worktreesFromInside.some((item) => samePath(item.path, created.worktree.path) && item.managed), "在隔离工作区内查询自身仍应是 managed");
 
   await writeFile(path.join(created.worktree.path, "wt.txt"), "worktree only");
-  assert((await host.gitWorktrees(root)).find((item) => item.path === created.worktree.path)?.dirty === true, "未提交改动应标记为 dirty");
+  assert((await host.gitWorktrees(root)).find((item) => samePath(item.path, created.worktree.path))?.dirty === true, "未提交改动应标记为 dirty");
   const mainStatus = (await host.gitOverview(root)).status;
   assert(!mainStatus.some((file) => file.path === "wt.txt"), "隔离工作区的文件不应出现在主仓库状态里");
   await expectReject(() => host.gitWorktreeRemove(root, root), "不能移除主工作区");
@@ -173,7 +178,7 @@ try {
     "deleteBranch 为 true 时本地分支应一并删除",
   );
   assert(
-    !(await host.gitWorktrees(root)).some((item) => item.managed && item.path === created.worktree.path),
+    !(await host.gitWorktrees(root)).some((item) => item.managed && samePath(item.path, created.worktree.path)),
     "移除后不应再出现在列表里",
   );
 
@@ -273,7 +278,7 @@ try {
   await host.gitWorktreeRemove(root, wtConflict.worktree.path, { deleteBranch: true });
 
   // 4) 自定义分支名、自定义目录、检出已有分支与克隆会话测试
-  const customWtParent = await mkdtemp(path.join(tmpdir(), "pi-wt-custom-"));
+  const customWtParent = await realpath(await mkdtemp(path.join(tmpdir(), "pi-wt-custom-")));
   try {
     const customTargetDir = path.join(customWtParent, "my-custom-wt");
     const wtCustom = await host.gitWorktreeCreate(root, "custom-task", {
@@ -381,7 +386,7 @@ try {
   assert(badgeKind(badgeSample({ index: "M", worktree: " " })) === "修改", "修改应归为修改");
 
   // 从 Git 克隆：目标目录由界面推导（位置 + 仓库名），主进程复核后再执行
-  const cloneParent = await mkdtemp(path.join(tmpdir(), "pi-desktop-clone-"));
+  const cloneParent = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-clone-")));
   try {
     const cloned = await host.gitClone(root, path.join(cloneParent, "cloned-repo"));
     assert(cloned.ok, "克隆应成功");
