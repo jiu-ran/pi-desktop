@@ -491,15 +491,18 @@ export async function checkAppearanceInElectron(win) {
         await dbg.sendCommand("Input.dispatchMouseEvent", { type: "mouseReleased", x: spot.x, y: spot.y, button: "left", buttons: 0, clickCount });
         await wait(120);
       }
-      await wait(500);
+      // 放大动画跑完（约 250ms）之后主进程会切全屏补齐底部那 1 DIP，多等一点
+      await wait(900);
     };
     const maximizeLabel = async () => evaluate("document.querySelectorAll('.wc-btn')[1]?.getAttribute('aria-label') ?? ''");
+    // 最大化状态是「最大化或全屏」：主进程补齐底部时会切全屏
+    const maximizedLike = () => win.isMaximized() || win.isFullScreen();
     assert.equal(await maximizeLabel(), "最大化", "初始应为「最大化」");
     await doubleClickTitlebar();
-    assert.equal(win.isMaximized(), true, "双击标题栏应最大化");
+    assert.equal(maximizedLike(), true, "双击标题栏应最大化");
     assert.equal(await maximizeLabel(), "向下还原", "最大化后图标要变成「向下还原」");
     await doubleClickTitlebar();
-    assert.equal(win.isMaximized(), false, "再次双击应还原");
+    assert.equal(maximizedLike(), false, "再次双击应还原");
     assert.equal(await maximizeLabel(), "最大化", "还原后图标要变回「最大化」");
 
     console.log("[appearance] window-controls", JSON.stringify({ count: rects.length, idle: idle.bg, closeHover: closeHover.bg }));
