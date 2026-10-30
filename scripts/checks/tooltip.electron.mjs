@@ -195,12 +195,14 @@ export async function checkTooltipInElectron(win) {
     await wait(50);
     const atOuter = () => {
       const box = outer.getBoundingClientRect();
-      return { clientX: Math.round(box.left + 8), clientY: Math.round(box.top + 8) };
+      // 取父容器右下角空白区域，避开左上角的子元素按钮（防止指针探测把父级提示提前切到子级）
+      return { clientX: Math.round(box.right - 20), clientY: Math.round(box.bottom - 15) };
     };
     let outerTip = "";
     let outerTrace = null;
     // 注意：重复派发 mouseover 会重置排队的 380ms 延迟，所以每次尝试之间要留够时间。
     for (let attempt = 0; attempt < 4 && !outerTip; attempt += 1) {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, ...atOuter() }));
       outer.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atOuter() }));
       for (let i = 0; i < 6 && !outerTip; i += 1) {
         await wait(120);
