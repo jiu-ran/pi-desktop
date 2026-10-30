@@ -121,6 +121,9 @@ try {
     host.gitAction(root, "switchBranch", { branch: baseRef }),
   ]);
   assert((await host.gitOverview(root)).branch === baseBranch, "同仓库并发写操作应串行且按序完成");
+  await expectReject(() => host.gitAction(root, "deleteBranch", { branch: baseRef }), "不能删除当前所在分支");
+  const deletedKeep = await host.gitAction(root, "deleteBranch", { branch: "refs/heads/feature/keep" });
+  assert(deletedKeep.ok && !(await host.gitBranches(root)).some((b) => b.name === "feature/keep"), "已合并的本地分支应能正常删除");
 
   await writeFile(path.join(root, "b.txt"), "two\n");
   const dirty = await host.gitOverview(root);
@@ -181,6 +184,19 @@ try {
     !(await host.gitWorktrees(root)).some((item) => item.managed && samePath(item.path, created.worktree.path)),
     "移除后不应再出现在列表里",
   );
+
+  // 测试：移除带 lock 且目录已被外部删除的孤儿工作区（如 JetBrains Air 等外部工具遗留）
+  const orphanDir = path.join(worktreeRoot, "orphan-locked-wt");
+  await execFileAsync("git", ["worktree", "add", orphanDir, "-b", "orphan-branch"], { cwd: root });
+  await execFileAsync("git", ["worktree", "lock", orphanDir, "--reason", "Test locked worktree"], { cwd: root });
+  await rm(orphanDir, { recursive: true, force: true });
+  assert(!existsSync(orphanDir), "测试孤儿工作区目录已物理删除");
+  const orphanListBefore = await host.gitWorktrees(root);
+  assert(orphanListBefore.some((item) => samePath(item.path, orphanDir)), "孤儿锁定工作区应被 gitWorktrees 读出");
+  const removedOrphan = await host.gitWorktreeRemove(root, orphanDir, { deleteBranch: true });
+  assert(removedOrphan.ok && removedOrphan.branchDeleted, "孤儿锁定工作区应能成功强制移除并删除分支");
+  const orphanListAfter = await host.gitWorktrees(root);
+  assert(!orphanListAfter.some((item) => samePath(item.path, orphanDir)), "移除后孤儿工作区不应再出现");
 
   // 基于指定阶段（分支 / 提交哈希）创建隔离工作区，并通过 squash / rebase / merge 合并回主分支
   await expectReject(() => host.gitWorktreeCreate(root, "bad-ref", { startPoint: "--help" }), "起点参数不得注入选项");

@@ -107,6 +107,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
             spellcheck="false"
             readonly
             :disabled="busy"
+            @click="!busy && browse()"
           />
           <button
             type="button"

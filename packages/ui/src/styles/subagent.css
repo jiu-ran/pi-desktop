@@ -272,7 +272,7 @@
   flex: none;
   color: var(--accent);
   font-size: 10.5px;
-  opacity: 0;
+  opacity: 0.65;
   transition: opacity 0.12s ease;
 }
 .subagent-card-main:hover .subagent-card-open,
@@ -289,8 +289,13 @@
 }
 .subagent-card-error-agent { flex: none; opacity: 0.75; }
 .subagent-card-error-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.subagent-card-main:disabled { cursor: default; }
+.subagent-card-main:disabled {
+  cursor: default;
+  opacity: 1;
+  border-style: dashed;
+}
 .subagent-card-main:disabled:hover { border-color: var(--line); background: var(--bg-1); }
+.subagent-card-main:disabled .subagent-card-open { display: none; }
 .subagent-card-raw {
   max-height: 140px;
   margin: 0;

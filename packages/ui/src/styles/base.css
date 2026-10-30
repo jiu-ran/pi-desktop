@@ -99,7 +99,8 @@ html, body, #app {
 
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: 0.45; }
+button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: not-allowed; }
+button:disabled { opacity: 0.4; }
 code, kbd, pre { font-family: var(--mono); font-size: var(--code-font-size, 12.5px); }
 
 kbd {
@@ -124,7 +125,7 @@ kbd {
 ::-webkit-scrollbar-thumb:hover { background-color: var(--fg-3); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-/* 通用按钮 */
+/* 通用按钮：明确区分可点击态（实体底色 + 悬停抬升）与禁用态（去饱和低对比） */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -134,19 +135,73 @@ kbd {
   padding: 0 12px;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-2) 78%, transparent);
   color: var(--fg);
   font-size: 12.5px;
   font-weight: 500;
-  transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s, transform 0.08s;
 }
-.btn:hover:not(:disabled) { background: var(--hover); }
-.btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-fg); }
+.btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fg-3) 65%, var(--line-2));
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.btn:active:not(:disabled) {
+  background: var(--press);
+  transform: translateY(0.5px);
+}
+.btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+}
+.btn.small {
+  height: 25px;
+  padding: 0 9px;
+  gap: 4px;
+  font-size: 11.5px;
+}
+.btn.ghost {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--fg-2);
+}
+.btn.ghost:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--hover);
+  color: var(--fg);
+}
+.btn.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
 .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); }
-.btn.danger { border-color: color-mix(in srgb, var(--err) 45%, transparent); color: var(--err); }
-.btn.danger:hover { background: var(--del-bg); }
+.btn.danger {
+  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+  background: color-mix(in srgb, var(--err) 6%, transparent);
+  color: var(--err);
+}
+.btn.danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--err) 70%, transparent);
+  background: var(--del-bg);
+}
 .btn.block { width: 100%; }
 .btn.large { height: 36px; padding: 0 20px; border-radius: 8px; font-size: 13.5px; }
+.btn:disabled,
+.btn.primary:disabled,
+.btn.danger:disabled,
+.btn.danger-solid:disabled,
+.btn.ghost:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-2) 45%, transparent);
+  color: var(--fg-3);
+  box-shadow: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
 
 .icon-btn {
   display: inline-grid;
@@ -157,9 +212,13 @@ kbd {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-2);
+  color: color-mix(in srgb, var(--fg) 78%, var(--fg-2));
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
 .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.icon-btn:active:not(:disabled) { background: var(--press); color: var(--fg); }
+.icon-btn.danger:hover:not(:disabled) { background: var(--del-bg); color: var(--del-fg); }
+.icon-btn:disabled { color: var(--fg-3); opacity: 0.28; cursor: not-allowed; }
 .icon-btn.small { min-width: 22px; height: 22px; font-size: 11.5px; }
 .icon-btn svg { display: block; }
 

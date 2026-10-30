@@ -44,6 +44,12 @@ let watcher: MutationObserver | null = null;
 let probeTimer = 0;
 /** 自己写回 title 时记下值，避免被全局观察器当成「新的原生提示」再摘一次。 */
 const selfWrites = new WeakMap<Element, string>();
+/**
+ * 子元素接管提示期间，祖先节点上的原生 title 也必须一并暂存摘除：
+ * 1) 否则子元素摘掉 title 后，浏览器会顺着 DOM 向上找到祖先的 title 并弹出系统白底提示；
+ * 2) 300ms 的指针探测 `target.closest("[title]")` 也会误命中祖先，导致子级与父级提示反复来回切换。
+ */
+const suppressedAncestors = new Map<HTMLElement, string>();
 /** 最近的指针位置与悬停目标：用来判断某个元素此刻是不是在指针下面。 */
 let pointerX = Number.NaN;
 let pointerY = Number.NaN;
@@ -74,12 +80,33 @@ function restoreTitle(element: Element, value: string): void {
   element.setAttribute("title", value);
 }
 
+function restoreSuppressedAncestors(keepFor?: HTMLElement | null): void {
+  for (const [anc, title] of [...suppressedAncestors.entries()]) {
+    if (keepFor && anc.isConnected && anc !== keepFor && anc.contains(keepFor)) continue;
+    suppressedAncestors.delete(anc);
+    restoreTitle(anc, title);
+  }
+}
+
+function suppressAncestors(element: HTMLElement): void {
+  restoreSuppressedAncestors(element);
+  let parent = element.parentElement;
+  while (parent) {
+    const t = parent.getAttribute("title");
+    if (t !== null) {
+      parent.removeAttribute("title");
+      if (t.trim()) suppressedAncestors.set(parent, t);
+    }
+    parent = parent.parentElement;
+  }
+}
+
 function stopObserver(): void {
   observer?.disconnect();
   observer = null;
 }
 
-function restoreActive(): void {
+function restoreActive(keepFor?: HTMLElement | null): void {
   const element = active;
   if (!element) return;
   active = null;
@@ -92,7 +119,11 @@ function restoreActive(): void {
   activeAriaLabel = null;
   addedAriaLabel = false;
   if (!element.isConnected) return;
-  restoreTitle(element, title);
+  if (keepFor && element !== keepFor && element.contains(keepFor)) {
+    if (title.trim()) suppressedAncestors.set(element, title);
+  } else {
+    restoreTitle(element, title);
+  }
   if (describedBy === null) {
     element.removeAttribute("aria-describedby");
   } else {
@@ -108,14 +139,28 @@ function restoreActive(): void {
 }
 
 /** 还没展示就离开：立刻把 title 写回，避免元素永久丢失提示文本。 */
-function cancelPending(): void {
+function cancelPending(keepFor?: HTMLElement | null): void {
   if (!pending) return;
   const element = pending;
   const title = pendingTitle;
   pending = null;
   pendingTitle = "";
   clearShowTimer();
-  restoreTitle(element, title);
+  if (keepFor && element.isConnected && element !== keepFor && element.contains(keepFor)) {
+    if (title.trim()) suppressedAncestors.set(element, title);
+  } else {
+    restoreTitle(element, title);
+  }
+}
+
+function hideForNext(keepFor: HTMLElement): void {
+  clearShowTimer();
+  clearHideTimer();
+  stopObserver();
+  tip.visible = false;
+  restoreActive(keepFor);
+  cancelPending(keepFor);
+  restoreSuppressedAncestors(keepFor);
 }
 
 function hideNow(): void {
@@ -125,6 +170,7 @@ function hideNow(): void {
   tip.visible = false;
   restoreActive();
   cancelPending();
+  restoreSuppressedAncestors();
 }
 
 function scheduleHide(): void {
@@ -208,20 +254,26 @@ function show(element: HTMLElement, title: string): void {
 function scheduleShow(element: HTMLElement): void {
   if (active === element) return;
   clearHideTimer();
-  const raw = element.getAttribute("title");
+  let raw = element.getAttribute("title");
+  if ((raw === null || !raw.trim()) && suppressedAncestors.has(element)) {
+    raw = suppressedAncestors.get(element) ?? null;
+    suppressedAncestors.delete(element);
+  }
   // 空 title 无需接管，否则会被白丢。
   if (raw === null || !raw.trim()) return;
   // 已经在显示浮层（在相邻元素之间移动）：立刻换文案，不再等一轮延迟。
   // 否则旧浮层还挂着、新元素带着原生 title，浏览器会先弹出白底提示。
   if (tip.visible && active) {
     element.removeAttribute("title");
-    hideNow();
+    hideForNext(element);
+    suppressAncestors(element);
     show(element, raw);
     return;
   }
-  if (active) hideNow();
-  cancelPending();
+  if (active) hideForNext(element);
+  cancelPending(element);
   element.removeAttribute("title");
+  suppressAncestors(element);
   pending = element;
   pendingTitle = raw;
   clearShowTimer();
@@ -231,8 +283,13 @@ function scheduleShow(element: HTMLElement): void {
     const value = pendingTitle;
     pending = null;
     pendingTitle = "";
-    if (element.isConnected && value) show(element, value);
-    else restoreTitle(element, value);
+    if (element.isConnected && value) {
+      suppressAncestors(element);
+      show(element, value);
+    } else {
+      restoreTitle(element, value);
+      restoreSuppressedAncestors();
+    }
   }, SHOW_DELAY);
 }
 
@@ -339,6 +396,12 @@ function handleTitleTargets(targets: Element[]): void {
       pendingTitle = title;
       continue;
     }
+    const currentAnchor = active ?? pending;
+    if (currentAnchor && element !== currentAnchor && element.contains(currentAnchor)) {
+      takeTitle(element);
+      if (element instanceof HTMLElement) suppressedAncestors.set(element, title);
+      continue;
+    }
     if (element instanceof HTMLElement && shows < MAX_SHOW_PER_BATCH) {
       shows += 1;
       scheduleShow(element);
@@ -361,6 +424,15 @@ function probeUnderPointer(): void {
   if (document.visibilityState !== "visible") return;
   const target = document.elementFromPoint(pointerX, pointerY);
   if (!(target instanceof Element) || target.closest(".pi-tooltip")) return;
+  const currentAnchor = active ?? pending;
+  if (currentAnchor?.isConnected && currentAnchor.contains(target)) {
+    const inner = target.closest<HTMLElement>("[title]");
+    if (inner && inner !== currentAnchor && currentAnchor.contains(inner)) {
+      scheduleShow(inner);
+    }
+    return;
+  }
+  restoreSuppressedAncestors();
   const element = target.closest<HTMLElement>("[title]");
   if (!element || element === active || element === pending) return;
   const title = element.getAttribute("title");
@@ -384,9 +456,11 @@ function onMouseOver(event: MouseEvent): void {
   if (event.buttons !== 0) return;
   // 指针进入了当前锚点的子元素：如果那个子元素自己也有 title（例如排队卡片里的
   // 编辑/撤回按钮），必须切过去接管，否则父级浮层一直挂着、子元素的原生白底提示照样弹。
+  // 注意必须校验 active.contains(inner)：当前锚点自身 title 已被摘除，target.closest("[title]")
+  // 若不加限制会向上越过当前子锚点找到祖先，导致父子提示反复乒乓切换。
   if (active?.contains(target)) {
     const inner = target.closest<HTMLElement>("[title]");
-    if (inner && inner !== active && !inner.closest(".pi-tooltip")) {
+    if (inner && inner !== active && active.contains(inner) && !inner.closest(".pi-tooltip")) {
       scheduleShow(inner);
       return;
     }
@@ -395,7 +469,7 @@ function onMouseOver(event: MouseEvent): void {
   }
   if (pending?.contains(target)) {
     const inner = target.closest<HTMLElement>("[title]");
-    if (inner && inner !== pending && !inner.closest(".pi-tooltip")) {
+    if (inner && inner !== pending && pending.contains(inner) && !inner.closest(".pi-tooltip")) {
       scheduleShow(inner);
       return;
     }
@@ -403,6 +477,7 @@ function onMouseOver(event: MouseEvent): void {
     clearHideTimer();
     return;
   }
+  restoreSuppressedAncestors();
   const element = target.closest<HTMLElement>("[title]");
   if (!element || element.closest(".pi-tooltip")) return;
   scheduleShow(element);
@@ -430,6 +505,7 @@ function onMouseOut(event: MouseEvent): void {
   }
   if (active) scheduleHide();
   cancelPending();
+  if (!active) restoreSuppressedAncestors();
 }
 
 function onKeyDown(event: KeyboardEvent): void {

@@ -19,8 +19,9 @@
 :root[data-theme="light"] .terminal-dock { --terminal-surface: var(--bg-2); }
 .terminal-dock button:focus-visible,
 .terminal-dock select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.terminal-dock button:disabled { cursor: default; opacity: 0.45; }
-.terminal-dock .icon-btn { flex: none; width: 28px; min-width: 28px; height: 28px; border-radius: 5px; color: var(--fg-2); }
+.terminal-dock button:disabled { cursor: not-allowed; opacity: 0.35; }
+.terminal-dock .icon-btn { flex: none; width: 28px; min-width: 28px; height: 28px; border-radius: 5px; color: color-mix(in srgb, var(--fg) 78%, var(--fg-2)); }
+.terminal-dock .icon-btn:disabled { color: var(--fg-3); opacity: 0.28; }
 .terminal-dock .icon-btn.small { width: 24px; min-width: 24px; height: 24px; }
 .terminal-dock svg { display: block; flex: none; }
 .terminal-resizer { position: absolute; z-index: 6; top: 0; right: 0; left: 0; height: 6px; cursor: row-resize; touch-action: none; }
@@ -46,7 +47,7 @@
 .terminal-create-btn svg { width: 13px; height: 13px; }
 .terminal-profile-picker { display: grid; flex: none; place-items: center; width: 26px; border-left: 1px solid var(--line); color: var(--fg-2); }
 .terminal-profile-picker .terminal-select-btn { height: 24px; padding: 0; border: 0; background: transparent; color: inherit; }
-.terminal-profile-picker .terminal-select-btn:hover { background: var(--hover); color: var(--accent); }
+.terminal-profile-picker .terminal-select-btn:hover:not(:disabled) { background: var(--hover); color: var(--accent); }
 .terminal-profile-picker:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* 第二层：类型分组的横向标签；始终保留全部任务入口。 */
@@ -79,7 +80,7 @@
 .terminal-tab-label { min-width: 0; overflow: hidden; font-family: var(--mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-all-tasks { flex: none; }
 .terminal-all-tasks .terminal-select-btn { height: 24px; padding: 0 7px; gap: 4px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg); color: var(--fg-2); font-size: 10px; }
-.terminal-all-tasks .terminal-select-btn:hover { border-color: var(--accent); color: var(--accent); }
+.terminal-all-tasks .terminal-select-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .terminal-status-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--fg-3); }
 .terminal-status-dot[data-status="running"] { background: var(--accent); }
 .terminal-status-dot[data-status="stopping"] { background: var(--warn); }
@@ -173,9 +174,10 @@
 .terminal-input[type="password"] { letter-spacing: 1.5px; }
 .terminal-history-picker { flex: none; }
 .terminal-history-picker .terminal-select-btn { height: 24px; padding: 0 2px; gap: 3px; border: 0; background: transparent; color: var(--fg-3); font-size: 10px; }
-.terminal-history-picker .terminal-select-btn:hover { color: var(--fg); }
-.terminal-run-btn { display: flex; flex: none; align-items: center; gap: 10px; height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 500; }
+.terminal-history-picker .terminal-select-btn:hover:not(:disabled) { color: var(--fg); }
+.terminal-run-btn { display: flex; flex: none; align-items: center; gap: 10px; height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 5px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 500; }
 .terminal-run-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.terminal-run-btn:disabled { border-color: var(--line); background: var(--bg-3); color: var(--fg-3); opacity: 0.55; cursor: not-allowed; }
 .terminal-run-key { opacity: 0.7; }
 .terminal-secret.is-on { background: var(--accent-soft); color: var(--accent); }
 .terminal-new-inline { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; color: var(--fg-2); font-size: 10.5px; }
@@ -184,7 +186,7 @@
 .terminal-cwd { display: inline-flex; flex: none; align-items: center; gap: 5px; max-width: 35%; padding: 0; overflow: hidden; border: 0; background: transparent; color: var(--fg-2); font-size: 10px; white-space: nowrap; }
 .terminal-cwd > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .terminal-cwd svg { width: 12px; height: 12px; }
-.terminal-cwd:hover { color: var(--accent); }
+.terminal-cwd:hover:not(:disabled) { color: var(--accent); }
 .terminal-footer-hint { min-width: 0; overflow: hidden; color: var(--fg-3); font-size: 10px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-footer-hint.is-note { color: var(--accent); }
 

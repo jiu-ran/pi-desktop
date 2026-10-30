@@ -856,6 +856,11 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     if (!ws || !host?.gitWorktreeRemove) throw new Error("没有打开的工作区");
     const targetKey = projectPathKey(target);
+    let fallbackCwd = fromCwd;
+    if (!fallbackCwd && host?.gitWorktrees) {
+      const list = await host.gitWorktrees(ws.cwd).catch(() => [] as GitWorktree[]);
+      fallbackCwd = list.find(item => item.primary)?.path;
+    }
     const targetWs = findWorkspace(target);
     if (targetWs) {
       // 移除工作树会删除目录：先关闭该项目（兜住运行中任务与未保存草稿），用户取消时不能切换工作区或继续删。
@@ -868,12 +873,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         state.recent = state.recent.filter(item => projectPathKey(item) !== targetKey);
       }
     }
-    let cwd = fromCwd || active.value?.cwd || ws.cwd;
-    if (fromCwd && projectPathKey(fromCwd) !== targetKey && projectPathKey(active.value?.cwd ?? "") !== projectPathKey(fromCwd)) {
-      await open(fromCwd);
-      cwd = active.value?.cwd || fromCwd;
+    let cwd = fallbackCwd || active.value?.cwd || ws.cwd;
+    if (fallbackCwd && projectPathKey(fallbackCwd) !== targetKey && projectPathKey(active.value?.cwd ?? "") !== projectPathKey(fallbackCwd)) {
+      await open(fallbackCwd);
+      cwd = active.value?.cwd || fallbackCwd;
     }
-    return host.gitWorktreeRemove(cwd, target, options);
+    const res = await host.gitWorktreeRemove(cwd, target, options);
+    bus.emit("git:worktree-changed", { cwd });
+    return res;
   }
 
   async function mergeGitWorktree(options: GitWorktreeMergeOptions): Promise<GitWorktreeMergeResult> {
@@ -1090,10 +1097,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       return { cancelled: true, recent: state.recent, deleted: 0, failed: 0 };
     }
     const result = await host.removeProject(target, { deleteSessions });
-    workspaces.delete(target);
+    if (ws) {
+      const refresh = sessionRefreshes.get(ws);
+      if (refresh?.timer) clearTimeout(refresh.timer);
+      sessionRefreshes.delete(ws);
+    }
+    for (const [k, v] of workspaces.entries()) {
+      if (k === target || projectPathKey(k) === projectPathKey(target) || v === ws) {
+        workspaces.delete(k);
+      }
+    }
     state.recent = result.recent;
     if (projectPathKey(state.activeCwd) === projectPathKey(target)) {
-      const next = [...workspaces.keys()][0] ?? "";
+      const remaining = [...workspaces.values()].find((item: any) => item.status === "ready");
+      const next = remaining?.cwd ?? [...workspaces.keys()][0] ?? "";
       state.activeCwd = next;
       bus.emit("workspace:switched", { cwd: next });
     }

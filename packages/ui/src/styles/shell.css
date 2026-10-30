@@ -76,10 +76,13 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-2);
+  color: color-mix(in srgb, var(--fg) 75%, var(--fg-2));
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
-.tb-btn:hover { background: var(--hover); color: var(--fg); }
-.tb-btn.active { color: var(--fg); }
+.tb-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.tb-btn:active:not(:disabled) { background: var(--press); color: var(--fg); }
+.tb-btn.active { background: color-mix(in srgb, var(--bg-3) 80%, transparent); color: var(--fg); }
+.tb-btn:disabled { color: var(--fg-3); opacity: 0.28; cursor: not-allowed; }
 .tb-btn svg { display: block; }
 
 /* 面包屑：项目 · 分支 / 任务 */
@@ -91,13 +94,14 @@
   min-width: 0;
   max-width: 220px;
   padding: 2px 6px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
   color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .crumb:first-child { flex: 0 1 auto; }
 .crumb-slash { flex: none; }
@@ -106,10 +110,11 @@
 @media (max-width: 1080px) {
   .crumb-branch { display: none; }
 }
-.crumb:hover { background: var(--hover); color: var(--fg); }
+.crumb:hover:not(:disabled) { border-color: var(--line); background: var(--hover); color: var(--fg); }
+.crumb:disabled { color: var(--fg-3); opacity: 0.45; cursor: not-allowed; }
 .crumb svg { flex: none; }
-.crumb-slash { color: var(--fg-3); }
-.crumb-title { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg); font-weight: 500; }
+.crumb-slash { color: var(--fg-3); cursor: default; }
+.crumb-title { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg); font-weight: 500; cursor: default; }
 .crumb-title > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 岛屿区域 */
@@ -382,16 +387,19 @@
   gap: 6px;
   height: 26px;
   padding: 0 7px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--fg-2);
   font-size: 12px;
   white-space: nowrap;
+  cursor: default;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .status-item.muted { color: var(--fg-3); }
 .status-item.clickable { cursor: pointer; }
-.status-item.clickable:hover { background: var(--hover); color: var(--fg); }
+.status-item.clickable:hover:not(:disabled) { border-color: var(--line); background: var(--hover); color: var(--fg); }
+.status-item.clickable:active:not(:disabled) { background: var(--press); }
 .status-item[data-tone="error"] { color: var(--err); }
 .pi-update-hint { color: var(--warn); font-weight: 600; }
 .pi-update-hint:hover { color: var(--warn); }

@@ -50,12 +50,32 @@ async function validateName(root: string, value: unknown): Promise<string> {
 }
 
 /** 不提供 force / discard / 自动 stash：切换必须保持文件和索引安全。 */
-export async function changeGitBranch(root: string, action: "switchBranch" | "createBranch", payload: {
+export async function changeGitBranch(root: string, action: "switchBranch" | "createBranch" | "deleteBranch", payload: {
   branch?: string;
   localName?: string;
   startPoint?: string;
+  force?: boolean;
 }): Promise<string> {
   const branches = await listGitBranches(root);
+  if (action === "deleteBranch") {
+    const targetRef = payload.branch?.startsWith("refs/") ? payload.branch : `refs/heads/${payload.branch ?? ""}`;
+    const branch = branches.find(item => item.ref === targetRef || (!item.remote && item.name === payload.branch));
+    if (!branch) throw new Error("目标分支已不存在，请刷新分支列表");
+    if (branch.remote) throw new Error("不能直接删除远程跟踪分支，请仅删除本地分支");
+    if (branch.current) throw new Error("不能删除当前所在的分支，请先切换到其他分支");
+    if (branch.worktreePath) throw new Error(`此分支正在工作区中使用（${branch.worktreePath}），请先在「工作区」页签移除该工作区`);
+    await validateName(root, branch.name);
+    try {
+      await git(root, ["branch", payload.force ? "-D" : "-d", "--", branch.name]);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (/not fully merged/i.test(msg)) {
+        throw new Error(`分支「${branch.name}」包含尚未合并的提交。若确认丢弃这些提交，请勾选「强制删除」后重试。`);
+      }
+      throw err;
+    }
+    return `已删除本地分支 ${branch.name}`;
+  }
   if (action === "switchBranch") {
     const branch = branches.find(item => item.ref === payload.branch);
     if (!branch) throw new Error("目标分支已不存在，请刷新分支列表");
@@ -80,7 +100,7 @@ export async function changeGitBranch(root: string, action: "switchBranch" | "cr
   // 没有 HEAD 的空仓库不允许在此制造虚假的分支成功状态。
   await git(root, ["rev-parse", "--verify", "HEAD"]);
   const start = payload.startPoint || "HEAD";
-  if (start !== "HEAD" && !branches.some(item => item.ref === start)) throw new Error("请选择有效的起点分支");
+  if (start !== "HEAD" && !branches.some(item => item.ref === start || item.name === start)) throw new Error("请选择有效的起点分支");
   if (start !== "HEAD" && (await git(root, ["status", "--porcelain=v1", "-uall"])).trim()) {
     throw new Error("从其他分支新建前请先处理未提交改动");
   }

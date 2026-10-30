@@ -128,7 +128,7 @@ export interface GitOverview {
   repoKey?: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch" | "deleteBranch";
 
 export interface GitActionPayload {
   /** 仓库内相对路径列表 */
@@ -140,6 +140,7 @@ export interface GitActionPayload {
   branch?: string;
   localName?: string;
   startPoint?: string;
+  force?: boolean;
 }
 
 export interface GitActionResult {
@@ -1739,10 +1740,11 @@ export class PiHost {
 
     switch (name) {
       case "switchBranch":
-      case "createBranch": {
-        const pool = this.clients.get(workspace);
+      case "createBranch":
+      case "deleteBranch": {
+        const pool = [...this.clients.entries()].find(([k]) => samePath(k, workspace))?.[1];
         if (pool && [...pool.workers.values()].some(slot => slot.streaming || slot.compacting)) {
-          throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换或新建分支");
+          throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换、新建或删除分支");
         }
         message = await changeGitBranch(root, name, payload);
         completionCache.delete(completionKey(workspace));
@@ -2238,7 +2240,7 @@ export class PiHost {
     };
   }
 
-  /** 移除由 Pi Desktop 创建的工作区；默认保留分支，也可选择同时删除本地分支。 */
+  /** 移除非主工作区（Worktree）；默认保留分支，也可选择同时删除本地分支。 */
   async gitWorktreeRemove(cwd: string, target: string, options: GitWorktreeRemoveOptions = {}): Promise<GitWorktreeRemoveResult> {
     const workspace = await realpath(path.resolve(cwd));
     await assertRealWorkspacePath(cwd, workspace);
@@ -2252,52 +2254,104 @@ export class PiHost {
     const entry = allWorktrees.find((item) => samePath(item.path, canonicalTarget));
     if (!entry) throw new Error("该目录不是当前仓库的 worktree");
     if (entry.primary) throw new Error("不能移除仓库的主工作区");
-    if (!entry.managed) throw new Error("只能移除由 Pi Desktop 创建的隔离工作区");
     if (samePath(entry.path, workspace)) throw new Error("不能移除当前正在使用的工作区");
-    const inUse = [...this.clients.keys()].some((itemCwd) => samePath(itemCwd, entry.path))
-      || [...this.starting.keys()].some((itemCwd) => samePath(itemCwd, entry.path));
-    if (inUse) throw new Error("该隔离工作区仍有 Pi 进程在运行，请先切换到其他项目再移除");
+    for (const [itemCwd, pool] of [...this.clients.entries()]) {
+      if (samePath(itemCwd, entry.path)) {
+        if ([...pool.workers.values()].some((slot) => slot.streaming || slot.compacting)) {
+          throw new Error("该隔离工作区仍有 Agent 任务正在运行，请等待结束后再移除");
+        }
+        await this.discardWorkspace(itemCwd);
+      }
+    }
+    if ([...this.starting.keys()].some((itemCwd) => samePath(itemCwd, entry.path))) {
+      throw new Error("该隔离工作区正在启动 Pi 进程，请稍候再移除");
+    }
 
-    if (entry.exists) {
-      let lastError: unknown = null;
+    // 1. 若工作树处于锁定状态（例如外部 IDE、JetBrains Air 或用户手动 lock），必须先解锁，否则 git worktree remove 与 prune 会直接跳过或报错
+    await gitProbe(primaryRoot, ["worktree", "unlock", entry.path]);
+
+    // 2. 执行 git worktree remove：传入双重 --force 以覆盖未暂存更改与锁定状态，即使目录不存在也应调用清理元数据
+    //    目录已不存在时只尝试一次，避免无意义的重试等待。
+    let removeError: unknown = null;
+    const removeAttempts = entry.exists ? 6 : 1;
+    for (let attempt = 0; attempt < removeAttempts; attempt += 1) {
+      try {
+        await gitRun(primaryRoot, ["worktree", "remove", "--force", "--force", entry.path]);
+        removeError = null;
+        break;
+      } catch (error) {
+        removeError = error;
+        if (attempt + 1 < removeAttempts) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+
+    // 3. 若目录仍然存在（例如 Windows 句柄锁导致 git remove 失败），进行物理删除重试
+    if (existsSync(entry.path)) {
+      let removed = false;
       for (let attempt = 0; attempt < 6; attempt += 1) {
         try {
-          await gitRun(primaryRoot, ["worktree", "remove", "--force", entry.path]);
-          lastError = null;
+          await rm(entry.path, { recursive: true, force: true });
+          removed = true;
           break;
-        } catch (error) {
-          lastError = error;
+        } catch {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
       }
-      if (lastError) {
-        let removed = false;
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-          try {
-            await rm(entry.path, { recursive: true, force: true });
-            removed = true;
-            break;
-          } catch {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-          }
-        }
-        if (!removed) {
-          throw new Error("隔离工作区文件仍被占用，请关闭占用该目录的程序后重试");
-        }
-      } else {
-        await rm(entry.path, { recursive: true, force: true }).catch(() => {});
+      if (!removed) {
+        throw new Error("工作区文件仍被占用，请关闭占用该目录的程序后重试");
       }
     }
-    await gitProbe(primaryRoot, ["worktree", "prune"]);
+
+    // 4. 清理无效的 worktree 内部元数据（指定 --expire now 立即清理，不等待默认的 3 天宽限期）
+    await gitProbe(primaryRoot, ["worktree", "prune", "--expire", "now"]);
+
+    // 5. 兜底保障：若 Git 内部依然残留该工作树元数据，只删除 gitdir 精确指向该工作树的那一个元数据目录。
+    //    必须精确比较路径：子串匹配会把 `wt` 误判为 `wt-2`，删掉别的工作树的元数据。
+    if ((await this.gitWorktrees(cwd)).some((item) => samePath(item.path, canonicalTarget))) {
+      const commonDirRaw = (await gitProbe(primaryRoot, ["rev-parse", "--git-common-dir"])).trim();
+      const commonDir = commonDirRaw ? path.resolve(primaryRoot, commonDirRaw) : path.join(primaryRoot, ".git");
+      const gitWorktreesDir = path.join(commonDir, "worktrees");
+      if (existsSync(gitWorktreesDir)) {
+        const subdirs = await readdir(gitWorktreesDir).catch(() => [] as string[]);
+        for (const sub of subdirs) {
+          const gitdirFile = path.join(gitWorktreesDir, sub, "gitdir");
+          const pointer = (await readFile(gitdirFile, "utf8").catch(() => "")).trim();
+          if (!pointer) continue;
+          // gitdir 内容形如 <worktree>/.git
+          const pointedWorktree = path.dirname(path.resolve(pointer));
+          if (samePath(pointedWorktree, canonicalTarget) || samePath(pointedWorktree, entry.path)) {
+            await rm(path.join(gitWorktreesDir, sub), { recursive: true, force: true }).catch(() => {});
+          }
+        }
+        await gitProbe(primaryRoot, ["worktree", "prune", "--expire", "now"]);
+      }
+    }
+
+    // 6. 保留分支时只清掉 Pi 自己写入的元数据键；不能 --remove-section，否则会把分支的上游跟踪（remote/merge）一起删掉。
+    //    删除分支时 git branch -D 会自行清理整个 branch.<name> 配置段。
+    if (entry.branch && !options?.deleteBranch) {
+      for (const key of ["piManaged", "piBaseBranch", "piBaseRef", "piBaseCommit"]) {
+        await gitProbe(primaryRoot, ["config", "--unset-all", `branch.${entry.branch}.${key}`]);
+      }
+    }
+
     let branchDeleted = false;
     if (options?.deleteBranch && entry.branch) {
       const deletedOut = await gitProbe(primaryRoot, ["branch", "-D", entry.branch]);
       branchDeleted = Boolean(deletedOut.trim());
     }
+
+    // 7. 最终校验：确认工作树确实已不在列表中
+    const finalList = await this.gitWorktrees(cwd);
+    if (finalList.some((item) => samePath(item.path, canonicalTarget))) {
+      throw new Error(`未能移除工作树 ${entry.path}，Git 仍保留该工作树记录，请检查是否有外部程序占用`);
+    }
+
+    const typeLabel = entry.managed ? "隔离工作区" : "外部工作区";
     const label = entry.branch || entry.head.slice(0, 7) || "detached";
     return {
       ok: true,
-      message: branchDeleted ? `已移除隔离工作区并删除分支 ${entry.branch}` : `已移除隔离工作区（${label}）`,
+      message: branchDeleted ? `已移除${typeLabel}并删除分支 ${entry.branch}` : `已移除${typeLabel}（${label}）`,
       branch: entry.branch,
       path: entry.path,
       branchDeleted,

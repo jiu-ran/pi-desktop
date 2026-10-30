@@ -217,12 +217,13 @@ export async function checkTooltipInElectron(win) {
       }
     }
     let nestedChildTitle = null;
+    let nestedOuterTitleWhileChildActive = null;
     let nestedTip = "";
     if (inner.isConnected) {
       const box = inner.getBoundingClientRect();
       const atInner = { clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) };
-      // 断言的核心是「子元素自己的 title 被摘掉了」：只要它还在，浏览器迟早弹原生白底提示。
-      // 浮层文案是否随即出现受 380ms 延迟 + 页面滚动影响，能读到就一起校验。
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, ...atInner }));
+      // 断言的核心是「子元素与父元素的 title 都被摘掉了，且跨过 300ms 指针探测周期后不会反复切回父元素」
       for (let i = 0; i < 20; i += 1) {
         inner.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 0, ...atInner }));
         await wait(120);
@@ -231,10 +232,16 @@ export async function checkTooltipInElectron(win) {
         if (tipText) nestedTip = tipText;
         if (inner.getAttribute('title') === null) break;
       }
+      // 等待跨过至少一次 300ms probeUnderPointer，确认不会在父子提示间来回乒乓
+      await wait(420);
+      const afterProbeText = document.querySelector('.pi-tooltip')?.textContent ?? "";
+      if (afterProbeText) nestedTip = afterProbeText;
       nestedChildTitle = inner.isConnected ? inner.getAttribute('title') : null;
+      nestedOuterTitleWhileChildActive = outer.isConnected ? outer.getAttribute('title') : null;
       inner.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 0, relatedTarget: document.body }));
-      await wait(200);
+      await wait(250);
     }
+    const nestedOuterRestored = outer.getAttribute('title');
     outer.remove();
 
     el.remove();
@@ -243,6 +250,8 @@ export async function checkTooltipInElectron(win) {
       nested_outer_tip: outerTip,
       nested_debug: { trace: outerTrace, visibility: document.visibilityState },
       nested_child_title: nestedChildTitle,
+      nested_outer_while_child: nestedOuterTitleWhileChildActive,
+      nested_outer_restored: nestedOuterRestored,
       nested_child_tip: nestedTip,
       // title 可能在 mouseout 时被还原，这里取「移出前是否已被摘掉」的布尔值
       nested_child_intercepted: nestedChildTitle === null,
@@ -288,6 +297,15 @@ export async function checkTooltipInElectron(win) {
     result.nested_child_intercepted,
     true,
     "子元素自己的 title 也必须被接管，否则父级浮层挂着的同时会弹原生白底提示",
+  );
+  assert.equal(
+    result.nested_outer_while_child,
+    null,
+    "悬停子元素期间父元素的原生 title 也必须被暂存摘除，否则浏览器会弹出父级原生白底提示且导致父子提示反复切换",
+  );
+  assert.ok(
+    result.nested_outer_restored?.includes("父级提示"),
+    "离开子元素与父元素后应还原父元素的 title",
   );
   if (result.nested_child_tip) {
     assert.match(result.nested_child_tip, /子级提示/, `浮层应切换到子元素文案，实际「${result.nested_child_tip}」`);

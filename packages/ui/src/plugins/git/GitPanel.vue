@@ -448,10 +448,17 @@ async function openWorktree(worktree: GitWorktree): Promise<void> {
 }
 
 async function removeWorktree(worktree: GitWorktree): Promise<void> {
+  const typeName = worktree.managed ? "隔离工作区" : "外部工作区";
   const dirtyWarn = worktree.dirty ? "注意：该工作区仍有未提交的改动，移除后这些未提交改动会丢失！" : "未提交的改动会一起丢失。";
+  const activeHint = isWorktreeActive(worktree)
+    ? `\n当前正处于该${typeName}，移除后将自动切回主工作区（${primaryWorktree.value?.branch || "主仓库"}）。`
+    : "";
+  const existHint = worktree.exists
+    ? `将删除目录：\n${worktree.path}\n\n${dirtyWarn}${activeHint}`
+    : `该工作树目录在磁盘上已不存在，将清理 Git 仓库中的失效记录：\n${worktree.path}${activeHint}`;
   const confirmed = await askConfirm({
-    title: "移除隔离工作区",
-    message: `将删除目录：\n${worktree.path}\n\n${dirtyWarn}`,
+    title: `移除${typeName}`,
+    message: existHint,
     confirmLabel: "移除",
     danger: true,
     check: worktree.branch ? { label: `同时删除本地分支 ${worktree.branch}`, value: false } : null,
@@ -760,7 +767,13 @@ function reveal(change: RepoChange): void {
 <template>
   <div class="git-panel">
     <div class="git-sc-toolbar">
-      <button class="git-sc-branch git-branch-trigger" type="button" :title="`${overview?.root || 'Git'}；点击管理分支`" aria-label="打开分支管理" @click="view = 'branches'">
+      <button
+        class="git-sc-branch git-branch-trigger"
+        type="button"
+        :title="`${overview?.branch || 'HEAD'}${overview?.upstream ? ` → ${overview.upstream}` : '（未设置上游分支）'}\n${overview?.root || 'Git'}；点击管理分支`"
+        aria-label="打开分支管理"
+        @click="view = view === 'branches' ? 'changes' : 'branches'"
+      >
         <span class="git-sc-branch-icon" v-html="icons.branch" />
         <strong>{{ hasRepo ? overview?.branch || "HEAD" : "Git" }}</strong>
         <span v-if="overview?.detached" class="git-sc-note">游离</span>
@@ -770,16 +783,6 @@ function reveal(change: RepoChange): void {
       </button>
       <span class="git-sc-spacer" />
       <button
-        v-if="hasRepo"
-        type="button"
-        class="btn small git-sc-wt-btn"
-        title="新建 Git Worktree（隔离工作区与对话）"
-        :disabled="!canCreateWorktree"
-        @click="openCreateWorktreeModal"
-      >
-        <span v-html="icons.branch" />+ 工作树
-      </button>
-      <button
         type="button"
         class="icon-btn small"
         title="刷新"
@@ -787,7 +790,6 @@ function reveal(change: RepoChange): void {
         @click="load"
         v-html="icons.refresh"
       />
-
       <button
         type="button"
         class="icon-btn small"
@@ -816,10 +818,25 @@ function reveal(change: RepoChange): void {
         v-html="icons.upload"
       />
     </div>
-    <div v-if="hasRepo" class="git-repo-context" :title="overview?.root"><span>{{ overview?.upstream || '未设置上游分支' }}</span><span>{{ overview?.canWrite ? '当前仓库' : '只读 · 非仓库根目录' }}</span></div>
+    <div v-if="hasRepo && overview && !overview.canWrite" class="git-repo-context" :title="overview.root">
+      <span>只读 · 当前项目不是仓库根目录</span>
+    </div>
     <nav class="git-view-tabs" aria-label="版本控制视图">
-      <button v-for="tab in [{ id: 'changes', label: '更改' }, { id: 'branches', label: '分支' }, { id: 'history', label: '历史' }, { id: 'worktrees', label: '工作区' }, { id: 'session', label: '快照' }]" :key="tab.id" type="button" :class="{ active: view === tab.id }" :aria-pressed="view === tab.id" @click="view = tab.id">
-        {{ tab.label }}<small v-if="tab.id === 'changes' && overview?.status.length">{{ overview.status.length }}</small>
+      <button
+        v-for="tab in [
+          { id: 'changes', label: '更改', count: overview?.status.length || 0 },
+          { id: 'branches', label: '分支', count: 0 },
+          { id: 'history', label: '历史', count: 0 },
+          { id: 'worktrees', label: '工作区', count: isolatedCount },
+          { id: 'session', label: '快照', count: 0 },
+        ]"
+        :key="tab.id"
+        type="button"
+        :class="{ active: view === tab.id }"
+        :aria-pressed="view === tab.id"
+        @click="view = tab.id"
+      >
+        {{ tab.label }}<small v-if="tab.count">{{ tab.count }}</small>
       </button>
     </nav>
 
@@ -839,24 +856,22 @@ function reveal(change: RepoChange): void {
         </button>
       </div>
 
-      <GitBranches v-if="view === 'branches'" :overview="overview" :busy="Boolean(busy) || Boolean(worktreeBusy)" @action="run" />
+      <GitBranches v-if="view === 'branches'" :overview="overview" :busy="Boolean(busy) || Boolean(worktreeBusy)" @action="run" @open-worktrees="view = 'worktrees'" />
       <div v-else-if="worktreesOpen" class="git-history git-worktrees">
-        <div class="git-history-head">
-          <button type="button" class="icon-btn small" title="返回更改" @click="worktreesOpen = false" v-html="icons.chevronLeft" />
-          <strong>隔离工作区</strong>
-          <span class="git-history-count">{{ isolatedCount }}</span>
+        <div class="git-worktrees-toolbar">
+          <span class="git-wt-summary">共 {{ worktrees.length }} 个工作区<template v-if="isolatedCount"> · {{ isolatedCount }} 个隔离</template></span>
           <span class="git-sc-spacer" />
           <span v-if="worktreeBusy === 'create'" class="mini-spinner" />
           <button
             type="button"
-            class="icon-btn small"
-            :title="createFormOpen ? '收起新建面板' : '新建隔离工作区'"
+            class="btn small git-branch-create-btn"
+            title="新建 Git Worktree（隔离工作区与对话）"
             :disabled="!canCreateWorktree"
-            @click="toggleCreateWorktreeForm"
-            v-html="createFormOpen ? icons.close : icons.plus"
-          />
+            @click="openCreateWorktreeModal"
+          >
+            <span v-html="icons.plus" />新建工作区
+          </button>
         </div>
-        <p class="git-worktree-hint">基于指定分支或提交创建独立工作区，作为新项目并行运行任务；完成后可一键合并回基础分支。</p>
 
         <form v-if="createFormOpen" class="git-worktree-form" @submit.prevent="submitCreateWorktree">
           <div class="git-wt-form-title">新建隔离工作区</div>
@@ -956,6 +971,7 @@ function reveal(change: RepoChange): void {
                 <small :title="worktree.path">{{ worktree.path }}</small>
               </div>
               <span v-if="worktree.primary" class="git-worktree-tag">主工作区</span>
+              <span v-else-if="!worktree.exists" class="git-worktree-tag is-missing" title="该工作区在磁盘上的文件夹已不存在">已失效</span>
               <span v-else-if="worktree.managed" class="git-worktree-tag">隔离</span>
               <span v-else class="git-worktree-tag">外部</span>
               <div class="git-worktree-actions">
@@ -971,10 +987,10 @@ function reveal(change: RepoChange): void {
                   合并
                 </button>
                 <button
-                  v-if="!worktree.primary && !isWorktreeActive(worktree)"
+                  v-if="!isWorktreeActive(worktree)"
                   type="button"
                   class="icon-btn small"
-                  title="在新项目中打开"
+                  :title="worktree.primary ? '切换到主工作区' : (worktree.managed ? '切换到该隔离工作区' : '切换到该外部工作区')"
                   :disabled="Boolean(worktreeBusy) || !worktree.exists"
                   @click="openWorktree(worktree)"
                   v-html="icons.folder"
@@ -988,10 +1004,10 @@ function reveal(change: RepoChange): void {
                   v-html="icons.reveal"
                 />
                 <button
-                  v-if="worktree.managed && !isWorktreeActive(worktree)"
+                  v-if="!worktree.primary"
                   type="button"
                   class="icon-btn small danger"
-                  title="移除隔离工作区"
+                  :title="!worktree.exists ? '清理失效工作区记录' : (worktree.managed ? '移除隔离工作区' : '移除外部工作区')"
                   :disabled="Boolean(worktreeBusy)"
                   @click="removeWorktree(worktree)"
                   v-html="icons.trash"
@@ -1059,15 +1075,10 @@ function reveal(change: RepoChange): void {
             </form>
           </div>
         </div>
-        <p v-if="!worktrees.some((worktree) => !worktree.primary)" class="git-worktree-empty">还没有隔离工作区。点击右上角 + 新建一个。</p>
+        <p v-if="!worktrees.some((worktree) => !worktree.primary)" class="git-worktree-empty">还没有隔离工作区。点击上方「新建工作区」创建一个。</p>
       </div>
 
       <div v-else-if="history" class="git-history">
-        <div class="git-history-head">
-          <button type="button" class="icon-btn small" title="返回更改" @click="history = false" v-html="icons.chevronLeft" />
-          <strong>提交历史</strong>
-          <span class="git-history-count">{{ overview?.commits.length ?? 0 }}</span>
-        </div>
         <div class="git-commit-list">
           <p v-if="!overview?.commits.length" class="list-empty">
             {{ overview?.hasCommits ? "暂无提交历史" : "还没有提交，切换回更改并提交第一个版本" }}

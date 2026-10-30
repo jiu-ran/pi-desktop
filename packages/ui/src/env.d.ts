@@ -165,7 +165,7 @@ export interface GitBranch {
   worktreePath: string;
 }
 
-export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch";
+export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch" | "deleteBranch";
 
 export interface GitActionPayload {
   paths?: string[];
@@ -174,6 +174,7 @@ export interface GitActionPayload {
   branch?: string;
   localName?: string;
   startPoint?: string;
+  force?: boolean;
 }
 
 export interface GitActionResult {

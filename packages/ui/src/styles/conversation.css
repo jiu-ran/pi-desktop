@@ -1357,9 +1357,12 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--fg-2);
+  color: color-mix(in srgb, var(--fg) 78%, var(--fg-2));
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
-.bar-btn:hover { background: var(--hover); color: var(--fg); }
+.bar-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.bar-btn:active:not(:disabled) { background: var(--press); color: var(--fg); }
+.bar-btn:disabled { color: var(--fg-3); opacity: 0.3; cursor: not-allowed; }
 
 .send-btn {
   display: inline-flex;
@@ -1368,20 +1371,41 @@
   gap: 5px;
   height: 27px;
   padding: 0 11px;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-2) 60%, transparent);
   color: var(--fg-3);
   font-size: 12.5px;
+  font-weight: 500;
   white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
-.send-btn:disabled { opacity: 1; }
-.send-btn.ready { background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent); }
-.send-btn.ready:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+.send-btn:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-2) 45%, transparent);
+  color: var(--fg-3);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.send-btn.ready {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.send-btn.ready:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); }
 .send-btn svg { display: block; }
 .send-icon { display: grid; place-items: center; margin-right: -1px; }
-.send-btn.stop { color: var(--fg); }
-.send-btn.stop:hover { background: var(--del-bg); color: var(--del-fg); }
+.send-btn.stop {
+  border-color: color-mix(in srgb, var(--err) 38%, var(--line-2));
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+  color: var(--del-fg);
+}
+.send-btn.stop:hover:not(:disabled) {
+  border-color: var(--err);
+  background: var(--del-bg);
+  color: var(--del-fg);
+}
 
 /* 底栏下拉（模型 / 思考 / 发送方式） */
 .picker { position: relative; min-width: 0; flex: 0 1 auto; }
@@ -1394,14 +1418,16 @@
   max-width: min(180px, 42vw);
   height: 24px;
   padding: 0 7px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-2);
+  color: color-mix(in srgb, var(--fg) 76%, var(--fg-2));
   font-size: 12.5px;
   text-align: left;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
 }
-.picker-btn:hover:not(:disabled), .picker-btn.open { background: var(--hover); color: var(--fg); }
+.picker-btn:hover:not(:disabled), .picker-btn.open { border-color: var(--line); background: var(--hover); color: var(--fg); }
+.picker-btn:disabled { color: var(--fg-3); opacity: 0.38; cursor: not-allowed; }
 .picker-icon { display: grid; flex: none; }
 .picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 舞台变窄时把“思考：高”收成图标，优先保证模型名和发送按钮不重叠 */
@@ -1591,12 +1617,12 @@
   cursor: pointer;
 }
 .queue-card-icon svg { width: 13px; height: 13px; }
-.queue-card-icon:hover { background: var(--hover); color: var(--fg); }
-.queue-card-icon.is-withdraw:hover {
+.queue-card-icon:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.queue-card-icon.is-withdraw:hover:not(:disabled) {
   background: color-mix(in srgb, var(--del-fg) 14%, transparent);
   color: var(--del-fg);
 }
-.queue-card-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+.queue-card-icon:disabled { opacity: 0.32; cursor: not-allowed; }
 /* 投递方式：小号下拉（引导 / 排队），带说明，比原来「点一下翻面」的标签清楚。
    注意特异性：`.select-menu.is-sm .select-menu-trigger` 是 0,3,0，这里必须压过它才有 18px 高。 */
 .queue-card .queue-card-mode.is-sm {

@@ -449,19 +449,24 @@
   padding: 11px 8px;
   border-bottom: 1px solid var(--line);
   border-radius: 7px;
+  cursor: default;
   transition: background 0.12s;
 }
 .settings-row:last-child {
   border-bottom: 0;
 }
-.settings-row:hover {
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-}
-.settings-row.clickable {
+.settings-row.clickable:not(.is-disabled) {
   cursor: pointer;
 }
+.settings-row.clickable:not(.is-disabled):hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
 .settings-row.is-disabled {
-  opacity: 0.5;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.settings-row.is-disabled strong {
+  color: var(--fg-2);
 }
 .settings-row-info {
   display: flex;
@@ -542,6 +547,9 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .select-menu-trigger:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+  color: var(--fg-3);
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -605,8 +613,8 @@
   text-align: left;
   cursor: pointer;
 }
-.select-menu-item:hover,
-.select-menu-item:focus-visible {
+.select-menu-item:hover:not(:disabled),
+.select-menu-item:focus-visible:not(:disabled) {
   outline: none;
   background: var(--hover);
   color: var(--fg);
@@ -617,7 +625,8 @@
   font-weight: 600;
 }
 .select-menu-item:disabled {
-  opacity: 0.45;
+  color: var(--fg-3);
+  opacity: 0.38;
   cursor: not-allowed;
 }
 .select-menu-item-label {
@@ -664,8 +673,8 @@
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 
-.settings-input:hover,
-.settings-textarea:hover {
+.settings-input:hover:not(:disabled),
+.settings-textarea:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--fg-3) 70%, var(--line-2));
 }
 
@@ -677,6 +686,9 @@
 
 .settings-input:disabled,
 .settings-textarea:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  color: var(--fg-3);
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1080,6 +1092,13 @@
 .agents-editor:focus {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.agents-editor:disabled {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  color: var(--fg-3);
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ---------- 快捷键列表 ---------- */
