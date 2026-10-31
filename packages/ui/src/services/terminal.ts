@@ -487,6 +487,57 @@ export function createTerminalService({
     }
   }
 
+  /**
+   * 在原窗格里重跑同一条后台命令。
+   *
+   * 以前「重新执行」只是把命令填回输入框，回车会再开一个新标签：跑几次就堆一排
+   * 同名标签，还得手动收拾。这里直接复用这个标签：先结束残留进程，输出清空，
+   * 换成新进程，标签位置不变。
+   */
+  async function rerun(id = state.activeId): Promise<boolean> {
+    const task = state.tasks.find((item) => item.id === id);
+    if (!task || task.pty || !task.command.trim()) return false;
+    if (!available || state.starting) return false;
+    if (task.status === "running" || task.status === "stopping") {
+      await stop(id);
+      // 停止是异步的：要给旧进程一点时间退出，否则同一个目录里会有两份进程。
+      const deadline = Date.now() + 4000;
+      while ((task.status === "running" || task.status === "stopping") && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (task.status === "running" || task.status === "stopping") {
+        notify("进程还没退出，稍后再试", "warning");
+        return false;
+      }
+    }
+    state.starting = true;
+    try {
+      const info = (await host.startTerminal(task.cwd, task.command, getProfileOptions())) as TerminalTaskInfo;
+      // 极短命令可能在 startTerminal 返回前就收到了事件：那就复用已经在列表里的那条，
+      // 否则会把刚写进去的输出丢掉。
+      const existing = state.tasks.find((item) => item.id === info.id);
+      if (existing) applyInfo(existing, info);
+      const fresh = existing ?? taskFrom(info);
+      // start 事件（或极快命令的 exit 事件）可能先一步把新任务塞进列表。
+      // 统一重排一次：去掉旧的那条和可能已经存在的同一条，再把新任务放回原来的位置，
+      // 这样既不会出现同一个 id 两遍，标签也不会跳到末尾。
+      const at = state.tasks.findIndex((item) => item.id === id);
+      const rest = state.tasks.filter((item) => item !== fresh && item.id !== id);
+      rest.splice(at === -1 ? rest.length : Math.min(at, rest.length), 0, fresh);
+      state.tasks.splice(0, state.tasks.length, ...rest);
+      state.activeId = fresh.id;
+      state.open = state.enabled;
+      state.historyIndex = -1;
+      remember(task.command);
+      return true;
+    } catch (error) {
+      report(error);
+      return false;
+    } finally {
+      state.starting = false;
+    }
+  }
+
   /** 新建一个长驻 shell；支持连续执行命令以及 mysql / python 等行式交互程序。 */
   async function startShell(): Promise<void> {
     if (!state.enabled || state.starting) return;
@@ -747,6 +798,7 @@ export function createTerminalService({
     onData,
     writePty,
     resizePty,
+    rerun,
     stop,
     clearOutput,
     clearFinished,

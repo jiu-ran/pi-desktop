@@ -71,6 +71,18 @@ const legacyInteractive = computed(() => interactive.value && !pty.value);
 const ptyRunning = computed(() => pty.value && isRunning.value);
 const interactiveRunning = computed(() => interactive.value && isRunning.value);
 const shellEnded = computed(() => interactive.value && !isRunning.value);
+/** 当前标签是已结束的后台命令，且输入框是空的：此时「运行」就是原地重跑同一条。 */
+const canRerunInPlace = computed(() => {
+  const current = task.value;
+  return Boolean(
+    current &&
+      !current.pty &&
+      !current.interactive &&
+      !isRunning.value &&
+      !state.input.trim() &&
+      current.command.trim(),
+  );
+});
 const canStartTerminal = computed(() => terminal.supportsPty || terminal.supportsShell);
 const startLabel = computed(() => (terminal.supportsPty ? "新建终端" : "新建交互会话"));
 const finishedCount = computed(() => state.tasks.filter((item) => item.status !== "running" && item.status !== "stopping").length);
@@ -84,6 +96,7 @@ const inputPlaceholder = computed(() => {
 });
 const runLabel = computed(() => {
   if (pty.value) return "后台运行";
+  if (canRerunInPlace.value) return "重新执行";
   if (shellEnded.value) return "新建会话";
   return interactiveRunning.value ? "发送" : "运行";
 });
@@ -96,6 +109,7 @@ const footerHint = computed(() => {
       : "终端已结束 · 此处仍可运行后台命令";
   }
   if (interactiveRunning.value) return "交互会话 · Enter 发送 · Ctrl+Enter 后台运行 · Ctrl+L 清屏";
+  if (canRerunInPlace.value) return "Enter 在原标签里重跑这条命令 · 输入新命令则另开一个标签";
   return "Enter 运行 · ↑↓ 历史 · Ctrl+L 清屏";
 });
 
@@ -315,6 +329,11 @@ function submit(): void {
     void startTerminal();
     return;
   }
+  // 已结束的后台命令 + 空输入：Enter 直接原地重跑，不用再打一遍命令、也不开新标签
+  if (canRerunInPlace.value && task.value) {
+    void terminal.rerun(task.value.id);
+    return;
+  }
   const text = state.input;
   if (!text.trim() || state.starting) return;
   scrollToLatestNow();
@@ -456,7 +475,8 @@ function onTaskSelect(id: string): void {
   selectTask(id);
 }
 
-function rerun(item: TerminalTask): void {
+/** 把命令填回输入框：想改一下再跑的时候用（直接跑用 terminal.rerun，不新建标签）。 */
+function fillCommand(item: TerminalTask): void {
   state.input = item.command;
   terminal.select(item.id);
   focusInput();
@@ -734,7 +754,25 @@ onMounted(() => {
                 <button class="icon-btn small" :class="{ 'is-on': wrap }" type="button" :title="wrap ? '关闭自动换行' : '自动换行'" aria-label="自动换行" :aria-pressed="wrap" @click="toggleWrap" v-html="icons.wrap" />
                 <button class="icon-btn small" type="button" :title="copied ? '已复制' : '复制全部输出'" aria-label="复制全部输出" :disabled="!task.output" @click="copyOutput" v-html="copied ? icons.check : icons.copy" />
                 <button class="icon-btn small" type="button" title="清空输出 (Ctrl/Cmd+L)" aria-label="清空输出" :disabled="!task.output" @click="clearActiveOutput" v-html="icons.trash" />
-                <button v-if="!interactive" class="icon-btn small" type="button" title="重新填入命令" aria-label="重新填入命令" @click="rerun(task)" v-html="icons.refresh" />
+                <button
+                  v-if="!interactive"
+                  class="icon-btn small"
+                  type="button"
+                  title="重新执行（在原标签里重跑，不新建标签）"
+                  aria-label="重新执行"
+                  :disabled="state.starting || !task.command.trim()"
+                  @click="terminal.rerun(task.id)"
+                  v-html="icons.refresh"
+                />
+                <button
+                  v-if="!interactive"
+                  class="icon-btn small"
+                  type="button"
+                  title="把命令填回输入框（可以先改再跑）"
+                  aria-label="填入命令"
+                  @click="fillCommand(task)"
+                  v-html="icons.edit"
+                />
               </template>
               <button class="icon-btn small terminal-reveal-task" type="button" title="在文件管理器中打开任务目录" aria-label="打开任务目录" @click="revealCwd(task.cwd)" v-html="icons.reveal" />
               <button v-if="isRunning && !pty" class="terminal-stop-btn" type="button" :disabled="task.status === 'stopping'" title="停止此后台任务的进程树" @click="terminal.stop(task.id)">
@@ -828,7 +866,7 @@ onMounted(() => {
           @pick="fillHistory"
         />
         <button v-if="interactiveRunning && !pty" class="icon-btn small terminal-secret" :class="{ 'is-on': secret }" type="button" :title="secret ? '显示输入' : '隐藏输入（用于密码）'" :aria-pressed="secret" @click="secret = !secret" v-html="secret ? icons.eyeOff : icons.eye" />
-        <button class="terminal-run-btn" type="button" :disabled="!terminal.available || !cwd || state.starting || (!(shellEnded && !pty) && !state.input.trim())" @click="submit">
+        <button class="terminal-run-btn" type="button" :disabled="!terminal.available || !cwd || state.starting || (!(shellEnded && !pty) && !state.input.trim() && !canRerunInPlace)" @click="submit">
           {{ state.starting ? '启动中…' : runLabel }}
           <span class="terminal-run-key" aria-hidden="true">↵</span>
         </button>
