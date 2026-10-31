@@ -582,6 +582,9 @@ export interface PiDesktopBridge {
   reveal: (target: string) => Promise<void>;
   mcpOverview: (cwd?: string) => Promise<McpOverview>;
   mcpProbe: (cwd?: string) => Promise<McpOverview>;
+  /** OAuth 登录 / 退出登录：转发给本机 `pi mcp login|logout`，授权在浏览器里完成 */
+  mcpLogin: (cwd: string | undefined, name: string) => Promise<{ output: string }>;
+  mcpLogout: (cwd: string | undefined, name: string) => Promise<{ output: string }>;
   mcpSaveServer: (
     cwd: string,
     payload: { scope: "global" | "project"; name: string; previousName?: string; config: Record<string, any> },

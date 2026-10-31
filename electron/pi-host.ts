@@ -3390,6 +3390,46 @@ export class PiHost {
     };
   }
 
+  /**
+   * MCP 服务的 OAuth 登录 / 退出登录。
+   *
+   * 授权要在浏览器里点，桌面端不复刻这套流程，直接调本机 `pi mcp login|logout`：
+   * Pi 会打开浏览器、在本机等回调，凭据也由 Pi 自己保存。桌面端只负责等它结束
+   * 并把输出反馈出来（成功后再刷一次服务状态）。
+   */
+  async mcpLogin(cwd: string | undefined, name: string): Promise<{ output: string }> {
+    return this.runMcpAuth(cwd, ["login", name], 300_000);
+  }
+
+  async mcpLogout(cwd: string | undefined, name: string): Promise<{ output: string }> {
+    return this.runMcpAuth(cwd, ["logout", name], 60_000);
+  }
+
+  private async runMcpAuth(cwd: string | undefined, args: string[], timeout: number): Promise<{ output: string }> {
+    const entry = await this.piEntry();
+    const targetCwd = cwd ? path.resolve(cwd) : homedir();
+    const result = await new Promise<{ code: number; output: string }>((resolve) => {
+      execFile(
+        process.execPath,
+        [entry, "mcp", ...args],
+        {
+          cwd: targetCwd,
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0" },
+          maxBuffer: 8 * 1024 * 1024,
+          timeout,
+          windowsHide: true,
+        },
+        (error: any, stdout = "", stderr = "") => {
+          const output = `${stdout}${stderr}`.trim();
+          const code = typeof error?.code === "number" ? error.code : error ? 1 : 0;
+          resolve({ code, output: output || (error ? String(error.message ?? error) : "") });
+        },
+      );
+    });
+    if (result.code !== 0) throw new Error(result.output || `pi mcp ${args[0]} 失败（退出码 ${result.code}）`);
+    return { output: result.output };
+  }
+
   async mcpProbe(cwd?: string): Promise<McpOverview> {
     const piEntry = await this.piEntry();
     const targetCwd = cwd ? path.resolve(cwd) : homedir();

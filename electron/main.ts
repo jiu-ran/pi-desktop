@@ -728,7 +728,7 @@ const workspaceChannels = new Set([
   "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:git-worktree-merge", "pi:complete-paths", "pi:restart", "pi:sessions",
   "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui",
   "pi:project-trust", "pi:project-trust-set", "pi:import-session", "pi:export-session-jsonl", "pi:mcp-overview", "pi:git-action",
-  "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
+  "pi:mcp-probe", "pi:mcp-login", "pi:mcp-logout", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
   "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
 ]);
@@ -1003,6 +1003,8 @@ app.whenReady().then(() => {
   });
   handle("pi:mcp-overview", (cwd?: string) => host.mcpOverview(cwd));
   handle("pi:mcp-probe", (cwd?: string) => host.mcpProbe(cwd));
+  handle("pi:mcp-login", (cwd: string | undefined, name: string) => host.mcpLogin(cwd, name));
+  handle("pi:mcp-logout", (cwd: string | undefined, name: string) => host.mcpLogout(cwd, name));
   handle("pi:mcp-save-server", (cwd: string, payload: any) => host.mcpSaveServer(cwd, payload));
   handle("pi:mcp-update-server", (cwd: string, payload: any) => host.mcpUpdateServer(cwd, payload));
   handle("pi:mcp-remove-server", (cwd: string, payload: any) => host.mcpRemoveServer(cwd, payload));

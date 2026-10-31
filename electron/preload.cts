@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   reveal: (target: string) => ipcRenderer.invoke("pi:reveal", target),
   mcpOverview: (cwd?: string) => ipcRenderer.invoke("pi:mcp-overview", cwd),
   mcpProbe: (cwd?: string) => ipcRenderer.invoke("pi:mcp-probe", cwd),
+  mcpLogin: (cwd: string | undefined, name: string) => ipcRenderer.invoke("pi:mcp-login", cwd, name),
+  mcpLogout: (cwd: string | undefined, name: string) => ipcRenderer.invoke("pi:mcp-logout", cwd, name),
   mcpSaveServer: (cwd: string, payload: any) => ipcRenderer.invoke("pi:mcp-save-server", cwd, payload),
   mcpUpdateServer: (cwd: string, payload: any) => ipcRenderer.invoke("pi:mcp-update-server", cwd, payload),
   mcpRemoveServer: (cwd: string, payload: any) => ipcRenderer.invoke("pi:mcp-remove-server", cwd, payload),

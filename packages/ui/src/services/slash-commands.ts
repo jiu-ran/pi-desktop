@@ -42,10 +42,18 @@ export function scopeLabel(scope?: string): string {
   return (scope && SCOPES[scope]) ?? "";
 }
 
+/**
+ * 合并桌面端命令与 Pi 报上来的命令。
+ *
+ * **撞名时桌面端赢**：Pi 自带的扩展里就有 `mcp`（管 MCP 的 OAuth 登录），还有
+ * `llama` 之类的。如果让扩展赢，`/mcp` 会跑进扩展自己的流程（还会在对话里
+ * 留一条 `/mcp` 消息），而不是打开桌面端的 MCP 设置页。同名时保留桌面端实现，
+ * 扩展那条不再展示（想用扩展版可以在终端里敲）。
+ */
 export function mergeCommands(local: LocalSlashCommand[], remote: any[]): SlashCommandItem[] {
-  const remoteNames = new Set(remote.map((cmd) => cmd.name));
+  const localNames = new Set(local.map((cmd) => cmd.name));
   return [
-    ...local.filter((cmd) => !remoteNames.has(cmd.name)).map((cmd) => ({
+    ...local.map((cmd) => ({
       key: `d:${cmd.name}`,
       name: cmd.name,
       title: cmd.title ?? "",
@@ -55,17 +63,19 @@ export function mergeCommands(local: LocalSlashCommand[], remote: any[]): SlashC
       order: cmd.order ?? 50,
       local: cmd,
     })),
-    ...remote.map((cmd, i) => ({
-      key: `p:${cmd.name}`,
-      name: cmd.name,
-      title: cmd.source === "skill" ? cmd.name.replace(/^skill:/, "") : "",
-      description: cmd.description ?? "",
-      args: "",
-      group: GROUPS.some((g) => g.id === cmd.source) ? cmd.source : "extension",
-      scope: scopeLabel(cmd.sourceInfo?.scope),
-      order: 1000 + i,
-      local: null,
-    })),
+    ...remote
+      .filter((cmd) => !localNames.has(cmd.name))
+      .map((cmd, i) => ({
+        key: `p:${cmd.name}`,
+        name: cmd.name,
+        title: cmd.source === "skill" ? cmd.name.replace(/^skill:/, "") : "",
+        description: cmd.description ?? "",
+        args: "",
+        group: GROUPS.some((g) => g.id === cmd.source) ? cmd.source : "extension",
+        scope: scopeLabel(cmd.sourceInfo?.scope),
+        order: 1000 + i,
+        local: null,
+      })),
   ];
 }
 

@@ -20,6 +20,8 @@ const exposureOptions: Array<{ value: McpExposureMode; label: string; hint: stri
 const mcpLoading = ref(false);
 const mcpProbing = ref(false);
 const mcpSaving = ref(false);
+/** 正在走 OAuth 的服务（`scope:name`），按钮转「等待浏览器…」 */
+const mcpAuthBusy = ref("");
 const mcpData = ref<McpOverview | null>(null);
 const expandedTools = reactive<Record<string, boolean>>({});
 
@@ -65,6 +67,33 @@ async function runMcpProbe(): Promise<void> {
     bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
   } finally {
     mcpProbing.value = false;
+  }
+}
+
+/**
+ * 需要 OAuth 的服务：签到与退出都交给本机 `pi mcp login|logout`。
+ *
+ * 授权要跳浏览器、还要在本机等回调，桌面端自己实现没有意义；Pi 会把凭据存在
+ * 自己的位置上，登录完刷新一次服务状态就能看到「已连接」。
+ */
+async function mcpAuth(item: McpServerItem, action: "login" | "logout"): Promise<void> {
+  const key = `${item.scope}:${item.name}`;
+  if (mcpAuthBusy.value) return;
+  mcpAuthBusy.value = key;
+  try {
+    const bridge = (globalThis as any).piDesktop;
+    const call = action === "login" ? bridge.mcpLogin : bridge.mcpLogout;
+    await call(state.activeCwd || undefined, item.name);
+    bus.emit("notify", {
+      level: "info",
+      text: action === "login" ? `${item.name} 已登录，正在刷新状态…` : `${item.name} 的登录凭据已删除`,
+    });
+    await loadMcpOverview();
+    await runMcpProbe();
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  } finally {
+    mcpAuthBusy.value = "";
   }
 }
 
@@ -508,6 +537,26 @@ watch(() => state.activeCwd, loadMcpOverview);
               ]"
               @change="changeMcpServerExposure(srv, $event as McpExposureMode)"
             />
+            <button
+              v-if="srv.state === 'needs_auth' || srv.oauth"
+              type="button"
+              class="btn small"
+              :disabled="Boolean(mcpAuthBusy)"
+              :title="srv.state === 'needs_auth' ? '在浏览器里完成 OAuth 授权' : '重新登录'"
+              @click="mcpAuth(srv, 'login')"
+            >
+              {{ mcpAuthBusy === `${srv.scope}:${srv.name}` ? "等待浏览器…" : srv.state === "needs_auth" ? "登录" : "重新登录" }}
+            </button>
+            <button
+              v-if="srv.oauth"
+              type="button"
+              class="btn ghost small"
+              :disabled="Boolean(mcpAuthBusy)"
+              title="删除已保存的 OAuth 凭据（pi mcp logout）"
+              @click="mcpAuth(srv, 'logout')"
+            >
+              退出登录
+            </button>
             <button
               type="button"
               class="btn ghost small"
