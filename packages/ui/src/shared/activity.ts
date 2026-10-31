@@ -1,7 +1,7 @@
 // 连续工具 / 思考步骤的分组与摘要参考 ThinkRail（Apache-2.0）的 ActivityGroup，
 // 见 THIRD-PARTY-NOTICES.md。这里只做纯数据推导，不依赖 Vue 或 pi 运行时。
 
-import { parseMcpTool } from "./mcp-tool.ts";
+import { mcpCallsInCode, parseMcpTool, type McpCallSummary } from "./mcp-tool.ts";
 
 export interface ActivityBlockLike {
   kind: string;
@@ -96,10 +96,23 @@ export function describeActivityBlock(block: ActivityBlockLike): string {
   return target ? clip(`${verb} ${target}`) : verb;
 }
 
-/** MCP 工具的服务名（不是 MCP 工具返回 null）：时间线上要标出来是外部服务在跑。 */
-export function mcpServerOf(block: ActivityBlockLike): string | null {
+/** Pi 把跨工具脚本调用包装成这一个工具名。 */
+const CODEMODE_TOOL = "codemode";
+
+/**
+ * 这一步里发生的 MCP 调用（没有返回 null）。
+ *
+ * 两种来源：
+ * - direct / deferred 暴露：工具名本身就是 `mcp__<服务>__<工具>`，一次调用一条；
+ * - codemode（默认）暴露：外部调用藏在脚本里（`tools.mcp__<服务>__<工具>`），
+ *   对话记录只有一条「运行脚本」。后者不认出来的话，最常见的用法根本看不到 MCP。
+ */
+export function mcpCallsOf(block: ActivityBlockLike): McpCallSummary | null {
   if (block.kind !== "tool") return null;
-  return parseMcpTool(block.name)?.server ?? null;
+  const direct = parseMcpTool(block.name);
+  if (direct) return { servers: [direct.server], calls: 1 };
+  if (block.name === CODEMODE_TOOL) return mcpCallsInCode((block.args as any)?.code);
+  return null;
 }
 
 export const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";

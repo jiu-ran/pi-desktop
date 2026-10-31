@@ -3,13 +3,14 @@ import {
   activityVerb,
   describeActivityBlock,
   isFailed,
-  mcpServerOf,
+  mcpCallsOf,
   isLiveTool,
   isSettled,
   type ActivityBlockLike,
   type ActivityEntry,
 } from "./activity.ts";
 import { blockDiff, diffStat } from "./diff.ts";
+import type { McpCallSummary } from "./mcp-tool.ts";
 
 /**
  * 回合分组：一次用户请求 = 一条「执行记录」。
@@ -57,8 +58,8 @@ export interface TurnStep<T extends ActivityBlockLike = ActivityBlockLike> {
   target: string;
   failed: boolean;
   live: boolean;
-  /** MCP 工具的服务名：这一下是外部服务在跑，行内要标出来 */
-  mcpServer: string | null;
+  /** 这一步里发生的 MCP 调用（含 codemode 脚本里的），行内要标出来 */
+  mcp: McpCallSummary | null;
   /** 改动新增行数；非改动步骤为 null */
   added: number | null;
   /** 改动删除行数；写入（write）或非改动步骤为 null */
@@ -204,7 +205,7 @@ export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEnt
       kind: block.kind === "thinking" ? "thinking" : "tool",
       label: stepLabel(block),
       target: stepTarget(block),
-      mcpServer: mcpServerOf(block),
+      mcp: mcpCallsOf(block),
       failed: isFailed(block),
       live: isLiveTool(block) || Boolean(block.streaming),
       added: stat?.added ?? null,
@@ -242,7 +243,6 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
   }
   const commands = tools.filter((entry) => entry.block.name === "bash");
   const reads = tools.filter((entry) => entry.block.name === "read");
-  const mcpCalls = tools.filter((entry) => mcpServerOf(entry.block) !== null);
   const failedCount = tools.filter((entry) => isFailed(entry.block)).length;
   const live = entries.some((entry) => isLiveTool(entry.block) || entry.block.streaming);
   // 只看最后一个已结算的工具：失败后重试成功就不算失败；仍在运行时先不报警
@@ -250,6 +250,8 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
   const errored = !live && Boolean(lastSettled && isFailed(lastSettled.block));
 
   const steps = buildTurnSteps(entries);
+  // 按「调用次数」算，而不是「几个块」：codemode 一条脚本里可能调好几次外部服务
+  const mcpCalls = steps.reduce((sum, step) => sum + (step.mcp?.calls ?? 0), 0);
   const stamps = entries.map((entry) => entry.block.ts).filter((ts): ts is number => typeof ts === "number" && ts > 0);
   const span = stamps.length >= 2 ? Math.max(0, Math.max(...stamps) - Math.min(...stamps)) : 0;
   // 工具自己记录的耗时之和：回放 / 恢复的会话里时间戳可能挤在同一毫秒（span≈0），
@@ -270,7 +272,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     if (files.size) parts.push(`改 ${files.size} 个文件`);
     if (commands.length) parts.push(`${commands.length} 条命令`);
     if (reads.length) parts.push(`读 ${reads.length} 个文件`);
-    if (mcpCalls.length) parts.push(`MCP ${mcpCalls.length} 次`);
+    if (mcpCalls) parts.push(`MCP ${mcpCalls} 次`);
     if (thoughts.length) parts.push(`思考 ${thoughts.length} 段`);
     if (failedCount) parts.push(`${failedCount} 处失败`);
   }
@@ -287,7 +289,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     editCount: files.size,
     commandCount: commands.length,
     readCount: reads.length,
-    mcpCount: mcpCalls.length,
+    mcpCount: mcpCalls,
     failedCount,
     errored,
     live,

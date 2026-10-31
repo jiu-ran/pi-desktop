@@ -4,6 +4,7 @@ import { createFrameScheduler } from "../../shared/frame-scheduler.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { displayProjectName, icons } from "../../shared/util.ts";
 import { collectChanges } from "../../shared/diff.ts";
+import { mcpChipLabel } from "../../shared/mcp-tool.ts";
 import { isSessionOnly, mergeRepoChanges } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../../plugins/git/state.ts";
 import { buildCopyTexts } from "../../shared/copy-text.ts";
@@ -868,10 +869,10 @@ watch(searchMatches, () => {
                       >
                         <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
                         <span
-                          v-if="row.steps[0]!.mcpServer"
+                          v-if="row.steps[0]!.mcp"
                           class="turn-step-mcp"
-                          :title="`MCP 服务：${row.steps[0]!.mcpServer}（外部服务提供的工具）`"
-                        >MCP · {{ row.steps[0]!.mcpServer }}</span>
+                          :title="`MCP 服务：${row.steps[0]!.mcp.servers.join('、')}（外部服务提供的工具）`"
+                        >{{ mcpChipLabel(row.steps[0]!.mcp) }}</span>
                         <span class="turn-step-count">×{{ row.steps.length }}</span>
                         <span class="turn-step-target">{{ row.target }}</span>
                         <span class="turn-step-meta">
@@ -930,10 +931,10 @@ watch(searchMatches, () => {
                       >
                         <span class="turn-step-label">{{ row.step.label }}</span>
                         <span
-                          v-if="row.step.mcpServer"
+                          v-if="row.step.mcp"
                           class="turn-step-mcp"
-                          :title="`MCP 服务：${row.step.mcpServer}（外部服务提供的工具）`"
-                        >MCP · {{ row.step.mcpServer }}</span>
+                          :title="`MCP 服务：${row.step.mcp.servers.join('、')}（外部服务提供的工具）`"
+                        >{{ mcpChipLabel(row.step.mcp) }}</span>
                         <span
                           v-if="row.step.kind !== 'thinking' || !stepOpen(item.group, row.step.block.id)"
                           class="turn-step-target"

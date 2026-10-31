@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
-import { mcpBadge, parseMcpTool } from "../../../shared/mcp-tool.ts";
+import { mcpBadge, mcpCallsInCode, mcpChipLabel, parseMcpTool } from "../../../shared/mcp-tool.ts";
 import ToolCard from "./ToolCard.vue";
 import ToolImages from "./ToolImages.vue";
 import SearchHighlight from "../SearchHighlight.vue";
@@ -12,6 +12,10 @@ const props = defineProps<{
 }>();
 
 const mcp = computed(() => parseMcpTool(props.block.name));
+// MCP 默认走 codemode 暴露：外部调用藏在脚本里，卡片上也该写明是哪个服务
+const scriptMcp = computed(() =>
+  mcp.value ? null : mcpCallsInCode((props.block.args as any)?.code),
+);
 
 const verb = computed(() => {
   if (mcp.value) return mcp.value.label;
@@ -53,8 +57,8 @@ const images = computed(() => props.block.imageItems ?? []);
     :block="block"
     :verb="verb"
     :subtitle="subtitle"
-    :badge="mcp ? mcpBadge(mcp) : ''"
-    :badge-tone="mcp ? 'mcp' : ''"
+    :badge="mcp ? mcpBadge(mcp) : scriptMcp ? mcpChipLabel(scriptMcp) : ''"
+    :badge-tone="mcp || scriptMcp ? 'mcp' : ''"
     :query="query"
   >
     <div v-if="argsText" class="tool-section">
