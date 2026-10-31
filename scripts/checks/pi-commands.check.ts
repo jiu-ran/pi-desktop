@@ -82,4 +82,14 @@ assert.equal(findPiCommand("not-a-command"), undefined);
 assert.equal(findPiCommand("login")?.support, "terminal");
 assert.equal(findPiCommand("import")?.support, "desktop");
 
+// 菜单里只列真能执行的命令：做不到的那几条不能再出现在候选里，
+// 但直接敲出来时必须给出说明（而不是把 "/login" 当普通文字发给模型）。
+assert.ok(
+  !source.includes("terminalOnlyCommands"),
+  "slash-commands.ts 不该把「只能终端」的命令塞进菜单，它们只用于敲出来时的提示",
+);
+const composer = readFileSync(path.join(repo, "packages/ui/src/components/chat/Composer.vue"), "utf8");
+assert.ok(composer.includes("findPiCommand(parsed.value.name)"), "submit 里要查表，把「只能终端」的命令拦下来");
+assert.ok(composer.includes("terminalCommandNotice"), "拦下来之后要给一句能照做的说明");
+
 console.log(`pi-commands OK ${PI_BUILTIN_COMMANDS.length} 条内置（桌面端 ${PI_BUILTIN_COMMANDS.length - terminal.length} / 需终端 ${terminal.length}）、${DESKTOP_ONLY_COMMANDS.length} 条桌面专属`);

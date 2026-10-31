@@ -140,29 +140,47 @@ export async function checkArgHintInElectron(win) {
   assert.ok(Math.abs(shifted.dy) <= 1, `有附件条时提示仍要贴着正文，实际差 ${shifted.dy}px`);
   assert.ok(shifted.inside, "有附件条时提示不能跑到输入框外面（以前会盖在附件上）");
 
-  // 5. / 菜单要和 Pi CLI 的命令清单对得上：
+  // 5. / 菜单只列真能执行的命令：
   //    - 桌面端补上的（/trust /import /changelog /quit）必须出现；
-  //    - 只能在终端里做的（/tree /login /share…）要带「需终端」标记，
-  //      不能被当成普通命令发出去。
+  //    - 只能在终端里做的（/tree /login /share…）不该出现在候选里，
+  //      但直接敲出来时必须给出说明，不能当普通文字发给模型。
   await setDraft("/");
   await wait(300);
-  const menu = JSON.parse(
+  const menuNames = JSON.parse(
     await evaluate(`(() => {
-      const items = [...document.querySelectorAll(".slash-menu .slash-item")].map((el) => ({
-        name: (el.querySelector(".slash-name")?.textContent ?? "").replace("/", ""),
-        badge: el.querySelector(".slash-src")?.textContent ?? "",
-      }));
+      const items = [...document.querySelectorAll(".slash-menu .slash-item")].map(
+        (el) => (el.querySelector(".slash-name")?.textContent ?? "").replace("/", ""),
+      );
       return JSON.stringify(items);
     })()`),
   );
-  const menuNames = menu.map((item) => item.name);
   for (const name of ["trust", "import", "changelog", "quit"]) {
     assert.ok(menuNames.includes(name), `/ 菜单里缺少 /${name}（Pi 有这条命令，桌面端要适配）`);
   }
-  const terminalBadges = menu.filter((item) => item.badge === "需终端").map((item) => item.name);
-  for (const name of ["tree", "scoped-models", "share", "bug", "login", "logout"]) {
-    assert.ok(terminalBadges.includes(name), `/${name} 只支持终端，菜单里要标「需终端」`);
+  const terminalOnly = ["tree", "scoped-models", "share", "bug", "login", "logout"];
+  for (const name of terminalOnly) {
+    assert.ok(!menuNames.includes(name), `/${name} 桌面端做不了，不该出现在菜单里`);
   }
+
+  // 直接敲 /login：菜单显示解释，回车也不能发出去（不能变成给模型的一句 "/login"）
+  await setDraft("/login");
+  await wait(300);
+  const loginMenu = await evaluate(`document.querySelector(".slash-menu .slash-empty")?.textContent ?? ""`);
+  assert.ok(loginMenu.includes("只能在终端里用"), `敲 /login 时菜单要解释原因，实际 ${JSON.stringify(loginMenu)}`);
+  const before = await evaluate(`document.querySelectorAll(".msg.user").length`);
+  await evaluate(`(() => {
+    const box = document.querySelector(".composer textarea");
+    box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return true;
+  })()`);
+  await wait(600);
+  const after = await evaluate(`document.querySelectorAll(".msg.user").length`);
+  const toast = await evaluate(`[...document.querySelectorAll(".toast")].map((el) => el.textContent).join(" | ")`);
+  assert.equal(after, before, "在终端专属命令上回车不能真的发出一条消息");
+  assert.ok(toast.includes("只能在终端里用"), `回车后要给提示，实际 ${JSON.stringify(toast)}`);
+  const cleared = await evaluate(`document.querySelector(".composer textarea").value`);
+  assert.equal(cleared, "", "拦下之后输入框应清空（这条不是要发给模型的话）");
+
   await closeMenu();
   await wait(150);
   await setDraft("");
@@ -171,6 +189,6 @@ export async function checkArgHintInElectron(win) {
     "[arg-hint]",
     JSON.stringify({ compact, resume: { dx: resume.dx, dy: resume.dy, hint: resume.hint }, shifted, host: host.holder }),
   );
-  console.log("[arg-hint] / 菜单", JSON.stringify({ 命令数: menuNames.length, 需终端: terminalBadges }));
+  console.log("[arg-hint] / 菜单", JSON.stringify({ 命令数: menuNames.length, 终端专属已隐藏: terminalOnly.length }));
   return { compact, resume, shifted };
 }

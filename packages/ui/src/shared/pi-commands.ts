@@ -8,7 +8,8 @@
  * - 表里按 Pi 的版本逐条列全（`PI_COMMANDS_VERSION`），`pi-commands.check.ts` 会盯着
  *   数量与名字，Pi 升级加命令时这里必须跟着动；
  * - 每条要么 `desktop`（桌面端有等价实现，见 `services/slash-commands.ts`），
- *   要么 `terminal` 并给出 `hint`——说清楚为什么没做以及现在怎么做到。
+ *   要么 `terminal` 并给出 `hint`——说清楚为什么没做以及现在怎么做到。`terminal`
+ *   的那几条不进 `/` 菜单，只在用户直接敲出来时用于解释（`Composer` 的 submit）。
  *
  * 这里只放数据和纯函数，不引用任何运行时对象，检查脚本可以直接跑。
  */
@@ -214,7 +215,7 @@ export function findPiCommand(name: string): PiCommandInfo | undefined {
   return PI_BUILTIN_COMMANDS.find((command) => command.name === name);
 }
 
-/** 只能在终端里做的命令：菜单里要打上「需终端」并给出替代做法。 */
+/** 只能在终端里做的命令：不进菜单，敲出来时用 `terminalCommandNotice` 解释。 */
 export function terminalOnlyCommands(): PiCommandInfo[] {
   return PI_BUILTIN_COMMANDS.filter((command) => command.support === "terminal");
 }

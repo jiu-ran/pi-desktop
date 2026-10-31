@@ -9,6 +9,8 @@ const props = withDefaults(
     cursor?: number;
     command?: SlashCommandItem | null;
     loading?: boolean;
+    /** 没有匹配项时的解释（例如「/login 只能在终端里用」） */
+    emptyHint?: string;
   }>(),
   {
     mode: "commands",
@@ -16,6 +18,7 @@ const props = withDefaults(
     cursor: 0,
     command: null,
     loading: false,
+    emptyHint: "",
   },
 );
 
@@ -89,7 +92,7 @@ watch(
       </template>
 
       <p v-if="loading" class="slash-empty">加载中…</p>
-      <p v-else-if="!items.length" class="slash-empty">{{ mode === "options" ? "没有可选项" : "没有匹配的命令" }}</p>
+      <p v-else-if="!items.length" class="slash-empty">{{ mode === "options" ? "没有可选项" : emptyHint || "没有匹配的命令" }}</p>
     </div>
 
     <footer class="slash-foot">

@@ -9,6 +9,7 @@ import { planQueueCard, planQueueMove, planQueueView, queueDraftText, queuePrevi
 import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
+import { PI_BUILTIN_COMMANDS, findPiCommand, terminalCommandNotice } from "../../shared/pi-commands.ts";
 import { appSettings } from "../../services/settings.ts";
 import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
@@ -552,6 +553,21 @@ const menuMode = computed<"commands" | "options" | null>(() => {
 const commandItems = computed(() =>
   menuMode.value === "commands" && parsed.value ? filterCommands(allCommands.value, parsed.value.name) : [],
 );
+
+/**
+ * 菜单里查不到时的一句话解释。
+ *
+ * Pi 有、桌面端做不了的那几条（/tree、/login…）不进菜单，但用户敲出来得知道
+ * 为什么没有——否则看起来就像命令不存在。
+ */
+const emptyHint = computed(() => {
+  if (menuMode.value !== "commands" || commandItems.value.length) return "";
+  const query = (parsed.value?.name ?? "").toLowerCase();
+  const match = PI_BUILTIN_COMMANDS.find(
+    (command) => command.support === "terminal" && (!query || command.name.includes(query)),
+  );
+  return match ? `/${match.name} 只能在终端里用（Pi 的交互模式功能）` : "";
+});
 const optionItems = computed(() => {
   if (menuMode.value !== "options" || !parsed.value) return [];
   const q = parsed.value.arg.toLowerCase();
@@ -978,6 +994,15 @@ async function submit(): Promise<void> {
     await runLocal(exact.value, parsed.value.arg);
     return;
   }
+  // Pi 有、但桌面端做不了的命令（/tree、/login、/share…）：它们不进菜单，
+  // 但直接敲出来时也不能把 "/login" 当成普通文字发给模型——给一句能照做的说明。
+  const unsupported = parsed.value ? findPiCommand(parsed.value.name) : undefined;
+  if (unsupported && unsupported.support === "terminal") {
+    draft.value = "";
+    nextTick(focus);
+    bus.emit("notify", { level: "warning", text: terminalCommandNotice(unsupported) });
+    return;
+  }
   draft.value = "";
   const sent = await workbench.send(text, { mode: mode.value });
   // 发送失败（附件失效、Worker 未就绪等）时把正文放回输入框，避免用户白打一段字。
@@ -1374,6 +1399,7 @@ const argHint = computed(() => {
           :cursor="cursor"
           :command="exact"
           :loading="optionsLoading"
+          :empty-hint="emptyHint"
           @hover="(i) => (cursor = i)"
           @pick="(item) => pick(item)"
         />

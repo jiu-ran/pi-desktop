@@ -1,4 +1,3 @@
-import { terminalCommandNotice, terminalOnlyCommands } from "../shared/pi-commands.ts";
 import { formatTokens, thinkingLabel } from "../shared/util.ts";
 import { openSettingsModal } from "./settings.ts";
 
@@ -35,11 +34,7 @@ export const GROUPS = [
   { id: "extension", label: "扩展命令" },
   { id: "prompt", label: "提示模板" },
   { id: "skill", label: "技能" },
-  { id: "terminal", label: "需要终端" },
 ];
-
-/** 只能在终端里用的 Pi 命令在菜单里要标出来，免得用户以为点一下就成。 */
-export const TERMINAL_BADGE = "需终端";
 
 const SCOPES: Record<string, string> = { user: "全局", project: "项目" };
 
@@ -57,7 +52,6 @@ export function mergeCommands(local: LocalSlashCommand[], remote: any[]): SlashC
       description: cmd.description ?? "",
       args: cmd.args ?? "",
       group: cmd.group ?? "desktop",
-      scope: cmd.group === "terminal" ? TERMINAL_BADGE : undefined,
       order: cmd.order ?? 50,
       local: cmd,
     })),
@@ -427,18 +421,9 @@ export function createBuiltinSlashCommands({
         bridge().windowControls.close();
       },
     },
-    // Pi 里只在交互模式实现、桌面端真做不了的（/tree、/share、/login…）：
-    // 仍然列出来并打上「需终端」，点一下给出原因和替代做法，而不是默默不存在。
-    ...terminalOnlyCommands().map((info, index) => ({
-      name: info.name,
-      title: info.title,
-      description: info.description,
-      group: "terminal",
-      order: 900 + index,
-      run: async () => {
-        workbench.notice("warning", terminalCommandNotice(info));
-      },
-    })),
+    // Pi 里只在交互模式实现、桌面端真做不了的那几条（/tree、/login、/share…）
+    // 不进菜单：菜单里只列真能执行的。但直接敲出来时不能当普通文字发给模型，
+    // 由 Composer 的 submit 用 `shared/pi-commands.ts` 查表给一句说明。
   ];
 }
 
