@@ -228,6 +228,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   let appUpdateCancelled = false;
 
   const draftTimers = new Map<string, number>();
+  /** 防抖窗口内还没落盘的草稿（按 `cwd|sessionFile` 索引），卸载时补写。 */
+  const pendingDrafts = new Map<string, { cwd: string; sessionFile: string; draft: ComposerDraft }>();
 
   /** 附件只存路径与名称：恢复时重新向主进程校验，文件被删了就跳过。 */
   function draftOf(thread: SessionThreadState): ComposerDraft {
@@ -245,10 +247,25 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     const key = `${cwd}|${sessionFile}`;
     const timer = draftTimers.get(key);
     if (timer) window.clearTimeout(timer);
+    // 记下待写内容：窗口关闭 / 页面卸载时要把还没到点的草稿补上，
+    // 否则 400ms 内刷新就会丢掉刚加的附件（只剩正文，因为正文更早写过）。
+    pendingDrafts.set(key, { cwd, sessionFile, draft });
     draftTimers.set(key, window.setTimeout(() => {
       draftTimers.delete(key);
+      pendingDrafts.delete(key);
       writeComposerDraft(cwd, sessionFile, draft);
     }, 400) as unknown as number);
+  }
+
+  /** 把还没到点的草稿立刻落盘（页面卸载 / 关闭窗口时调用）。 */
+  function flushPendingDrafts(): void {
+    for (const [key, entry] of [...pendingDrafts]) {
+      const timer = draftTimers.get(key);
+      if (timer) window.clearTimeout(timer);
+      draftTimers.delete(key);
+      pendingDrafts.delete(key);
+      writeComposerDraft(entry.cwd, entry.sessionFile, entry.draft);
+    }
   }
 
   /** 立即落盘（发送 / 切换会话前调用，避免防抖窗口内丢失）。 */
@@ -260,6 +277,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       window.clearTimeout(timer);
       draftTimers.delete(key);
     }
+    pendingDrafts.delete(key);
     writeComposerDraft(cwd, sessionFile, draft);
   }
 
@@ -270,21 +288,34 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   function restoreDraftAttachments(ws: WorkspaceState, thread: SessionThreadState, stored: ComposerDraft["attachments"]): void {
     if (!stored.length) return;
     void (async () => {
+      // 工作区还没就绪时主进程还没授权这个目录，附件校验会直接失败，
+      // 草稿里的附件就被当成「已不可用」丢掉了（重载 / 重新打开项目时很容易撞上）。
+      // 宁可等一会儿再恢复，也不要静默弄丢用户的附件。
+      const readyDeadline = Date.now() + 15_000;
+      while ((ws.status === "idle" || ws.status === "starting") && Date.now() < readyDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
       const missing: string[] = [];
       for (const item of stored) {
         if (thread.attachments.length >= MAX_ATTACHMENTS) break;
-        try {
-          // 会话附件不在项目目录内，要走会话专用的校验入口。
-          const prepared = item.kind === "session"
-            ? await host.prepareSessionAttachments(ws.cwd, [item.path])
-            : await host.prepareAttachments(ws.cwd, [item.path], [item.path]);
-          for (const entry of prepared.items ?? []) {
-            if (!entry?.path || thread.attachments.some((existing: any) => existing.path === entry.path)) continue;
-            thread.attachments.push(entry);
+        let restored = false;
+        for (let attempt = 0; attempt < 3 && !restored; attempt += 1) {
+          try {
+            // 会话附件不在项目目录内，要走会话专用的校验入口。
+            const prepared = item.kind === "session"
+              ? await host.prepareSessionAttachments(ws.cwd, [item.path])
+              : await host.prepareAttachments(ws.cwd, [item.path], [item.path]);
+            for (const entry of prepared.items ?? []) {
+              if (!entry?.path || thread.attachments.some((existing: any) => existing.path === entry.path)) continue;
+              thread.attachments.push(entry);
+            }
+            restored = true;
+          } catch {
+            // 刚启动时的授权 / 校验可能还在路上：隔一会儿再试，最后一次才判定为失效
+            if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 300));
           }
-        } catch {
-          missing.push(item.name || item.path);
         }
+        if (!restored) missing.push(item.name || item.path);
       }
       if (missing.length) {
         bus.emit("notify", {
@@ -2471,9 +2502,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return mockSkillsOverview;
   }
 
+  // 刷新 / 关窗时把防抖窗口里的草稿补写掉：不补的话刚加上的附件会丢。
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flushPendingDrafts);
+    window.addEventListener("beforeunload", flushPendingDrafts);
+  }
+
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    flushPendingDrafts();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", flushPendingDrafts);
+      window.removeEventListener("beforeunload", flushPendingDrafts);
+    }
     stopHostEvents?.();
     stopHostEvents = null;
     for (const ws of workspaces.values()) {

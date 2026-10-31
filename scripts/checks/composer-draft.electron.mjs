@@ -27,10 +27,17 @@ export async function checkComposerDraftInElectron(win) {
 
   const draft = `草稿恢复测试 ${Date.now()}`;
   // 草稿现在存成 JSON（正文 + 附件），按 text 字段判断是否落盘。
+  // 只认「当前项目」下的草稿键：以前不带 scope 地扫 localStorage，会被上一次冒烟
+  // 留下的旧草稿满足，断言看起来通过了、其实这一轮什么都没写。
+  const scope = `(key) => {
+    const ws = window.__piDesktop.workbench.active.value;
+    return Boolean(ws && key.startsWith('pi-desktop.composer-draft:' + ws.cwd + '|'));
+  }`;
   const storedValue = (text) => `(() => {
+    const inScope = ${scope};
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('pi-desktop.composer-draft:')) continue;
+      if (!key || !inScope(key)) continue;
       const raw = localStorage.getItem(key) ?? '';
       let value = null;
       try { value = JSON.parse(raw); } catch { value = raw; }
@@ -41,10 +48,11 @@ export async function checkComposerDraftInElectron(win) {
   })()`;
   const stored = storedValue(draft);
   const hasAttachmentDraft = `(() => {
+    const inScope = ${scope};
     const target = 'README.md';
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('pi-desktop.composer-draft:')) continue;
+      if (!key || !inScope(key)) continue;
       try {
         const value = JSON.parse(localStorage.getItem(key) ?? '');
         if ((value?.attachments ?? []).some((item) => String(item?.path ?? '').includes(target))) return true;
@@ -91,6 +99,28 @@ export async function checkComposerDraftInElectron(win) {
   );
   console.log("[composer-draft] 重启后已恢复输入内容");
 
+  // 附件恢复失败时把现场打出来：附件列表、提示条、以及草稿里存了什么
+  const diag = await evaluate(`(() => {
+    const ws = window.__piDesktop.workbench.active.value;
+    return {
+      attachments: (ws?.attachments ?? []).map((a) => a.path),
+      toasts: [...document.querySelectorAll('.toast')].map((el) => el.textContent.trim()),
+      stored: (() => {
+        const out = [];
+        const prefix = 'pi-desktop.composer-draft:' + (ws?.cwd ?? '') + '|';
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i);
+          if (!key || !key.startsWith(prefix)) continue;
+          try {
+            const value = JSON.parse(localStorage.getItem(key) ?? '');
+            out.push({ suffix: key.slice(prefix.length).split('|').pop()?.slice(-12), attachments: (value?.attachments ?? []).map((a) => a.path) });
+          } catch { out.push({ suffix: key.slice(-12), broken: true }); }
+        }
+        return out;
+      })(),
+    };
+  })()`);
+  console.log("[composer-draft] 现场", JSON.stringify(diag));
   // 重启后附件也要回来（草稿不只保存文字）。
   await poll(
     `[...document.querySelectorAll('.attachment-chip')].some((chip) => chip.textContent.includes('README.md'))`,
