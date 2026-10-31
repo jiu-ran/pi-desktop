@@ -62,6 +62,14 @@ export interface TranscriptBlock {
   retry?: RetryNotice;
   /** 上下文压缩的状态与摘要 */
   compaction?: CompactionNotice;
+  /**
+   * 这是网络中断类的失败提示。
+   * 之后一旦有成功的回复（或重试成功），界面上要把它改成「已重新连接」，
+   * 而不是继续挂着一张红色的失败卡。
+   */
+  network?: boolean;
+  /** 这张失败卡已经因为「连接恢复」被改写成成功提示 */
+  recovered?: boolean;
   /** 同一条提示连续出现时的合并次数（界面上显示 ×N） */
   count?: number;
   /** 块创建时间（毫秒）：回合分组用它算「这一轮花了多久」 */
@@ -106,6 +114,33 @@ function dropBlocksById(blocks: TranscriptBlock[], ids: string[]): void {
   }
 }
 
+/** 「网络连接失败」这类可恢复的错误：连上之后就该显示成已恢复。 */
+function isRecoverableNetworkError(value: unknown): boolean {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  return /^connection (error|reset|closed|refused).?$/i.test(raw) || /socket hang up/i.test(raw) || /fetch failed|network error|ECONNRESET|ETIMEDOUT/i.test(raw);
+}
+
+/**
+ * 连接恢复后把失败卡翻成成功卡。
+ *
+ * 用户的心智很简单：断网时看得见「网络连接失败」，重连好了就应该是「已重新连接」，
+ * 而不是残留一张红色卡片——也不是干脆什么都不显示。
+ */
+function markNetworkRecovered(blocks: TranscriptBlock[]): boolean {
+  let changed = false;
+  for (const block of blocks) {
+    if (block.kind !== "notice" || !block.network || block.level !== "error" || block.retry || block.compaction) continue;
+    block.level = "info";
+    block.text = "已重新连接，任务继续";
+    block.count = undefined;
+    block.network = false;
+    block.recovered = true;
+    changed = true;
+  }
+  return changed;
+}
+
 function pushErrorNotice(blocks: TranscriptBlock[], value: unknown): void {
   const text = noticeErrorText(value);
   if (!text) return;
@@ -122,7 +157,7 @@ function pushErrorNotice(blocks: TranscriptBlock[], value: unknown): void {
     last.count = (last.count ?? 1) + 1;
     return;
   }
-  blocks.push({ kind: "notice", id: uid("n"), level: "error", text, count: 1 });
+  blocks.push({ kind: "notice", id: uid("n"), level: "error", text, count: 1, network: isRecoverableNetworkError(value) });
 }
 
 function textOf(content: any): string {
@@ -341,6 +376,9 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         }
         if (event.message.stopReason === "error" && event.message.errorMessage) {
           pushErrorNotice(blocks, event.message.errorMessage);
+        } else if (event.message.stopReason !== "aborted") {
+          // 正常回复说明连接已经恢复：之前的「网络连接失败」改为「已重新连接，任务继续」
+          markNetworkRecovered(blocks);
         }
         dropNamelessTools();
         return true;
@@ -438,6 +476,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           // 已经连上了，之前那几张「网络连接失败」就不要再挂在对话里
           dropBlocksById(blocks, notice.retry.absorbed ?? []);
           notice.retry.absorbed = [];
+          markNetworkRecovered(blocks);
           notice.level = "info";
           notice.text = retryResultText(true, event.attempt, notice.retry.maxAttempts, "");
         } else {

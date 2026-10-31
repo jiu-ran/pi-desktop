@@ -22,6 +22,8 @@ const title = computed(() => props.block.retry?.error ?? props.block.compaction?
 const retrying = computed(() => Boolean(props.block.retry && !props.block.retry.done));
 const icon = computed(() => {
   if (props.block.compaction?.running) return "◌";
+  // 断网恢复后的那张卡：显式给个对勾，比 info 的「i」更像「已经连上了」
+  if (props.block.recovered) return "✓";
   if (props.block.retry) {
     if (!props.block.retry.done) return "↻";
     return props.block.retry.success ? "✓" : "×";

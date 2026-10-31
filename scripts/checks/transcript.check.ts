@@ -361,5 +361,26 @@ console.log("tool stream OK");
   const failedNotices = t5.blocks.filter((block) => block.kind === "notice");
   assert.ok(failedNotices.some((block) => block.text.includes("重试 1/2 失败")), "失败时要说明重试到第几次");
 
-  console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并 / 成功清掉失败卡");
+  // 没有自动重试（用户自己重发）时：恢复正常后失败卡要变成「已重新连接」，而不是删掉或留着
+  const t6 = createTranscript();
+  t6.applyEvent(boom());
+  t6.applyEvent(boom());
+  t6.applyEvent(boom());
+  const merged6 = t6.blocks.filter((block) => block.kind === "notice");
+  assert.equal(merged6.length, 1, "三次失败合成一张卡");
+  assert.equal(merged6[0].level, "error", "断网时是红色失败卡");
+  t6.applyEvent({ type: "message_end", message: { role: "assistant", stopReason: "endTurn", content: [{ type: "text", text: "好了" }] } });
+  const recovered = t6.blocks.filter((block) => block.kind === "notice");
+  assert.equal(recovered.length, 1, `恢复后仍然只有一条提示，实际 ${recovered.length} 条`);
+  assert.equal(recovered[0].level, "info", `恢复后不该再是红色失败，实际 ${recovered[0].level}`);
+  assert.equal(recovered[0].text, "已重新连接，任务继续", `恢复后的文案不对：${recovered[0].text}`);
+
+  // 与网络无关的报错不能被抹成「已重新连接」
+  const t7 = createTranscript();
+  t7.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "工具调用失败" } });
+  t7.applyEvent({ type: "message_end", message: { role: "assistant", stopReason: "endTurn", content: [{ type: "text", text: "好的" }] } });
+  const kept = t7.blocks.filter((block) => block.kind === "notice");
+  assert.ok(kept.some((block) => block.level === "error"), "非网络错误仍然是失败卡");
+
+  console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并 / 成功清掉失败卡 / 恢复后变「已重新连接」");
 }
