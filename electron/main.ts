@@ -726,7 +726,8 @@ const workspaceChannels = new Set([
   "pi:read-workspace-file", "pi:write-workspace-file", "pi:open-workspace-path",
   "pi:create-workspace-entry", "pi:rename-workspace-entry", "pi:delete-workspace-entry",
   "pi:git-overview", "pi:git-branches", "pi:git-inspect", "pi:git-worktrees", "pi:git-worktree-create", "pi:git-worktree-remove", "pi:git-worktree-merge", "pi:complete-paths", "pi:restart", "pi:sessions",
-  "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui", "pi:mcp-overview", "pi:git-action",
+  "pi:delete-session", "pi:message-page", "pi:remove-project", "pi:call", "pi:extension-ui",
+  "pi:project-trust", "pi:project-trust-set", "pi:import-session", "pi:export-session-jsonl", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
   "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
@@ -980,6 +981,10 @@ app.whenReady().then(() => {
   handle("pi:complete-paths", (cwd: string, query: string) => host.completePaths(cwd, query));
   handle("pi:restart", (cwd: string, sessionFile?: string) => host.restart(cwd, sessionFile));
   handle("pi:sessions", (cwd: string) => host.sessions(cwd));
+  handle("pi:project-trust", (cwd: string) => host.projectTrust(cwd));
+  handle("pi:project-trust-set", (cwd: string, action: "trust" | "trust-parent" | "distrust") => host.setProjectTrust(cwd, action));
+  handle("pi:import-session", (cwd: string, file: string) => host.importSession(cwd, file));
+  handle("pi:export-session-jsonl", (cwd: string, target?: string) => host.exportSessionJsonl(cwd, target));
   handle("pi:message-page", (cwd: string, file: string, endIndex?: number, limit?: number, minTurns?: number, minBlocks?: number) =>
     host.messagePage(cwd, file, endIndex, limit, minTurns, minBlocks),
   );

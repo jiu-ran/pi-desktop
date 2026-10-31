@@ -140,9 +140,37 @@ export async function checkArgHintInElectron(win) {
   assert.ok(Math.abs(shifted.dy) <= 1, `有附件条时提示仍要贴着正文，实际差 ${shifted.dy}px`);
   assert.ok(shifted.inside, "有附件条时提示不能跑到输入框外面（以前会盖在附件上）");
 
+  // 5. / 菜单要和 Pi CLI 的命令清单对得上：
+  //    - 桌面端补上的（/trust /import /changelog /quit）必须出现；
+  //    - 只能在终端里做的（/tree /login /share…）要带「需终端」标记，
+  //      不能被当成普通命令发出去。
+  await setDraft("/");
+  await wait(300);
+  const menu = JSON.parse(
+    await evaluate(`(() => {
+      const items = [...document.querySelectorAll(".slash-menu .slash-item")].map((el) => ({
+        name: (el.querySelector(".slash-name")?.textContent ?? "").replace("/", ""),
+        badge: el.querySelector(".slash-src")?.textContent ?? "",
+      }));
+      return JSON.stringify(items);
+    })()`),
+  );
+  const menuNames = menu.map((item) => item.name);
+  for (const name of ["trust", "import", "changelog", "quit"]) {
+    assert.ok(menuNames.includes(name), `/ 菜单里缺少 /${name}（Pi 有这条命令，桌面端要适配）`);
+  }
+  const terminalBadges = menu.filter((item) => item.badge === "需终端").map((item) => item.name);
+  for (const name of ["tree", "scoped-models", "share", "bug", "login", "logout"]) {
+    assert.ok(terminalBadges.includes(name), `/${name} 只支持终端，菜单里要标「需终端」`);
+  }
+  await closeMenu();
+  await wait(150);
+  await setDraft("");
+
   console.log(
     "[arg-hint]",
     JSON.stringify({ compact, resume: { dx: resume.dx, dy: resume.dy, hint: resume.hint }, shifted, host: host.holder }),
   );
+  console.log("[arg-hint] / 菜单", JSON.stringify({ 命令数: menuNames.length, 需终端: terminalBadges }));
   return { compact, resume, shifted };
 }

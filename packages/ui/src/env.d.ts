@@ -562,6 +562,20 @@ export interface PiDesktopBridge {
     minBlocks?: number,
   ) => Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }>;
   deleteSession: (cwd: string, file: string) => Promise<any[]>;
+  /** 项目信任状态（Pi 在 RPC 模式下拿不到回答，默认按不信任处理） */
+  projectTrust: (cwd: string) => Promise<{
+    cwd: string;
+    decision: boolean | null;
+    recordedAt: string;
+    needsTrust: boolean;
+    effective: boolean;
+  }>;
+  setProjectTrust: (
+    cwd: string,
+    action: "trust" | "trust-parent" | "distrust",
+  ) => Promise<{ cwd: string; decision: boolean | null; recordedAt: string; needsTrust: boolean; effective: boolean }>;
+  importSession: (cwd: string, file: string) => Promise<{ path: string; title: string }>;
+  exportSessionJsonl: (cwd: string, target?: string) => Promise<{ path: string }>;
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => Promise<any>;
   call: (cwd: string, method: string, args?: any[], sessionFile?: string) => Promise<any>;
   respondExtensionUi: (cwd: string, response: Record<string, any>, sessionFile?: string) => Promise<any>;

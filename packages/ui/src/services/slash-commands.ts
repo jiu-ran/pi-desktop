@@ -1,5 +1,11 @@
+import { terminalCommandNotice, terminalOnlyCommands } from "../shared/pi-commands.ts";
 import { formatTokens, thinkingLabel } from "../shared/util.ts";
 import { openSettingsModal } from "./settings.ts";
+
+/** 桌面端拿不到的桥接对象（preload 暴露在 globalThis.piDesktop）。 */
+function bridge(): any {
+  return (globalThis as any).piDesktop;
+}
 
 export interface LocalSlashCommand {
   name: string;
@@ -29,7 +35,11 @@ export const GROUPS = [
   { id: "extension", label: "扩展命令" },
   { id: "prompt", label: "提示模板" },
   { id: "skill", label: "技能" },
+  { id: "terminal", label: "需要终端" },
 ];
+
+/** 只能在终端里用的 Pi 命令在菜单里要标出来，免得用户以为点一下就成。 */
+export const TERMINAL_BADGE = "需终端";
 
 const SCOPES: Record<string, string> = { user: "全局", project: "项目" };
 
@@ -47,6 +57,7 @@ export function mergeCommands(local: LocalSlashCommand[], remote: any[]): SlashC
       description: cmd.description ?? "",
       args: cmd.args ?? "",
       group: cmd.group ?? "desktop",
+      scope: cmd.group === "terminal" ? TERMINAL_BADGE : undefined,
       order: cmd.order ?? 50,
       local: cmd,
     })),
@@ -229,13 +240,41 @@ export function createBuiltinSlashCommands({
     {
       name: "export",
       title: "导出 HTML",
-      description: "把当前会话导出为 HTML 文件，可指定路径",
-      args: "[路径.html]",
+      description: "导出当前会话：`.html`（可分享的网页）或 `.jsonl`（原始记录）",
+      args: "[路径.html|.jsonl]",
       order: 51,
       run: async (arg: string) => {
-        const { path } = await workbench.call("exportHtml", arg || undefined);
+        const target = arg.trim();
+        if (/\.jsonl$/i.test(target)) {
+          const result = await bridge().exportSessionJsonl(workbench.active.value?.cwd, target);
+          workbench.notice("info", `已导出会话：${result.path}`);
+          workbench.reveal(result.path);
+          return;
+        }
+        const { path } = await workbench.call("exportHtml", target || undefined);
         workbench.notice("info", `已导出：${path}`);
         workbench.reveal(path);
+      },
+    },
+    {
+      name: "import",
+      title: "导入会话",
+      description: "把一个 .jsonl 会话文件导入当前项目，导入后直接接着聊",
+      args: "<文件.jsonl>",
+      order: 52,
+      run: async (arg: string) => {
+        const cwd = workbench.active.value?.cwd;
+        if (!cwd) throw new Error("请先打开一个项目");
+        let file = arg.trim();
+        if (!file) {
+          const picked: string[] = (await bridge().chooseFiles()) ?? [];
+          file = picked.find((item) => item.toLowerCase().endsWith(".jsonl")) ?? "";
+          if (!file) throw new Error("没有选中 .jsonl 会话文件");
+        }
+        const imported = await bridge().importSession(cwd, file);
+        await workbench.refreshSessions();
+        await workbench.switchSession(imported.path);
+        workbench.notice("info", `已导入并切换到：${imported.title}`);
       },
     },
     {
@@ -339,5 +378,84 @@ export function createBuiltinSlashCommands({
         workbench.notice("info", lines.join("\n"));
       },
     },
+    {
+      name: "changelog",
+      title: "更新日志",
+      description: "在浏览器打开当前版本的更新日志",
+      order: 82,
+      run: async () => {
+        const version = workbench.state.appUpdate.current;
+        const url = version
+          ? `https://github.com/jiu-ran/pi-desktop/releases/tag/v${version}`
+          : "https://github.com/jiu-ran/pi-desktop/releases";
+        await bridge().openExternalUrl(url);
+        workbench.notice("info", `已在浏览器打开 Pi Desktop ${version || "最新版本"} 的更新日志`);
+      },
+    },
+    {
+      name: "trust",
+      title: "项目信任",
+      description: "允许 Pi 加载这个项目的 .pi 配置、扩展、技能与 MCP（不信任时这些都会被忽略）",
+      args: "<选择一项>",
+      order: 73,
+      options: () => [
+        { value: "trust", label: "信任此项目", hint: "加载 .pi 下的配置、扩展、技能与 MCP" },
+        { value: "trust-parent", label: "信任上一级目录", hint: "上一级所有子项目共用同一套配置时用" },
+        { value: "distrust", label: "不再信任", hint: "忽略项目级资源，只用全局的" },
+      ],
+      run: async (arg: string) => {
+        const cwd = workbench.active.value?.cwd;
+        if (!cwd) throw new Error("请先打开一个项目");
+        if (!arg) {
+          workbench.notice("info", trustNotice(await bridge().projectTrust(cwd)));
+          return;
+        }
+        needIdle();
+        const action = arg === "trust-parent" ? "trust-parent" : arg === "distrust" ? "distrust" : "trust";
+        const status = await bridge().setProjectTrust(cwd, action);
+        // 资源在 Pi 启动时就加载好了，改完信任必须重启才能生效
+        await workbench.restart();
+        workbench.notice(status.effective ? "info" : "warning", `${trustNotice(status)}\n已重启 Pi 进程，资源重新加载`);
+      },
+    },
+    {
+      name: "quit",
+      title: "退出",
+      description: "关闭 Pi Desktop（任务运行中会先确认）",
+      order: 90,
+      run: async () => {
+        bridge().windowControls.close();
+      },
+    },
+    // Pi 里只在交互模式实现、桌面端真做不了的（/tree、/share、/login…）：
+    // 仍然列出来并打上「需终端」，点一下给出原因和替代做法，而不是默默不存在。
+    ...terminalOnlyCommands().map((info, index) => ({
+      name: info.name,
+      title: info.title,
+      description: info.description,
+      group: "terminal",
+      order: 900 + index,
+      run: async () => {
+        workbench.notice("warning", terminalCommandNotice(info));
+      },
+    })),
   ];
+}
+
+/** 项目信任的一句话结论（/trust 与状态展示共用）。 */
+export function trustNotice(status: {
+  needsTrust: boolean;
+  effective: boolean;
+  decision: boolean | null;
+  recordedAt: string;
+  cwd: string;
+}): string {
+  if (!status.needsTrust) return "这个项目没有需要信任的资源（.pi 配置 / 扩展 / 技能 / MCP），怎么选都一样";
+  if (status.effective) {
+    return `项目已信任：${status.recordedAt || status.cwd}`;
+  }
+  if (status.decision === false) {
+    return `项目被标记为不信任：${status.recordedAt || status.cwd}\n项目级扩展、技能与 MCP 不会加载。要启用请执行 /trust。`;
+  }
+  return "项目信任还没决定：桌面端走 RPC，Pi 拿不到确认就按不信任处理 —— 项目级扩展、技能与 MCP 现在不会加载。\n执行 /trust 选择「信任此项目」即可（会重启 Pi 生效）。";
 }

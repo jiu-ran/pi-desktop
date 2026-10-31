@@ -15,6 +15,42 @@ const skillsLoading = ref(false);
 const skillsData = ref<PiSkillsOverview | null>(null);
 const skillsFilter = ref<"all" | "user" | "project">("all");
 
+/**
+ * 项目信任状态。
+ *
+ * 桌面端走 RPC，Pi 没法弹窗问「信不信任这个目录」，默认就按不信任处理 ——
+ * 于是项目级技能 / 扩展 / MCP 全都不加载，而下面这个列表是按文件扫出来的，
+ * 看起来一切正常。不把这件事显式说出来，用户会以为是自己配置错了。
+ */
+const trust = ref<{ needsTrust: boolean; effective: boolean; decision: boolean | null; recordedAt: string } | null>(null);
+const trustSaving = ref(false);
+
+async function loadTrust(): Promise<void> {
+  const cwd = state.activeCwd;
+  if (!cwd) return;
+  try {
+    trust.value = await (globalThis as any).piDesktop.projectTrust(cwd);
+  } catch {
+    trust.value = null;
+  }
+}
+
+async function trustProject(): Promise<void> {
+  const cwd = state.activeCwd;
+  if (!cwd) return;
+  trustSaving.value = true;
+  try {
+    await (globalThis as any).piDesktop.setProjectTrust(cwd, "trust");
+    await workbench.restart();
+    await Promise.all([loadTrust(), loadSkillsOverview()]);
+    bus.emit("notify", { level: "info", text: "已信任此项目，项目级资源已重新加载" });
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  } finally {
+    trustSaving.value = false;
+  }
+}
+
 const visibleSkills = computed(() => {
   const list = skillsData.value?.skills ?? [];
   return skillsFilter.value === "all" ? list : list.filter((skill) => skill.scope === skillsFilter.value);
@@ -32,8 +68,14 @@ async function loadSkillsOverview(): Promise<void> {
 }
 
 // 打开设置页时加载；切项目后重拉（项目级技能会变）
-onMounted(loadSkillsOverview);
-watch(() => state.activeCwd, loadSkillsOverview);
+onMounted(() => {
+  void loadTrust();
+  void loadSkillsOverview();
+});
+watch(() => state.activeCwd, () => {
+  void loadTrust();
+  void loadSkillsOverview();
+});
 </script>
 
 <template>
@@ -55,6 +97,18 @@ watch(() => state.activeCwd, loadSkillsOverview);
         <button type="button" class="btn ghost small" :disabled="skillsLoading" @click="loadSkillsOverview">
           <span class="settings-inline-icon" v-html="icons.refresh" />
           刷新
+        </button>
+      </div>
+    </div>
+
+    <div v-if="trust?.needsTrust && !trust.effective" class="settings-alert err">
+      <div>
+        这个项目有需要信任的资源（.pi 配置 / 扩展 / 技能 / MCP），但当前未被信任：桌面端通过 RPC 启动 Pi，
+        拿不到「是否信任」的确认，这些项目级内容现在不会加载。
+      </div>
+      <div class="settings-toolbar-actions">
+        <button type="button" class="btn small" :disabled="trustSaving" @click="trustProject">
+          {{ trustSaving ? "处理中…" : "信任此项目" }}
         </button>
       </div>
     </div>

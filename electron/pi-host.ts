@@ -17,6 +17,7 @@ import { sessionContextBlock } from "./session-context.ts";
 import { logPerfLine } from "./perf-log.ts";
 import { log } from "./logger.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
+import { projectTrustStatus, setProjectTrust, type TrustAction } from "./project-trust.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
 const execFileAsync = promisify(execFile);
@@ -3091,6 +3092,59 @@ export class PiHost {
     else if ("confirmed" in response) payload.confirmed = Boolean(response.confirmed);
     else payload.value = response.value ?? "";
     stdin.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  /** 项目信任状态（Pi 在 RPC 模式下没答案就按不信任处理，桌面端要能看见这件事）。 */
+  async projectTrust(cwd: string) {
+    cwd = this.resolvePoolKey(cwd);
+    const { global } = readSettings(cwd, this.agentDirPath());
+    const defaultProjectTrust = typeof global.defaultProjectTrust === "string" ? global.defaultProjectTrust : "ask";
+    return projectTrustStatus({ cwd, agentDir: this.agentDirPath(), defaultProjectTrust });
+  }
+
+  /** 写入信任决定（/trust）。调用方负责重启 Pi 让资源重新加载。 */
+  async setProjectTrust(cwd: string, action: TrustAction) {
+    cwd = this.resolvePoolKey(cwd);
+    const { global } = readSettings(cwd, this.agentDirPath());
+    const defaultProjectTrust = typeof global.defaultProjectTrust === "string" ? global.defaultProjectTrust : "ask";
+    return setProjectTrust({ cwd, action, agentDir: this.agentDirPath(), defaultProjectTrust });
+  }
+
+  /**
+   * 导入外部会话（/import）：把 .jsonl 克隆进当前项目的会话目录。
+   * 克隆而不是直接引用，是为了让它在侧栏可见、也让会话头里的 cwd 指向这个项目。
+   */
+  async importSession(cwd: string, file: string): Promise<{ path: string; title: string }> {
+    cwd = this.resolvePoolKey(cwd);
+    const source = path.resolve(file);
+    if (!source.toLowerCase().endsWith(".jsonl")) throw new Error("只能导入 .jsonl 会话文件");
+    const firstLine = (await readFile(source, "utf8").catch(() => "")).split("\n", 1)[0];
+    const head = firstLine.trim();
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(head || "{}");
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || parsed.type !== "session") throw new Error("这不是 Pi 的会话文件（首行缺少 session 头）");
+    const dest = await cloneSessionToWorkspace(source, cwd);
+    const summary = await summarizeSessionFile(dest);
+    return { path: dest, title: summary?.title ?? "导入的会话" };
+  }
+
+  /** 导出原始会话（/export xxx.jsonl）：Pi 的 RPC 只有 HTML 导出，JSONL 自己拷一份。 */
+  async exportSessionJsonl(cwd: string, target = ""): Promise<{ path: string }> {
+    cwd = this.resolvePoolKey(cwd);
+    const source = this.clients.get(cwd)?.activeSessionFile;
+    if (!source) throw new Error("当前会话还没有落盘，先发一条消息再导出");
+    const text = await readFile(source, "utf8");
+    const wanted = target.trim();
+    const file = wanted
+      ? path.resolve(cwd, wanted)
+      : path.join(cwd, `pi-session-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.jsonl`);
+    await mkdir(path.dirname(file), { recursive: true });
+    await atomicWriteText(file, text);
+    return { path: file };
   }
 
   async restart(cwd: string, sessionFile?: string) {

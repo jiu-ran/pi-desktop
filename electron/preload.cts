@@ -78,6 +78,10 @@ contextBridge.exposeInMainWorld("piDesktop", {
   messagePage: (cwd: string, file: string, endIndex = 0, limit = 8, minTurns = 0, minBlocks = 0) =>
     ipcRenderer.invoke("pi:message-page", cwd, file, endIndex, limit, minTurns, minBlocks),
   deleteSession: (cwd: string, file: string) => ipcRenderer.invoke("pi:delete-session", cwd, file),
+  projectTrust: (cwd: string) => ipcRenderer.invoke("pi:project-trust", cwd),
+  setProjectTrust: (cwd: string, action: "trust" | "trust-parent" | "distrust") => ipcRenderer.invoke("pi:project-trust-set", cwd, action),
+  importSession: (cwd: string, file: string) => ipcRenderer.invoke("pi:import-session", cwd, file),
+  exportSessionJsonl: (cwd: string, target?: string) => ipcRenderer.invoke("pi:export-session-jsonl", cwd, target),
   removeProject: (cwd: string, options?: { deleteSessions?: boolean }) => ipcRenderer.invoke("pi:remove-project", cwd, options),
   call: (cwd: string, method: string, args?: any[], sessionFile?: string) => ipcRenderer.invoke("pi:call", cwd, method, args, sessionFile),
   respondExtensionUi: (cwd: string, response: Record<string, any>, sessionFile?: string) => ipcRenderer.invoke("pi:extension-ui", cwd, response, sessionFile),
