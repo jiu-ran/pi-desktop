@@ -766,7 +766,7 @@ watch(searchMatches, () => {
         </div>
       </Transition>
       <div ref="scroller" class="timeline" @scroll="onScroll">
-        <div class="timeline-inner" :class="{ 'is-empty': !ws.blocks.length && !ws.loading }">
+        <div class="timeline-inner" :class="{ 'is-empty': !ws.blocks.length && ws.status !== 'starting' }">
           <!-- 加载错误提示 -->
           <div v-if="loadMoreError" class="load-error">
             <span>⚠️ {{ loadMoreError }}</span>
@@ -781,7 +781,9 @@ watch(searchMatches, () => {
             <span>已加载最近 {{ ws.activeThread.messageTotal - ws.activeThread.historyStart }} / {{ ws.activeThread.messageTotal }} 条消息 · 继续上滑加载更早</span>
           </div>
           
-          <div v-if="ws.loading && !ws.blocks.length" class="empty-thread">
+          <!-- 新建任务 / 重新连接期间给一个明确的进度：以前挂的是从未被赋值的
+               ws.loading，这块提示永远不出现，界面上会直接闪出「你想做什么」 -->
+          <div v-if="ws.status === 'starting' && !ws.blocks.length" class="empty-thread">
             <span class="mini-spinner" />
             <p>正在连接 Pi…</p>
           </div>

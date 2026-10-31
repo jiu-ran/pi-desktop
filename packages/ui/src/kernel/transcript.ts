@@ -4,11 +4,14 @@ import { compactionFailureText } from "../shared/compaction-error.ts";
 import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
 import { formatTokens } from "../shared/util.ts";
 import { localizeNotification } from "../shared/notify-text.ts";
+import { retryNoticeText, retryResultText } from "../shared/retry-notice.ts";
 
 export interface RetryNotice {
   attempt: number;
   maxAttempts: number;
   delayMs: number;
+  /** 下一次重试的时间点（毫秒）：界面据此走倒计时，不用把秒数写死在文本里 */
+  deadlineAt: number;
   error?: string;
   done?: boolean;
   success?: boolean;
@@ -357,8 +360,9 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           running.retry.attempt = event.attempt;
           running.retry.maxAttempts = event.maxAttempts;
           running.retry.delayMs = delay;
+          running.retry.deadlineAt = Date.now() + delay;
           running.retry.error = reason || running.retry.error;
-          running.text = `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`;
+          running.text = retryNoticeText(event.attempt, event.maxAttempts);
           return true;
         }
         // 上一次失败刚刚留下一条错误提示：直接把它改写成重试提示，
@@ -366,12 +370,13 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         const justFailed = blocks[blocks.length - 1];
         if (justFailed?.kind === "notice" && justFailed.level === "error" && !justFailed.retry && !justFailed.compaction) {
           justFailed.level = "warning";
-          justFailed.text = `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`;
+          justFailed.text = retryNoticeText(event.attempt, event.maxAttempts);
           justFailed.count = undefined;
           justFailed.retry = {
             attempt: event.attempt,
             maxAttempts: event.maxAttempts,
             delayMs: delay,
+            deadlineAt: Date.now() + delay,
             error: reason || justFailed.text,
           };
           return true;
@@ -380,11 +385,12 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           kind: "notice",
           id: uid("n"),
           level: "warning",
-          text: `连接中断，${(delay / 1000).toFixed(1)} 秒后重试（${event.attempt}/${event.maxAttempts}）`,
+          text: retryNoticeText(event.attempt, event.maxAttempts),
           retry: {
             attempt: event.attempt,
             maxAttempts: event.maxAttempts,
             delayMs: delay,
+            deadlineAt: Date.now() + delay,
             error: reason || undefined,
           },
         });
@@ -397,11 +403,11 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         notice.retry.success = Boolean(event.success);
         if (event.success) {
           notice.level = "info";
-          notice.text = `已重新连接（第 ${event.attempt} 次重试）`;
+          notice.text = retryResultText(true, event.attempt, notice.retry.maxAttempts, "");
         } else {
           notice.level = "error";
           const reason = noticeErrorText(event.finalError) || notice.retry.error || "未知错误";
-          notice.text = `重试 ${event.attempt}/${notice.retry.maxAttempts} 失败：${reason}`;
+          notice.text = retryResultText(false, event.attempt, notice.retry.maxAttempts, reason);
         }
         return true;
       }

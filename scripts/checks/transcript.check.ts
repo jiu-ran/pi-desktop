@@ -299,7 +299,14 @@ console.log("tool stream OK");
   t.applyEvent({ ...error, message: { ...error.message, content: [] } });
   const notices = t.blocks.filter((block) => block.kind === "notice");
   assert.equal(notices.length, 1, `三轮重试只应留一条提示，实际 ${notices.length} 条：${notices.map((n) => n.text).join(" | ")}`);
-  assert.equal(notices[0].text, "连接中断，4.0 秒后重试（2/3）", `重试提示应就地更新，实际「${notices[0].text}」`);
+  // 正文只说「正在重试（n/m）」，具体秒数由界面按 deadlineAt 走倒计时
+  assert.equal(notices[0].text, "连接中断，正在重试（2/3）", `重试提示应就地更新，实际「${notices[0].text}」`);
+  assert.equal(notices[0].retry.attempt, 2, "提示要反映最新一次重试");
+  assert.equal(notices[0].retry.delayMs, 4000, "退避时间要跟着更新，进度条据此重走");
+  assert.ok(
+    Math.abs(notices[0].retry.deadlineAt - (Date.now() + 4000)) < 2000,
+    `deadlineAt 应是「现在 + 退避时间」，实际差 ${notices[0].retry.deadlineAt - Date.now()}ms`,
+  );
   assert.equal(notices[0].retry.error, "网络连接失败", "错误文案要中文化");
   assert.ok(!notices.some((n) => /Connection error/.test(n.text)), "界面上不应再出现英文原文");
 
@@ -327,5 +334,5 @@ console.log("tool stream OK");
   assert.equal(merged.length, 1, `相同的错误应合并，实际 ${merged.length} 条`);
   assert.equal(merged[0].count, 3, `应显示重复次数，实际 ${merged[0].count}`);
   assert.equal(merged[0].text, "网络连接失败");
-  console.log("retry notice OK 单条复用 / 中文化 / 成功与失败文案 / 重复合并");
+  console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并");
 }

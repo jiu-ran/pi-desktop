@@ -716,6 +716,14 @@
 .notice[data-kind="retry"] .notice-icon { margin-top: 0; width: 14px; height: 14px; }
 .notice[data-kind="retry"] .notice-main { gap: 3px; }
 .notice[data-kind="retry"] .notice-retry-bar { margin-top: 0; height: 2px; }
+/* 重连倒计时：等宽数字，避免每秒跳动时整行左右抖 */
+.notice-countdown {
+  flex: none;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 /* 连续重复的提示只留一条，右侧显示次数 */
 .notice-count {
   flex: none;

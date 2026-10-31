@@ -104,7 +104,6 @@ export interface WorkspaceState {
   cwd: string;
   name: string;
   status: "idle" | "starting" | "ready" | "error";
-  loading?: boolean;
   error: string;
   models: any[];
   branch: string;
