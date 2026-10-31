@@ -5,6 +5,32 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.2] - 2026-10-31
+
+补齐 Pi CLI 的 `/` 命令并修掉一直没生效的项目信任；`/mcp` 不再被 Pi 自带扩展顶掉并补上 OAuth 登录；终端里的后台命令可以原地重跑；「重新连接模型」提示卡的倒计时与进度条终于对得上真实时间。
+
+### 新增
+
+- **`/` 命令补齐到 Pi 1.4.0**：24 条内置命令里 18 条有桌面端等价实现，新增 `/trust`、`/import`、`/changelog`、`/quit`，`/export` 支持 `.jsonl`。
+- **项目信任（`/trust`）**：读写 `<agentDir>/trust.json`（格式与 Pi 一致、支持祖先目录继承），支持信任 / 信任上一级 / 不再信任，写完自动重启 Pi 让项目级扩展、技能与 MCP 重新加载；Skills 页在「需要信任但未生效」时显示横幅与一键信任。
+- **MCP OAuth 登录**：设置页对需要授权的服务提供「登录 / 重新登录 / 退出登录」，转发给本机 `pi mcp login|logout`，完成后刷新状态。
+- **后台命令原地重跑**：跑过的后台命令在输入框留空时按 Enter 就在原标签里重跑（输出清空、标签位置不变）；运行中的任务可以停止，重跑会先停旧的等它退出。
+
+### 修复
+
+- **项目信任从未生效**：桌面端走 RPC 拿不到「是否信任」的确认，Pi 一律按不信任处理，项目级扩展 / 技能 / MCP 静默不加载，而设置页列表是按文件扫的、看起来正常。
+- **`/mcp` 被 Pi 自带扩展顶掉**：撞名时改为桌面端优先，点 `/mcp` 打开 MCP 设置页，不再跑进扩展流程并在对话里留下 `/mcp` 消息。
+- **做不了的命令不再进 `/` 菜单**：`/tree`、`/login`、`/logout`、`/share`、`/bug`、`/scoped-models` 从候选里移除；直接敲出来时解释原因并给出替代做法，不会把 `/login` 当普通文字发给模型。
+- **重连提示卡**：倒计时不再写死秒数（每 200ms 按 deadline 更新，到点显示「正在重试…」），进度条每次重试重新走一遍，重连期间图标转圈。
+- **后台命令标签重复**：`start` 事件早于启动响应到达时，列表里会出现同一个 id 的两条记录。
+- **「正在连接 Pi…」永远不显示**：它挂在一个从未被赋值的 `loading` 字段上，改为按工作区 `status` 判断。
+
+### 工程
+
+- 新增检查：`pi-commands`、`project-trust`、`slash-merge`、`terminal-rerun`、`retry-notice`；`transcript.check` 补上重试提示的 deadline 与退避时间断言。
+- `docs/pi-compatibility.md` 增加「`/` 命令对照」「项目信任」「撞名规则」三节。
+- `npm audit fix` 把 `joi`、`follow-redirects` 升到补丁版本，high / critical 清零；剩余 moderate 在仅构建期使用的 electron-builder 链路（`@electron/asar` 的 `minimatch`），不进安装包。
+
 ## [0.8.1] - 2026-10-30
 
 修复外部工具锁定的 Git Worktree 无法清理问题；全面对齐并重构 Git 分支与状态操作按钮；优化全局可点击交互状态与悬停提示（Tooltip）穿透；增强工作区关闭与生命周期治理。
