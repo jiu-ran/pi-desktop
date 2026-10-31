@@ -1,6 +1,8 @@
 // 连续工具 / 思考步骤的分组与摘要参考 ThinkRail（Apache-2.0）的 ActivityGroup，
 // 见 THIRD-PARTY-NOTICES.md。这里只做纯数据推导，不依赖 Vue 或 pi 运行时。
 
+import { parseMcpTool } from "./mcp-tool.ts";
+
 export interface ActivityBlockLike {
   kind: string;
   id: string;
@@ -82,8 +84,8 @@ export function activityTarget(block: ActivityBlockLike): string {
 export function activityVerb(block: ActivityBlockLike): string {
   if (block.kind === "thinking") return "思考";
   const name = block.name ?? "";
-  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
-  return mcp ? mcp[2]!.replace(/_/g, " ") : (TOOL_VERBS[name] ?? name) || "工具";
+  const mcp = parseMcpTool(name);
+  return mcp ? mcp.label : (TOOL_VERBS[name] ?? name) || "工具";
 }
 
 /** 单个步骤的一行描述，例如「读取 util.ts」「运行 npm run check」。 */
@@ -92,6 +94,12 @@ export function describeActivityBlock(block: ActivityBlockLike): string {
   if (block.kind === "thinking") return verb;
   const target = activityTarget(block);
   return target ? clip(`${verb} ${target}`) : verb;
+}
+
+/** MCP 工具的服务名（不是 MCP 工具返回 null）：时间线上要标出来是外部服务在跑。 */
+export function mcpServerOf(block: ActivityBlockLike): string | null {
+  if (block.kind !== "tool") return null;
+  return parseMcpTool(block.name)?.server ?? null;
 }
 
 export const isFailed = (block: ActivityBlockLike): boolean => Boolean(block.isError) || block.status === "error";

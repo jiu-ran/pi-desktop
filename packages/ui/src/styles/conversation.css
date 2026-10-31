@@ -638,6 +638,15 @@
 .step-verb { flex: none; color: var(--fg); font-weight: 500; }
 .step-target { flex: 1; min-width: 0; overflow: hidden; color: var(--fg-2); font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .step-badge { flex: none; padding: 0 6px; border-radius: 4px; background: var(--bg-2); color: var(--fg-2); font-size: 11px; line-height: 18px; }
+/* MCP 工具：走的是外部服务，用强调色标出来，但不加边框/背景块，避免和「改动」抢注意力 */
+.step-badge[data-tone="mcp"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.step-badge-icon { font-size: 8px; line-height: 1; opacity: 0.9; }
 .step-meta { flex: none; color: var(--fg-3); font: 11.5px var(--mono); }
 .step-error { flex: none; color: var(--err); font-size: 12px; }
 .stat-add { flex: none; color: var(--add-fg); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
@@ -922,6 +931,17 @@
   font-weight: 500;
 }
 .turn-step.is-thinking .turn-step-label { color: var(--fg-3); font-weight: 400; }
+/* 行内 MCP 标记：这一下调用的是外部服务（mcp__<服务>__<工具>） */
+.turn-step-mcp {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  line-height: 16px;
+  letter-spacing: 0.2px;
+}
 .turn-step.is-edit .turn-step-label { color: var(--accent); }
 .turn-step.failed .turn-step-label { color: var(--err); }
 .turn-step-target {

@@ -3,6 +3,7 @@ import {
   activityVerb,
   describeActivityBlock,
   isFailed,
+  mcpServerOf,
   isLiveTool,
   isSettled,
   type ActivityBlockLike,
@@ -56,6 +57,8 @@ export interface TurnStep<T extends ActivityBlockLike = ActivityBlockLike> {
   target: string;
   failed: boolean;
   live: boolean;
+  /** MCP 工具的服务名：这一下是外部服务在跑，行内要标出来 */
+  mcpServer: string | null;
   /** 改动新增行数；非改动步骤为 null */
   added: number | null;
   /** 改动删除行数；写入（write）或非改动步骤为 null */
@@ -77,6 +80,8 @@ export interface TurnGroup<T extends ActivityBlockLike = ActivityBlockLike> {
   editCount: number;
   commandCount: number;
   readCount: number;
+  /** 这次执行里调用了多少次 MCP（外部服务）工具 */
+  mcpCount: number;
   failedCount: number;
   /** 以失败收尾（与旧的活动组同一口径：只看最后一个已结算的工具） */
   errored: boolean;
@@ -199,6 +204,7 @@ export function buildTurnSteps<T extends ActivityBlockLike>(entries: ActivityEnt
       kind: block.kind === "thinking" ? "thinking" : "tool",
       label: stepLabel(block),
       target: stepTarget(block),
+      mcpServer: mcpServerOf(block),
       failed: isFailed(block),
       live: isLiveTool(block) || Boolean(block.streaming),
       added: stat?.added ?? null,
@@ -218,6 +224,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
   | "editCount"
   | "commandCount"
   | "readCount"
+  | "mcpCount"
   | "failedCount"
   | "errored"
   | "live"
@@ -235,6 +242,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
   }
   const commands = tools.filter((entry) => entry.block.name === "bash");
   const reads = tools.filter((entry) => entry.block.name === "read");
+  const mcpCalls = tools.filter((entry) => mcpServerOf(entry.block) !== null);
   const failedCount = tools.filter((entry) => isFailed(entry.block)).length;
   const live = entries.some((entry) => isLiveTool(entry.block) || entry.block.streaming);
   // 只看最后一个已结算的工具：失败后重试成功就不算失败；仍在运行时先不报警
@@ -262,6 +270,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     if (files.size) parts.push(`改 ${files.size} 个文件`);
     if (commands.length) parts.push(`${commands.length} 条命令`);
     if (reads.length) parts.push(`读 ${reads.length} 个文件`);
+    if (mcpCalls.length) parts.push(`MCP ${mcpCalls.length} 次`);
     if (thoughts.length) parts.push(`思考 ${thoughts.length} 段`);
     if (failedCount) parts.push(`${failedCount} 处失败`);
   }
@@ -278,6 +287,7 @@ export function summarizeTurn<T extends ActivityBlockLike>(entries: ActivityEntr
     editCount: files.size,
     commandCount: commands.length,
     readCount: reads.length,
+    mcpCount: mcpCalls.length,
     failedCount,
     errored,
     live,

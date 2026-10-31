@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { TranscriptBlock } from "../../../kernel/transcript.ts";
+import { mcpBadge, parseMcpTool } from "../../../shared/mcp-tool.ts";
 import ToolCard from "./ToolCard.vue";
 import ToolImages from "./ToolImages.vue";
 import SearchHighlight from "../SearchHighlight.vue";
@@ -10,13 +11,10 @@ const props = defineProps<{
   query?: string;
 }>();
 
-const mcp = computed(() => {
-  const parts = (props.block.name ?? "").split("__");
-  return parts[0] === "mcp" && parts.length >= 3 ? { server: parts[1], method: parts.slice(2).join("__") } : null;
-});
+const mcp = computed(() => parseMcpTool(props.block.name));
 
 const verb = computed(() => {
-  if (mcp.value) return mcp.value.method;
+  if (mcp.value) return mcp.value.label;
   const known: Record<string, string> = {
     codemode: "运行脚本",
     grep: "搜索",
@@ -51,7 +49,14 @@ const images = computed(() => props.block.imageItems ?? []);
 </script>
 
 <template>
-  <ToolCard :block="block" :verb="verb" :subtitle="subtitle" :badge="mcp ? `MCP · ${mcp.server}` : ''" :query="query">
+  <ToolCard
+    :block="block"
+    :verb="verb"
+    :subtitle="subtitle"
+    :badge="mcp ? mcpBadge(mcp) : ''"
+    :badge-tone="mcp ? 'mcp' : ''"
+    :query="query"
+  >
     <div v-if="argsText" class="tool-section">
       <span class="tool-section-label">参数</span>
       <pre class="term-out"><SearchHighlight :text="argsText" :query="query" /></pre>

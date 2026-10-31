@@ -10,6 +10,8 @@ const props = withDefaults(
     subtitle?: string;
     meta?: string;
     badge?: string;
+    /** 徽标色调：`mcp` 表示外部 MCP 服务提供的工具 */
+    badgeTone?: "" | "mcp";
     added?: number | null;
     removed?: number | null;
     defaultOpen?: boolean;
@@ -20,6 +22,7 @@ const props = withDefaults(
     subtitle: "",
     meta: "",
     badge: "",
+    badgeTone: "",
     added: null,
     removed: null,
     defaultOpen: false,
@@ -58,7 +61,9 @@ const duration = computed(() => {
       </span>
       <span class="step-verb">{{ verb || title || block.name }}</span>
       <span class="step-target" :title="subtitle">{{ subtitle }}</span>
-      <span v-if="badge" class="step-badge">{{ badge }}</span>
+      <span v-if="badge" class="step-badge" :data-tone="badgeTone || undefined">
+        <span v-if="badgeTone === 'mcp'" class="step-badge-icon" aria-hidden="true">◆</span>{{ badge }}
+      </span>
       <span v-if="added != null" class="stat-add">+{{ added }}</span>
       <span v-if="removed != null" class="stat-del">−{{ removed }}</span>
       <span v-if="meta" class="step-meta">{{ meta }}</span>

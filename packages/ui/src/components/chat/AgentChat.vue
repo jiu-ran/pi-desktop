@@ -867,6 +867,11 @@ watch(searchMatches, () => {
                         @click="toggleRun(item.group, row)"
                       >
                         <span class="turn-step-label">{{ row.steps[0]!.label }}</span>
+                        <span
+                          v-if="row.steps[0]!.mcpServer"
+                          class="turn-step-mcp"
+                          :title="`MCP 服务：${row.steps[0]!.mcpServer}（外部服务提供的工具）`"
+                        >MCP · {{ row.steps[0]!.mcpServer }}</span>
                         <span class="turn-step-count">×{{ row.steps.length }}</span>
                         <span class="turn-step-target">{{ row.target }}</span>
                         <span class="turn-step-meta">
@@ -924,6 +929,11 @@ watch(searchMatches, () => {
                         @click="toggleStep(item.group, row.step.block.id)"
                       >
                         <span class="turn-step-label">{{ row.step.label }}</span>
+                        <span
+                          v-if="row.step.mcpServer"
+                          class="turn-step-mcp"
+                          :title="`MCP 服务：${row.step.mcpServer}（外部服务提供的工具）`"
+                        >MCP · {{ row.step.mcpServer }}</span>
                         <span
                           v-if="row.step.kind !== 'thinking' || !stepOpen(item.group, row.step.block.id)"
                           class="turn-step-target"
