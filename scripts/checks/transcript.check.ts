@@ -334,5 +334,32 @@ console.log("tool stream OK");
   assert.equal(merged.length, 1, `相同的错误应合并，实际 ${merged.length} 条`);
   assert.equal(merged[0].count, 3, `应显示重复次数，实际 ${merged[0].count}`);
   assert.equal(merged[0].text, "网络连接失败");
-  console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并");
+  // 重连成功后，之前那几张「网络连接失败」必须一起消失（截图里的情况：红卡 ×3 一直挂着）
+  const t4 = createTranscript();
+  const boom = () => ({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } });
+  t4.applyEvent(boom());
+  t4.applyEvent(boom());
+  t4.applyEvent(boom());
+  const beforeRetry = t4.blocks.filter((block) => block.kind === "notice" && block.level === "error");
+  assert.equal(beforeRetry.length, 1, "连续三次同样的失败合成一张卡");
+  assert.equal(beforeRetry[0].count, 3, `应显示 ×3，实际 ${beforeRetry[0].count}`);
+  t4.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 5, delayMs: 2000, errorMessage: "Connection error." });
+  // 第二次尝试又失败：错误卡出现在重试卡后面，也要被记住
+  t4.applyEvent(boom());
+  t4.applyEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 5, delayMs: 4000, errorMessage: "Connection error." });
+  t4.applyEvent({ type: "auto_retry_end", attempt: 2, success: true });
+  const afterSuccess = t4.blocks.filter((block) => block.kind === "notice");
+  assert.equal(afterSuccess.length, 1, `重连成功后只该剩一条提示，实际：${afterSuccess.map((b) => b.text).join(" | ")}`);
+  assert.equal(afterSuccess[0].text, "已重新连接（第 2 次重试）");
+  assert.ok(!afterSuccess.some((block) => block.level === "error"), "重连成功后不能再挂红色的失败卡");
+
+  // 彻底失败时保留失败信息（这次确实没连上），但也不能把原因弄丢
+  const t5 = createTranscript();
+  t5.applyEvent(boom());
+  t5.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 2, delayMs: 1000, errorMessage: "Connection error." });
+  t5.applyEvent({ type: "auto_retry_end", attempt: 1, success: false, finalError: "Connection error." });
+  const failedNotices = t5.blocks.filter((block) => block.kind === "notice");
+  assert.ok(failedNotices.some((block) => block.text.includes("重试 1/2 失败")), "失败时要说明重试到第几次");
+
+  console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并 / 成功清掉失败卡");
 }

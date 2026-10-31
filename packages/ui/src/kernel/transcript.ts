@@ -15,6 +15,8 @@ export interface RetryNotice {
   error?: string;
   done?: boolean;
   success?: boolean;
+  /** 被这次重连取代的失败提示 id：重连成功后要一起收掉，别留一张红色的错误卡 */
+  absorbed?: string[];
 }
 
 export interface CompactionNotice {
@@ -79,6 +81,31 @@ function noticeErrorText(value: unknown): string {
  * - 正在重试的那条已经说明了原因时，不再单独插一条同样的错误；
  * - 连续两条一模一样的提示合并成一条并计数（×N），不再各占一行。
  */
+/**
+ * 紧跟在重试提示前面 / 后面的一串失败提示 id。
+ *
+ * 这些卡片和重试卡说的是同一件事：重连成功后必须收掉，否则对话里会一直挂着一张
+ * 「网络连接失败 ×3」的红卡，而实际上早就连上了。
+ */
+function trailingErrorIds(blocks: TranscriptBlock[]): string[] {
+  const ids: string[] = [];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index];
+    if (block.kind !== "notice" || block.level !== "error" || block.retry || block.compaction) break;
+    ids.unshift(block.id);
+  }
+  return ids;
+}
+
+/** 把重连成功后才该消失的失败提示从对话里摘掉。 */
+function dropBlocksById(blocks: TranscriptBlock[], ids: string[]): void {
+  if (!ids.length) return;
+  const drop = new Set(ids);
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (drop.has(blocks[index].id)) blocks.splice(index, 1);
+  }
+}
+
 function pushErrorNotice(blocks: TranscriptBlock[], value: unknown): void {
   const text = noticeErrorText(value);
   if (!text) return;
@@ -353,6 +380,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       case "auto_retry_start": {
         const delay = Math.max(0, Number(event.delayMs ?? 0));
         const reason = noticeErrorText(event.errorMessage);
+        // 先记下这一轮里紧挨着的失败提示：重连成功后它们都要消失
+        const failing = trailingErrorIds(blocks);
         // 同一次故障的多次重试复用同一条提示：以前每轮都 push 新块，
         // 三次重试就在对话里堆三张几乎一样的卡片。
         const running = [...blocks].reverse().find((block) => block.kind === "notice" && block.retry && !block.retry.done);
@@ -362,6 +391,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           running.retry.delayMs = delay;
           running.retry.deadlineAt = Date.now() + delay;
           running.retry.error = reason || running.retry.error;
+          running.retry.absorbed = [...new Set([...(running.retry.absorbed ?? []), ...failing])];
           running.text = retryNoticeText(event.attempt, event.maxAttempts);
           return true;
         }
@@ -378,6 +408,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
             delayMs: delay,
             deadlineAt: Date.now() + delay,
             error: reason || justFailed.text,
+            // 这条自己就是那张错误卡改写的，剩下的同批失败提示一起吸收
+            absorbed: failing.filter((id) => id !== justFailed.id),
           };
           return true;
         }
@@ -392,6 +424,7 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
             delayMs: delay,
             deadlineAt: Date.now() + delay,
             error: reason || undefined,
+            absorbed: failing,
           },
         });
         return true;
@@ -402,6 +435,9 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         notice.retry.done = true;
         notice.retry.success = Boolean(event.success);
         if (event.success) {
+          // 已经连上了，之前那几张「网络连接失败」就不要再挂在对话里
+          dropBlocksById(blocks, notice.retry.absorbed ?? []);
+          notice.retry.absorbed = [];
           notice.level = "info";
           notice.text = retryResultText(true, event.attempt, notice.retry.maxAttempts, "");
         } else {
