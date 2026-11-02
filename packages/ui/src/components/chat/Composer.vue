@@ -10,6 +10,7 @@ import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { PI_BUILTIN_COMMANDS, findPiCommand, terminalCommandNotice } from "../../shared/pi-commands.ts";
+import { parseBashInput } from "../../shared/bash-input.ts";
 import { appSettings } from "../../services/settings.ts";
 import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
@@ -990,6 +991,28 @@ function focus(): void {
 async function submit(): Promise<void> {
   const text = draft.value;
   if ((!text.trim() && !attachments.value.length) || busy.value) return;
+  // `!` / `!!`：直接跑 shell 命令，不发普通提示词（Pi 会把它记进会话）。
+  const bash = bashInput.value;
+  if (bash) {
+    if (bashRunning.value) {
+      bus.emit("notify", { level: "warning", text: "已有命令在运行，先停止它再执行新的命令" });
+      return;
+    }
+    if (!bash.command) {
+      bus.emit("notify", { level: "warning", text: "在 ! 后面输入要运行的命令" });
+      return;
+    }
+    draft.value = "";
+    const accepted = await workbench.runBash(bash.command, bash.excludeFromContext);
+    // 没真正跑起来（Worker 未就绪等）时把输入还给用户，避免白敲一段命令。
+    if (!accepted && !draft.value) draft.value = text;
+    if (accepted) {
+      rememberPrompt(text);
+      historyState.value = { ...EMPTY_HISTORY_STATE };
+    }
+    nextTick(focus);
+    return;
+  }
   if (exact.value?.local && parsed.value) {
     await runLocal(exact.value, parsed.value.arg);
     return;
@@ -1099,6 +1122,11 @@ function onKeydown(event: KeyboardEvent): void {
       return;
     }
   }
+  if (event.key === "Escape" && bashRunning.value) {
+    event.preventDefault();
+    void abortBash();
+    return;
+  }
   if (event.key === "Escape" && ws.value?.streaming) stop();
 }
 
@@ -1139,7 +1167,7 @@ watch(
 
 const placeholder = computed(() => {
   if (ws.value?.streaming) return "继续输入，将按所选方式加入当前任务…";
-  return hasHistory.value ? "继续这个任务，输入 / 使用命令" : "描述一个任务，输入 / 使用命令";
+  return hasHistory.value ? "继续这个任务，输入 / 命令，! 运行 shell" : "描述一个任务，输入 / 命令，! 运行 shell";
 });
 /**
  * 命令后面的参数占位提示（/resume + 空格 → <会话>）。
@@ -1153,6 +1181,15 @@ const argHint = computed(() => {
   if (!args || draft.value.includes("\n")) return "";
   return `${/\s$/.test(draft.value) ? "" : " "}${args}`;
 });
+
+// ---------- `!` 命令（Pi TUI 的同一套写法） ----------
+const bashInput = computed(() => parseBashInput(draft.value));
+const bashRunning = computed(() => Boolean(ws.value?.activeThread?.bashRunning));
+
+async function abortBash(): Promise<void> {
+  await workbench.abortBash();
+  nextTick(focus);
+}
 </script>
 
 <template>
@@ -1403,6 +1440,17 @@ const argHint = computed(() => {
           @hover="(i) => (cursor = i)"
           @pick="(item) => pick(item)"
         />
+
+        <div v-if="bashInput" class="bash-hint">
+          <span class="bash-hint-mark">{{ bashInput.excludeFromContext ? "!!" : "!" }}</span>
+          <span class="bash-hint-text">
+            <template v-if="!bashInput.command">在感叹号后面输入要运行的命令</template>
+            <template v-else-if="bashRunning">已有命令在运行，按 Esc 或卡片上的「停止」先中断它</template>
+            <template v-else-if="bashInput.excludeFromContext">在项目目录里运行；输出只留在会话记录，不交给模型</template>
+            <template v-else>在项目目录里运行；输出会在下一次提问时交给模型</template>
+          </span>
+          <span class="bash-hint-key"><kbd>Enter</kbd> 运行</span>
+        </div>
 
         <div class="composer-field">
           <div v-if="attachments.length" class="attachment-strip">

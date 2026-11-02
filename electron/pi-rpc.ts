@@ -63,6 +63,9 @@ export const RPC_COMMAND_PARAMS: Record<string, string[]> = {
   getForkMessages: [],
   getLastAssistantText: [],
   exportHtml: ["outputPath"],
+  // `bash` 的第三个参数是桌面端生成的关联 id，只用于把流式输出对回卡片，不发给 Pi。
+  bash: ["command", "excludeFromContext"],
+  abortBash: [],
 };
 
 /** 有些命令的 data 里还包了一层，调用方要的是里面那项。 */
@@ -92,7 +95,7 @@ type Listener = (event: any) => void;
 interface Pending {
   resolve: (value: any) => void;
   reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+  timer: NodeJS.Timeout | null;
 }
 
 export class PiRpcClient {
@@ -197,8 +200,14 @@ export class PiRpcClient {
     return this.stderr;
   }
 
-  /** 通用发送：方法名按 COMMANDS 表取参数名，未登记的方法直接拒绝（白名单在外面）。 */
-  async send(method: string, args: any[] = [], timeoutMs = RPC_DEFAULT_TIMEOUT_MS): Promise<any> {
+  /**
+   * 通用发送：方法名按 COMMANDS 表取参数名，未登记的方法直接拒绝（白名单在外面）。
+   *
+   * `timeoutMs <= 0` 表示不设超时（用户直接在对话里跑的命令可能很久）；
+   * `requestId` 允许调用方指定 wire 上的 id，用来把 `bash_execution_update` 事件
+   * 对回界面上的那张卡片。
+   */
+  async send(method: string, args: any[] = [], timeoutMs = RPC_DEFAULT_TIMEOUT_MS, requestId?: string): Promise<any> {
     const params = RPC_COMMAND_PARAMS[method];
     if (!params) throw new Error(`不支持的 RPC 方法：${method}`);
     const child = this.process;
@@ -211,22 +220,24 @@ export class PiRpcClient {
       const value = args[index];
       if (value !== undefined) payload[name] = value;
     });
-    const id = `req_${++this.requestId}`;
+    const id = requestId?.trim() || `req_${++this.requestId}`;
     payload.id = id;
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new RpcTimeoutError(method, timeoutMs, this.stderr));
-      }, timeoutMs);
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+            this.pending.delete(id);
+            reject(new RpcTimeoutError(method, timeoutMs, this.stderr));
+          }, timeoutMs)
+        : null;
       this.pending.set(id, {
         timer,
         resolve: (value) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           resolve(value);
         },
         reject: (error) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           reject(error);
         },
       });
@@ -234,7 +245,7 @@ export class PiRpcClient {
         stdin.write(`${JSON.stringify(payload)}\n`);
       } catch (error: any) {
         this.pending.delete(id);
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         reject(new Error(`写入 Pi 进程失败：${error?.message ?? error}`));
       }
     });
@@ -332,6 +343,16 @@ export class PiRpcClient {
   }
   setSessionName(name: string): Promise<any> {
     return this.call("setSessionName", [name]);
+  }
+  /**
+   * 用户在对话里直接跑的命令。不设客户端超时：一条 `npm run build` 可以跑几分钟，
+   * 超时只代表桌面端不等了，Pi 那边的命令还在继续，反而会留下一条收不回来的卡片。
+   */
+  bash(command: string, excludeFromContext?: boolean, id?: string): Promise<any> {
+    return this.send("bash", [command, excludeFromContext], 0, id);
+  }
+  abortBash(): Promise<any> {
+    return this.call("abortBash");
   }
 
   // ---------- 内部 ----------

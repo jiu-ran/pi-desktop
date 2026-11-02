@@ -376,6 +376,8 @@ export interface WorkerSlot {
   sessionFile: string;
   streaming: boolean;
   compacting: boolean;
+  /** 用户从对话里发起的 `!` 命令正在跑：不能被当作空闲 Worker 切走 / 回收 */
+  bashRunning?: boolean;
   lastState?: any;
 }
 
@@ -1392,11 +1394,11 @@ export class PiHost {
   private findIdleSlot(pool: WorkspaceClientPool): WorkerSlot | null {
     const activeKey = normSessionFile(pool.activeSessionFile);
     const activeSlot = pool.workers.get(activeKey);
-    if (activeSlot && !activeSlot.streaming && !activeSlot.compacting) {
+    if (activeSlot && !activeSlot.streaming && !activeSlot.compacting && !activeSlot.bashRunning) {
       return activeSlot;
     }
     for (const slot of pool.workers.values()) {
-      if (!slot.streaming && !slot.compacting) return slot;
+      if (!slot.streaming && !slot.compacting && !slot.bashRunning) return slot;
     }
     return null;
   }
@@ -1404,7 +1406,7 @@ export class PiHost {
   private pruneIdleWorkers(pool: WorkspaceClientPool, maxIdle = this.maxIdleWorkers): void {
     const activeKey = normSessionFile(pool.activeSessionFile);
     const idleSlots = [...pool.workers.entries()].filter(
-      ([key, slot]) => key !== activeKey && !slot.streaming && !slot.compacting,
+      ([key, slot]) => key !== activeKey && !slot.streaming && !slot.compacting && !slot.bashRunning,
     );
     while (idleSlots.length > maxIdle) {
       const oldest = idleSlots.shift();
@@ -1744,8 +1746,8 @@ export class PiHost {
       case "createBranch":
       case "deleteBranch": {
         const pool = [...this.clients.entries()].find(([k]) => samePath(k, workspace))?.[1];
-        if (pool && [...pool.workers.values()].some(slot => slot.streaming || slot.compacting)) {
-          throw new Error("当前项目有 Agent 任务运行中，请等待结束后再切换、新建或删除分支");
+        if (pool && [...pool.workers.values()].some(slot => slot.streaming || slot.compacting || slot.bashRunning)) {
+          throw new Error("当前项目有 Agent 任务或命令运行中，请等待结束后再切换、新建或删除分支");
         }
         message = await changeGitBranch(root, name, payload);
         completionCache.delete(completionKey(workspace));
@@ -2258,8 +2260,8 @@ export class PiHost {
     if (samePath(entry.path, workspace)) throw new Error("不能移除当前正在使用的工作区");
     for (const [itemCwd, pool] of [...this.clients.entries()]) {
       if (samePath(itemCwd, entry.path)) {
-        if ([...pool.workers.values()].some((slot) => slot.streaming || slot.compacting)) {
-          throw new Error("该隔离工作区仍有 Agent 任务正在运行，请等待结束后再移除");
+        if ([...pool.workers.values()].some((slot) => slot.streaming || slot.compacting || slot.bashRunning)) {
+          throw new Error("该隔离工作区仍有 Agent 任务或命令正在运行，请等待结束后再移除");
         }
         await this.discardWorkspace(itemCwd);
       }
@@ -2388,8 +2390,8 @@ export class PiHost {
     return withFileWrite(path.join(primaryRoot, ".git-pi-operation"), async () => {
       for (const checkPath of [primaryRoot, entry.path]) {
         const pool = [...this.clients.entries()].find(([k]) => samePath(k, checkPath))?.[1];
-        if (pool && [...pool.workers.values()].some((slot) => slot.streaming || slot.compacting)) {
-          throw new Error("相关工作区仍有 Agent 任务正在运行，请等待任务结束后再合并");
+        if (pool && [...pool.workers.values()].some((slot) => slot.streaming || slot.compacting || slot.bashRunning)) {
+          throw new Error("相关工作区仍有 Agent 任务或命令正在运行，请等待任务结束后再合并");
         }
       }
 
@@ -3078,6 +3080,18 @@ export class PiHost {
         pool.activeSessionFile = slot.sessionFile;
       }
       return res;
+    }
+
+    if (method === "bash") {
+      // `abort_bash` 会中断这个会话里所有正在跑的命令：一条一条来，
+      // 顺便让切换会话 / 新建会话把这一槽 Worker 当成「忙」，不要切走。
+      if (slot.bashRunning) throw new Error("这个会话已有命令在运行，先停止它再执行新的命令");
+      slot.bashRunning = true;
+      try {
+        return await client.bash(...restored);
+      } finally {
+        slot.bashRunning = false;
+      }
     }
 
     return client[method](...restored);

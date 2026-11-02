@@ -50,7 +50,9 @@ assert.deepEqual(RPC_COMMAND_PARAMS.switchSession, ["sessionPath"]);
 assert.deepEqual(RPC_COMMAND_PARAMS.fork, ["entryId"]);
 assert.deepEqual(RPC_COMMAND_PARAMS.compact, ["customInstructions"]);
 assert.deepEqual(RPC_COMMAND_PARAMS.setSessionName, ["name"]);
-assert.deepEqual(RPC_COMMAND_PARAMS.bash ?? [], [], "bash 不在白名单里，不应该出现参数表");
+assert.deepEqual(RPC_COMMAND_PARAMS.bash, ["command", "excludeFromContext"], "bash 的 wire 字段顺序错了");
+assert.equal(rpcCommandType("bash"), "bash");
+assert.equal(rpcCommandType("abortBash"), "abort_bash");
 
 // 压缩上下文靠「单命令超时 30 秒」这个数值决定要不要改等事件，两处必须一致
 assert.equal(COMPACT_RPC_TIMEOUT_MS, RPC_DEFAULT_TIMEOUT_MS, "compact-wait 的超时常量与 RPC 客户端不一致");

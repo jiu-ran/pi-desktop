@@ -23,6 +23,7 @@
 | `/` 命令由桌面端自己实现一遍 | `packages/ui/src/shared/pi-commands.ts`、`services/slash-commands.ts` | RPC 的 `get_commands` 只返回扩展 / 提示模板 / 技能三类，Pi 的 24 条内置命令都得自己接 | Pi 的 RPC 直接提供内置命令的枚举与执行 |
 | 项目信任自己读写 `trust.json` | `electron/project-trust.ts` | Pi 在 RPC 模式下拿不到「信不信任这个目录」的回答，默认按不信任处理，项目级扩展 / 技能 / MCP 会静默不加载 | Pi 的 RPC 提供 trust 查询与设置 |
 | 会话导入 / JSONL 导出自己实现 | `electron/pi-host.ts`（`importSession` / `exportSessionJsonl`） | RPC 只有 `export_html`，没有 import / jsonl 导出 | Pi 的 RPC 补齐这两条命令 |
+| 对话里的 `!` / `!!` 走 RPC `bash` | `electron/pi-rpc.ts`、`packages/ui/src/shared/bash-input.ts` | 命令输出要在对话里边跑边看；RPC 的最终结果与流式增量靠桌面端生成的 `id` 关联 | Pi 的 RPC 取消 `bash` / `abort_bash` 或改为其它协议 |
 
 ## 自己实现部分的已知差异
 

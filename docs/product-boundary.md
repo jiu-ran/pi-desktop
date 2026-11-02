@@ -35,7 +35,7 @@ Pi Desktop 是本机 Pi Coding Agent 的桌面工作台。Pi 是唯一的 Agent�
 
 | 能力 | 归属 | 说明 |
 | --- | --- | --- |
-| 对话与内置工具卡片（read / bash / edit / write） | 核心 | Pi 的输出与内置工具 |
+| 对话与内置工具卡片（read / bash / edit / write），以及输入框里的 `!` / `!!` 命令 | 核心 | Pi 的输出、内置工具与 RPC `bash` |
 | 会话、模型与思考等级、斜杠命令 | 核心 | Pi 自带 |
 | `@` 文件 / 文件夹引用 | 核心 | Pi TUI 的补全就是文件 |
 | Skills / MCP / Packages / AGENTS.md | 核心 | Pi 自带的配置能力 |

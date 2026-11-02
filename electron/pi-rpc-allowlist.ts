@@ -5,4 +5,5 @@ export const PI_RPC_ALLOWLIST = Object.freeze([
   "setAutoCompaction", "setAutoRetry", "setSteeringMode", "setFollowUpMode", "setMaxIdleWorkers",
   "compact", "getSessionStats", "getCommands", "getTree", "fork", "setSessionName",
   "clone", "getForkMessages", "getLastAssistantText", "exportHtml",
+  "bash", "abortBash",
 ]);

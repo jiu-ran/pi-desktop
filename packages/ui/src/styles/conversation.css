@@ -1090,6 +1090,51 @@
 .term .term-out { border-radius: 0; background: transparent; }
 .term-out.err { background: var(--del-bg); color: var(--del-fg); }
 
+/* 对话里的 `!` / `!!` 命令：和工具卡片分开，标清输出是否进入模型上下文 */
+.bash-card { display: flex; flex-direction: column; }
+.bash-head-row { display: flex; align-items: center; gap: 6px; }
+.bash-head-row .step-head { flex: 1; width: auto; }
+.bash-stop {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--err);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.bash-stop:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
+.bash-stop:disabled { opacity: 0.55; cursor: default; }
+.bash-card .term-out { max-height: 420px; }
+.bash-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+.bash-meta { min-width: 0; }
+.bash-warn { color: var(--warn); }
+.bash-copy {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.bash-copy:hover { background: var(--hover); color: var(--fg); }
+
 .diff-file { overflow: hidden; color: var(--fg-3); font: 11.5px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .diff-view {
   max-height: 420px;
@@ -2196,6 +2241,24 @@
   pointer-events: none;
 }
 .arg-ghost { color: transparent; }
+
+/* 输入框上方的 `!` 命令提示：说清输出会不会进上下文 */
+.bash-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.bash-hint-mark { flex: none; color: var(--ok-fg); font: 600 12px var(--mono); }
+.bash-hint-text { flex: 1; min-width: 0; }
+.bash-hint-key { flex: none; color: var(--fg-3); font-size: 11px; }
+.bash-hint-key kbd { margin-right: 3px; }
 
 .ext-widgets { display: flex; flex-direction: column; gap: 6px; }
 .ext-widget { padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-1); }

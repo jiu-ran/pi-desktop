@@ -4,6 +4,7 @@ import UserMessage from "./messages/UserMessage.vue";
 import AssistantText from "./messages/AssistantText.vue";
 import ThinkingBlock from "./messages/ThinkingBlock.vue";
 import NoticeBlock from "./messages/NoticeBlock.vue";
+import BashExecution from "./messages/BashExecution.vue";
 import BashTool from "./tools/BashTool.vue";
 import DiffTool from "./tools/DiffTool.vue";
 import ReadTool from "./tools/ReadTool.vue";
@@ -56,6 +57,7 @@ provide("piBlockHeadless", toRef(props, "headless"));
   <AssistantText v-else-if="block.kind === 'text'" :block="block" :query="bodyQuery" :copy-text="copyText" />
   <ThinkingBlock v-else-if="block.kind === 'thinking'" :block="block" />
   <NoticeBlock v-else-if="block.kind === 'notice'" :block="block" />
+  <BashExecution v-else-if="block.kind === 'bash'" :block="block" />
   <template v-else-if="block.kind === 'tool'">
     <BashTool v-if="block.name === 'bash'" :block="block" />
     <DiffTool v-else-if="block.name === 'edit' || block.name === 'write'" :block="block" />

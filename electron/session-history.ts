@@ -11,7 +11,7 @@
 
 import { open, readFile, stat } from "node:fs/promises";
 
-const HISTORY_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "toolResult"]);
+const HISTORY_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "toolResult", "bashExecution"]);
 
 export interface HistoryPage {
   messages: any[];
@@ -42,6 +42,7 @@ export interface SliceOptions {
  */
 function countBlocks(message: any): number {
   if (message?.role === "user") return 1;
+  if (message?.role === "bashExecution") return 1;
   if (message?.role === "assistant") {
     let count = 0;
     for (const part of message.content ?? []) {

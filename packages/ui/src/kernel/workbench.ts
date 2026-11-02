@@ -86,6 +86,8 @@ export interface SessionThreadState {
   thinking: string;
   streaming: boolean;
   compacting: boolean;
+  /** 当前会话里有一条 `!` 命令还在跑（不是 Agent 的工具调用） */
+  bashRunning: boolean;
   queue: { steering: string[]; followUp: string[] };
   usage: any;
   blocks: TranscriptBlock[];
@@ -133,6 +135,11 @@ export interface WorkspaceState {
 
 function normalizeThreadKey(file = ""): string {
   return (file || "__default__").replace(/\\/g, "/").toLowerCase();
+}
+
+/** 这个会话是否还有活要干（Agent 输出、压缩，或用户直接跑的 `!` 命令）。 */
+function threadBusy(thread: SessionThreadState): boolean {
+  return thread.streaming || thread.compacting || thread.bashRunning;
 }
 
 function savedWidth(key: string, min: number, max: number, fallback: number): number {
@@ -336,6 +343,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       thinking: "off",
       streaming: false,
       compacting: false,
+      bashRunning: false,
       queue: { steering: [], followUp: [] },
       usage: null,
       blocks: transcript.blocks,
@@ -458,9 +466,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
         saveDraftSoon(this.cwd, thread.sessionFile, draftOf(thread));
       },
       get runningSessionCount(): number {
-        return Object.values(this.threads as Record<string, SessionThreadState>).filter(
-          (t) => t.streaming || t.compacting,
-        ).length;
+        return Object.values(this.threads as Record<string, SessionThreadState>).filter(threadBusy).length;
       },
       get hasAnyRunning(): boolean {
         return this.runningSessionCount > 0;
@@ -1525,6 +1531,54 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  /**
+   * 对话里的 `!` / `!!`：命令直接在项目目录里跑，输出由 Pi 记进会话。
+   *
+   * 同一会话同时只允许一条：`abortBash` 会中断所有正在跑的命令，并发跑两条时
+   * 「停止」分不清停哪条。事件与响应靠 requestId 对回卡片。
+   */
+  let bashSeq = 0;
+  async function runBash(command: string, excludeFromContext = false): Promise<boolean> {
+    const ws = active.value;
+    const text = String(command ?? "").trim();
+    if (!ws || !text) return false;
+    const pending = pendingNewSessions.get(ws.cwd);
+    if (pending) await pending.catch(() => {});
+    const targetSessionFile = ws.sessionFile;
+    const thread = ensureThread(ws, targetSessionFile);
+    if (thread.blocks.some((block) => block.kind === "bash" && block.status === "running")) {
+      bus.emit("notify", { level: "warning", text: "已有命令在运行，先停止它再执行新的命令" });
+      return false;
+    }
+    const requestId = `bash_${Date.now().toString(36)}_${(bashSeq += 1)}`;
+    thread.transcript.beginBash(requestId, text, excludeFromContext);
+    thread.bashRunning = true;
+    thread.loaded = true;
+    try {
+      const result = await rpc(ws.cwd, "bash", [text, excludeFromContext, requestId], targetSessionFile);
+      thread.transcript.finishBash(requestId, result);
+      return true;
+    } catch (error: any) {
+      thread.transcript.failBash(requestId, error);
+      bus.emit("notify", { level: "error", text: `命令执行失败：${error?.message ?? String(error)}` });
+      return false;
+    } finally {
+      thread.bashRunning = false;
+    }
+  }
+
+  /** 停止当前会话里正在跑的 `!` 命令。 */
+  async function abortBash(sessionFile?: string): Promise<void> {
+    const ws = active.value;
+    if (!ws) return;
+    const targetSessionFile = sessionFile ?? ws.sessionFile;
+    try {
+      await rpc(ws.cwd, "abortBash", [], targetSessionFile);
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+    }
+  }
+
   async function stop(): Promise<string> {
     const ws = active.value;
     if (!ws) return "";
@@ -1533,6 +1587,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const targetSessionFile = ws.sessionFile;
     const thread = ensureThread(ws, targetSessionFile);
     const queued = await rpc(ws.cwd, "clearQueue", [], targetSessionFile);
+    // 「停止」是对整个任务的：连同对话里正在跑的 `!` 命令一起中断。
+    await rpc(ws.cwd, "abortBash", [], targetSessionFile).catch(() => {});
     await rpc(ws.cwd, "abort", [], targetSessionFile);
     const prompts = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])].map(String);
     // 队列被清空后 planQueuedFlush 会把残留的气泡当成「刚发出去」挪到末尾，
@@ -2594,6 +2650,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     loadMoreMessages,
     call,
     send,
+    runBash,
+    abortBash,
     stop,
     newSession,
     switchSession,

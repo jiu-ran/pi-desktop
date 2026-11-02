@@ -30,7 +30,7 @@ export interface CompactionNotice {
 }
 
 export interface TranscriptBlock {
-  kind: "user" | "text" | "thinking" | "tool" | "notice";
+  kind: "user" | "text" | "thinking" | "tool" | "notice" | "bash";
   id: string;
   text?: string;
   images?: number;
@@ -74,6 +74,16 @@ export interface TranscriptBlock {
   count?: number;
   /** 块创建时间（毫秒）：回合分组用它算「这一轮花了多久」 */
   ts?: number;
+  /** 用户在对话里用 `!` 直接跑的命令 */
+  command?: string;
+  /** 与 Pi 的 `bash_execution_update` 事件对应的请求 id */
+  requestId?: string;
+  exitCode?: number | null;
+  cancelled?: boolean;
+  truncated?: boolean;
+  fullOutputPath?: string;
+  /** `!!` 命令：输出不进入模型上下文 */
+  excludeFromContext?: boolean;
 }
 
 /** 网络类英文报错压成短中文：重试提示里只留一句，不再整段英文堆着。 */
@@ -219,6 +229,31 @@ function applyToolResult(block: TranscriptBlock, result: any): void {
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
 
+/**
+ * Pi 会话里的 `bashExecution` 消息（用户在 TUI / RPC 里直接跑的命令）。
+ * 它不是工具结果，没有 toolCallId，界面上单独一张卡片。
+ */
+function bashBlock(message: any): Omit<TranscriptBlock, "id"> {
+  const exitCode = typeof message.exitCode === "number" ? message.exitCode : null;
+  const cancelled = Boolean(message.cancelled);
+  const failed = !cancelled && exitCode !== null && exitCode !== 0;
+  return {
+    kind: "bash",
+    command: String(message.command ?? ""),
+    output: String(message.output ?? ""),
+    status: failed ? "error" : "done",
+    isError: failed,
+    exitCode,
+    cancelled,
+    truncated: Boolean(message.truncated),
+    fullOutputPath: message.fullOutputPath ? String(message.fullOutputPath) : undefined,
+    excludeFromContext: Boolean(message.excludeFromContext),
+    durationMs: null,
+    startedAt: null,
+    ts: Number(message.timestamp) || Date.now(),
+  };
+}
+
 export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) => arr) {
   const blocks = wrap<TranscriptBlock[]>([]);
   const tools = new Map<string, TranscriptBlock>();
@@ -258,6 +293,10 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
   }
 
   function appendMessage(message: any): void {
+    if (message.role === "bashExecution") {
+      blocks.push({ ...bashBlock(message), id: uid("b") });
+      return;
+    }
     if (message.role === "user") {
       const block = userBlock(message.content);
       if (block.text || block.images || block.attachments?.length || block.skill) blocks.push({ ...block, id: uid("u") });
@@ -413,6 +452,15 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
         block.isError = Boolean(event.isError);
         block.status = event.isError ? "error" : "done";
         block.durationMs = event.durationMs ?? null;
+        return true;
+      }
+      case "bash_execution_update": {
+        // 事件里的 id 是桌面端在发起 bash 时指定的，用它把增量对回那张卡片。
+        const block = blocks.find(
+          (item) => item.kind === "bash" && item.requestId === event.id && item.status === "running",
+        );
+        if (!block) return false;
+        block.output = (block.output ?? "") + String(event.delta ?? "");
         return true;
       }
       case "auto_retry_start": {
@@ -591,10 +639,66 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     }
   }
 
+  /**
+   * 用户发起一条 `!` / `!!` 命令：先放一张运行中的卡片，再等 RPC 的最终结果。
+   * 先把卡片建好，`bash_execution_update` 才有地方落。
+   */
+  function beginBash(requestId: string, command: string, excludeFromContext = false): TranscriptBlock {
+    const block: TranscriptBlock = {
+      kind: "bash",
+      id: uid("b"),
+      requestId,
+      command,
+      output: "",
+      status: "running",
+      isError: false,
+      exitCode: null,
+      cancelled: false,
+      truncated: false,
+      excludeFromContext,
+      startedAt: Date.now(),
+      ts: Date.now(),
+    };
+    blocks.push(block);
+    return block;
+  }
+
+  /** 结束一条命令：最终输出以 RPC 响应为准（流式增量可能只保留了末尾一段）。 */
+  function finishBash(requestId: string, result: any): boolean {
+    const block = blocks.find((item) => item.kind === "bash" && item.requestId === requestId);
+    if (!block) return false;
+    const exitCode = typeof result?.exitCode === "number" ? result.exitCode : null;
+    const cancelled = Boolean(result?.cancelled);
+    const failed = !cancelled && exitCode !== null && exitCode !== 0;
+    block.output = String(result?.output ?? block.output ?? "");
+    block.exitCode = exitCode;
+    block.cancelled = cancelled;
+    block.truncated = Boolean(result?.truncated);
+    block.fullOutputPath = result?.fullOutputPath ? String(result.fullOutputPath) : undefined;
+    block.isError = failed;
+    block.status = failed ? "error" : "done";
+    if (block.startedAt) block.durationMs = Date.now() - block.startedAt;
+    return true;
+  }
+
+  /** RPC 本身失败（Worker 未就绪、Pi 进程退出）：卡片保留失败原因，不伪装成「没跑过」。 */
+  function failBash(requestId: string, error: unknown): boolean {
+    const block = blocks.find((item) => item.kind === "bash" && item.requestId === requestId);
+    if (!block) return false;
+    const reason = String((error as any)?.message ?? error ?? "执行失败");
+    block.output = [block.output, reason].filter(Boolean).join("\n");
+    block.isError = true;
+    block.status = "error";
+    if (block.startedAt) block.durationMs = Date.now() - block.startedAt;
+    return true;
+  }
+
   function prependMessages(messages: any[]): void {
     const newBlocks: TranscriptBlock[] = [];
     for (const message of messages ?? []) {
-      if (message.role === "user") {
+      if (message.role === "bashExecution") {
+        newBlocks.push({ ...bashBlock(message), id: uid("b") });
+      } else if (message.role === "user") {
         const block = userBlock(message.content);
         if (block.text || block.images || block.attachments?.length) newBlocks.push({ ...block, id: uid("u") });
       } else if (message.role === "assistant") {
@@ -635,5 +739,5 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
     blocks.unshift(...newBlocks);
   }
 
-  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages, removeBlock, moveBlockToEnd };
+  return { blocks, loadMessages, applyEvent, pushUser, pushNotice, attachUsage, prependMessages, removeBlock, moveBlockToEnd, beginBash, finishBash, failBash };
 }
