@@ -91,7 +91,7 @@ export async function checkSettingsInElectron(win) {
   assert.equal(nav.sections.filter((item) => item.active).length, 1, "只应有一个分区高亮");
   assert.equal(nav.sections.filter((item) => item.current === "page").length, 1, "高亮的分区要带 aria-current=page");
   assert.ok(nav.sections.every((item) => item.title.length > 4), `分区项要有 title（悬停能看到说明），实际：${JSON.stringify(nav.sections.map((item) => item.title))}`);
-  assert.equal(nav.sections.map((item) => item.count).join(""), "241113", "分区右侧标出二级 tab 数量");
+  assert.equal(nav.sections.map((item) => item.count).join(""), "251113", "分区右侧标出二级 tab 数量");
   assert.ok(nav.subtabs.length >= 2, "对话分区下应有二级 tab");
   // Pi CLI / Pi Desktop 是平级的一级分区，且只有一页 —— 所以没有二级 tab
   const piSections = nav.sections.filter((item) => ["Pi CLI", "Pi Desktop"].includes(item.label));
@@ -164,8 +164,8 @@ export async function checkSettingsInElectron(win) {
   assert.deepEqual(problems, [], `分区渲染问题：${problems.join("；")}`);
   assert.deepEqual(
     visited.slice().sort(),
-    ["agents", "conversation", "environment", "logs", "mcp", "packages", "plugins", "section:look", "section:pi-cli-section", "section:pi-desktop-section", "skills", "terminal"],
-    `六个分区要覆盖全部 12 个设置页，实际 ${visited.join("/")}`,
+    ["agents", "conversation", "environment", "logs", "mcp", "packages", "plugins", "section:look", "section:pi-cli-section", "section:pi-desktop-section", "skills", "terminal", "tools"],
+    `六个分区要覆盖全部 13 个设置页，实际 ${visited.join("/")}`,
   );
 
   // 全局提示词页：编辑器必须按主题铺开（曾因为 CSS 丢了只剩两行白底，读不出来）
