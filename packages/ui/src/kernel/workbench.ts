@@ -40,6 +40,7 @@ import type {
   McpOverview,
   PiPackagesOverview,
   PiSkillsOverview,
+  PiToolsOverview,
   WorkspaceEntry,
   WorkspaceFileData,
 } from "../env.d.ts";
@@ -2502,6 +2503,46 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return mockSkillsOverview;
   }
 
+  const mockToolsOverview: PiToolsOverview = {
+    agentDir: "~/.pi/agent",
+    globalSettingsPath: "~/.pi/agent/settings.json",
+    projectSettingsPath: ".pi/settings.json",
+    effectiveScope: "default",
+    globalConfigured: false,
+    projectConfigured: false,
+    projectTrusted: true,
+    projectWritable: true,
+    globalEntries: [],
+    projectEntries: [],
+    tools: [
+      { name: "read", label: "读取文件", description: "读取文本文件与支持的图片", group: "builtin", enabled: true, defaultEnabled: true },
+      { name: "bash", label: "运行命令", description: "在本机 shell 里执行命令", group: "builtin", enabled: true, defaultEnabled: true },
+      { name: "edit", label: "编辑文件", description: "对已有文件做精确文本替换", group: "builtin", enabled: true, defaultEnabled: true },
+      { name: "write", label: "写入文件", description: "创建文件或覆盖已有内容", group: "builtin", enabled: true, defaultEnabled: true },
+      { name: "codemode", label: "Codemode 脚本", description: "用一段 JavaScript 并行调用其它工具", group: "extension", enabled: false, defaultEnabled: false },
+    ],
+    enabledNames: ["read", "bash", "edit", "write"],
+    extraEntries: [],
+    diagnostics: [],
+  };
+
+  async function toolsOverview(): Promise<PiToolsOverview> {
+    if (host?.toolsOverview) return host.toolsOverview(state.activeCwd || undefined);
+    return mockToolsOverview;
+  }
+
+  async function toolsSet(payload: {
+    scope: "global" | "project";
+    name: string;
+    enabled: boolean;
+  }): Promise<PiToolsOverview> {
+    if (host?.toolsSet) return host.toolsSet(state.activeCwd || "", JSON.parse(JSON.stringify(payload)));
+    const item = mockToolsOverview.tools.find((tool) => tool.name === payload.name);
+    if (item) item.enabled = payload.enabled;
+    mockToolsOverview.enabledNames = mockToolsOverview.tools.filter((tool) => tool.enabled).map((tool) => tool.name);
+    return mockToolsOverview;
+  }
+
   // 刷新 / 关窗时把防抖窗口里的草稿补写掉：不补的话刚加上的附件会丢。
   if (typeof window !== "undefined") {
     window.addEventListener("pagehide", flushPendingDrafts);
@@ -2627,6 +2668,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     packagesRemove,
     packagesUpdate,
     skillsOverview,
+    toolsOverview,
+    toolsSet,
   };
 }
 

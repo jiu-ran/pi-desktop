@@ -23,6 +23,7 @@
 | `/` 命令由桌面端自己实现一遍 | `packages/ui/src/shared/pi-commands.ts`、`services/slash-commands.ts` | RPC 的 `get_commands` 只返回扩展 / 提示模板 / 技能三类，Pi 的 24 条内置命令都得自己接 | Pi 的 RPC 直接提供内置命令的枚举与执行 |
 | 项目信任自己读写 `trust.json` | `electron/project-trust.ts` | Pi 在 RPC 模式下拿不到「信不信任这个目录」的回答，默认按不信任处理，项目级扩展 / 技能 / MCP 会静默不加载 | Pi 的 RPC 提供 trust 查询与设置 |
 | 会话导入 / JSONL 导出自己实现 | `electron/pi-host.ts`（`importSession` / `exportSessionJsonl`） | RPC 只有 `export_html`，没有 import / jsonl 导出 | Pi 的 RPC 补齐这两条命令 |
+| 工具开关写入 `defaultTools`，启动时用 `--tools` 校正 | `electron/pi-tools.ts`、`packages/ui/src/components/overlays/settings/ToolSettings.vue` | RPC 没有运行时启停工具的接口；`defaultTools` 只在启动时读取，已有会话还会从记录里恢复自己的工具 | Pi 的 RPC 提供工具清单与运行时启停 |
 
 ## 自己实现部分的已知差异
 
@@ -56,6 +57,20 @@ Pi 的内置命令在 CLI 的交互模式里实现，RPC 的 `get_commands` 只�
 MCP 服务的 OAuth 授权仍然交给 Pi：设置页的「登录 / 退出登录」直接转发 `pi mcp login|logout`（授权在浏览器里完成，凭据由 Pi 保存），完成后自动刷新服务状态。
 
 只能在终端里做的命令**不进 `/` 菜单**（菜单里只列真能执行的）。直接敲出来时：菜单里显示「/login 只能在终端里用」，回车给出一句说明（为什么没做 + 现在怎么做），同时清空输入框 —— **不会**把 `/login` 这样的文字发给模型。
+
+### 工具开关（`defaultTools`）
+
+设置 → 扩展 → 工具开关读写 Pi 的 `defaultTools`（全局或项目 `.pi/settings.json`），沿用 Pi 的语义：
+
+- 普通名单替换默认的 `read` / `bash` / `edit` / `write`，只有 `+name` / `-name` 才叠加；空数组表示全部停用。
+- 项目普通名单替换全局；项目只写 `+/-` 时叠加在全局选择上。
+- 写入时把当前解析结果写成普通名单（目录外的扩展工具名 / `mcp__*` 条目原样保留），文件里看到的就是实际选择。
+- `codemode` / `tool_search` 属于内置扩展，也能在这里启用；MCP 工具不受影响，仍由 MCP 页的暴露模式控制。
+- 项目级开关和其他 `.pi` 资源一样受项目信任约束：未信任时 Pi 不加载 `.pi/settings.json`，桌面端也不写（设置页会给出「信任此项目」按钮，或先执行 `/trust`）。
+
+**已有会话也要生效**：Pi 1.3 起恢复会话时会保留会话记录里的工具，只改 `defaultTools` 对它们无效。因此桌面端在 `defaultTools` 有配置时，启动 Pi 会附上 `--tools +read,+bash,…,-write,…`（Pi 1.1 起是叠加语义），把目录内工具校正到开关状态；没配置过时不传，保持 Pi 自己的默认行为与恢复规则。启动参数在 `PiRpcClient.start()` 里追加，正常 worker 与温备 worker 都走同一条路径。
+
+开关在下次启动 Pi 时读取；设置页提供「重启空闲会话」，正在输出的会话会在本轮结束后才用上新工具。
 
 ### 项目信任（`/trust`）
 

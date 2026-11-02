@@ -730,7 +730,7 @@ const workspaceChannels = new Set([
   "pi:project-trust", "pi:project-trust-set", "pi:import-session", "pi:export-session-jsonl", "pi:mcp-overview", "pi:git-action",
   "pi:mcp-probe", "pi:mcp-login", "pi:mcp-logout", "pi:mcp-save-server", "pi:mcp-update-server", "pi:mcp-remove-server",
   "pi:mcp-set-auto-codemode", "pi:mcp-import-json", "pi:packages-overview", "pi:packages-install",
-  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
+  "pi:packages-remove", "pi:packages-update", "pi:skills-overview", "pi:tools-overview", "pi:tools-set", "pi:terminal-start", "pi:terminal-shell", "pi:terminal-pty",
 ]);
 
 /** 超过这个耗时的 IPC 会记一条：界面「卡住」时能直接看到是哪个调用慢。 */
@@ -1015,6 +1015,8 @@ app.whenReady().then(() => {
   handle("pi:packages-remove", (cwd: string, payload: any) => host.packagesRemove(cwd, payload));
   handle("pi:packages-update", (cwd: string, payload?: any) => host.packagesUpdate(cwd, payload));
   handle("pi:skills-overview", (cwd?: string) => host.skillsOverview(cwd));
+  handle("pi:tools-overview", (cwd?: string) => host.toolsOverview(cwd));
+  handle("pi:tools-set", (cwd: string, payload: any) => host.toolsSet(cwd, payload));
   handle("pi:terminal-start", (cwd: string, command: string, options?: TerminalPtyOptions) => terminalHost.startWithProfile(cwd, command, options));
   handle("pi:terminal-shell", (cwd: string) => terminalHost.startShell(cwd));
   handle("pi:terminal-pty", (cwd: string, cols?: number, rows?: number, options?: TerminalPtyOptions) => terminalHost.startPty(cwd, cols, rows, options));

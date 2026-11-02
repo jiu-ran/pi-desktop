@@ -85,6 +85,8 @@ export interface PiRpcOptions {
   entry: string;
   cwd?: string;
   env?: Record<string, string>;
+  /** 启动参数（例如工具开关的 `--tools +read,-write`）；`--mode rpc` 由客户端自己加。 */
+  args?: string[];
 }
 
 type Listener = (event: any) => void;
@@ -117,7 +119,7 @@ export class PiRpcClient {
     this.stopping = false;
     this.buffer = "";
 
-    const child = spawn(process.execPath, [this.options.entry, "--mode", "rpc"], {
+    const child = spawn(process.execPath, [this.options.entry, "--mode", "rpc", ...(this.options.args ?? [])], {
       cwd: this.options.cwd,
       env: {
         ...process.env,
