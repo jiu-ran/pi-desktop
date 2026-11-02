@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pruneUpdateDir, trimRuntimeCaches } from "../../electron/maintenance.ts";
+import { pruneEmptyWorktreeDirs, pruneUpdateDir, trimRuntimeCaches } from "../../electron/maintenance.ts";
 
 // 升级后清理：旧安装包只留最新的一个，缓存超阈值才清，而且绝不碰用户数据。
 const root = await mkdtemp(path.join(tmpdir(), "pi-maintenance-"));
@@ -55,7 +55,18 @@ try {
   await trimRuntimeCaches(root, 1);
   assert.deepEqual(await readdir(sessions), ["s.jsonl"], "会话文件绝不能被清理");
 
-  console.log("maintenance OK 旧安装包 / 缓存阈值 / 不碰用户数据");
+  // 残留的空工作区目录：删；还有文件的目录：留着
+  const worktrees = path.join(root, "worktrees");
+  await mkdir(path.join(worktrees, "repo-feat-empty"), { recursive: true });
+  await mkdir(path.join(worktrees, "repo-fix-has-files"), { recursive: true });
+  await writeFile(path.join(worktrees, "repo-fix-has-files", ".git"), "gitdir: /tmp/x");
+  await writeFile(path.join(worktrees, "README.txt"), "not a dir");
+  const prunedWt = await pruneEmptyWorktreeDirs(worktrees);
+  assert.deepEqual(prunedWt, ["repo-feat-empty"], "只清理空目录");
+  assert.deepEqual((await readdir(worktrees)).sort(), ["README.txt", "repo-fix-has-files"], "有内容的目录和文件都不动");
+  assert.deepEqual(await pruneEmptyWorktreeDirs(path.join(root, "missing")), [], "目录不存在时安静返回");
+
+  console.log("maintenance OK 旧安装包 / 缓存阈值 / 不碰用户数据 / 空残留工作区目录");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

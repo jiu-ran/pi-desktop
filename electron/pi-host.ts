@@ -138,6 +138,11 @@ export interface GitOverview {
   repoKey?: string;
   /** 主仓库文件夹名（隔离工作区目录名的前缀，例如 pi-desktop） */
   repoName?: string;
+  /**
+   * 不是 Git 仓库、却又位于托管工作区根目录里：多半是隔离工作区被移除后留下的空壳。
+   * 界面据此提示「这是残留目录」并允许从最近项目移除，而不是劝用户在这里 git init。
+   */
+  staleWorktree?: boolean;
 }
 
 export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch" | "deleteBranch";
@@ -1637,7 +1642,9 @@ export class PiHost {
     if (!root) {
       // 兼容 .git 目录存在但 git 不可用的情况：至少把分支名带回去
       const fallback = await gitBranch(workspace);
-      return fallback ? { ...empty, isRepo: true, branch: fallback } : empty;
+      if (fallback) return { ...empty, isRepo: true, branch: fallback };
+      // 托管目录里的非仓库目录 = 被移除后留下的空壳，别把它当成「新项目」劝用户初始化
+      return pathWithin(this.worktreeRoot, workspace) ? { ...empty, staleWorktree: true } : empty;
     }
 
     const [statusOut, logOut, headOut, symbolicOut, upstreamOut, remoteOut, userName, userEmail] = await Promise.all([

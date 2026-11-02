@@ -153,6 +153,8 @@ export interface GitOverview {
   repoKey?: string;
   /** 主仓库文件夹名（隔离工作区目录名的前缀） */
   repoName?: string;
+  /** 位于托管工作区根目录、却不是 Git 仓库（移除隔离工作区后留下的空壳） */
+  staleWorktree?: boolean;
 }
 
 export interface GitBranch {

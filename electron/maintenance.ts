@@ -108,6 +108,40 @@ export interface MaintenanceResult {
   removedInstallers: string[];
   freedBytes: number;
   clearedCaches: string[];
+  /** 清掉的空残留目录（隔离工作区被删后只剩空壳的那种） */
+  removedWorktrees: string[];
+}
+
+/**
+ * 清理托管工作区根目录里的**空**残留目录。
+ *
+ * 正常的隔离工作区至少有 `.git` 文件，不可能为空；空目录只能是删除工作区时
+ * 目录被占用、内容删掉了但壳还在 —— 这种壳还留在「最近项目」里，点进去就是
+ * 一个没有 `.git` 的目录（版本控制面板会显示「还不是 Git 仓库」），很误导。
+ * 这里只删空目录，有任何文件都跳过，不冒删用户数据的险。
+ */
+export async function pruneEmptyWorktreeDirs(dir: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const name of names) {
+    const target = path.join(dir, name);
+    try {
+      const info = await stat(target);
+      if (!info.isDirectory()) continue;
+      const inner = await readdir(target);
+      if (inner.length > 0) continue;
+      await rm(target, { recursive: true, force: true });
+      removed.push(name);
+    } catch {
+      // 被占用就下次启动再试
+    }
+  }
+  return removed;
 }
 
 /**
@@ -115,7 +149,7 @@ export interface MaintenanceResult {
  * 任何失败都只记日志，绝不阻塞或影响启动。
  */
 export async function runStartupMaintenance(userData: string): Promise<MaintenanceResult> {
-  const result: MaintenanceResult = { removedInstallers: [], freedBytes: 0, clearedCaches: [] };
+  const result: MaintenanceResult = { removedInstallers: [], freedBytes: 0, clearedCaches: [], removedWorktrees: [] };
   try {
     result.removedInstallers = await pruneUpdateDir(path.join(userData, "updates"));
   } catch {
@@ -125,6 +159,11 @@ export async function runStartupMaintenance(userData: string): Promise<Maintenan
     const trimmed = await trimRuntimeCaches(userData);
     result.freedBytes = trimmed.freed;
     result.clearedCaches = trimmed.cleared;
+  } catch {
+    // 忽略
+  }
+  try {
+    result.removedWorktrees = await pruneEmptyWorktreeDirs(path.join(userData, "worktrees"));
   } catch {
     // 忽略
   }

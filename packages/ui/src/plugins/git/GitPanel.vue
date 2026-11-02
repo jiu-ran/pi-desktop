@@ -552,6 +552,18 @@ const sections = computed<PanelSection[]>(() => {
     });
 });
 
+/** 残留目录（管理目录里的空壳）直接退出列表，别让用户对着它 git init。 */
+async function forgetStale(): Promise<void> {
+  const cwd = ws.value?.cwd;
+  if (!cwd) return;
+  try {
+    await workbench.forget(cwd);
+    bus.emit("notify", { level: "info", text: "已从最近项目里移除这个目录" });
+  } catch (err: any) {
+    error.value = err?.message ?? String(err);
+  }
+}
+
 async function run(action: GitActionName, payload: GitActionPayload = {}): Promise<boolean> {
   if (busy.value || worktreeBusy.value || !ws.value) return false;
   const cwd = ws.value.cwd;
@@ -848,7 +860,16 @@ function reveal(change: RepoChange): void {
         <button type="button" class="icon-btn small" title="关闭" @click="error = ''" v-html="icons.close" />
       </div>
 
-      <div v-if="overview && !hasRepo" class="git-init">
+      <!-- 托管目录里的空壳：别劝用户 git init，那是隔离工作区被移除后留下的目录 -->
+      <div v-if="overview && !hasRepo && overview.staleWorktree" class="git-init">
+        <p class="git-init-title">这个目录已不是有效的工作区</p>
+        <p class="git-init-hint">它位于隔离工作区的存放目录里，但不是 Git 仓库 —— 多半是移除隔离工作区后留下的空目录。把它从最近项目里去掉即可，不要在这里初始化仓库。</p>
+        <button type="button" class="btn small" :disabled="busy === 'init'" @click="forgetStale">
+          从最近项目移除
+        </button>
+      </div>
+
+      <div v-else-if="overview && !hasRepo" class="git-init">
         <p class="git-init-title">当前项目还不是 Git 仓库</p>
         <p class="git-init-hint">初始化后即可暂存、提交、推送，并在提交历史里查看记录。本会话中 Agent 改动的文件会先列在下面。</p>
         <button type="button" class="btn small primary" :disabled="busy === 'init'" @click="run('init')">
