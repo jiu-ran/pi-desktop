@@ -136,6 +136,8 @@ export interface GitOverview {
   worktreeRoot?: string;
   /** 主仓库根目录的 8 位哈希前缀 */
   repoKey?: string;
+  /** 主仓库文件夹名（隔离工作区目录名的前缀，例如 pi-desktop） */
+  repoName?: string;
 }
 
 export type GitActionName = "init" | "stage" | "unstage" | "commit" | "fetch" | "pull" | "push" | "switchBranch" | "createBranch" | "deleteBranch";
@@ -1713,6 +1715,7 @@ export class PiHost {
       userEmail: userEmail.trim(),
       worktreeRoot: this.worktreeRoot,
       repoKey,
+      repoName: worktreeSlug(path.basename(primaryRoot)) || repoKey,
     };
   }
 
@@ -2112,7 +2115,10 @@ export class PiHost {
     const slug = worktreeSlug(rawSeed.replace(/^pi[/-]+/i, "")) || worktreeSlug(rawSeed);
     if (!slug) throw new Error("任务名或分支名不能为空");
 
+    // 目录名前缀用仓库文件夹名（pi-desktop-fix-login 这种一眼能认出来的），
+    // 哈希只在文件夹名不可用时兜底；同名冲突由下面的 -1 / -2 后缀处理。
     const repoKey = createHash("sha1").update(primaryRoot).digest("hex").slice(0, 8);
+    const repoSeed = worktreeSlug(path.basename(primaryRoot)) || repoKey;
     await mkdir(this.worktreeRoot, { recursive: true });
     const managedRoot = await realpath(this.worktreeRoot);
     const rawTargetDir = String(options?.targetDir ?? "").trim();
@@ -2158,7 +2164,7 @@ export class PiHost {
         }
       }
     } else {
-      const baseDir = path.join(managedRoot, `${repoKey}-${slug}`);
+      const baseDir = path.join(managedRoot, `${repoSeed}-${slug}`);
       if (branchMode === "create" && customBranchInput) {
         branch = await validateBranchFormat(customBranchInput);
         const exists = (await gitProbe(primaryRoot, ["show-ref", "--verify", `refs/heads/${branch}`])).trim();

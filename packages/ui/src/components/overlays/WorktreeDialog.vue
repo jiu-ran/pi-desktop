@@ -20,9 +20,24 @@ const sessions = ref<Array<{ id: string; path: string; title: string; empty?: bo
 
 // 1. 分支策略与命名
 const branchMode = ref<"create" | "existing">("create");
-const taskName = ref("");
+/**
+ * 分支类型前缀：分支名固定是 `pi/<类型>-<名称>`（例如 `pi/fix-login-timeout`）。
+ * 类型只影响这一段前缀，后面的名称仍可自由写；直接改分支名里的前缀也会同步回来。
+ */
+const BRANCH_TYPES = ["feat", "fix", "chore", "docs", "refactor", "test", "perf", "ci"] as const;
+type BranchType = (typeof BRANCH_TYPES)[number];
+const branchType = ref<BranchType>("feat");
+const branchTypeOptions: SelectOption[] = [
+  { value: "feat", label: "feat", hint: "新功能" },
+  { value: "fix", label: "fix", hint: "修 bug" },
+  { value: "chore", label: "chore", hint: "杂务 / 依赖 / 配置" },
+  { value: "docs", label: "docs", hint: "文档" },
+  { value: "refactor", label: "refactor", hint: "重构（不改行为）" },
+  { value: "test", label: "test", hint: "测试" },
+  { value: "perf", label: "perf", hint: "性能" },
+  { value: "ci", label: "ci", hint: "构建 / CI" },
+];
 const customBranchName = ref("");
-const branchNameTouched = ref(false);
 const existingBranchRef = ref("");
 const remoteLocalBranchName = ref("");
 const remoteLocalBranchTouched = ref(false);
@@ -60,10 +75,23 @@ function slugify(value: string): string {
     .replace(/^[._-]+|[._-]+$/g, "");
 }
 
-const taskSlug = computed(() => {
-  const stripped = taskName.value.trim().replace(/^pi[/-]+/i, "");
-  return slugify(stripped);
-});
+/** 分支名去掉 `pi/` 与类型前缀后的「名称」部分 —— 界面上只让用户写这一段。 */
+function branchBody(name: string): string {
+  const stripped = String(name ?? "").trim().replace(/^pi[/-]+/i, "");
+  const pattern = new RegExp(`^(?:${BRANCH_TYPES.join("|")})[-/]`, "i");
+  return stripped.replace(pattern, "");
+}
+
+/** 从分支名里认出类型前缀（`pi/fix-xxx` → fix），认不出就保持当前选择。 */
+function branchTypeOf(name: string): BranchType | null {
+  const match = /^pi[/-]+([a-z]+)[-/]/i.exec(String(name ?? "").trim());
+  const found = match?.[1]?.toLowerCase() ?? "";
+  return (BRANCH_TYPES as readonly string[]).includes(found) ? (found as BranchType) : null;
+}
+
+/** 目录名 / 任务标识用的紧凑形式：`feat-login-timeout`（保留类型，去掉 `pi/`）。 */
+const branchCompact = computed(() => slugify(String(customBranchName.value ?? "").replace(/^pi[/-]+/i, "")));
+const branchSlug = computed(() => slugify(branchBody(customBranchName.value)));
 
 const existingSlug = computed(() => {
   const selected = branches.value.find((b) => b.ref === existingBranchRef.value);
@@ -78,23 +106,23 @@ const currentSlug = computed(() => {
   if (branchMode.value === "existing") {
     return existingSlug.value;
   }
-  return taskSlug.value;
-});
-
-const defaultBranchName = computed(() => {
-  if (branchMode.value === "existing") {
-    if (selectedExistingBranch.value?.remote) {
-      return remoteLocalBranchName.value.trim() || existingSlug.value;
-    }
-    return selectedExistingBranch.value?.name ?? "";
-  }
-  return taskSlug.value ? `pi/${taskSlug.value}` : "";
+  return branchCompact.value || "worktree";
 });
 
 const defaultParentLocation = computed(() => overview.value?.worktreeRoot || "");
+/** 目录名前缀用仓库文件夹名（pi-desktop-…），只有拿不到名字时才退回 8 位哈希。 */
+const repoFolderSlug = computed(() => {
+  // 优先用主仓库名字：从隔离工作区里再开一个时，overview.root 是那个工作区自己，
+  // 用它当前缀会套娃（demo-repo-fix-a-fix-b）。
+  const declared = String(overview.value?.repoName ?? "").trim();
+  if (declared) return declared;
+  const root = String(overview.value?.root ?? "").replace(/[\\/]+$/, "");
+  const leaf = root.split(/[\\/]/).pop() ?? "";
+  return slugify(leaf) || String(overview.value?.repoKey ?? "");
+});
 const defaultFolderName = computed(() => {
-  const prefix = overview.value?.repoKey ? `${overview.value.repoKey}-` : "";
-  const slug = branchMode.value === "existing" ? existingSlug.value : taskSlug.value;
+  const prefix = repoFolderSlug.value ? `${repoFolderSlug.value}-` : "";
+  const slug = branchMode.value === "existing" ? existingSlug.value : branchCompact.value;
   return slug ? `${prefix}${slug}` : `${prefix}worktree`;
 });
 
@@ -220,34 +248,31 @@ const sessionOptions = computed<SelectOption[]>(() => {
 });
 
 // 当任务名或分支模式改变时，自动同步未被用户手动改过的默认分支名和目录名
+// 目录名跟着分支名走：分支名是唯一入口，标识不再单独填
 watch(
   [currentSlug, branchMode],
   () => {
-    if (branchMode.value === "create" && !branchNameTouched.value) {
-      customBranchName.value = defaultBranchName.value;
-    }
     if (!folderNameTouched.value) {
       folderName.value = defaultFolderName.value;
     }
   },
 );
 
-function onTaskNameInput(): void {
-  if (branchMode.value === "create" && !branchNameTouched.value) {
-    customBranchName.value = defaultBranchName.value;
-  }
-  if (!folderNameTouched.value) {
-    folderName.value = defaultFolderName.value;
-  }
+/** 切换分支类型：只重写 `pi/<类型>-` 前缀，名称部分原样保留。 */
+function selectBranchType(value: string | number | boolean): void {
+  const next = String(value);
+  if (!(BRANCH_TYPES as readonly string[]).includes(next)) return;
+  branchType.value = next as BranchType;
+  const body = branchSlug.value || slugify(currentSlug.value);
+  customBranchName.value = `pi/${next}-${body}`;
+  if (!folderNameTouched.value) folderName.value = defaultFolderName.value;
 }
 
-function onCustomBranchInput(): void {
-  branchNameTouched.value = customBranchName.value.trim() !== defaultBranchName.value;
-}
-
-function resetBranchName(): void {
-  branchNameTouched.value = false;
-  customBranchName.value = defaultBranchName.value;
+/** 用户直接改分支名时，让类型选择跟上写进去的前缀。 */
+function onBranchInput(): void {
+  const parsed = branchTypeOf(customBranchName.value);
+  if (parsed) branchType.value = parsed;
+  if (!folderNameTouched.value) folderName.value = defaultFolderName.value;
 }
 
 function onFolderNameInput(): void {
@@ -369,18 +394,16 @@ async function initializeDialog(): Promise<void> {
     }
     sessionLoadMode.value = "clone";
 
-    // 根据预设或对话标题生成初始任务标识
+    // 种子：预设名 / 对话标题 → 分支名里的「名称」部分（分支名仍是唯一入口）
     const selectedSess = sessions.value.find((s) => s.path === selectedSessionFile.value);
     const seedName =
       worktreeDialogState.initialName ||
       selectedSess?.title ||
       presetPrompt.split(/\r?\n/)[0]?.slice(0, 24) ||
       "feature";
-    taskName.value = slugify(seedName) || `worktree-${wt.length}`;
-
+    const seedSlug = slugify(seedName).slice(0, 32) || `worktree-${wt.length}`;
     branchMode.value = "create";
-    branchNameTouched.value = false;
-    customBranchName.value = defaultBranchName.value;
+    customBranchName.value = `pi/${branchType.value}-${seedSlug}`;
 
     const firstAvailableExisting = existingBranchOptions.value.find((item) => !item.disabled);
     existingBranchRef.value = String(firstAvailableExisting?.value ?? "");
@@ -433,12 +456,7 @@ async function submit(): Promise<void> {
     const useQuoteSession = Boolean(selectedSessionFile.value && sessionLoadMode.value === "quote");
     const promptText = initialPrompt.value.trim();
 
-    const finalTaskName =
-      taskName.value.trim() ||
-      (branchMode.value === "create"
-        ? slugify(customBranchName.value.replace(/^pi[/-]+/i, ""))
-        : currentSlug.value) ||
-      "worktree";
+    const finalTaskName = branchCompact.value || currentSlug.value || "worktree";
 
     const createRes = await workbench.createGitWorktree(
       finalTaskName,
@@ -566,42 +584,35 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
           <template v-if="branchMode === 'create'">
             <div class="wt-grid-2">
               <div class="clone-field">
-                <label class="clone-label" for="wt-task-name">任务标识（简称）</label>
-                <input
-                  id="wt-task-name"
-                  ref="nameInput"
-                  v-model="taskName"
-                  class="clone-input"
-                  placeholder="例如 fix-auth 或 feat-export"
-                  spellcheck="false"
-                  autocomplete="off"
+                <label class="clone-label">分支类型</label>
+                <SelectMenu
+                  :model-value="branchType"
+                  :options="branchTypeOptions"
                   :disabled="busy"
-                  @input="onTaskNameInput"
+                  placeholder="选择分支类型"
+                  width="100%"
+                  @update:model-value="selectBranchType"
                 />
               </div>
               <div class="clone-field">
-                <div class="wt-label-row">
-                  <label class="clone-label" for="wt-branch-name">新分支名称（可自定义修改）</label>
-                  <button
-                    v-if="branchNameTouched"
-                    type="button"
-                    class="wt-link-btn"
-                    :disabled="busy"
-                    @click="resetBranchName"
-                  >恢复默认 ({{ defaultBranchName || 'pi/...' }})</button>
-                </div>
+                <label class="clone-label" for="wt-branch-name">分支名称</label>
                 <input
                   id="wt-branch-name"
+                  ref="nameInput"
                   v-model="customBranchName"
                   class="clone-input"
-                  placeholder="例如 pi/fix-auth 或 feat/fix-auth"
+                  placeholder="例如 pi/feat-login-timeout"
                   spellcheck="false"
                   autocomplete="off"
                   :disabled="busy"
-                  @input="onCustomBranchInput"
+                  @input="onBranchInput"
                 />
               </div>
             </div>
+            <p class="clone-target">
+              将创建分支 <code>{{ customBranchName || "pi/" + branchType + "-…" }}</code>
+              · 目录 <code>{{ defaultFolderName }}</code>
+            </p>
           </template>
 
           <template v-else>

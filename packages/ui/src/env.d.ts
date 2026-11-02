@@ -151,6 +151,8 @@ export interface GitOverview {
   userEmail: string;
   worktreeRoot?: string;
   repoKey?: string;
+  /** 主仓库文件夹名（隔离工作区目录名的前缀） */
+  repoName?: string;
 }
 
 export interface GitBranch {
