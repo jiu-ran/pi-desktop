@@ -121,9 +121,13 @@ const repoFolderSlug = computed(() => {
   return slugify(leaf) || String(overview.value?.repoKey ?? "");
 });
 const defaultFolderName = computed(() => {
-  const prefix = repoFolderSlug.value ? `${repoFolderSlug.value}-` : "";
-  const slug = branchMode.value === "existing" ? existingSlug.value : branchCompact.value;
-  return slug ? `${prefix}${slug}` : `${prefix}worktree`;
+  const repo = repoFolderSlug.value;
+  const creating = branchMode.value !== "existing";
+  // 新建分支时只有「名称」部分算用户给的：只填了类型（pi/feat-）就还没名字
+  const named = creating ? Boolean(branchSlug.value) : existingSlug.value !== "worktree";
+  if (!named) return repo || "worktree";
+  const slug = creating ? branchCompact.value : existingSlug.value;
+  return repo ? `${repo}-${slug}` : slug;
 });
 
 const pathSeparator = computed(() => {
@@ -263,8 +267,8 @@ function selectBranchType(value: string | number | boolean): void {
   const next = String(value);
   if (!(BRANCH_TYPES as readonly string[]).includes(next)) return;
   branchType.value = next as BranchType;
-  const body = branchSlug.value || slugify(currentSlug.value);
-  customBranchName.value = `pi/${next}-${body}`;
+  // 只换前缀，名称部分原样保留；名称还空着就保持空着（不替用户编一个）
+  customBranchName.value = `pi/${next}-${branchSlug.value}`;
   if (!folderNameTouched.value) folderName.value = defaultFolderName.value;
 }
 
@@ -350,6 +354,7 @@ const canSubmit = computed(() => {
   }
   return Boolean(
     customBranchName.value.trim() &&
+    branchSlug.value &&
     startPoint.value.trim() &&
     targetDirPreview.value.trim(),
   );
@@ -383,27 +388,16 @@ async function initializeDialog(): Promise<void> {
     sendImmediately.value = false;
     openAfterCreate.value = true;
 
-    // 预选要加载的对话
+    // 预选要加载的对话：默认「不加载历史对话」。
+    // 只有「从这个对话创建隔离工作区」这类入口会明确带 sessionFile 进来，才替用户选上。
     const requestedSession = worktreeDialogState.sessionFile;
-    if (requestedSession && sessions.value.some((s) => s.path === requestedSession)) {
-      selectedSessionFile.value = requestedSession;
-    } else if (activeWs?.sessionFile && (activeWs.blocks?.length ?? 0) > 0 && sessions.value.some((s) => s.path === activeWs.sessionFile)) {
-      selectedSessionFile.value = activeWs.sessionFile;
-    } else {
-      selectedSessionFile.value = "";
-    }
+    selectedSessionFile.value =
+      requestedSession && sessions.value.some((s) => s.path === requestedSession) ? requestedSession : "";
     sessionLoadMode.value = "clone";
 
-    // 种子：预设名 / 对话标题 → 分支名里的「名称」部分（分支名仍是唯一入口）
-    const selectedSess = sessions.value.find((s) => s.path === selectedSessionFile.value);
-    const seedName =
-      worktreeDialogState.initialName ||
-      selectedSess?.title ||
-      presetPrompt.split(/\r?\n/)[0]?.slice(0, 24) ||
-      "feature";
-    const seedSlug = slugify(seedName).slice(0, 32) || `worktree-${wt.length}`;
+    // 分支名与目录名不预填内容：只放好统一前缀，名字由用户自己写
     branchMode.value = "create";
-    customBranchName.value = `pi/${branchType.value}-${seedSlug}`;
+    customBranchName.value = `pi/${branchType.value}-`;
 
     const firstAvailableExisting = existingBranchOptions.value.find((item) => !item.disabled);
     existingBranchRef.value = String(firstAvailableExisting?.value ?? "");
@@ -429,7 +423,9 @@ async function initializeDialog(): Promise<void> {
     loading.value = false;
     await nextTick();
     nameInput.value?.focus();
-    nameInput.value?.select();
+    // 光标放在 `pi/<类型>-` 之后：前缀已经给好，接着写名字即可
+    const end = nameInput.value?.value.length ?? 0;
+    nameInput.value?.setSelectionRange(end, end);
   }
 }
 
