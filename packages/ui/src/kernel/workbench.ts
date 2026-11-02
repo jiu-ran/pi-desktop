@@ -18,7 +18,7 @@ import {
     type QueuedEntry,
   } from "../shared/queue-view.ts";
 import { rebuildPrompt } from "../shared/queue-prompt.ts";
-import { piUpdateToast } from "../shared/pi-update.ts";
+import { piUpdateFailureToast, piUpdateToast } from "../shared/pi-update.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
 import type { EventBus } from "./event-bus.ts";
@@ -190,7 +190,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       updateAvailable: false,
       checking: false,
       updating: false,
-      lastUpdate: null as null | { from: string; to: string; at: number; log: string; scope?: "self" | "all" },
+      lastUpdate: null as null | { from: string; to: string; at: number; log: string; scope?: "self" | "all"; ok?: boolean },
     },
     appUpdate: {
       current: "",
@@ -2282,7 +2282,17 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     try {
       const result = await host.updatePi(customPath || undefined, scope === "all" ? "all" : "self");
       if (!result.ok) {
-        bus.emit("notify", { level: "error", text: `Pi 更新失败：${result.log.slice(-200) || "未知错误"}` });
+        const version = result.from || state.pi.version;
+        // 失败也留一条记录：设置页的「查看输出」比提示条能装下更多东西
+        state.pi.lastUpdate = {
+          from: version,
+          to: version,
+          at: Date.now(),
+          log: result.log,
+          scope: scope === "all" ? "all" : "self",
+          ok: false,
+        };
+        bus.emit("notify", { level: "error", text: `Pi 更新失败：${piUpdateFailureToast(result.log)}` });
         return false;
       }
       await refreshPi(customPath);
