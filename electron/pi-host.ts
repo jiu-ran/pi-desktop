@@ -18,6 +18,15 @@ import { logPerfLine } from "./perf-log.ts";
 import { log } from "./logger.ts";
 import { atomicWriteText, withFileWrite } from "./atomic-file.ts";
 import { projectTrustStatus, setProjectTrust, type TrustAction } from "./project-trust.ts";
+import {
+  describeTools,
+  hasToolSelection,
+  resolveSettingsTools,
+  toggleToolEntries,
+  toolModifierArguments,
+  TOOL_NAME,
+  type PiToolsOverview,
+} from "./pi-tools.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
 
 const execFileAsync = promisify(execFile);
@@ -1219,7 +1228,7 @@ export class PiHost {
     pool: WorkspaceClientPool,
     options: { targetSessionFile?: string; pickLatestOnInit?: boolean; parentSession?: string } = {},
   ): Promise<WorkerSlot> {
-    const client = new PiRpcClient({ entry: await this.piEntry(), cwd });
+    const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd) });
     const slot: WorkerSlot = {
       client,
       sessionFile: "",
@@ -1310,7 +1319,7 @@ export class PiHost {
   private warmStandbyWorker(cwd: string, pool: WorkspaceClientPool): void {
     if (pool.standbySlot || pool.standbyPromise) return;
     const promise = (async (): Promise<WorkerSlot | null> => {
-      const client = new PiRpcClient({ entry: await this.piEntry(), cwd });
+      const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd) });
       const slot: WorkerSlot = {
         client,
         sessionFile: "",
@@ -3122,6 +3131,104 @@ export class PiHost {
     const { global } = readSettings(cwd, this.agentDirPath());
     const defaultProjectTrust = typeof global.defaultProjectTrust === "string" ? global.defaultProjectTrust : "ask";
     return setProjectTrust({ cwd, action, agentDir: this.agentDirPath(), defaultProjectTrust });
+  }
+
+  // ---------- 工具开关（Pi 的 defaultTools） ----------
+
+  /** 工具目录 + 当前生效的选择（全局 / 项目两层设置合并后的结果）。 */
+  async toolsOverview(cwd?: string): Promise<PiToolsOverview> {
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
+    if (cwd) await assertRealWorkspacePath(cwd, effectiveCwd);
+    // Pi 在项目未信任时不加载 .pi/settings.json，这里也按同一规则算「生效选择」
+    const trust = cwd ? await this.projectTrustInfo(effectiveCwd) : { trusted: true, writable: true };
+    const { global, project, paths, diagnostics } = readSettings(effectiveCwd, agentDir);
+    return describeTools({
+      globalSettings: global,
+      projectSettings: cwd && trust.trusted ? project : {},
+      globalSettingsPath: paths.global,
+      projectSettingsPath: cwd ? paths.project : "",
+      agentDir,
+      projectTrusted: trust.trusted,
+      projectWritable: trust.writable,
+      // 没有打开项目时不要把 home 下的「项目设置」错误算进来
+      diagnostics: cwd ? diagnostics : diagnostics.filter((item) => item.startsWith(paths.global)),
+    });
+  }
+
+  /**
+   * 写入一个开关。写入的是解析后的普通名单（`defaultTools`），而不是继续叠 `+/-`：
+   * 文件里看到的选择就是实际选择，扩展工具名与 `mcp__*` 模式原样保留。
+   */
+  async toolsSet(
+    cwd: string,
+    payload: { scope?: "global" | "project"; name?: string; enabled?: boolean },
+  ): Promise<PiToolsOverview> {
+    const scope = payload?.scope === "project" ? "project" : "global";
+    const name = String(payload?.name ?? "").trim();
+    const enabled = Boolean(payload?.enabled);
+    if (!TOOL_NAME.test(name)) throw new Error(`工具名不合法：${name || "(空)"}`);
+    if (scope === "project" && !cwd) throw new Error("项目级工具开关需要先打开一个项目");
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
+    if (cwd) await assertRealWorkspacePath(cwd, effectiveCwd);
+    if (scope === "project" && !(await this.projectTrustInfo(effectiveCwd)).writable) {
+      throw new Error("项目级工具设置需要先信任此项目：Pi 不会加载未信任项目的 .pi/settings.json（设置 → Skills 或 /trust）");
+    }
+    const file = scope === "global" ? path.join(agentDir, "settings.json") : path.join(effectiveCwd, ".pi", "settings.json");
+
+    await withFileWrite(file, async () => {
+      // 锁内重新读：两个开关同时保存时，后写的那个要基于前一个的结果。
+      const fresh = readSettings(effectiveCwd, agentDir);
+      if (fresh.diagnostics.some((item) => item.startsWith(file))) {
+        throw new Error(`${scope === "global" ? "全局" : "项目"}设置文件不是合法 JSON，先修好再改工具开关`);
+      }
+      const nextEntries = toggleToolEntries({
+        scope,
+        globalEntries: fresh.global.defaultTools,
+        projectEntries: fresh.project.defaultTools,
+        projectConfigured: hasToolSelection(fresh.project),
+        name,
+        enabled,
+      });
+      const target = scope === "global" ? fresh.global : fresh.project;
+      const next = { ...target, defaultTools: nextEntries };
+      await mkdir(path.dirname(file), { recursive: true });
+      await atomicWriteText(file, JSON.stringify(next, null, 2));
+    });
+
+    return this.toolsOverview(cwd || undefined);
+  }
+
+  /**
+   * 项目信任：Pi 在 RPC 模式拿不到「信不信任」的回答，默认按不信任处理。
+   * `trusted` 决定项目设置是否生效；`writable` 还要求用户显式信任过这个项目
+   * （新项目写 `.pi/settings.json` 之后就会变成「需要信任」）。
+   */
+  private async projectTrustInfo(cwd: string): Promise<{ trusted: boolean; writable: boolean }> {
+    const { global } = readSettings(cwd, this.agentDirPath());
+    const defaultProjectTrust = typeof global.defaultProjectTrust === "string" ? global.defaultProjectTrust : "ask";
+    const status = await projectTrustStatus({ cwd, agentDir: this.agentDirPath(), defaultProjectTrust });
+    return {
+      trusted: status.effective,
+      writable: status.decision === true || defaultProjectTrust === "always",
+    };
+  }
+
+  /**
+   * 启动参数里的工具校正。只有用户配置过 `defaultTools` 才加：
+   * 没配过就保持 Pi 自己的默认值与「恢复会话保留工具」的行为。
+   */
+  private async toolArgs(cwd: string): Promise<string[]> {
+    try {
+      const { global, project } = readSettings(cwd, this.agentDirPath());
+      const projectSettings = (await this.projectTrustInfo(cwd)).trusted ? project : {};
+      if (!hasToolSelection(global) && !hasToolSelection(projectSettings)) return [];
+      return toolModifierArguments(resolveSettingsTools(global, projectSettings));
+    } catch {
+      // 设置读不出来时不要拦住启动：按 Pi 默认处理。
+      return [];
+    }
   }
 
   /**

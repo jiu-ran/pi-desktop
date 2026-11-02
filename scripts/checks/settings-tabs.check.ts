@@ -69,6 +69,8 @@ assert.equal(findSettingsTab("logs").label, "运行日志", "按 id 找页");
 assert.equal(findSettingsTab("nope" as any).id, SETTINGS_TABS[0]!.id, "找不到时退回第一页，界面不至于空白");
 assert.equal(sectionOfTab("logs").id, "desktop", "运行日志属于「桌面」分区");
 assert.equal(sectionOfTab("mcp").id, "power", "MCP 属于「扩展」分区");
+assert.equal(sectionOfTab("tools").id, "power", "工具开关属于「扩展」分区");
+assert.equal(findSettingsTab("tools").label, "工具开关");
 // Pi CLI 与 Pi Desktop 是平级的一级分区（各自只有一页）
 assert.equal(sectionOfTab("pi-cli").id, "pi-cli-section", "Pi CLI 自己是一个一级分区");
 assert.equal(sectionOfTab("pi-desktop").id, "pi-desktop-section", "Pi Desktop 自己是一个一级分区");
@@ -100,6 +102,8 @@ assert.ok(searchSettings("快捷键").some((hit) => hit.id === "environment"), "
 
 const skillHits = searchSettings("SKILL");
 assert.ok(skillHits.some((hit) => hit.id === "skills"), "搜索不区分大小写");
+assert.equal(searchSettings("工具")[0]?.id, "tools", "搜「工具」时工具开关排第一");
+assert.ok(searchSettings("defaultTools").some((hit) => hit.id === "tools"), "能按 Pi 的设置名搜到工具开关");
 const bySection = searchSettings("扩展");
 assert.ok(bySection.length >= 3, `按分区名搜索应命中该分区所有页，实际 ${bySection.length}`);
 assert.ok(searchSettings("系统").some((hit) => hit.id === "logs"), "按分区名搜「系统」能命中运行日志");

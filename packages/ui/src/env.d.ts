@@ -391,6 +391,36 @@ export interface PiSkillsOverview {
   diagnostics: string[];
 }
 
+export interface PiToolItem {
+  name: string;
+  label: string;
+  description: string;
+  group: "builtin" | "extension";
+  enabled: boolean;
+  /** Pi 默认就启用的工具（read / bash / edit / write）。 */
+  defaultEnabled: boolean;
+}
+
+export interface PiToolsOverview {
+  agentDir: string;
+  globalSettingsPath: string;
+  projectSettingsPath: string;
+  effectiveScope: "global" | "project" | "default";
+  globalConfigured: boolean;
+  projectConfigured: boolean;
+  /** 项目是否已信任；未信任时项目级设置不会加载（与 Pi 一致）。 */
+  projectTrusted: boolean;
+  /** 项目级设置是否可写：需要显式信任项目（或 defaultProjectTrust=always）。 */
+  projectWritable: boolean;
+  globalEntries: string[];
+  projectEntries: string[];
+  tools: PiToolItem[];
+  enabledNames: string[];
+  /** 目录之外的条目（扩展工具名 / `mcp__*` 模式），会原样保留。 */
+  extraEntries: string[];
+  diagnostics: string[];
+}
+
 export interface PiLocation {
   found: boolean;
   version: string;
@@ -601,6 +631,11 @@ export interface PiDesktopBridge {
   packagesRemove: (cwd: string, payload: { source: string; local?: boolean }) => Promise<PiPackagesOverview>;
   packagesUpdate: (cwd: string, payload?: { source?: string }) => Promise<PiPackagesOverview>;
   skillsOverview: (cwd?: string) => Promise<PiSkillsOverview>;
+  toolsOverview: (cwd?: string) => Promise<PiToolsOverview>;
+  toolsSet: (
+    cwd: string,
+    payload: { scope: "global" | "project"; name: string; enabled: boolean },
+  ) => Promise<PiToolsOverview>;
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
   startTerminal: (cwd: string, command: string, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;

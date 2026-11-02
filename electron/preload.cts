@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   packagesRemove: (cwd: string, payload: any) => ipcRenderer.invoke("pi:packages-remove", cwd, payload),
   packagesUpdate: (cwd: string, payload?: any) => ipcRenderer.invoke("pi:packages-update", cwd, payload),
   skillsOverview: (cwd?: string) => ipcRenderer.invoke("pi:skills-overview", cwd),
+  toolsOverview: (cwd?: string) => ipcRenderer.invoke("pi:tools-overview", cwd),
+  toolsSet: (cwd: string, payload: any) => ipcRenderer.invoke("pi:tools-set", cwd, payload),
   globalAgents: () => ipcRenderer.invoke("pi:global-agents"),
   saveGlobalAgents: (content: string) => ipcRenderer.invoke("pi:global-agents-save", content),
   startTerminal: (cwd: string, command: string, options?: any) => ipcRenderer.invoke("pi:terminal-start", cwd, command, options),

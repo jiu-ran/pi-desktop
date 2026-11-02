@@ -867,6 +867,10 @@
   background: color-mix(in srgb, var(--err) 12%, transparent);
   color: color-mix(in srgb, var(--err) 70%, var(--fg));
 }
+.settings-alert.warn {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: color-mix(in srgb, var(--warn) 75%, var(--fg));
+}
 .settings-err-text {
   color: var(--err);
 }

@@ -27,6 +27,7 @@ export type SettingsTabId =
   | "appearance"
   | "terminal"
   | "mcp"
+  | "tools"
   | "packages"
   | "agents"
   | "skills"

@@ -31,6 +31,7 @@ import PiCliSettings from "./settings/PiCliSettings.vue";
 import PiDesktopSettings from "./settings/PiDesktopSettings.vue";
 import PackageSettings from "./settings/PackageSettings.vue";
 import PluginSettings from "./settings/PluginSettings.vue";
+import ToolSettings from "./settings/ToolSettings.vue";
 import {
   SETTINGS_SECTIONS as SECTIONS,
   findSettingsTab,
@@ -355,6 +356,7 @@ onBeforeUnmount(() => {
 
           <TerminalSettings v-else-if="settingsModalState.tab === 'terminal'" />
           <McpSettings v-else-if="settingsModalState.tab === 'mcp'" />
+          <ToolSettings v-else-if="settingsModalState.tab === 'tools'" />
 
           <PackageSettings v-else-if="settingsModalState.tab === 'packages'" />
 

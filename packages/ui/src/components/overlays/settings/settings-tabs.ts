@@ -59,6 +59,13 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
     keywords: ["mcp", "服务器", "服务", "server", "工具", "tools", "全局", "项目", "json"],
   },
   {
+    id: "tools",
+    label: "工具开关",
+    icon: icons.sliders,
+    desc: "启用或停用 Pi 的内置工具与 codemode / tool_search，写入 Pi 的 defaultTools",
+    keywords: ["工具", "tool", "tools", "defaulttools", "开关", "启用", "停用", "read", "bash", "write", "edit", "grep", "find", "ls", "codemode", "tool_search", "权限", "安全"],
+  },
+  {
     id: "packages",
     label: "Pi 软件包管理",
     icon: icons.package,
@@ -122,8 +129,8 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "power",
     label: "扩展",
     icon: icons.puzzle,
-    desc: "Skills、MCP 服务、软件包与桌面插件",
-    tabs: ["skills", "mcp", "packages", "plugins"],
+    desc: "工具开关、Skills、MCP 服务、软件包与桌面插件",
+    tabs: ["tools", "skills", "mcp", "packages", "plugins"],
   },
   { id: "look", label: "外观", icon: icons.palette, desc: "配色、字号与面板宽度", tabs: ["appearance"] },
   {
