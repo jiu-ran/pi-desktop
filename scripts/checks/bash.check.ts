@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseBashInput } from "../../packages/ui/src/shared/bash-input.ts";
+import { bashEditorText, formatBashInput, parseBashInput, setBashEditorText, toggleBashMode } from "../../packages/ui/src/shared/bash-input.ts";
 import { createTranscript } from "../../packages/ui/src/kernel/transcript.ts";
 import { parseSessionHistory, sliceHistoryPage } from "../../electron/session-history.ts";
 
@@ -13,12 +13,37 @@ import { parseSessionHistory, sliceHistoryPage } from "../../electron/session-hi
  */
 
 // 1. 输入解析
-assert.deepEqual(parseBashInput("!ls -la"), { command: "ls -la", excludeFromContext: false });
-assert.deepEqual(parseBashInput("  !!git status  "), { command: "git status", excludeFromContext: true });
-assert.deepEqual(parseBashInput("!"), { command: "", excludeFromContext: false }, "只有感叹号也要认出来，交给界面提示");
-assert.deepEqual(parseBashInput("!!!"), { command: "!", excludeFromContext: true });
+assert.deepEqual(parseBashInput("!ls -la"), { body: "ls -la", command: "ls -la", excludeFromContext: false });
+assert.deepEqual(parseBashInput("  !!git status  "), { body: "git status  ", command: "git status", excludeFromContext: true });
+assert.deepEqual(parseBashInput("!"), { body: "", command: "", excludeFromContext: false }, "只有感叹号也要认出来，交给界面提示");
+assert.deepEqual(parseBashInput("!!!"), { body: "!", command: "!", excludeFromContext: true });
+assert.equal(parseBashInput("!ls  ")?.body, "ls  ", "输入框展示要保留正在输入的空格");
+assert.equal(parseBashInput("!ls  ")?.command, "ls", "实际执行的命令去掉首尾空白");
 assert.equal(parseBashInput("echo !"), null, "正文里的感叹号不是命令");
 assert.equal(parseBashInput("普通消息"), null, "普通消息不能被当成命令");
+
+// 输入框隐藏前缀后，持久化 / 历史记录仍要能还原成 `!` / `!!` 字符串
+assert.equal(formatBashInput("ls -la"), "!ls -la");
+assert.equal(formatBashInput("ls  "), "!ls  ");
+assert.equal(formatBashInput("", true), "!!");
+assert.equal(formatBashInput("!x", true), "!!!x");
+
+// 输入框只显示命令：`!` / `!!` 不进入 textarea
+assert.equal(bashEditorText("!git status"), "git status");
+assert.equal(bashEditorText("!!git status"), "git status");
+assert.equal(bashEditorText("!ls  "), "ls  ", "末尾正在输入的空格不能被吞掉");
+assert.equal(bashEditorText("普通消息"), "普通消息");
+assert.equal(toggleBashMode(""), "!", "空输入框按 ! 进入 shell 模式");
+assert.equal(toggleBashMode("abc"), "!abc", "已有正文时在开头按 ! 会转成命令");
+assert.equal(toggleBashMode("!"), "!!", "空命令再按一次切到 !!");
+assert.equal(toggleBashMode("!!"), "!!", "已有 !! 时不再切回，接下来的 ! 是命令字符");
+assert.equal(toggleBashMode("!git status"), "!git status", "已经有命令时切换函数本身不改动它");
+assert.equal(setBashEditorText("!", "git status"), "!git status");
+assert.equal(setBashEditorText("!!", "git status"), "!!git status");
+assert.equal(setBashEditorText("!ls", "ls  "), "!ls  ", "编辑时保留末尾空格");
+assert.equal(setBashEditorText("!ls", ""), "", "删空内容就退出 shell 模式");
+assert.equal(setBashEditorText("!!", "!x"), "!!!x", "!! 模式下命令本身可以以 ! 开头");
+assert.equal(setBashEditorText("普通消息", "新内容"), "新内容", "普通模式不受前缀逻辑影响");
 
 // 2. 流式卡片
 const live = createTranscript();

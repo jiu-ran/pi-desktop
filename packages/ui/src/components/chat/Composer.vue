@@ -10,7 +10,7 @@ import QuoteEditor from "./QuoteEditor.vue";
 import SelectMenu from "../shared/SelectMenu.vue";
 import { filterCommands, mergeCommands, parseSlash, type SlashCommandItem } from "../../services/slash-commands.ts";
 import { PI_BUILTIN_COMMANDS, findPiCommand, terminalCommandNotice } from "../../shared/pi-commands.ts";
-import { parseBashInput } from "../../shared/bash-input.ts";
+import { bashEditorText, parseBashInput, setBashEditorText, toggleBashMode } from "../../shared/bash-input.ts";
 import { appSettings } from "../../services/settings.ts";
 import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
 import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
@@ -579,7 +579,9 @@ const optionItems = computed(() => {
     .map((o) => ({ ...o, current: o.value === current }));
 });
 const menuItems = computed<any[]>(() => (menuMode.value === "options" ? optionItems.value : commandItems.value));
-const pathToken = computed(() => parseMentionToken(draft.value));
+const pathToken = computed(() =>
+  String(draft.value).trimStart().startsWith("!") ? null : parseMentionToken(draft.value),
+);
 
 /**
  * `@` 选择器里的候选分组。
@@ -970,7 +972,19 @@ function autosize(): void {
   el.style.height = "auto";
   el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
 }
-watch(draft, () => nextTick(autosize));
+watch(draft, () => nextTick(() => {
+  // `!` / `!!` 前缀不进入 textarea。键盘输入已经在 keydown 里拦下，
+  // 这里兜住粘贴 / 输入法等直接走 input 事件的路径，避免前缀闪一下。
+  const el = input.value;
+  const expected = editorText.value;
+  if (el && el.value !== expected) {
+    const caret = el.selectionStart ?? expected.length;
+    el.value = expected;
+    const position = Math.min(caret, expected.length);
+    el.selectionStart = el.selectionEnd = position;
+  }
+  autosize();
+}));
 // 换会话 / 换项目：draft 可能两边都是空的，必须显式重算一次
 watch(() => ws.value?.sessionFile, () => nextTick(autosize));
 watch(() => ws.value?.cwd, () => nextTick(autosize));
@@ -1052,6 +1066,26 @@ async function stop(): Promise<void> {
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return;
+  // 第一个 `!` 只切换 shell 模式，不进入输入框；`!` 再按一次切到 `!!`。
+  if (event.key === "!" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const target = event.currentTarget as HTMLTextAreaElement | null;
+    const atStart = target ? target.selectionStart === 0 && target.selectionEnd === 0 : false;
+    if (atStart) {
+      const next = toggleBashMode(draft.value);
+      if (next !== draft.value) {
+        event.preventDefault();
+        draft.value = next;
+        nextTick(autosize);
+        return;
+      }
+    }
+  }
+  // 空命令时退格 = 退出 shell 模式（否则只会在空输入框里按一下没反应）。
+  if (event.key === "Backspace" && bashInput.value && !bashInput.value.body) {
+    event.preventDefault();
+    exitBashMode();
+    return;
+  }
   if (pathPicker.value) {
     const count = pickerCount.value;
     if (event.key === "ArrowDown" && count) {
@@ -1169,6 +1203,7 @@ watch(
 );
 
 const placeholder = computed(() => {
+  if (bashInput.value) return "输入 shell 命令，Enter 运行…";
   if (ws.value?.streaming) return "继续输入，将按所选方式加入当前任务…";
   return hasHistory.value ? "继续这个任务，输入 / 命令，! 运行 shell" : "描述一个任务，输入 / 命令，! 运行 shell";
 });
@@ -1189,6 +1224,22 @@ const argHint = computed(() => {
 const bashInput = computed(() => parseBashInput(draft.value));
 const bashRunning = computed(() => Boolean(ws.value?.activeThread?.bashRunning));
 
+/**
+ * 输入框里显示的内容：`!` / `!!` 只作为模式前缀，不进入 textarea。
+ * 底下仍然存带前缀的字符串，草稿持久化 / 重启恢复后才不会退化成普通消息。
+ */
+const editorText = computed<string>({
+  get: () => bashEditorText(draft.value),
+  set: (value) => {
+    draft.value = setBashEditorText(draft.value, value);
+  },
+});
+
+function exitBashMode(): void {
+  draft.value = "";
+  nextTick(focus);
+}
+
 /** 输入框上方的提示：`!` 与 `!!` 的区别必须在动手前说清楚。 */
 const bashHint = computed(() => {
   const bash = bashInput.value;
@@ -1207,7 +1258,7 @@ const bashHint = computed(() => {
     return {
       mark,
       title: "输入要运行的命令",
-      detail: bash.excludeFromContext ? "仍会执行并记进会话，但结果不交给模型" : "运行结果会在下一次提问时交给模型",
+      detail: bash.excludeFromContext ? "输出只留在会话记录，不交给模型" : "输出会在下一次提问时交给模型",
       exclude: bash.excludeFromContext,
       running: false,
     };
@@ -1215,7 +1266,7 @@ const bashHint = computed(() => {
   return {
     mark,
     title: "将在项目目录运行",
-    detail: bash.excludeFromContext ? "仍会执行并记进会话，但结果不交给模型" : "运行结果会在下一次提问时交给模型",
+    detail: bash.excludeFromContext ? "输出只留在会话记录，不交给模型" : "输出会在下一次提问时交给模型",
     exclude: bash.excludeFromContext,
     running: false,
   };
@@ -1478,14 +1529,13 @@ async function abortBash(): Promise<void> {
 
         <div v-if="bashHint" class="bash-hint" :data-mode="bashHint.exclude ? 'exclude' : 'include'" :data-running="bashHint.running || undefined">
           <span class="bash-hint-mark">{{ bashHint.mark }}</span>
-          <span class="bash-hint-text">
-            <span class="bash-hint-title">{{ bashHint.title }}</span>
-            <span class="bash-hint-detail">{{ bashHint.detail }}</span>
-          </span>
+          <span class="bash-hint-title">{{ bashHint.title }}</span>
+          <span class="bash-hint-detail" :title="bashHint.detail">{{ bashHint.detail }}</span>
           <span class="bash-hint-key">
             <template v-if="bashHint.running"><kbd>Esc</kbd> 停止当前命令</template>
             <template v-else><kbd>Enter</kbd> 运行</template>
           </span>
+          <button type="button" class="bash-hint-close" title="退出 shell 模式" aria-label="退出 shell 模式" @click="exitBashMode">×</button>
         </div>
 
         <div class="composer-field">
@@ -1525,7 +1575,7 @@ async function abortBash(): Promise<void> {
           <div class="composer-input">
             <textarea
               ref="input"
-              v-model="draft"
+              v-model="editorText"
               rows="1"
               :placeholder="placeholder"
               spellcheck="false"
