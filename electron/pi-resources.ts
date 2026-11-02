@@ -396,14 +396,25 @@ export async function skillsFromResources(resources: ResourceItem[]): Promise<{ 
 }
 
 /** 用本机 pi 跑一条 CLI 命令（安装 / 卸载 / 更新软件包）。 */
-export function runPiCli(entry: string, args: string[], cwd?: string): Promise<{ code: number; output: string }> {
+export function runPiCli(
+  entry: string,
+  args: string[],
+  cwd?: string,
+  extraEnv?: Record<string, string | undefined>,
+): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
       [entry, ...args],
       {
         cwd,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0", GIT_TERMINAL_PROMPT: "0" },
+        env: {
+          // extraEnv 是调用方按出网方式处理过的完整环境（直连时会故意缺代理变量）
+          ...(extraEnv ?? process.env),
+          ELECTRON_RUN_AS_NODE: "1",
+          FORCE_COLOR: "0",
+          GIT_TERMINAL_PROMPT: "0",
+        },
         maxBuffer: 8 * 1024 * 1024,
         timeout: 180_000,
         windowsHide: true,

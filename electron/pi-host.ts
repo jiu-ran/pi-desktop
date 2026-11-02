@@ -274,6 +274,11 @@ export interface PiHostOptions {
    * 桌面端不内置 Pi 的推理与工具执行，会话一律跑用户自己装的那份（见 docs/product-boundary.md）。
    */
   piEntry?: () => Promise<string>;
+  /**
+   * 出网方式：Pi 子进程的环境变量补丁（代理 / 直连）。
+   * Pi 用 undici 的 EnvHttpProxyAgent，只认 HTTP(S)_PROXY，系统代理由主进程转换后塞进来。
+   */
+  networkEnv?: () => Record<string, string | undefined>;
 }
 
 export type GitWorktreeMergeStrategy = "squash" | "merge" | "rebase";
@@ -1087,8 +1092,9 @@ export class PiHost {
   /** 本机 pi 入口的解析器（主进程注入），解析结果缓存到 piEntryCache */
   private piEntryResolver?: () => Promise<string>;
   private piEntryCache = "";
+  private networkEnv?: () => Record<string, string | undefined>;
 
-  constructor({ emit, trash, worktreeRoot, piEntry }: PiHostOptions) {
+  constructor({ emit, trash, worktreeRoot, piEntry, networkEnv }: PiHostOptions) {
     this.emit = emit;
     this.trash = trash ?? ((file: string) => unlink(file));
     this.clients = new Map();
@@ -1096,6 +1102,7 @@ export class PiHost {
     this.maxIdleWorkers = 3;
     this.worktreeRoot = path.resolve(worktreeRoot ?? path.join(homedir(), ".pi-desktop", "worktrees"));
     this.piEntryResolver = piEntry;
+    this.networkEnv = networkEnv;
   }
 
   /** 设置里换了 Pi 路径、或刚更新完 Pi 之后调用：下次启动 worker 时重新解析。 */
@@ -1228,7 +1235,7 @@ export class PiHost {
     pool: WorkspaceClientPool,
     options: { targetSessionFile?: string; pickLatestOnInit?: boolean; parentSession?: string } = {},
   ): Promise<WorkerSlot> {
-    const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd) });
+    const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd), env: this.networkEnv?.() });
     const slot: WorkerSlot = {
       client,
       sessionFile: "",
@@ -1319,7 +1326,7 @@ export class PiHost {
   private warmStandbyWorker(cwd: string, pool: WorkspaceClientPool): void {
     if (pool.standbySlot || pool.standbyPromise) return;
     const promise = (async (): Promise<WorkerSlot | null> => {
-      const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd) });
+      const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd), env: this.networkEnv?.() });
       const slot: WorkerSlot = {
         client,
         sessionFile: "",
@@ -3535,7 +3542,7 @@ export class PiHost {
         [entry, "mcp", ...args],
         {
           cwd: targetCwd,
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0" },
+          env: { ...(this.networkEnv?.() ?? process.env), ELECTRON_RUN_AS_NODE: "1", FORCE_COLOR: "0" },
           maxBuffer: 8 * 1024 * 1024,
           timeout,
           windowsHide: true,
@@ -3893,7 +3900,7 @@ export class PiHost {
     if (local && !cwd) throw new Error("当前未打开项目目录，无法安装到项目级配置");
     const normalized = this.normalizeInstallSource(payload?.source ?? "", cwd);
     const entry = await this.piEntry();
-    const result = await runPiCli(entry, ["install", normalized, ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined);
+    const result = await runPiCli(entry, ["install", normalized, ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined, this.networkEnv?.());
     if (result.code !== 0) throw new Error(`安装失败：${result.output.slice(-400) || "pi install 异常退出"}`);
     return this.packagesOverview(cwd);
   }
@@ -3901,7 +3908,7 @@ export class PiHost {
   async packagesRemove(cwd: string, payload: { source: string; local?: boolean }): Promise<PiPackagesOverview> {
     const local = Boolean(payload?.local);
     const entry = await this.piEntry();
-    const result = await runPiCli(entry, ["remove", String(payload?.source ?? ""), ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined);
+    const result = await runPiCli(entry, ["remove", String(payload?.source ?? ""), ...(local ? ["-l"] : [])], local && cwd ? path.resolve(cwd) : undefined, this.networkEnv?.());
     if (result.code !== 0) throw new Error(`卸载失败：${result.output.slice(-400) || "pi remove 异常退出"}`);
     return this.packagesOverview(cwd);
   }
@@ -3909,7 +3916,7 @@ export class PiHost {
   async packagesUpdate(cwd: string, payload?: { source?: string }): Promise<PiPackagesOverview> {
     const entry = await this.piEntry();
     const target = payload?.source ? ["--extension", String(payload.source)] : ["--extensions"];
-    const result = await runPiCli(entry, ["update", ...target], cwd ? path.resolve(cwd) : undefined);
+    const result = await runPiCli(entry, ["update", ...target], cwd ? path.resolve(cwd) : undefined, this.networkEnv?.());
     if (result.code !== 0) throw new Error(`更新失败：${result.output.slice(-400) || "pi update 异常退出"}`);
     return this.packagesOverview(cwd);
   }

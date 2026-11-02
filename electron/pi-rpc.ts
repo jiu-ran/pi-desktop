@@ -122,13 +122,15 @@ export class PiRpcClient {
     this.stopping = false;
     this.buffer = "";
 
+    // options.env 是调用方算好的完整环境（可能刻意删掉了代理变量），要当底座用，
+    // 不能盖在 process.env 上：``...process.env`` 会把直连时删掉的代理又带回来。
+    const baseEnv = this.options.env ?? process.env;
     const child = spawn(process.execPath, [this.options.entry, "--mode", "rpc", ...(this.options.args ?? [])], {
       cwd: this.options.cwd,
       env: {
-        ...process.env,
+        ...baseEnv,
         // 打包后的 process.execPath 是 Electron 本体：这个开关让它按 Node 跑
         ELECTRON_RUN_AS_NODE: "1",
-        ...this.options.env,
       },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,

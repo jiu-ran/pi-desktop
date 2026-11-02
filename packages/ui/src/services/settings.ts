@@ -3,6 +3,7 @@ import type { EventBus } from "../kernel/event-bus.ts";
 import type { Workbench } from "../kernel/workbench.ts";
 import { readStorage, writeStorage } from "../shared/storage.ts";
 import { normalizeLogMaxBytes } from "../shared/log-limit.ts";
+import { NETWORK_MODE_DEFAULT, normalizeNetworkMode, type NetworkMode } from "../shared/network-mode.ts";
 import { shouldAutoDownloadUpdate } from "../shared/update-auto.ts";
 import {
   appearanceStyle,
@@ -64,6 +65,13 @@ export interface AppSettings {
   piUpdateScope: "self" | "all";
   /** 手动指定的 Pi 可执行文件路径（为空时只从 PATH 自动识别） */
   piCustomPath: string;
+  /**
+   * 出网方式：auto = 环境变量优先、其次系统代理；system = 系统代理；
+   * direct = 直连；custom = 用 proxyUrl。
+   */
+  networkMode: NetworkMode;
+  /** networkMode = custom 时的代理地址（允许省略 http://） */
+  proxyUrl: string;
   /** 启动时检查 Pi Desktop 的 GitHub Release */
   appUpdateCheck: boolean;
   /** 检查到新版本后自动下载并校验安装包（安装仍需手动确认） */
@@ -123,6 +131,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piAutoUpdate: false,
   piUpdateScope: "self",
   piCustomPath: "",
+  networkMode: NETWORK_MODE_DEFAULT,
+  proxyUrl: "",
   appUpdateCheck: true,
   appUpdateAuto: true,
   uiFontSize: 13,
@@ -174,6 +184,8 @@ function loadSavedSettings(): AppSettings {
       piAutoUpdate: typeof parsed.piAutoUpdate === "boolean" ? parsed.piAutoUpdate : DEFAULT_SETTINGS.piAutoUpdate,
       piUpdateScope: parsed.piUpdateScope === "all" ? "all" : "self",
       piCustomPath: typeof parsed.piCustomPath === "string" ? parsed.piCustomPath.slice(0, 500) : DEFAULT_SETTINGS.piCustomPath,
+      networkMode: normalizeNetworkMode(parsed.networkMode),
+      proxyUrl: typeof parsed.proxyUrl === "string" ? parsed.proxyUrl.slice(0, 300) : "",
       appUpdateCheck: typeof parsed.appUpdateCheck === "boolean" ? parsed.appUpdateCheck : DEFAULT_SETTINGS.appUpdateCheck,
       appUpdateAuto: typeof parsed.appUpdateAuto === "boolean" ? parsed.appUpdateAuto : DEFAULT_SETTINGS.appUpdateAuto,
       uiFontSize: Math.min(16, Math.max(12, Number(parsed.uiFontSize) || DEFAULT_SETTINGS.uiFontSize)),
@@ -334,6 +346,20 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
     await workbench.call("setAutoCompaction", appSettings.autoCompaction).catch(() => {});
     await workbench.call("setAutoRetry", appSettings.autoRetry).catch(() => {});
   }
+
+  // 出网方式与工作区无关，启动就落一次；改设置时再落一次（Pi 子进程下次启动才换得到）
+  let networkTimer: ReturnType<typeof setTimeout> | null = null;
+  const syncNetwork = (): void => {
+    if (networkTimer) clearTimeout(networkTimer);
+    networkTimer = setTimeout(() => {
+      networkTimer = null;
+      void workbench.applyNetwork?.(appSettings.networkMode, appSettings.proxyUrl);
+    }, 150);
+  };
+  disposers.push(watch(() => [appSettings.networkMode, appSettings.proxyUrl], syncNetwork, { immediate: true }));
+  disposers.push(() => {
+    if (networkTimer) clearTimeout(networkTimer);
+  });
 
   disposers.push(bus.on("workspace:opened", () => {
     void syncAgentPreferences();

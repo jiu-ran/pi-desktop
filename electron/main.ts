@@ -10,6 +10,7 @@ import { piCliEntryFromExecutable, resolvePiEntryFromSystem } from "./pi-entry.t
 import { TerminalHost } from "./terminal-host.ts";
 import { listTerminalProfiles, resolveTerminalProfile, type TerminalPtyOptions } from "./terminal-profiles.ts";
 import { createAppUpdateManager, MANUAL_CHECK_CACHE_MS } from "./network/update.ts";
+import { applyNetworkMode, childEnv, initNetworkMode, networkStatus } from "./network/mode.ts";
 import { atomicWriteText } from "./atomic-file.ts";
 import { activity, logPerfLine, withActivity } from "./perf-log.ts";
 import { isWritableDir, log, logStore, useAppLogs } from "./logger.ts";
@@ -202,6 +203,8 @@ const host = new PiHost({
   trash: (file) => shell.trashItem(file),
   worktreeRoot: path.join(app.getPath("userData"), "worktrees"),
   piEntry: resolvePiEntry,
+  // Pi 用 undici 的 EnvHttpProxyAgent：只认环境变量，系统代理得我们转一道
+  networkEnv: () => childEnv(),
 });
 
 const terminalHost = new TerminalHost({
@@ -251,7 +254,8 @@ function runCommand(command: string, args: string[], timeoutMs = 30000): Promise
     // Node.js 22 (DEP0190): 启用 shell: true 时若传递 args 数组会触发 DeprecationWarning。
     // 将命令与参数拼成单一命令行字符串传入，彻底消除警告并确保 Windows 下 .cmd shim 正常执行。
     const cmdLine = args.length ? `${command} ${args.join(" ")}` : command;
-    const child = spawn(cmdLine, { shell: true, timeout: timeoutMs, windowsHide: true });
+    // 出网方式对子进程同样生效：`npm view` / `pi update` 都要按用户选的代理走
+    const child = spawn(cmdLine, { shell: true, timeout: timeoutMs, windowsHide: true, env: childEnv() });
     let output = "";
     child.stdout?.on("data", (chunk) => { output += chunk; });
     child.stderr?.on("data", (chunk) => { output += chunk; });
@@ -798,6 +802,8 @@ function startLagWatchdog(): void {
 
 app.whenReady().then(() => {
   activateLogs();
+  // 先按「自动」落一次：渲染层就绪前发生的请求（如启动检查更新）也要按同一套规则走
+  void initNetworkMode();
   if (!ownsInstance) return;
   handle("pi:locate", (customPath = "") => {
     // 记下手动路径：会话启动时要按同一个路径解析 pi 入口
@@ -806,6 +812,9 @@ app.whenReady().then(() => {
     return locatePi(customPath);
   });
   handle("pi:check-update", (customPath = "") => checkPiUpdate(customPath));
+  // 出网方式：应用自己的请求走 session 代理，Pi 子进程走环境变量
+  handle("net:apply", (mode = "", custom = "") => applyNetworkMode(mode, custom));
+  handle("net:status", () => networkStatus());
   handle("app:check-update", (options: { manual?: boolean } = {}) =>
     appUpdateManager.check({ maxAgeMs: options?.manual ? MANUAL_CHECK_CACHE_MS : undefined }),
   );

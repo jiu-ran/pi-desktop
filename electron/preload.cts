@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   locate: (customPath = "") => ipcRenderer.invoke("pi:locate", customPath),
   setZoomFactor: (factor: number) => ipcRenderer.invoke("pi:set-zoom", factor),
   checkPiUpdate: (customPath = "") => ipcRenderer.invoke("pi:check-update", customPath),
+  networkApply: (mode = "", custom = "") => ipcRenderer.invoke("net:apply", mode, custom),
+  networkStatus: () => ipcRenderer.invoke("net:status"),
   checkAppUpdate: (options?: { manual?: boolean }) => ipcRenderer.invoke("app:check-update", options),
   downloadAppUpdate: () => ipcRenderer.invoke("app:download-update"),
   cancelAppUpdate: () => ipcRenderer.invoke("app:cancel-update"),

@@ -204,6 +204,14 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       /** 上次检查失败的原因（限流 / 断网）；有值时不能显示「已是最新」 */
       error: "",
     },
+    /** 出网方式的实际结果（主进程算的：最终代理 + 来源） */
+    network: { mode: "auto", custom: "", proxy: "", source: "none", systemProxy: "" } as {
+      mode: string;
+      custom: string;
+      proxy: string;
+      source: string;
+      systemProxy: string;
+    },
     recent: [] as string[],
     activeCwd: "",
     theme: readStorage(THEME_KEY) === "light" ? "light" : "dark",
@@ -2276,6 +2284,25 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return Boolean(await host.openAppUpdate(state.appUpdate.url).catch(() => false));
   }
 
+  /**
+   * 应用出网方式。主进程据此设置 Electron session 的代理，并把环境变量补丁
+   * 交给之后启动的 Pi 子进程（已在运行的会话要重启才换得到）。
+   */
+  let networkSeq = 0;
+  async function applyNetwork(mode = "", custom = ""): Promise<typeof state.network | null> {
+    if (!host?.networkApply) return null;
+    // 连续切换时按「最后发起的那个」为准：早发起的慢响应回来不能把新设置盖回去
+    const seq = ++networkSeq;
+    try {
+      const status = await host.networkApply(mode, custom);
+      if (seq !== networkSeq) return state.network;
+      if (status && typeof status === "object") state.network = { ...state.network, ...status };
+      return state.network;
+    } catch {
+      return null;
+    }
+  }
+
   async function updatePi(customPath = "", scope: "self" | "all" = "self"): Promise<boolean> {
     if (!host?.updatePi || state.pi.updating) return false;
     state.pi.updating = true;
@@ -2715,6 +2742,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     installAppUpdate,
     openAppUpdate,
     updatePi,
+    applyNetwork,
     setSidebarWidth,
     setPanelWidth,
     setStageWidth,
