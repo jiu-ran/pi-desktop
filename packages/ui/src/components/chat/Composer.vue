@@ -999,7 +999,10 @@ async function submit(): Promise<void> {
       return;
     }
     if (!bash.command) {
-      bus.emit("notify", { level: "warning", text: "在 ! 后面输入要运行的命令" });
+      bus.emit("notify", {
+        level: "warning",
+        text: `在 ${bash.excludeFromContext ? "!!" : "!"} 后面输入要运行的命令`,
+      });
       return;
     }
     draft.value = "";
@@ -1185,6 +1188,38 @@ const argHint = computed(() => {
 // ---------- `!` 命令（Pi TUI 的同一套写法） ----------
 const bashInput = computed(() => parseBashInput(draft.value));
 const bashRunning = computed(() => Boolean(ws.value?.activeThread?.bashRunning));
+
+/** 输入框上方的提示：`!` 与 `!!` 的区别必须在动手前说清楚。 */
+const bashHint = computed(() => {
+  const bash = bashInput.value;
+  if (!bash) return null;
+  const mark = bash.excludeFromContext ? "!!" : "!";
+  if (bashRunning.value) {
+    return {
+      mark,
+      title: "已有命令在运行",
+      detail: "按 Esc 或点卡片上的「停止」先中断它",
+      exclude: bash.excludeFromContext,
+      running: true,
+    };
+  }
+  if (!bash.command) {
+    return {
+      mark,
+      title: "输入要运行的命令",
+      detail: bash.excludeFromContext ? "仍会执行并记进会话，但结果不交给模型" : "运行结果会在下一次提问时交给模型",
+      exclude: bash.excludeFromContext,
+      running: false,
+    };
+  }
+  return {
+    mark,
+    title: "将在项目目录运行",
+    detail: bash.excludeFromContext ? "仍会执行并记进会话，但结果不交给模型" : "运行结果会在下一次提问时交给模型",
+    exclude: bash.excludeFromContext,
+    running: false,
+  };
+});
 
 async function abortBash(): Promise<void> {
   await workbench.abortBash();
@@ -1441,15 +1476,16 @@ async function abortBash(): Promise<void> {
           @pick="(item) => pick(item)"
         />
 
-        <div v-if="bashInput" class="bash-hint">
-          <span class="bash-hint-mark">{{ bashInput.excludeFromContext ? "!!" : "!" }}</span>
+        <div v-if="bashHint" class="bash-hint" :data-mode="bashHint.exclude ? 'exclude' : 'include'" :data-running="bashHint.running || undefined">
+          <span class="bash-hint-mark">{{ bashHint.mark }}</span>
           <span class="bash-hint-text">
-            <template v-if="!bashInput.command">在感叹号后面输入要运行的命令</template>
-            <template v-else-if="bashRunning">已有命令在运行，按 Esc 或卡片上的「停止」先中断它</template>
-            <template v-else-if="bashInput.excludeFromContext">在项目目录里运行；输出只留在会话记录，不交给模型</template>
-            <template v-else>在项目目录里运行；输出会在下一次提问时交给模型</template>
+            <span class="bash-hint-title">{{ bashHint.title }}</span>
+            <span class="bash-hint-detail">{{ bashHint.detail }}</span>
           </span>
-          <span class="bash-hint-key"><kbd>Enter</kbd> 运行</span>
+          <span class="bash-hint-key">
+            <template v-if="bashHint.running"><kbd>Esc</kbd> 停止当前命令</template>
+            <template v-else><kbd>Enter</kbd> 运行</template>
+          </span>
         </div>
 
         <div class="composer-field">
