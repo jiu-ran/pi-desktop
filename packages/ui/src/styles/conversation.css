@@ -733,6 +733,13 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* 失败卡的副标题：一句「下一步做什么」，比正文灰一档 */
+.notice-hint {
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.notice[data-level="error"] .notice-hint { color: var(--fg-2); }
 /* 连续重复的提示只留一条，右侧显示次数 */
 .notice-count {
   flex: none;

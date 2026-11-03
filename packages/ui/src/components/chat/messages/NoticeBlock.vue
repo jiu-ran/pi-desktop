@@ -82,7 +82,9 @@ const countdown = computed(() => {
       <span v-if="countdown" class="notice-countdown" role="timer">{{ countdown }}</span>
       <!-- 重试期间不再重复显示同一句错误（hover 里能看到的 title 已经带着），
            一条提示只占一行，省掉以前那半屏的重复内容 -->
-      <span v-if="(block.count ?? 1) > 1" class="notice-count">×{{ block.count }}</span>
+      <!-- 断网失败卡的 count 已经写进标题（「重试 2 次仍未成功」），不再单独显示 ×N -->
+      <span v-if="(block.count ?? 1) > 1 && !block.hint" class="notice-count">×{{ block.count }}</span>
+      <span v-if="block.hint" class="notice-hint"><SearchHighlight :text="block.hint" :query="query" /></span>
       <!-- 每次重试换一个 key：换条后进度条要重新从头走，否则上一轮已经走空就一直停着 -->
       <div
         v-if="retrying && block.retry"

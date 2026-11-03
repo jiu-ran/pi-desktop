@@ -28,3 +28,26 @@ export function retryResultText(success: boolean, attempt: number, maxAttempts: 
   if (success) return `已重新连接（第 ${attempt} 次重试）`;
   return `重试 ${attempt}/${maxAttempts} 失败：${reason || "未知错误"}`;
 }
+
+/** 彻底失败的网络提示：标题说清「试了几次都没成」，副标题说下一步做什么。 */
+export interface NetworkFailureNotice {
+  title: string;
+  hint: string;
+  /** 已经失败的次数（合并相同提示后的计数，至少 1） */
+  attempts: number;
+}
+
+/**
+ * 断网失败卡的文案。
+ *
+ * 只写「网络连接失败 ×2」看不出严重程度：是重试了两次都失败，还是两条不同的错误？
+ * 所以把次数写进标题（×N 徽标随之省略），再补一句可以怎么办。
+ */
+export function networkFailureNotice(count = 1): NetworkFailureNotice {
+  const attempts = Math.max(1, Math.round(Number(count) || 1));
+  return {
+    title: attempts > 1 ? `网络连接失败 · 重试 ${attempts} 次仍未成功` : "网络连接失败",
+    hint: "检查网络或代理后再发一次",
+    attempts,
+  };
+}

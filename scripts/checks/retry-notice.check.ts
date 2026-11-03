@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  networkFailureNotice,
   retryCountdownLabel,
   retryNoticeText,
   retryRemainingMs,
@@ -48,4 +49,15 @@ const notice = readFileSync(path.resolve(here, "../../packages/ui/src/components
 assert.ok(notice.includes(':key="block.retry.attempt"'), "进度条要按 attempt 换 key，否则换条后不会重新走");
 assert.ok(notice.includes("notice-spin"), "重连期间图标要转起来");
 
-console.log("retry-notice OK 倒计时取整 / 文案 / 收尾 / deadline / 进度条重启");
+// 彻底失败的网络提示：次数写进标题，再补一句下一步
+const once = networkFailureNotice(1);
+assert.equal(once.title, "网络连接失败");
+assert.equal(once.hint, "检查网络或代理后再发一次");
+const twice = networkFailureNotice(2);
+assert.equal(twice.title, "网络连接失败 · 重试 2 次仍未成功", "两次都没成要写清楚，不是只丢一个 ×2");
+assert.equal(twice.hint, "检查网络或代理后再发一次");
+assert.equal(networkFailureNotice(0).attempts, 1, "次数最小是 1");
+assert.equal(networkFailureNotice(Number.NaN).attempts, 1, "脏数据也不能出现「重试 NaN 次」");
+assert.equal(networkFailureNotice(2.6).attempts, 3, "四舍五入成整数");
+
+console.log("retry-notice OK 倒计时取整 / 文案 / 收尾 / deadline / 进度条重启 / 断网失败卡文案");

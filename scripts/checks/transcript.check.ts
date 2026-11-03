@@ -333,7 +333,9 @@ console.log("tool stream OK");
   const merged = t3.blocks.filter((block) => block.kind === "notice");
   assert.equal(merged.length, 1, `相同的错误应合并，实际 ${merged.length} 条`);
   assert.equal(merged[0].count, 3, `应显示重复次数，实际 ${merged[0].count}`);
-  assert.equal(merged[0].text, "网络连接失败");
+  assert.equal(merged[0].text, "网络连接失败 · 重试 3 次仍未成功", "次数要写进标题，不能只丢一个 ×3");
+  assert.equal(merged[0].hint, "检查网络或代理后再发一次", "失败卡要带一句下一步做什么");
+  assert.equal(merged[0].key, "网络连接失败", "合并用的原始文案要保留，否则下一张合并不上");
   // 重连成功后，之前那几张「网络连接失败」必须一起消失（截图里的情况：红卡 ×3 一直挂着）
   const t4 = createTranscript();
   const boom = () => ({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } });

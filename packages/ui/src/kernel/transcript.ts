@@ -4,7 +4,7 @@ import { compactionFailureText } from "../shared/compaction-error.ts";
 import { parseSkillInvocation, type SkillInvocation } from "../shared/skill-invocation.ts";
 import { formatTokens } from "../shared/util.ts";
 import { localizeNotification } from "../shared/notify-text.ts";
-import { retryNoticeText, retryResultText } from "../shared/retry-notice.ts";
+import { networkFailureNotice, retryNoticeText, retryResultText } from "../shared/retry-notice.ts";
 
 export interface RetryNotice {
   attempt: number;
@@ -72,6 +72,10 @@ export interface TranscriptBlock {
   recovered?: boolean;
   /** 同一条提示连续出现时的合并次数（界面上显示 ×N） */
   count?: number;
+  /** 副标题：一句「下一步做什么」（目前只有断网失败卡用） */
+  hint?: string;
+  /** 合并用的原始文案：断网卡的 text 会被改写成带次数的标题 */
+  key?: string;
   /** 块创建时间（毫秒）：回合分组用它算「这一轮花了多久」 */
   ts?: number;
   /** 用户在对话里用 `!` 直接跑的命令 */
@@ -143,6 +147,7 @@ function markNetworkRecovered(blocks: TranscriptBlock[]): boolean {
     if (block.kind !== "notice" || !block.network || block.level !== "error" || block.retry || block.compaction) continue;
     block.level = "info";
     block.text = "已重新连接，任务继续";
+    block.hint = undefined;
     block.count = undefined;
     block.network = false;
     block.recovered = true;
@@ -163,11 +168,30 @@ function pushErrorNotice(blocks: TranscriptBlock[], value: unknown): void {
   if (last?.kind === "notice" && last.retry?.done && last.retry.success === false && last.retry.error === text) {
     return;
   }
-  if (last?.kind === "notice" && last.text === text && !last.retry && !last.compaction) {
+  // 断网卡的标题里带了次数（「重试 2 次仍未成功」），所以合并时按「原始文案」比对，
+  // 不能拿已经改过的标题当 key，否则第二条一模一样错误永远合并不上。
+  const lastKey = last?.kind === "notice" && !last.retry && !last.compaction ? last.key ?? last.text : undefined;
+  if (last && lastKey === text) {
     last.count = (last.count ?? 1) + 1;
+    if (last.network) {
+      const notice = networkFailureNotice(last.count);
+      last.text = notice.title;
+      last.hint = notice.hint;
+    }
     return;
   }
-  blocks.push({ kind: "notice", id: uid("n"), level: "error", text, count: 1, network: isRecoverableNetworkError(value) });
+  const network = isRecoverableNetworkError(value);
+  const composed = network ? networkFailureNotice(1) : null;
+  blocks.push({
+    kind: "notice",
+    id: uid("n"),
+    level: "error",
+    text: composed ? composed.title : text,
+    hint: composed?.hint,
+    key: text,
+    count: 1,
+    network,
+  });
 }
 
 function textOf(content: any): string {
