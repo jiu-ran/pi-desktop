@@ -180,12 +180,6 @@ function refresh(): void {
   load();
 }
 
-function chooseProject(): void {
-  workbench
-    .chooseAndOpen()
-    .catch((reason: any) => bus.emit("notify", { level: "error", text: reason?.message ?? String(reason) }));
-}
-
 function openResult(item: WorkspaceEntry): void {
   openFileInStage(workbench, stage, bus, item.relative);
 }
@@ -234,7 +228,6 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
         />
         <button type="button" class="icon-btn small" title="新建文件" :disabled="!ws" @click="beginCreate('', 'file')" v-html="icons.plus" />
         <button type="button" class="icon-btn small" title="新建文件夹" :disabled="!ws" @click="beginCreate('', 'folder')" v-html="icons.folderAdd" />
-        <button type="button" class="icon-btn small" title="打开其他项目目录" @click="chooseProject" v-html="icons.folder" />
       </div>
     </div>
 
@@ -248,8 +241,7 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
       <button type="button" class="btn" @click="refresh">重试</button>
     </div>
     <div v-else-if="!ws" class="files-state">
-      <span>打开文件夹或克隆仓库后，这里会显示文件树</span>
-      <button type="button" class="btn" @click="chooseProject">打开文件夹</button>
+      <span>先在左侧侧边栏选择或打开一个项目，这里会显示它的文件树</span>
     </div>
     <template v-else-if="filter.trim()">
       <div v-if="searching" class="files-state"><span class="mini-spinner" />正在搜索文件…</div>
