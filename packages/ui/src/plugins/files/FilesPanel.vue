@@ -13,7 +13,9 @@ import {
   type RepoChange,
 } from "../../shared/git-changes.ts";
 import { overviewState, refreshOverviewState } from "../git/state.ts";
-import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
+import { copyText, deleteEntry, renameEntry } from "./actions.ts";
+import { beginCreate, inlineCreate } from "./inline-create.ts";
+import FileCreateRow from "./FileCreateRow.vue";
 import FileIcon from "../../components/shared/FileIcon.vue";
 import FileTreeNode from "./FileTreeNode.vue";
 import { openFileInStage } from "./state.ts";
@@ -128,8 +130,8 @@ onBeforeUnmount(() => {
 function rootMenu(event: MouseEvent): void {
   if (!ws.value) return;
   openMenu(event, [
-    { label: "新建文件", icon: icons.plus, run: () => void createEntry(ctx, "", "file") },
-    { label: "新建文件夹", icon: icons.folder, run: () => void createEntry(ctx, "", "folder") },
+    { label: "新建文件", icon: icons.plus, run: () => beginCreate("", "file") },
+    { label: "新建文件夹", icon: icons.folder, run: () => beginCreate("", "folder") },
     { separator: true },
     { label: "复制项目路径", icon: icons.copy, run: () => void copyText(bus, ws.value!.cwd, "已复制路径") },
     { label: "在文件管理器中显示", icon: icons.folder, run: () => workbench.reveal(ws.value!.cwd) },
@@ -208,7 +210,8 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
           @click="refresh"
           v-html="icons.refresh"
         />
-        <button type="button" class="icon-btn small" title="新建文件" :disabled="!ws" @click="createEntry(ctx, '', 'file')" v-html="icons.plus" />
+        <button type="button" class="icon-btn small" title="新建文件" :disabled="!ws" @click="beginCreate('', 'file')" v-html="icons.plus" />
+        <button type="button" class="icon-btn small" title="新建文件夹" :disabled="!ws" @click="beginCreate('', 'folder')" v-html="icons.folderAdd" />
         <button type="button" class="icon-btn small" title="打开其他项目目录" @click="chooseProject" v-html="icons.folder" />
       </div>
     </div>
@@ -272,7 +275,14 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
       </button>
     </div>
     <div v-else class="files-tree" @contextmenu="rootMenu">
-      <div v-if="!entries.length" class="files-state">目录为空，右键可新建</div>
+      <FileCreateRow
+        v-if="inlineCreate && inlineCreate.parent === ''"
+        :key="inlineCreate.seq"
+        :parent="''"
+        :kind="inlineCreate.kind"
+        :level="0"
+      />
+      <div v-if="!entries.length && !inlineCreate" class="files-state">目录为空，右键可新建</div>
       <FileTreeNode
         v-for="item in entries"
         :key="item.path"

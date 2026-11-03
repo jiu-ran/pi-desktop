@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PiHost } from "../../electron/pi-host.ts";
 import { displayProjectName } from "../../packages/ui/src/shared/util.ts";
+import { entryNamePlaceholder, validateEntryName } from "../../packages/ui/src/shared/entry-name.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "pi-desktop-files-"));
 const external = `${root}-outside.txt`;
@@ -98,6 +99,21 @@ try {
   console.log("files", top.length, nested.length, "git", git.branch, git.commits.length);
   if (displayProjectName("C:\\work\\7879f06a-login") !== "login") throw new Error("隔离工作区目录应显示任务名");
   if (displayProjectName("C:\\work\\app") !== "app") throw new Error("普通项目名不应被改写");
+  // 文件树就地新建：名字的本地校验（不合法的名字不该等到主进程才报错）
+  assert(validateEntryName("app.ts").ok, "普通文件名要允许");
+  assert(validateEntryName("  目录  ").ok, "首尾空白会被 trim");
+  assert(!validateEntryName("").ok, "空名字算不合法");
+  assert(validateEntryName("").reason === "", "空名字只是还没输入，不该报错");
+  assert(!validateEntryName("..").ok && !validateEntryName(".").ok, ". / .. 要拦");
+  assert(validateEntryName("a/b.ts").reason.includes("/"), "斜杠要拦（会跑到别的目录）");
+  assert(!validateEntryName("a" + String.fromCharCode(92) + "b.ts").ok, "反斜杠也要拦");
+  assert(!validateEntryName("a:b.ts").ok, "Windows 保留字符要拦");
+  assert(!validateEntryName("a*b?.ts").ok, "通配符要拦");
+  assert(validateEntryName("x".repeat(256)).reason.includes("太长"), "超长名字要提示");
+  assert(validateEntryName("x".repeat(255)).ok, "255 个字符是允许的");
+  assert(entryNamePlaceholder("folder") === "文件夹名", "文件夹占位文案");
+  assert(entryNamePlaceholder("file").includes("app.ts"), "文件占位要有示例");
+
   console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });

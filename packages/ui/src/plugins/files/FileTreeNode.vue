@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { openMenu } from "../../components/sidebar/ui.ts";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { icons } from "../../shared/util.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
 import { badgeCode, badgeKind, pathKey, type RepoChange } from "../../shared/git-changes.ts";
 import FileIcon from "../../components/shared/FileIcon.vue";
-import { copyText, createEntry, deleteEntry, renameEntry } from "./actions.ts";
+import { copyText, deleteEntry, renameEntry } from "./actions.ts";
+import { beginCreate, inlineCreate } from "./inline-create.ts";
+import FileCreateRow from "./FileCreateRow.vue";
 import { openFileInStage } from "./state.ts";
 
 const props = withDefaults(
@@ -97,6 +99,17 @@ async function reloadChildren(force = false): Promise<void> {
   }
 }
 
+// 就地新建行可能落在还没展开的目录里（右键「新建文件」）：自动展开，不然输入框看不见。
+watch(
+  inlineCreate,
+  (draft) => {
+    if (!draft || props.item.kind !== "folder") return;
+    const inside = draft.parent === props.item.relative || draft.parent.startsWith(`${props.item.relative}/`);
+    if (inside && !expanded.value) void open();
+  },
+  { immediate: true },
+);
+
 const stopWatching = bus.on("files:changed", ({ directory }: { directory: string }) => {
   if (props.item.kind === "folder" && directory === props.item.relative) {
     children.value = [];
@@ -112,8 +125,8 @@ function menu(event: MouseEvent): void {
   openMenu(event, [
     ...(folder
       ? [
-          { label: "新建文件", icon: icons.plus, run: () => void createEntry(ctx, props.item.relative, "file") },
-          { label: "新建文件夹", icon: icons.folder, run: () => void createEntry(ctx, props.item.relative, "folder") },
+          { label: "新建文件", icon: icons.plus, run: () => beginCreate(props.item.relative, "file") },
+          { label: "新建文件夹", icon: icons.folder, run: () => beginCreate(props.item.relative, "folder") },
           { separator: true },
         ]
       : [{ label: "用系统程序打开", icon: icons.reveal, run: () => workbench.openWorkspacePath(props.item.relative).catch(notify) }]),
@@ -161,6 +174,13 @@ function menu(event: MouseEvent): void {
       >{{ badgeCode(git) }}</span>
     </button>
     <div v-if="expanded" class="file-tree-children" @contextmenu.stop>
+      <FileCreateRow
+        v-if="inlineCreate && inlineCreate.parent === item.relative"
+        :key="inlineCreate.seq"
+        :parent="item.relative"
+        :kind="inlineCreate.kind"
+        :level="level + 1"
+      />
       <FileTreeNode
         v-for="child in children"
         :key="child.path"
