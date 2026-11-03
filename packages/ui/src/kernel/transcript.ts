@@ -314,6 +314,10 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
       }
       if (message.stopReason === "error" && message.errorMessage) {
         pushErrorNotice(blocks, message.errorMessage);
+      } else if (message.stopReason !== "aborted") {
+        // 回放历史时也要认「后来连上了」：否则重新打开会话 / 重启应用后，
+        // 早已恢复的「网络连接失败」会重新变成一张永远挂在对话里的红卡。
+        markNetworkRecovered(blocks);
       }
       return;
     }

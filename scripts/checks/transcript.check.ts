@@ -383,4 +383,44 @@ console.log("tool stream OK");
   assert.ok(kept.some((block) => block.level === "error"), "非网络错误仍然是失败卡");
 
   console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并 / 成功清掉失败卡 / 恢复后变「已重新连接」");
+
+  // 回放历史（打开会话 / 重启应用）也要认「后来连上了」：
+  // 以前 loadMessages 只把 error 消息变成红卡，从不检查后面是否已经成功，
+  // 于是早就恢复的网络失败会以「网络连接失败 ×2」的样子永远留在对话里。
+  const replayed = createTranscript();
+  replayed.loadMessages([
+    { role: "user", content: [{ type: "text", text: "在吗" }] },
+    { role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] },
+    { role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] },
+    { role: "assistant", stopReason: "endTurn", content: [{ type: "text", text: "在的" }] },
+  ]);
+  const replayedNotices = replayed.blocks.filter((block) => block.kind === "notice");
+  assert.equal(replayedNotices.length, 1, "两条相同错误合并成一条");
+  assert.equal(replayedNotices[0].level, "info", "回放时后面已成功：不该再是红卡");
+  assert.equal(replayedNotices[0].text, "已重新连接，任务继续");
+  assert.equal(replayedNotices[0].count, undefined, "恢复后不再显示 ×N");
+
+  const stillFailing = createTranscript();
+  stillFailing.loadMessages([
+    { role: "user", content: [{ type: "text", text: "在吗" }] },
+    { role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] },
+    { role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] },
+  ]);
+  const failingNotices = stillFailing.blocks.filter((block) => block.kind === "notice");
+  assert.equal(failingNotices.length, 1);
+  assert.equal(failingNotices[0].level, "error", "真的没恢复：仍然是红卡");
+  assert.equal(failingNotices[0].count, 2, "重复失败仍然计数");
+
+  const abortedReplay = createTranscript();
+  abortedReplay.loadMessages([
+    { role: "assistant", stopReason: "error", errorMessage: "Connection error.", content: [] },
+    { role: "assistant", stopReason: "aborted", content: [] },
+  ]);
+  assert.equal(
+    abortedReplay.blocks.filter((block) => block.kind === "notice")[0].level,
+    "error",
+    "中断不是「连上了」，不能把失败卡刷成已恢复",
+  );
+
+  console.log("transcript replay OK 回放时恢复 / 未恢复仍是红卡 / 中断不算恢复");
 }
