@@ -15,6 +15,8 @@ import {
 import { overviewState, refreshOverviewState } from "../git/state.ts";
 import { copyText, deleteEntry, renameEntry } from "./actions.ts";
 import { beginCreate, inlineCreate } from "./inline-create.ts";
+import { applySort, fileSort, setFileSort } from "./sort.ts";
+import { FILE_SORT_OPTIONS, sameSortSetting } from "../../shared/file-sort.ts";
 import FileCreateRow from "./FileCreateRow.vue";
 import FileIcon from "../../components/shared/FileIcon.vue";
 import FileTreeNode from "./FileTreeNode.vue";
@@ -23,6 +25,9 @@ import { openFileInStage } from "./state.ts";
 const { workbench, stage, bus } = useKernel();
 const ws = computed(() => workbench.active.value);
 const entries = ref<WorkspaceEntry[]>([]);
+/** 排序只影响展示：原始顺序留在 entries 里，切换排序不需要重新读目录 */
+const sortedEntries = computed(() => applySort(entries.value));
+const sortGlyph = "<svg class=\"pi-icon\" viewBox=\"0 0 16 16\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5.5 3.5v9M3 6l2.5-2.5L8 6M10.5 12.5v-9M8 10l2.5 2.5L13 10\"/></svg>";
 const loading = ref(false);
 const error = ref("");
 const filter = ref("");
@@ -127,6 +132,15 @@ onBeforeUnmount(() => {
 });
 
 
+/** 排序菜单：当前生效的那项带勾，点一下立刻生效（本地记住） */
+function sortMenu(event: MouseEvent): void {
+  openMenu(event, FILE_SORT_OPTIONS.map((option) => ({
+    label: `${sameSortSetting(fileSort, option) ? "✓ " : ""}${option.label}`,
+    icon: sortGlyph,
+    run: () => setFileSort(option),
+  })));
+}
+
 function rootMenu(event: MouseEvent): void {
   if (!ws.value) return;
   openMenu(event, [
@@ -210,6 +224,14 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
           @click="refresh"
           v-html="icons.refresh"
         />
+        <button
+          type="button"
+          class="icon-btn small"
+          :title="`排序：${FILE_SORT_OPTIONS.find((option) => sameSortSetting(fileSort, option))?.label ?? '文件夹在前 · 名称 A→Z'}`"
+          :disabled="!ws"
+          @click="sortMenu"
+          v-html="sortGlyph"
+        />
         <button type="button" class="icon-btn small" title="新建文件" :disabled="!ws" @click="beginCreate('', 'file')" v-html="icons.plus" />
         <button type="button" class="icon-btn small" title="新建文件夹" :disabled="!ws" @click="beginCreate('', 'folder')" v-html="icons.folderAdd" />
         <button type="button" class="icon-btn small" title="打开其他项目目录" @click="chooseProject" v-html="icons.folder" />
@@ -282,9 +304,9 @@ function onResultDragStart(event: DragEvent, item: WorkspaceEntry): void {
         :kind="inlineCreate.kind"
         :level="0"
       />
-      <div v-if="!entries.length && !inlineCreate" class="files-state">目录为空，右键可新建</div>
+      <div v-if="!sortedEntries.length && !inlineCreate" class="files-state">目录为空，右键可新建</div>
       <FileTreeNode
-        v-for="item in entries"
+        v-for="item in sortedEntries"
         :key="item.path"
         :item="item"
         :git="gitFor(item.path)"

@@ -8,6 +8,7 @@ import { badgeCode, badgeKind, pathKey, type RepoChange } from "../../shared/git
 import FileIcon from "../../components/shared/FileIcon.vue";
 import { copyText, deleteEntry, renameEntry } from "./actions.ts";
 import { beginCreate, inlineCreate } from "./inline-create.ts";
+import { applySort } from "./sort.ts";
 import FileCreateRow from "./FileCreateRow.vue";
 import { openFileInStage } from "./state.ts";
 
@@ -29,6 +30,8 @@ const { workbench, stage, bus } = useKernel();
 const expanded = ref(false);
 const loading = ref(false);
 const children = ref<WorkspaceEntry[]>([]);
+/** 子层级用同一份排序设置：整棵树一致，而不是只有顶层排好 */
+const sortedChildren = computed(() => applySort(children.value));
 let childrenRequest = 0;
 
 const isActive = computed(
@@ -182,14 +185,14 @@ function menu(event: MouseEvent): void {
         :level="level + 1"
       />
       <FileTreeNode
-        v-for="child in children"
+        v-for="child in sortedChildren"
         :key="child.path"
         :item="child"
         :level="level + 1"
         :git="gitMap?.get(pathKey(child.path))"
         :git-map="gitMap"
       />
-      <div v-if="!loading && !children.length" class="file-tree-empty" :style="{ paddingLeft: `${32 + level * 16}px` }">
+      <div v-if="!loading && !sortedChildren.length" class="file-tree-empty" :style="{ paddingLeft: `${32 + level * 16}px` }">
         空文件夹
       </div>
     </div>
