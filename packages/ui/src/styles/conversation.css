@@ -507,7 +507,8 @@
   --ms-flow-hr-y: 1em;
   --ms-background: 0 0% 100% / 0;
   --table-border: var(--line-2);
-  --table-header-bg: var(--bg-1);
+  /* 表头像一块「表头」而不是跟正文同色：比正文深/浅一档，但不抢眼。 */
+  --table-header-bg: var(--bg-2);
   background: transparent !important;
   color: var(--fg);
   font-family: var(--font);
@@ -575,6 +576,14 @@
 }
 .md table { border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
 .md table tbody tr:nth-child(2n) { background: transparent !important; }
+/* 表格行不可点击：markstream 默认给 tbody tr:hover 上强调色底（整行一块色块），
+   鼠标一扫就跳，纯噪声。这里直接关掉，只留下 hover 时不变的分隔线。 */
+.md table tbody tr:hover,
+.md table tbody tr:focus-within { background: transparent !important; }
+/* 列宽按内容分，而不是把总宽平均切：短列（名称）不再白占一大片，长列也不至于挤成
+   「Tomcat 实 / 现」这种断行。markstream 默认 table-layout: fixed，这里改回 auto。 */
+.md table.table-node { table-layout: auto !important; }
+.md table thead th { padding-top: 6px; padding-bottom: 6px; font-size: 12.5px; }
 /* 对话里的行内代码就是「强调」：颜色用 --emphasis（默认跟随强调色，
    也可以在设置里单独挑一个）。底色是同色淡底，深浅主题都成立。 */
 .md :is(code:not(pre code)) {
