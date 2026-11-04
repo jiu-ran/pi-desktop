@@ -3,6 +3,7 @@ import { icons } from "../../shared/util.ts";
 import FilesPanel from "./FilesPanel.vue";
 import FileStage from "./FileStage.vue";
 import { openFileInStage } from "./state.ts";
+import { bindDiskWatch } from "./watch.ts";
 import { openQuickOpen } from "../../services/quick-open.ts";
 
 export default definePlugin({
@@ -18,6 +19,10 @@ export default definePlugin({
     return null;
   },
   activate(ctx) {
+    // 项目目录被应用之外的东西改（Agent 跑工具、git 切分支、别的编辑器保存）：
+    // 主进程推过来，文件树与已打开的编辑页跟着刷新。
+    ctx.onDispose(bindDiskWatch(ctx.emit));
+
     ctx.on("file:open", (targetPath: string) => {
       openFileInStage(ctx.workbench, ctx.stage, { emit: ctx.emit } as any, targetPath);
     });

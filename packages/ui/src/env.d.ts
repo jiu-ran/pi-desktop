@@ -504,6 +504,13 @@ export interface TerminalTaskSnapshot extends TerminalTaskInfo {
   truncated: boolean;
 }
 
+/** 项目目录的磁盘变动（主进程 fs.watch 汇总后推给界面）。 */
+export interface WorkspaceDiskChange {
+  cwd: string;
+  relativePaths: string[];
+  directories: string[];
+}
+
 export type TerminalEvent =
   | { type: "start"; task: TerminalTaskInfo }
   | { type: "data"; id: string; stream: "stdout" | "stderr"; text: string }
@@ -658,6 +665,8 @@ export interface PiDesktopBridge {
   terminalTasks: () => Promise<TerminalTaskSnapshot[]>;
   onTerminalEvent: (listener: (payload: TerminalEvent) => void) => () => void;
   onEvent: (listener: (payload: { cwd: string; sessionFile?: string; event: any }) => void) => () => void;
+  /** 项目目录在应用之外被改动：目录要重读、已打开的文件要同步。 */
+  onFilesDiskChange: (listener: (payload: WorkspaceDiskChange) => void) => () => void;
 }
 
 declare global {

@@ -1534,7 +1534,7 @@ export class PiHost {
       }
       const revision = createHash("sha256").update(previous).digest("hex");
       if (expectedRevision !== undefined && revision !== expectedRevision) {
-        throw new Error("文件已被外部程序或 Agent 修改，已阻止覆盖；请保留草稿并重新读取后合并修改");
+        throw new Error("文件已在磁盘上被改动，已阻止覆盖；请先重新读取再合并修改");
       }
       await atomicWriteText(target, content);
       return {

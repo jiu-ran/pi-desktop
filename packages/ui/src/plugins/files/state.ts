@@ -23,6 +23,9 @@ export interface FileStageData {
   preview?: { mimeType: string; dataUrl: string };
   /** 非文本文件：只读预览 */
   binary?: boolean;
+  /** 磁盘上的内容被应用之外的东西改了：`modified` 是内容变了，`deleted` 是被删/移走。
+      有草稿时不覆盖文件，只挂这条提示。 */
+  externalChange?: "modified" | "deleted";
 }
 
 export function normalizeRelativePath(cwd: string, targetPath: string): string {

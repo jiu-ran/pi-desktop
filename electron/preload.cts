@@ -123,6 +123,11 @@ contextBridge.exposeInMainWorld("piDesktop", {
     ipcRenderer.on("pi:terminal-event", wrapped);
     return () => ipcRenderer.removeListener("pi:terminal-event", wrapped);
   },
+  onFilesDiskChange: (listener: (payload: any) => void) => {
+    const wrapped = (_event: IpcRendererEvent, payload: any) => listener(payload);
+    ipcRenderer.on("files:disk-change", wrapped);
+    return () => ipcRenderer.removeListener("files:disk-change", wrapped);
+  },
   onEvent: (listener: (payload: any) => void) => {
     const wrapped = (_event: IpcRendererEvent, payload: any) => listener(payload);
     ipcRenderer.on("pi:event", wrapped);

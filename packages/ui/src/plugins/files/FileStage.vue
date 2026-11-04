@@ -13,6 +13,7 @@ import { askConfirm } from "../../components/sidebar/ui";
 import type { StageTab } from "../../kernel/stage.ts";
 import type { FileStageData } from "./state.ts";
 import { saveFileTab } from "./save.ts";
+import type { WorkspaceDiskChange } from "../../env.d.ts";
 
 const props = defineProps<{
   tab: StageTab<FileStageData>;
@@ -41,6 +42,9 @@ function applyLiveContent(next: string): void {
 
 const saving = computed(() => Boolean(file.value?.saving));
 const lastAutoSaved = ref(false);
+/** 刚跟着磁盘同步过内容：工具栏短暂提示一下，免得用户不知道页面为什么变了。 */
+const lastSynced = ref(false);
+let syncHintTimer: ReturnType<typeof setTimeout> | null = null;
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let fileGeneration = 0;
 
@@ -145,7 +149,8 @@ async function attachToChat(): Promise<void> {
 async function reload(): Promise<void> {
   if (!file.value?.relative) return;
   if (saving.value) return;
-  if (props.tab.dirty) {
+  // 提示条上的按钮已经写明「丢弃草稿」，就不再弹二次确认
+  if (props.tab.dirty && !skipReloadConfirm) {
     const ok = await askConfirm({
       title: "重新读取会丢弃当前草稿",
       message: `确定放弃「${file.value.name}」中未保存的修改吗？`,
@@ -169,6 +174,7 @@ async function reload(): Promise<void> {
     file.value.size = detail.size;
     file.value.preview = detail.preview;
     file.value.binary = detail.binary;
+    file.value.externalChange = undefined;
     props.tab.dirty = false;
     lastAutoSaved.value = false;
   } catch (error: any) {
@@ -193,7 +199,69 @@ async function save(options?: { auto?: boolean }): Promise<void> {
   }
 }
 
-/** 冲突后由用户明确选择用当前草稿覆盖磁盘内容。 */
+/** 文件被外部改动：干净页签直接同步；有草稿只挂提示，绝不覆盖手上写的字。 */
+function normalizeForCompare(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+async function syncFromDisk(change: WorkspaceDiskChange): Promise<void> {
+  const data = file.value;
+  if (!data || !data.relative || data.loading || saving.value) return;
+  // 事件来自当前打开着的项目：别的项目里同名文件不归这个页签管
+  if (data.cwd && change.cwd && normalizeForCompare(data.cwd) !== normalizeForCompare(change.cwd)) return;
+  const relative = String(data.relative).replace(/\\/g, "/");
+  const parent = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/")) : "";
+  const hit = Array.isArray(change.relativePaths)
+    ? change.relativePaths.includes(relative) || (!change.relativePaths.length && change.directories?.includes(parent))
+    : false;
+  if (!hit) return;
+
+  if (props.tab.dirty) {
+    // 草稿优先：保留用户手上的内容，只提示磁盘变了（保存时宿主还会再拦一次）
+    if (data.externalChange !== "deleted") data.externalChange = "modified";
+    return;
+  }
+
+  const generation = ++fileGeneration;
+  try {
+    const detail = await workbench.readFile(relative);
+    if (generation !== fileGeneration) return;
+    const sameContent = detail.revision === data.revision
+      && detail.content === data.content
+      && (detail.preview?.dataUrl ?? "") === (data.preview?.dataUrl ?? "");
+    data.externalChange = undefined;
+    if (sameContent) return;
+    data.content = detail.content;
+    data.savedContent = detail.content;
+    data.draft = detail.content;
+    data.revision = detail.revision;
+    data.size = detail.size;
+    data.preview = detail.preview;
+    data.binary = detail.binary;
+    data.error = "";
+    props.tab.dirty = false;
+    lastAutoSaved.value = false;
+    lastSynced.value = true;
+    if (syncHintTimer) clearTimeout(syncHintTimer);
+    syncHintTimer = setTimeout(() => { syncHintTimer = null; lastSynced.value = false; }, 2600);
+  } catch {
+    // 文件被删掉 / 挑走：保留正在显示的内容，只提示，不把页面清空
+    if (generation === fileGeneration) data.externalChange = "deleted";
+  }
+}
+
+function dismissExternalChange(): void {
+  if (file.value) file.value.externalChange = undefined;
+}
+/** 提示条里的「丢弃草稿，读磁盘最新」：后果已写在按钮上，不再二次确认。 */
+let skipReloadConfirm = false;
+async function forceReload(): Promise<void> {
+  if (!file.value) return;
+  file.value.externalChange = undefined;
+  skipReloadConfirm = true;
+  try { await reload(); } finally { skipReloadConfirm = false; }
+}
+
 async function forceSave(): Promise<void> {
   if (!file.value || saving.value) return;
   const ok = await askConfirm({
@@ -270,10 +338,16 @@ onMounted(() => {
   document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
+const stopDiskWatch = bus.on("files:disk-change", (change: WorkspaceDiskChange) => {
+  void syncFromDisk(change);
+});
+
 onBeforeUnmount(() => {
+  stopDiskWatch();
   window.removeEventListener("blur", onWindowBlur);
   document.removeEventListener("visibilitychange", onVisibilityChange);
   clearAutoSaveTimer();
+  if (syncHintTimer) clearTimeout(syncHintTimer);
   fileGeneration += 1;
   if (stage.allTabs.value.includes(props.tab) && props.tab.dirty && appSettings.autoSave !== "off") {
     // 保存服务持有原 tab/cwd；即使切换了项目，也不会把同名文件写到新项目。
@@ -295,6 +369,7 @@ onBeforeUnmount(() => {
         {{ appSettings.autoSave === "afterDelay" ? "待自动保存" : "未保存" }}
       </span>
       <span v-else-if="lastAutoSaved" class="file-editor-status saved">已自动保存</span>
+      <span v-else-if="lastSynced" class="file-editor-status saved">已同步磁盘</span>
       <button
         v-if="!isBinary && !isLargeText"
         type="button"
@@ -347,6 +422,29 @@ onBeforeUnmount(() => {
       <button type="button" class="icon-btn small" title="使用系统程序打开" @click="openExternal" v-html="icons.reveal" />
     </div>
 
+    <div v-if="file?.externalChange" class="file-editor-state external">
+      <div class="file-editor-note">
+        <span v-if="file.externalChange === 'deleted'" class="file-editor-note-title">
+          磁盘上的「{{ file.name }}」已被删除或移走
+        </span>
+        <span v-else class="file-editor-note-title">磁盘上的「{{ file.name }}」已更新</span>
+        <span v-if="file.externalChange === 'deleted'" class="file-editor-note-hint">
+          当前内容还在编辑器里，可以复制出去或另存到别处。
+        </span>
+        <span v-else class="file-editor-note-hint">
+          可能是 Agent 改的，也可能是你在别的编辑器里改的；你的草稿还在，保存会覆盖磁盘内容。
+        </span>
+      </div>
+      <button
+        v-if="file.externalChange !== 'deleted'"
+        type="button"
+        class="btn small"
+        :disabled="saving"
+        title="丢弃当前草稿，读取磁盘上的最新内容"
+        @click="forceReload"
+      >用磁盘版本</button>
+      <button type="button" class="btn small" :disabled="saving" @click="dismissExternalChange">保留草稿</button>
+    </div>
     <div v-if="file?.saveError" class="file-editor-state error conflict">
       <span>{{ localizeNotification(file.saveError, "error") }}（草稿仍保留）</span>
       <button type="button" class="btn small" :disabled="saving" @click="reload">重新读取</button>

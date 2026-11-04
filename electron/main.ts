@@ -15,6 +15,7 @@ import { atomicWriteText } from "./atomic-file.ts";
 import { activity, logPerfLine, withActivity } from "./perf-log.ts";
 import { isWritableDir, log, logStore, useAppLogs } from "./logger.ts";
 import { runStartupMaintenance } from "./maintenance.ts";
+import { WorkspaceWatcher } from "./workspace-watch.ts";
 import { cleanLegacyProjectArtifacts } from "./project-cleanup.ts";
 import type { AppUpdateCheckResult } from "./network/update.ts";
 
@@ -212,6 +213,19 @@ const terminalHost = new TerminalHost({
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pi:terminal-event", plain(event));
   },
 });
+
+// 项目目录被应用之外的东西改动（Agent 跑工具、git 切分支、别的编辑器保存）：
+// 主进程盯着工作区，把「哪些目录要重读、哪些文件变了」推给界面。
+const workspaceWatcher = new WorkspaceWatcher((change) => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send("files:disk-change", plain(change));
+});
+
+/** 访问某个工作区时顺手盯上它：监听按需开，不预先遍历所有最近项目。 */
+function watchWorkspace(cwd: string): void {
+  try { workspaceWatcher.watch(cwd); } catch { /* 监听失败不影响读写 */ }
+}
 
 const recentFile = () => path.join(app.getPath("userData"), "recent-workspaces.json");
 
@@ -899,6 +913,7 @@ app.whenReady().then(() => {
   handle("pi:forget", async (cwd: string) => {
     const authorized = await authorizedCwd(cwd);
     host.revokeWorkspace(authorized);
+    workspaceWatcher.unwatch(authorized);
     return forgetRecent(recentFile(), authorized);
   });
   handle("pi:choose-directory", async () => {
@@ -959,7 +974,10 @@ app.whenReady().then(() => {
     await writeRecent(recentFile(), authorized);
     return result;
   });
-  handle("pi:snapshot", (cwd: string, sessionFile?: string) => host.snapshot(cwd, sessionFile));
+  handle("pi:snapshot", (cwd: string, sessionFile?: string) => {
+    watchWorkspace(cwd);
+    return host.snapshot(cwd, sessionFile);
+  });
   handle("pi:prepare-attachments", (cwd: string, paths: string[], authorizePaths?: string[]) => {
     host.authorizeAttachmentPaths(authorizePaths ?? []);
     return host.prepareAttachments(cwd, paths);
@@ -968,9 +986,18 @@ app.whenReady().then(() => {
   handle("pi:prepare-session-attachments", (cwd: string, files: string[]) => host.prepareSessionAttachments(cwd, files));
   // @ 引用其它项目对话：跨项目只读列举，限 40 条，带 3 秒缓存
   handle("pi:cross-project-sessions", (limit?: number) => host.crossProjectSessions(limit));
-  handle("pi:list-directory", (cwd: string, relative: string) => host.listDirectory(cwd, relative));
-  handle("pi:read-workspace-file", (cwd: string, relative: string) => host.readWorkspaceFile(cwd, relative));
-  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => host.writeWorkspaceFile(cwd, relative, content, revision));
+  handle("pi:list-directory", (cwd: string, relative: string) => {
+    watchWorkspace(cwd);
+    return host.listDirectory(cwd, relative);
+  });
+  handle("pi:read-workspace-file", (cwd: string, relative: string) => {
+    watchWorkspace(cwd);
+    return host.readWorkspaceFile(cwd, relative);
+  });
+  handle("pi:write-workspace-file", (cwd: string, relative: string, content: string, revision?: string) => {
+    watchWorkspace(cwd);
+    return host.writeWorkspaceFile(cwd, relative, content, revision);
+  });
   handle("pi:open-workspace-path", async (cwd: string, relative: string) => shell.openPath(await host.openWorkspacePath(cwd, relative)));
   handle("pi:create-workspace-entry", (cwd: string, parent: string, name: string, kind: "file" | "folder") => host.createWorkspaceEntry(cwd, parent, name, kind));
   handle("pi:rename-workspace-entry", (cwd: string, relative: string, name: string) => host.renameWorkspaceEntry(cwd, relative, name));
@@ -1002,6 +1029,7 @@ app.whenReady().then(() => {
     await host.close(cwd);
     const result = deleteSessions ? await host.deleteAllSessions(cwd) : { deleted: 0, failed: 0 };
     host.revokeWorkspace(cwd);
+    workspaceWatcher.unwatch(cwd);
     return { ...result, recent: await forgetRecent(recentFile(), cwd) };
   });
   handle("pi:call", (cwd: string, method: string, args: any[], sessionFile?: string) => host.call(cwd, method, args, sessionFile));
@@ -1110,6 +1138,7 @@ app.whenReady().then(() => {
   );
   app.on("before-quit", () => {
     log.info("app", "退出");
+    workspaceWatcher.closeAll();
     // 退出前把缓冲刷干净，否则最后几行会丢
     void logStore.flushAll();
   });
