@@ -549,7 +549,8 @@ export interface PiDesktopBridge {
   chooseFiles: () => Promise<string[]>;
   savePastedImage: (payload: { name?: string; mimeType?: string; data: string }) => Promise<string>;
   chooseFolder: () => Promise<string | null>;
-  open: (cwd: string) => Promise<any>;
+  /** 打开工作区。不传 resumeSessionFile 时是一次新对话（不自动接管上一次）。 */
+  open: (cwd: string, options?: { resumeSessionFile?: string }) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
   /** 渲染进程卡顿上报（主进程记到 logs/perf.log） */

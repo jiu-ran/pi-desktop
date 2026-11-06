@@ -966,11 +966,11 @@ app.whenReady().then(() => {
     if (!result.canceled) host.authorizeAttachmentPaths(result.filePaths);
     return result.canceled ? null : result.filePaths[0];
   });
-  handle("pi:open", async (cwd: string) => {
+  handle("pi:open", async (cwd: string, options?: { resumeSessionFile?: string }) => {
     const authorized = await host.authorizeWorkspace(cwd);
     // 把旧版本写进项目的日志目录与 .git/info/exclude 忽略行清掉（只清能确认是自己留的）
     void cleanLegacyProjectArtifacts(authorized);
-    const result = await host.open(authorized);
+    const result = await host.open(authorized, undefined, { resumeSessionFile: options?.resumeSessionFile });
     await writeRecent(recentFile(), authorized);
     return result;
   });

@@ -42,7 +42,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   savePastedImage: (payload: { name?: string; mimeType?: string; data: string }) =>
     ipcRenderer.invoke("pi:save-pasted-image", payload),
   chooseFolder: () => ipcRenderer.invoke("pi:choose-folder"),
-  open: (cwd: string) => ipcRenderer.invoke("pi:open", cwd),
+  open: (cwd: string, options?: { resumeSessionFile?: string }) => ipcRenderer.invoke("pi:open", cwd, options),
   snapshot: (cwd: string, sessionFile?: string) => ipcRenderer.invoke("pi:snapshot", cwd, sessionFile),
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) => ipcRenderer.invoke("pi:prepare-attachments", cwd, paths, authorizePaths),
   prepareSessionAttachments: (cwd: string, files: string[]) => ipcRenderer.invoke("pi:prepare-session-attachments", cwd, files),

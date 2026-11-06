@@ -1170,7 +1170,8 @@ export class PiHost {
   }
 
   /** @param timeoutMs 启动等待上限（测试可传更小的值） */
-  async open(cwd: string, timeoutMs = START_TIMEOUT_MS) {
+  /** @param options.resumeSessionFile 指定要接管的会话文件；不传就是一次新对话。 */
+  async open(cwd: string, timeoutMs = START_TIMEOUT_MS, options: { resumeSessionFile?: string } = {}) {
     if (this.closing) throw new Error("Pi 宿主正在关闭");
     const authorized = await this.requireAuthorizedWorkspace(cwd);
     cwd = authorized;
@@ -1181,7 +1182,7 @@ export class PiHost {
       let tracked = this.starting.get(cwd);
       if (!tracked) {
         let self: Promise<void>;
-        const pending = this.start(cwd, attempt);
+        const pending = this.start(cwd, attempt, options);
         self = pending.finally(() => {
           // 只有自己还是当前记录时才清理：超时后重新发起的那次不能被旧记录删掉。
           if (this.starting.get(cwd) === self) this.starting.delete(cwd);
@@ -1240,7 +1241,7 @@ export class PiHost {
   private async spawnWorker(
     cwd: string,
     pool: WorkspaceClientPool,
-    options: { targetSessionFile?: string; pickLatestOnInit?: boolean; parentSession?: string } = {},
+    options: { targetSessionFile?: string; parentSession?: string } = {},
   ): Promise<WorkerSlot> {
     const client = new PiRpcClient({ entry: await this.piEntry(), cwd, args: await this.toolArgs(cwd), env: this.networkEnv?.() });
     const slot: WorkerSlot = {
@@ -1297,20 +1298,6 @@ export class PiHost {
           await unlink(initialFile).catch(() => {});
         }
         state = await client.getState();
-      } else if (options.pickLatestOnInit) {
-        const history = await listSessions(cwd, state.sessionFile);
-        const latest = history.find((item) => !item.empty && item.path !== state.sessionFile);
-        if (latest && state.messageCount === 0) {
-          try {
-            const switched = await client.switchSession(latest.path);
-            if (!switched?.cancelled) {
-              if (initialFile) await unlink(initialFile).catch(() => {});
-              state = await client.getState();
-            }
-          } catch {
-            // 保持当前会话
-          }
-        }
       }
 
       slot.sessionFile = state.sessionFile ?? "";
@@ -1443,13 +1430,15 @@ export class PiHost {
     }
   }
 
-  async start(cwd: string, attempt = this.startAttempts.get(cwd) ?? 0): Promise<void> {
+  async start(cwd: string, attempt = this.startAttempts.get(cwd) ?? 0, options: { resumeSessionFile?: string } = {}): Promise<void> {
     const pool: WorkspaceClientPool = {
       client: null as unknown as PiRpcClient,
       activeSessionFile: "",
       workers: new Map(),
     };
-    await this.spawnWorker(cwd, pool, { pickLatestOnInit: true });
+    // 不传 resumeSessionFile 时不接管任何旧会话：打开项目就是一次新对话，
+    // 想接着聊请从侧边栏的会话列表里点（那里会走 switchSession）。
+    await this.spawnWorker(cwd, pool, { targetSessionFile: options.resumeSessionFile || undefined });
     // 启动期间已经被判超时（attempt 变了）：别把这个 worker 留在内存里。
     if ((this.startAttempts.get(cwd) ?? 0) !== attempt) {
       const clients = [...pool.workers.values()].map((slot) => slot.client);

@@ -755,7 +755,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     ] as const;
     const task = (async () => {
       try {
-        const snap = await host.open(target);
+        // 打开项目不接管上一次的对话（那是「启动就看见旧聊天」的来源）：
+        // 只有同一进程里这次工作区已经有过会话（崩溃重试）才接着读它。
+        const snap = await host.open(target, { resumeSessionFile: ws!.sessionFile || undefined });
         if (disposed) return ws!;
         applySnapshot(ws!, snap);
         ws!.status = "ready";
