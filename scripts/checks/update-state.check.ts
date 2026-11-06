@@ -60,6 +60,10 @@ console.log("update-state OK");
     "失败时不能再弹「已是最新版本」",
   );
   const update = await readFile("electron/network/update.ts", "utf8");
-  assert.ok(/AUTO_CHECK_CACHE_MS/.test(update) && /lastSuccess/.test(update), "成功结果要缓存，避免被限流");
+  // 缓存与限流记录都要落盘：只在内存里的话，重启应用等于重新发一次请求
+  assert.ok(/AUTO_CHECK_CACHE_MS/.test(update), "要复用最近一次检查结果，避免被限流");
+  assert.ok(/app-update-cache.json/.test(update), "缓存要写盘，跨启动复用");
+  assert.ok(/blockedByCache/.test(update), "限流恢复时间要落盘，恢复前不再发请求");
+  assert.ok(/fetchStableReleaseConditional/.test(update), "检查更新要带 ETag 条件请求（304 不消耗配额）");
   console.log("app update error OK 失败不报最新 / 成功才记时间 / 结果缓存");
 }

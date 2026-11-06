@@ -31,6 +31,60 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+export interface JsonWithMeta<T> {
+  /** 200 时有 data；304（内容没变）时 data 为 null */
+  status: number;
+  data: T | null;
+  etag?: string;
+  lastModified?: string;
+}
+
+/**
+ * 带条件请求的 JSON 请求。
+ *
+ * GitHub 说得很明确：条件请求命中 304 时**不消耗** API 配额。更新检查最常发的是
+ * `releases` 列表，绝大多数情况下内容都没变，所以带上上次的 ETag 能把大部分请求变成 0 配额。
+ */
+export async function requestJsonWithMeta<T = any>(url: string, options: RequestJsonOptions = {}): Promise<JsonWithMeta<T>> {
+  const { timeout = 15000, maxRetries = 2, retryDelay = 1000, signal } = options;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    signal?.throwIfAborted();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(abort, timeout);
+    try {
+      const response = await net.fetch(url, { headers: { "User-Agent": "Pi-Desktop", ...options.headers }, signal: controller.signal });
+      const meta = {
+        etag: response.headers.get("etag") ?? undefined,
+        lastModified: response.headers.get("last-modified") ?? undefined,
+      };
+      if (response.status === 304) return { status: 304, data: null, ...meta };
+      if (!response.ok) {
+        if (response.status === 403 || response.status === 429) {
+          const reset = Number(response.headers.get("x-ratelimit-reset") ?? 0);
+          const retryAt = Number.isFinite(reset) && reset > 0 ? reset * 1000 : 0;
+          if (response.headers.get("x-ratelimit-remaining") === "0" || retryAt > Date.now()) {
+            throw new RateLimitError(response.status, retryAt, rateLimitMessage(retryAt));
+          }
+        }
+        const error: any = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        error.status = response.status;
+        throw error;
+      }
+      return { status: response.status, data: (await response.json()) as T, ...meta };
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+      const status = Number((error as any)?.status ?? 0);
+      if (status >= 400 && status < 500) throw error;
+    } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
+    if (attempt < maxRetries) await delay(retryDelay * (attempt + 1), signal);
+  }
+  throw lastError || new Error("网络请求失败");
+}
+
 /** 外部取消与超时必须同时生效；超时持续到 JSON 响应体解析完成。 */
 export async function requestJson<T = any>(url: string, options: RequestJsonOptions = {}): Promise<T> {
   const { timeout = 15000, maxRetries = 2, retryDelay = 1000, signal } = options;

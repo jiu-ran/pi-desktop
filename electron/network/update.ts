@@ -6,13 +6,27 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { RateLimitError, downloadFileStream, normalizeNetworkError, rateLimitMessage } from "./http.ts";
 import { pruneUpdateDir } from "../maintenance.ts";
+import { atomicWriteText } from "../atomic-file.ts";
+import { readFile } from "node:fs/promises";
 import {
   fetchStableRelease,
+  fetchStableReleaseConditional,
   compareVersions,
   findReleaseAsset,
   extractSha256FromDigest,
   type GitHubReleaseAsset,
 } from "./github.ts";
+import {
+  MANUAL_UPDATE_CACHE_MS,
+  UPDATE_CACHE_TTL_MS,
+  blockedByCache,
+  cacheAfterNotModified,
+  cacheAfterRateLimit,
+  cacheAfterSuccess,
+  cacheIsFresh,
+  normalizeUpdateCache,
+  type UpdateCacheState,
+} from "./update-cache.ts";
 
 /**
  * 应用更新检查结果
@@ -30,9 +44,9 @@ export interface AppUpdateCheckResult {
 }
 
 /** 自动检查（启动时）复用多久以内的结果 */
-const AUTO_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
+const AUTO_CHECK_CACHE_MS = UPDATE_CACHE_TTL_MS;
 /** 手动点「检查更新」时最多复用多久以内的结果：避免连点把配额打光 */
-export const MANUAL_CHECK_CACHE_MS = 5 * 60 * 1000;
+export const MANUAL_CHECK_CACHE_MS = MANUAL_UPDATE_CACHE_MS;
 
 /**
  * 已准备的应用更新
@@ -55,16 +69,48 @@ export class AppUpdateManager {
   private readonly repo: string;
   private readonly preparedUpdates: Map<string, PreparedAppUpdate> = new Map();
   private downloadInProgress: boolean = false;
-  /** 最近一次成功的检查结果（用于避免被 GitHub 限流） */
-  private lastSuccess: { at: number; current: string; result: AppUpdateCheckResult } | null = null;
-  /** 被限流时的恢复时间：恢复前不再发请求，免得一直踩同一个坑 */
-  private blockedUntil = 0;
+  /** 上次检查结果 + 条件请求凭据 + 限流恢复时间，落盘后跨启动复用 */
+  private cache: UpdateCacheState | null = null;
+  /** 读写缓存文件串行化：并发检查时不要互相覆盖 */
+  private cacheTask: Promise<unknown> = Promise.resolve();
   private downloadController: AbortController | null = null;
   private installing = false;
 
   constructor(owner: string, repo: string) {
     this.owner = owner;
     this.repo = repo;
+  }
+
+  /** 缓存文件放在 userData：跟着应用走，重装不丢；版本号变了会自然失效。 */
+  private cacheFile(): string {
+    return path.join(app.getPath("userData"), "app-update-cache.json");
+  }
+
+  private async loadCache(): Promise<UpdateCacheState> {
+    if (this.cache) return this.cache;
+    let state = normalizeUpdateCache(null);
+    try {
+      state = normalizeUpdateCache(JSON.parse(await readFile(this.cacheFile(), "utf8")));
+    } catch {
+      // 文件不存在 / 被改坏：当作没有缓存
+    }
+    this.cache = state;
+    return state;
+  }
+
+  private async saveCache(next: UpdateCacheState): Promise<void> {
+    this.cache = next;
+    // 串行写：并发检查时后写的那个覆盖先写的，但至少不会写坏文件
+    const task = this.cacheTask.catch(() => {}).then(async () => {
+      try {
+        await mkdir(path.dirname(this.cacheFile()), { recursive: true });
+        await atomicWriteText(this.cacheFile(), `${JSON.stringify(next, null, 2)}\n`, 0o600);
+      } catch {
+        // 缓存写不进去不影响这次检查的结果
+      }
+    });
+    this.cacheTask = task;
+    await task;
   }
 
   /**
@@ -77,23 +123,36 @@ export class AppUpdateManager {
   async check({ maxAgeMs }: { maxAgeMs?: number } = {}): Promise<AppUpdateCheckResult> {
     const current = app.getVersion();
     const ttl = Math.max(0, maxAgeMs ?? AUTO_CHECK_CACHE_MS);
-    const cached = this.lastSuccess;
-    if (cached && ttl > 0 && Date.now() - cached.at < ttl && cached.current === current) {
-      return { ...cached.result, cached: true };
-    }
-    if (Date.now() < this.blockedUntil) {
+    const now = Date.now();
+    const cache = await this.loadCache();
+    // 被限流：恢复时间之前一律不再发请求（重启应用也照样生效）
+    if (blockedByCache(cache, now)) {
       return {
         current,
         latest: "",
         updateAvailable: false,
         url: "",
         assetName: "",
-        error: rateLimitMessage(this.blockedUntil),
+        error: rateLimitMessage(cache.blockedUntil),
       };
+    }
+    // 命中缓存（跨启动）：启动时开 10 次应用也只会有一次真请求
+    if (cacheIsFresh(cache, current, ttl, now)) {
+      return { ...cache.result, current, cached: true };
     }
 
     try {
-      const release = await fetchStableRelease(this.owner, this.repo);
+      const lookup = await fetchStableReleaseConditional(this.owner, this.repo, 20, {
+        etag: cache.etag,
+        lastModified: cache.lastModified,
+      });
+      if (lookup.notModified && cache.result.latest) {
+        // 304 不消耗配额：内容没变，只把「确认时间」推到现在
+        const next = cacheAfterNotModified(cache);
+        await this.saveCache(next);
+        return { ...next.result, current, cached: true };
+      }
+      const release = lookup.release;
 
       if (!release) {
         return {
@@ -119,10 +178,13 @@ export class AppUpdateManager {
       };
 
       // 只缓存成功结果：失败（限流、断网）不能当作「最近查过」
-      this.lastSuccess = { at: Date.now(), current, result };
+      await this.saveCache(cacheAfterSuccess(cache, current, result, {
+        etag: lookup.etag,
+        lastModified: lookup.lastModified,
+      }));
       return result;
     } catch (error) {
-      if (error instanceof RateLimitError) this.blockedUntil = error.retryAt;
+      if (error instanceof RateLimitError) await this.saveCache(cacheAfterRateLimit(cache, error.retryAt));
       return {
         current,
         latest: "",

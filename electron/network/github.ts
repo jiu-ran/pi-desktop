@@ -1,4 +1,4 @@
-import { requestJson } from "./http.ts";
+import { requestJson, requestJsonWithMeta } from "./http.ts";
 
 /**
  * GitHub Release 资源对象
@@ -38,6 +38,44 @@ export async function fetchStableRelease(
   const stable = releases.filter(r => !r.draft && !r.prerelease && /^v?\d+(?:\.\d+){1,3}$/i.test(r.tag_name ?? ""))
     .sort((a, b) => compareVersions(b.tag_name ?? "", a.tag_name ?? ""));
   return stable[0] ?? null;
+}
+
+export interface StableReleaseLookup {
+  release: GitHubRelease | null;
+  /** true = 服务器回了 304（内容没变，不消耗配额） */
+  notModified: boolean;
+  etag?: string;
+  lastModified?: string;
+}
+
+/**
+ * 条件版本的 `fetchStableRelease`：带上上次的 ETag，内容没变时服务器回 304。
+ * 304 不计入 GitHub 的 API 配额，所以「反复检查更新」不该再是限流元凶。
+ */
+export async function fetchStableReleaseConditional(
+  owner: string,
+  repo: string,
+  pageSize = 20,
+  cache: { etag?: string; lastModified?: string } = {},
+): Promise<StableReleaseLookup> {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=${pageSize}`;
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  if (cache.etag) headers["If-None-Match"] = cache.etag;
+  else if (cache.lastModified) headers["If-Modified-Since"] = cache.lastModified;
+  const response = await requestJsonWithMeta<GitHubRelease[]>(url, { headers });
+  if (response.status === 304) {
+    return { release: null, notModified: true, etag: cache.etag, lastModified: cache.lastModified };
+  }
+  const releases = response.data;
+  if (!Array.isArray(releases)) throw new Error("GitHub 返回了无效的版本列表");
+  const stable = releases.filter(r => !r.draft && !r.prerelease && /^v?\d+(?:\.\d+){1,3}$/i.test(r.tag_name ?? ""))
+    .sort((a, b) => compareVersions(b.tag_name ?? "", a.tag_name ?? ""));
+  return {
+    release: stable[0] ?? null,
+    notModified: false,
+    etag: response.etag,
+    lastModified: response.lastModified,
+  };
 }
 
 /**

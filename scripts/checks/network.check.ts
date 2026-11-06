@@ -14,6 +14,7 @@ const resetAt = new Date("2026-10-25T10:57:00Z").getTime();
 const msg = rateLimitMessage(resetAt, now);
 assert.ok(/\d{1,2}:\d{2}/.test(msg) && msg.includes("恢复"), `限流提示要带恢复时间：${msg}`);
 assert.equal(rateLimitMessage(0, now), "服务器限制请求频率，请稍后重试", "没有恢复时间时退回通用文案");
+assert.ok(msg.includes("出口 IP"), `要说清配额按出口 IP 算，代理时可能与人共用：${msg}`);
 assert.equal(
   normalizeNetworkError(new RateLimitError(403, resetAt, msg)),
   rateLimitMessage(resetAt),

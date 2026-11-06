@@ -17,7 +17,9 @@ export function rateLimitMessage(retryAt: number, now = Date.now()): string {
   const at = new Date(retryAt);
   const hh = String(at.getHours()).padStart(2, "0");
   const mm = String(at.getMinutes()).padStart(2, "0");
-  return `服务器限制请求频率（GitHub 匿名接口每小时 60 次），约 ${hh}:${mm} 恢复`;
+  // 配额是按**出口 IP** 算的：走代理时那是代理节点的 IP，可能和别的用户共用，
+  // 所以「我自己没查几次」也可能被限流 —— 这一层必须说清楚，否则用户只会以为软件有 bug。
+  return `服务器限制请求频率（GitHub 匿名接口每小时 60 次，按出口 IP 计算；走代理时与其他用户共用），约 ${hh}:${mm} 恢复`;
 }
 
 /** 带恢复时间的限流错误：调用方可以在恢复前不再发请求。 */
