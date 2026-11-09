@@ -315,6 +315,7 @@ console.log("tool stream OK");
   assert.equal(done.length, 1, "重试成功后仍是一条");
   assert.equal(done[0].text, "已重新连接（第 2 次重试）");
   assert.equal(done[0].level, "info");
+  assert.equal(done[0].hint, undefined, "重连成功后不该再显示「检查网络或代理后再发一次」");
 
   // 失败：说清楚重试到第几次失败、原因是什么
   const t2 = createTranscript();
@@ -362,6 +363,7 @@ console.log("tool stream OK");
   t5.applyEvent({ type: "auto_retry_end", attempt: 1, success: false, finalError: "Connection error." });
   const failedNotices = t5.blocks.filter((block) => block.kind === "notice");
   assert.ok(failedNotices.some((block) => block.text.includes("重试 1/2 失败")), "失败时要说明重试到第几次");
+  assert.equal(failedNotices.find((block) => block.text.includes("重试 1/2 失败"))?.hint, "检查网络或代理后再发一次", "彻底失败时仍要给出下一步");
 
   // 没有自动重试（用户自己重发）时：恢复正常后失败卡要变成「已重新连接」，而不是删掉或留着
   const t6 = createTranscript();
@@ -376,6 +378,7 @@ console.log("tool stream OK");
   assert.equal(recovered.length, 1, `恢复后仍然只有一条提示，实际 ${recovered.length} 条`);
   assert.equal(recovered[0].level, "info", `恢复后不该再是红色失败，实际 ${recovered[0].level}`);
   assert.equal(recovered[0].text, "已重新连接，任务继续", `恢复后的文案不对：${recovered[0].text}`);
+  assert.equal(recovered[0].hint, undefined, "已经连上了就不该再挂「检查网络或代理」");
 
   // 与网络无关的报错不能被抹成「已重新连接」
   const t7 = createTranscript();
@@ -383,6 +386,27 @@ console.log("tool stream OK");
   t7.applyEvent({ type: "message_end", message: { role: "assistant", stopReason: "endTurn", content: [{ type: "text", text: "好的" }] } });
   const kept = t7.blocks.filter((block) => block.kind === "notice");
   assert.ok(kept.some((block) => block.level === "error"), "非网络错误仍然是失败卡");
+
+  // 用户实际看到的那条路径：断网（失败卡带「检查网络」副标题）→ 自动重试 → 重连成功。
+  // 以前改写 / 收尾都没清 hint，于是就出现「已重新连接（第 1 次重试）」下面还挂着
+  // 「检查网络或代理后再发一次」这种自相矛盾的话。
+  {
+    const t8 = createTranscript();
+    t8.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } });
+    const failed8 = t8.blocks.filter((block) => block.kind === "notice");
+    assert.equal(failed8[0]?.hint, "检查网络或代理后再发一次", "断网卡要给出下一步");
+
+    t8.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "Connection error." });
+    const retrying8 = t8.blocks.filter((block) => block.kind === "notice");
+    assert.equal(retrying8.length, 1, "失败卡应被就地改写成重试提示");
+    assert.equal(retrying8[0]?.hint, undefined, "正在重试时不该留着「检查网络或代理」");
+
+    t8.applyEvent({ type: "auto_retry_end", success: true, attempt: 1 });
+    const recovered8 = t8.blocks.filter((block) => block.kind === "notice");
+    assert.equal(recovered8[0]?.text, "已重新连接（第 1 次重试）", `恢复文案不对：${recovered8[0]?.text}`);
+    assert.equal(recovered8[0]?.level, "info");
+    assert.equal(recovered8[0]?.hint, undefined, "重连成功后不该再出现「检查网络或代理后再发一次」");
+  }
 
   console.log("retry notice OK 单条复用 / 中文化 / 死数字移除 / deadline / 成功与失败文案 / 重复合并 / 成功清掉失败卡 / 恢复后变「已重新连接」");
 

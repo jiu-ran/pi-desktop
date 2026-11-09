@@ -516,6 +516,8 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           justFailed.level = "warning";
           justFailed.text = retryNoticeText(event.attempt, event.maxAttempts);
           justFailed.count = undefined;
+          // 副标题是「网络失败」那张卡的收尾建议：现在是「正在重试」，留着就是自相矛盾
+          justFailed.hint = undefined;
           justFailed.retry = {
             attempt: event.attempt,
             maxAttempts: event.maxAttempts,
@@ -555,10 +557,13 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           markNetworkRecovered(blocks);
           notice.level = "info";
           notice.text = retryResultText(true, event.attempt, notice.retry.maxAttempts, "");
+          // 已经连上了：不要再挂「检查网络或代理」这种给失败用的话
+          notice.hint = undefined;
         } else {
           notice.level = "error";
           const reason = noticeErrorText(event.finalError) || notice.retry.error || "未知错误";
           notice.text = retryResultText(false, event.attempt, notice.retry.maxAttempts, reason);
+          notice.hint = networkFailureNotice(1).hint;
         }
         return true;
       }
