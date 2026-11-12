@@ -73,6 +73,49 @@ let historyLoadToken = 0;
 // 即使本地历史读取很快，也让「正在加载」动效完整播放，避免一闪而过。
 const HISTORY_LOADING_MIN_MS = 450;
 
+/** 单次手势最多自动续载几页：再多就该由用户决定要不要继续挖历史。 */
+const AUTO_CHAIN_LIMIT = 6;
+/** 内容还不够撑出滚动条时不受上限约束（否则短会话永远填不满）。 */
+const VIEWPORT_FILL_PX = 24;
+/** 续载的间隔：给渲染与高度计算留一拍，也避免同步递归。 */
+const AUTO_CHAIN_DELAY_MS = 120;
+
+/**
+ * 「还贴在顶部」时自动续载的页数。
+ *
+ * 以前每加载一页都要新的 scroll 事件才会再触发：用户一直往上滑到顶、一页 8 条插进来，
+ * 位置被还原到顶部附近却不再产生滚动事件，只能先往下滑再往上滑 —— 这就是「明明还在
+ * 顶上却不再加载」的原因。现在加载完若人还在顶部就自己接着来。
+ */
+let autoChainPages = 0;
+/**
+ * 用户是不是「正想往上读更早的内容」，由**滚轮方向**决定。
+ *
+ * 不能用 scrollTop < 100 直接判断：加载完一页后我们为了保持视觉位置会把 scrollTop
+ * 往下挑一大截，那时人其实还停在顶部那条边界上，只是坐标变了。
+ */
+let topIntent = false;
+/**
+ * 被节流挡下的那次上滑要补一次。
+ *
+ * 500ms 节流是「别连着发」的意思，但以前被挡掉就真的没人再来了：用户一口气滑到顶、
+ * 第一页刚好在这 500ms 里加载完，剩下的滚动事件全被吞掉，只能先往下滑再往上滑。
+ * 改成尾随一次：节流窗口一过自动补上。
+ */
+let pendingTrailingLoad = 0;
+
+function scheduleTrailingLoad(delayMs: number): void {
+  if (pendingTrailingLoad) return;
+  pendingTrailingLoad = window.setTimeout(() => {
+    pendingTrailingLoad = 0;
+    const thread = ws.value?.activeThread;
+    if (!thread || thread.historyStart <= 0) return;
+    // 人已经往下看了：这次就不补了
+    if (!topIntent) return;
+    void loadMoreMessages({ auto: true });
+  }, Math.max(60, delayMs));
+}
+
 const prompts = [
   {
     label: "浏览代码结构",
@@ -136,6 +179,8 @@ const jumpLabel = computed(() => {
 });
 
 function jumpToLatest(): void {
+  topIntent = false;
+  autoChainPages = 0;
   userScrolled.value = false;
   stick.value = true;
   seenBlocks.value = ws.value?.blocks.length ?? 0;
@@ -194,8 +239,8 @@ function onScroll(): void {
   syncOutline();
   
   // 检测是否滚到顶部，触发加载更多
-  const isNearTop = el.scrollTop < 100;
-  if (isNearTop && canLoadMore.value && !isLoadingMore.value) {
+  if (el.scrollTop >= 100) return;
+  if (canLoadMore.value && !isLoadingMore.value) {
     void loadMoreMessages();
   }
 }
@@ -257,6 +302,17 @@ function markUserScroll(): void {
  */
 function onWheel(event: WheelEvent): void {
   userScrolled.value = true;
+  // 滚轮方向就是意图：往上 = 想读更早的内容；往下 = 收手。
+  // 不能只看 scrollTop —— 加载一页后我们为了保持视觉位置会把 scrollTop 往下挪一大截，
+  // 那时人其实还停在顶部那条边界上。
+  if (event.deltaY < 0) {
+    topIntent = true;
+    // 新的一次上滑：自动续载额度重新开始
+    autoChainPages = 0;
+  } else if (event.deltaY > 0 && (scroller.value?.scrollTop ?? 0) > 200) {
+    topIntent = false;
+    autoChainPages = 0;
+  }
   const el = scroller.value;
   if (!el) return;
   if (!wantsToPauseFollow(event.deltaY, el.scrollTop, el.scrollHeight, el.clientHeight)) return;
@@ -301,17 +357,67 @@ function onSearchKey(event: KeyboardEvent): void {
   });
 }
 
+/**
+ * 内容根本撑不满视口时，用户连「往上滑」都做不到（没有滚动条、scrollTop 永远是 0），
+ * 只能我们主动把上一页补进来。每次补完再检查一次，直到撑出滚动条或没有更早的消息。
+ */
+function fillViewport(): void {
+  const el = scroller.value;
+  const thread = ws.value?.activeThread;
+  if (!el || !thread || thread.historyStart <= 0) return;
+  if (isLoadingMore.value || thread.loadingMore) return;
+  if (el.scrollHeight - el.clientHeight > VIEWPORT_FILL_PX) return;
+  autoChainPages += 1;
+  // 兜底：万一每页都空转（理论上不会），别无限循环
+  if (autoChainPages > 40) return;
+  void loadMoreMessages({ auto: true });
+}
+
+/**
+ * 一页加载完之后，如果用户还贴在顶部，就自己把下一页排上。
+ *
+ * 两个条件任一成立就续载：
+ * - 内容根本没撑出滚动条（短会话、窗口很高）：不续载就永远不能再触发；
+ * - 人还停在顶部附近（scrollTop < 100）：他显然还想往上读。
+ * 已经离开顶部就完全交给用户，不再自作主张。填满视口后还要再续的页数由
+ * AUTO_CHAIN_LIMIT 限制，避免一次上滑把几万条历史全拽下来。
+ */
+function maybeChainMore(thread: NonNullable<typeof ws.value>["activeThread"]): void {
+  const el = scroller.value;
+  console.log("[chain-debug]", JSON.stringify({ hasEl: Boolean(el), start: thread?.historyStart, topIntent, autoChainPages, loading: isLoadingMore.value }));
+  if (!el || !thread || thread.historyStart <= 0) return;
+  const notFilled = el.scrollHeight - el.clientHeight <= VIEWPORT_FILL_PX;
+  if (!topIntent && !notFilled) {
+    autoChainPages = 0;
+    return;
+  }
+  if (!notFilled && autoChainPages >= AUTO_CHAIN_LIMIT) return;
+  autoChainPages += 1;
+  window.setTimeout(() => {
+    if (ws.value?.activeThread !== thread) return;
+    void loadMoreMessages({ auto: true });
+  }, AUTO_CHAIN_DELAY_MS);
+}
+
 // 加载更多消息
-async function loadMoreMessages(): Promise<void> {
+async function loadMoreMessages(options: { auto?: boolean } = {}): Promise<void> {
   const thread = ws.value?.activeThread;
   const cwd = ws.value?.cwd;
   if (!thread || !cwd || !thread.sessionFile) return;
   if (isLoadingMore.value || thread.loadingMore || thread.historyStart <= 0) return;
 
-  // 防止连续触发
+  // 防止连续触发；被挡下的那次排到节流窗口末尾，不丢
   const now = Date.now();
-  if (now - messageLoadingThrottle.value < 500) return;
-  messageLoadingThrottle.value = now;
+  if (!options.auto) {
+    const wait = 500 - (now - messageLoadingThrottle.value);
+    if (wait > 0) {
+      scheduleTrailingLoad(wait);
+      return;
+    }
+    messageLoadingThrottle.value = now;
+  } else {
+    messageLoadingThrottle.value = Date.now();
+  }
 
   const token = ++historyLoadToken;
   const startedAt = performance.now();
@@ -374,6 +480,9 @@ async function loadMoreMessages(): Promise<void> {
       if (token === historyLoadToken) {
         historyLoading.value = false;
         isLoadingMore.value = false;
+        // 续载要等「最短加载展示时间」过去、位置还原也已生效再判断，
+        // 否则会因为 isLoadingMore 还是 true 而被直接挡回去。
+        window.setTimeout(() => maybeChainMore(thread), 0);
         if (successNotice && ws.value?.activeThread === thread) {
           historyNotice.value = successNotice;
           if (historyNoticeTimer) window.clearTimeout(historyNoticeTimer);
@@ -497,6 +606,8 @@ watch(
   () => [ws.value?.cwd, ws.value?.sessionFile],
   () => {
     clearHistoryFeedback();
+    topIntent = false;
+    autoChainPages = 0;
     settleAtBottom();
   },
 );
@@ -507,6 +618,8 @@ watch(
   (loaded) => {
     if (!loaded) return;
     settleAtBottom();
+    // 一页历史撑不满窗口时（短会话 / 大窗口），用户没法靠滚动触发加载
+    void nextTick(() => fillViewport());
   },
   { immediate: true },
 );
@@ -771,7 +884,7 @@ watch(searchMatches, () => {
           <!-- 加载错误提示 -->
           <div v-if="loadMoreError" class="load-error">
             <span>⚠️ {{ loadMoreError }}</span>
-            <button type="button" @click="loadMoreMessages">重试</button>
+            <button type="button" @click="loadMoreMessages()">重试</button>
           </div>
           
           <!-- 已加载全部消息提示 -->
