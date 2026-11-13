@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
-import { clampThinkingLevel, supportedThinkingLevels } from "../../shared/thinking-levels.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
@@ -18,6 +17,7 @@ import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLast
 import { readStorage, writeStorage } from "../../shared/storage.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
 import Picker from "./Picker.vue";
+import ModelThinkingPicker from "./ModelThinkingPicker.vue";
 import SlashMenu from "./SlashMenu.vue";
 import ImageLightbox from "./ImageLightbox.vue";
 import Widgets from "../overlays/Widgets.vue";
@@ -433,91 +433,43 @@ async function reloadDefaultModel(): Promise<void> {
 onMounted(() => { void reloadDefaultModel(); });
 watch(() => ws.value?.cwd, () => { void reloadDefaultModel(); });
 
-const modelItems = computed(() => {
-  const items: any[] = (ws.value?.models ?? []).map((m: any) => {
-    const value = `${m.provider}/${m.id}`;
-    return {
-      value,
-      label: m.name || m.id,
-      hint: m.provider,
-      model: m,
-      badge: value === defaultModelRef.value ? "默认" : undefined,
-    };
-  });
-  const current = ws.value?.model as any;
-  const currentRef = current ? `${current.provider}/${current.id}` : "";
-  if (ws.value && currentRef) {
-    const alreadyDefault = currentRef === defaultModelRef.value;
-    items.push({
-      value: "__set-default__",
-      label: alreadyDefault ? "当前模型已设为新会话默认" : `将「${current.name || current.id}」设为默认`,
-      action: true,
-      disabled: alreadyDefault,
-    });
+async function onSelectModel(model: any): Promise<void> {
+  if (!model) return;
+  try {
+    await workbench.setModel(model);
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
   }
-  return items;
-});
-const modelValue = computed(() => (ws.value?.model ? `${ws.value.model.provider}/${ws.value.model.id}` : ""));
-const modelLabel = computed(() => ws.value?.model?.name || ws.value?.model?.id || "选择模型");
-/**
- * 思考等级只列这个模型真正支持的档位：不支持推理的模型只有「关闭」，
- * 部分模型也没有 xhigh / max。以前直接列全部，选了没效果。
- */
-const levelItems = computed(() => {
-  const model = ws.value?.model as any;
-  const supported = supportedThinkingLevels(model);
-  const levels = supported.length ? supported : (ws.value?.levels ?? []);
-  const items: any[] = levels.map((level: string) => ({
-    value: level,
-    label: thinkingLabel(level),
-    hint: level,
-    badge: level === defaultThinkingRef.value ? "默认" : undefined,
-  }));
-  if (ws.value && levels.length > 1) {
-    const current = thinkingValue.value;
-    const alreadyDefault = current === defaultThinkingRef.value;
-    items.push({
-      value: "__set-default-thinking__",
-      label: alreadyDefault ? "当前思考已设为新会话默认" : `将「${thinkingLabel(current)}」设为默认思考`,
-      action: true,
-      disabled: alreadyDefault,
-    });
-  }
-  return items;
-});
-const thinkingValue = computed(() => clampThinkingLevel(ws.value?.thinking ?? "off", supportedThinkingLevels(ws.value?.model as any)));
-const thinkingValueLabel = computed(() => thinkingLabel(thinkingValue.value));
-
-async function onPickThinking(item: { value: string | number }): Promise<void> {
-  if (item.value === "__set-default-thinking__") {
-    const level = thinkingValue.value;
-    if (!workbench.setModelDefaults) return;
-    try {
-      await workbench.setModelDefaults({ scope: "global", thinkingLevel: level });
-      await reloadDefaultModel();
-      bus.emit("notify", { level: "info", text: `新会话默认思考：${thinkingLabel(level)}` });
-    } catch (error: any) {
-      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
-    }
-    return;
-  }
-  await workbench.setThinking(String(item.value));
 }
-/** 模型选择：普通项切换模型；动作项把「当前模型」写成新会话默认。 */
-async function onPickModel(item: { value: string | number; model?: any }): Promise<void> {
-  if (item.value === "__set-default__") {
-    const model = ws.value?.model as any;
-    if (!model || !workbench.setModelDefaults) return;
-    try {
-      await workbench.setModelDefaults({ scope: "global", provider: model.provider, model: model.id });
-      await reloadDefaultModel();
-      bus.emit("notify", { level: "info", text: `新会话默认模型：${model.name || model.id}` });
-    } catch (error: any) {
-      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
-    }
-    return;
+
+async function onSelectThinking(level: string): Promise<void> {
+  try {
+    await workbench.setThinking(level);
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
   }
-  if (item.model) await workbench.setModel(item.model);
+}
+
+/** 一次把当前模型与思考等级写成新会话默认值 */
+async function onSetDefaultModelAndThinking(payload: { model: any; thinkingLevel: string }): Promise<void> {
+  const { model, thinkingLevel } = payload;
+  if (!model || !workbench.setModelDefaults) return;
+  try {
+    await workbench.setModelDefaults({
+      scope: "global",
+      provider: model.provider,
+      model: model.id,
+      thinkingLevel,
+    });
+    await reloadDefaultModel();
+    const modelName = model.name || model.id;
+    const text = thinkingLevel
+      ? `新会话默认：${modelName} · 思考 ${thinkingLabel(thinkingLevel)}`
+      : `新会话默认：${modelName}`;
+    bus.emit("notify", { level: "info", text });
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  }
 }
 
 const modeItems = [
@@ -668,7 +620,13 @@ const optionItems = computed(() => {
   if (menuMode.value !== "options" || !parsed.value) return [];
   const q = parsed.value.arg.toLowerCase();
   const current =
-    exact.value?.name === "model" ? modelValue.value : exact.value?.name === "thinking" ? ws.value?.thinking : "";
+    exact.value?.name === "model"
+      ? ws.value?.model
+        ? `${ws.value.model.provider}/${ws.value.model.id}`
+        : ""
+      : exact.value?.name === "thinking"
+        ? ws.value?.thinking
+        : "";
   return options.value
     .filter((o) => !q || `${o.label} ${o.hint ?? ""} ${o.value}`.toLowerCase().includes(q))
     .map((o) => ({ ...o, current: o.value === current }));
@@ -1690,23 +1648,18 @@ async function abortBash(): Promise<void> {
                 <button @click="addFolder(); attachMenu = false"><span v-html="icons.folder" />添加文件夹</button>
               </div>
             </div>
-            <Picker
-              v-if="modelItems.length"
-              :items="modelItems"
-              :value="modelValue"
-              :label="modelLabel"
-              :title="`模型：${modelValue}`"
-              filterable
-              @pick="onPickModel"
-            />
-            <Picker
-              v-if="levelItems.filter((item) => !item.action).length > 1"
-              :items="levelItems"
-              :value="thinkingValue"
-              :label="thinkingValueLabel"
-              :icon="icons.brain"
-              :title="`思考等级：${thinkingValueLabel}（${thinkingValue}）`"
-              @pick="onPickThinking"
+            <ModelThinkingPicker
+              v-if="ws?.models?.length"
+              :models="ws.models"
+              :current-model="ws.model"
+              :current-thinking="ws.thinking"
+              :available-levels="ws.levels"
+              :default-model-ref="defaultModelRef"
+              :default-thinking="defaultThinkingRef"
+              @opened="reloadDefaultModel"
+              @select-model="onSelectModel"
+              @select-thinking="onSelectThinking"
+              @set-default="onSetDefaultModelAndThinking"
             />
             <button
               v-if="ws"

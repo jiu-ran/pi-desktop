@@ -1548,11 +1548,10 @@
 }
 .picker-action:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .picker-action:disabled { color: var(--fg-3); opacity: 0.6; cursor: default; }
-/* 舞台变窄时把“思考：高”收成图标，优先保证模型名和发送按钮不重叠 */
+/* 舞台变窄时把思考文字收成图标，优先保证模型名和发送按钮不重叠 */
 @container (max-width: 380px) {
   .composer-left { gap: 0; }
-  .composer-left .picker + .picker .picker-label { display: none; }
-  .composer-left .picker + .picker .picker-btn { padding: 0 5px; }
+  .mt-btn-thinking-label { display: none; }
   .composer-right { gap: 2px; }
   .composer-context { padding: 0 5px; }
   .send-btn { padding: 0 8px; }
@@ -1602,6 +1601,61 @@
 .picker-item small { flex: none; color: var(--fg-3); font-size: 11px; }
 .picker-check { flex: none; color: var(--accent); }
 .picker-empty { margin: 8px; color: var(--fg-3); font-size: 12px; }
+
+/* 合并后的「模型 + 思考程度」触发器与弹出面板 */
+.model-thinking-btn { max-width: min(360px, 60vw); }
+.mt-btn-sep { flex: none; color: var(--fg-3); }
+.mt-btn-thinking { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--fg-2); font-size: 12px; }
+.model-thinking-menu { min-width: 300px; max-width: 440px; }
+.model-thinking-menu .picker-items { max-height: 260px; }
+.mt-thinking-section { margin-top: 4px; padding: 6px 8px 4px; border-top: 1px solid var(--line); }
+.mt-thinking-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.mt-thinking-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.mt-thinking-note { color: var(--fg-3); font-size: 11px; }
+.mt-level-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.mt-level-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 18px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.mt-pill-default {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+.mt-level-pill:hover { background: var(--hover); color: var(--fg); }
+.mt-level-pill.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+}
 
 /* 待发送：只显示「还没有出现在对话里」的排队消息，气泡自己会带「待发送」标记 */
 /* 待发送消息：整条列出在输入框上方，带「待发送」标记，可直接点开编辑 */

@@ -2099,7 +2099,12 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const thread = ensureThread(ws, targetSessionFile);
     await rpc(ws.cwd, "setModel", [model.provider, model.id], targetSessionFile);
     thread.model = model;
-    thread.levels = await rpc(ws.cwd, "getAvailableThinkingLevels", [], targetSessionFile);
+    const [levels, nextState] = await Promise.all([
+      rpc(ws.cwd, "getAvailableThinkingLevels", [], targetSessionFile),
+      rpc(ws.cwd, "getState", [], targetSessionFile).catch(() => null),
+    ]);
+    thread.levels = levels;
+    if (nextState?.thinkingLevel) thread.thinking = nextState.thinkingLevel;
   }
 
   async function setThinking(level: string): Promise<void> {
