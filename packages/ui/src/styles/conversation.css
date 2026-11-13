@@ -1504,7 +1504,9 @@
   gap: 5px;
   width: 100%;
   min-width: 0;
-  max-width: min(180px, 42vw);
+  /* 模型名经常比 180px 长（「DeepSeek V4.1 Flash」就被截成「DeepSeek V4.1 Fl…」），
+     给宽一点，同时保住窄舞台下的收缩能力 */
+  max-width: min(280px, 52vw);
   height: 24px;
   padding: 0 7px;
   border: 1px solid transparent;
@@ -1519,8 +1521,34 @@
 .picker-btn:disabled { color: var(--fg-3); opacity: 0.38; cursor: not-allowed; }
 .picker-icon { display: grid; flex: none; }
 .picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 思考等级只有两三个字，固定在右侧，不参与挤压（否则会被压成「思考…」） */
+.composer-left .picker + .picker { flex: none; }
+.picker-item-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+.picker-actions { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.picker-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.picker-action:hover { background: var(--hover); color: var(--fg); }
 /* 舞台变窄时把“思考：高”收成图标，优先保证模型名和发送按钮不重叠 */
-@container (max-width: 470px) {
+@container (max-width: 380px) {
   .composer-left { gap: 0; }
   .composer-left .picker + .picker .picker-label { display: none; }
   .composer-left .picker + .picker .picker-btn { padding: 0 5px; }

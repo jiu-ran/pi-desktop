@@ -7,6 +7,7 @@ import SettingGroup from "./SettingGroup.vue";
 import SelectMenu from "../../shared/SelectMenu.vue";
 import SettingRow from "./SettingRow.vue";
 import type { PiModelDefaultsOverview } from "../../../env.d.ts";
+import { supportedThinkingLevels } from "../../../shared/thinking-levels.ts";
 
 /**
  * 对话与并发：怎么说、怎么排队、文件怎么自动保存。
@@ -29,6 +30,7 @@ const availableModels = computed(() =>
     value: `${model.provider}/${model.id}`,
     label: model.name || model.id,
     hint: model.provider,
+    model,
   })),
 );
 const modelDefaults = ref<PiModelDefaultsOverview | null>(null);
@@ -67,10 +69,32 @@ const scopeOptions = computed(() => [
     ? [{ value: "project", label: "当前项目", hint: modelDefaults.value.projectWritable ? ".pi/settings.json" : "需要先信任此项目" }]
     : []),
 ]);
-const thinkingOptions = computed(() => [
-  { value: "", label: "跟随 Pi 默认" },
-  ...(modelDefaults.value?.thinkingLevels ?? []).map((level) => ({ value: level, label: `${thinkingLabel(level)} (${level})` })),
-]);
+/**
+ * 思考等级跟着**所选模型**的能力走：不支持推理的模型只有「关闭」，
+ * 部分模型也没有 xhigh / max —— 列出一堆选了没效果的档位只会让人困惑。
+ * 还没选模型（跟随 Pi 默认）时退回当前会话模型的能力。
+ */
+const selectedModel = computed(() => {
+  const setting = currentScopeSetting.value;
+  const ref = setting.provider && setting.model ? `${setting.provider}/${setting.model}` : "";
+  const fromList = availableModels.value.find((item) => item.value === ref);
+  return fromList?.model ?? (active.value?.model as any) ?? null;
+});
+const thinkingOptions = computed(() => {
+  const supported = supportedThinkingLevels(selectedModel.value);
+  const levels = supported.length ? supported : (modelDefaults.value?.thinkingLevels ?? []);
+  return [
+    { value: "", label: "跟随 Pi 默认" },
+    ...levels.map((level) => ({ value: level, label: `${thinkingLabel(level)} (${level})` })),
+  ];
+});
+
+/** 已保存的等级在当前模型上不支持时提醒一句（否则用户会以为设置没生效） */
+const thinkingUnsupported = computed(() => {
+  const saved = currentScopeSetting.value.thinkingLevel;
+  if (!saved) return false;
+  return !thinkingOptions.value.some((option) => option.value === saved);
+});
 const disabled = computed(() => saving.value || (scope.value === "project" && !modelDefaults.value?.projectWritable));
 
 async function save(payload: { provider?: string; model?: string; thinkingLevel?: string }): Promise<void> {
@@ -148,7 +172,14 @@ function onThinkingChange(value: string): void {
       />
     </SettingRow>
 
-    <SettingRow label="默认思考程度" hint="新会话启动时的思考等级；模型不支持高等级时会自动降级">
+    <SettingRow
+      label="默认思考程度"
+      :hint="
+        thinkingUnsupported
+          ? '当前模型不支持已保存的等级，新会话里 Pi 会自动降级；建议重新选一个'
+          : '选项跟着模型走：不支持推理的模型只有「关闭」，部分模型也没有 xhigh / max'
+      "
+    >
       <SelectMenu
         :model-value="thinkingValue"
         aria-label="默认思考程度"

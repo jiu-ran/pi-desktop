@@ -6,6 +6,10 @@ export interface PickerItem {
   label: string;
   hint?: string;
   model?: any;
+  /** 右侧的小标签，例如「默认」 */
+  badge?: string;
+  /** true = 底部独立动作（不参与筛选与选中标记） */
+  action?: boolean;
 }
 
 const props = withDefaults(
@@ -42,9 +46,12 @@ const filterInput = ref<HTMLInputElement | null>(null);
 const filter = ref("");
 const offsetX = ref(0);
 
+const options = computed(() => props.items.filter((item) => !item.action));
+const actions = computed(() => props.items.filter((item) => item.action));
+
 const visible = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  return props.items.filter((item) => !q || `${item.label} ${item.hint ?? ""}`.toLowerCase().includes(q));
+  return options.value.filter((item) => !q || `${item.label} ${item.hint ?? ""}`.toLowerCase().includes(q));
 });
 
 async function toggle(): Promise<void> {
@@ -122,6 +129,7 @@ onBeforeUnmount(() => {
           @click="pick(item)"
         >
           <span class="picker-item-label">{{ item.label }}</span>
+          <span v-if="item.badge" class="picker-item-badge">{{ item.badge }}</span>
           <small v-if="item.hint">{{ item.hint }}</small>
           <svg
             v-if="item.value === value"
@@ -137,6 +145,12 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <p v-if="!visible.length" class="picker-empty">没有匹配项</p>
+      </div>
+      <div v-if="actions.length" class="picker-actions">
+        <button v-for="item in actions" :key="item.value" class="picker-action" @click="pick(item)">
+          <span class="picker-item-label">{{ item.label }}</span>
+          <small v-if="item.hint">{{ item.hint }}</small>
+        </button>
       </div>
     </div>
   </div>

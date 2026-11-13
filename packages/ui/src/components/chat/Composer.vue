@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { formatTokens, icons, thinkingLabel } from "../../shared/util.ts";
+import { clampThinkingLevel, supportedThinkingLevels } from "../../shared/thinking-levels.ts";
 import { formatBytes, imageDataUrl } from "../../shared/attachments.ts";
 import { contextBar, formatCost, usageParts } from "../../shared/session-stats.ts";
 import { applyMention, parseMentionToken, removeMentionToken } from "../../shared/mentions.ts";
@@ -412,19 +413,80 @@ function previewAttachment(item: any): void {
 }
 const hasHistory = computed(() => (ws.value?.blocks.length ?? 0) > 0);
 
-const modelItems = computed(() =>
-  (ws.value?.models ?? []).map((m: any) => ({
-    value: `${m.provider}/${m.id}`,
-    label: m.name || m.id,
-    hint: m.provider,
-    model: m,
-  })),
-);
+/** 新会话默认模型：用来在列表里标「默认」，也用来「设为默认」 */
+const defaultModelRef = ref("");
+const defaultModelLabel = computed(() => {
+  if (!defaultModelRef.value) return "";
+  const model = (ws.value?.models ?? []).find((m: any) => `${m.provider}/${m.id}` === defaultModelRef.value);
+  return model?.name || model?.id || defaultModelRef.value;
+});
+
+async function reloadDefaultModel(): Promise<void> {
+  if (!workbench.modelDefaults) return;
+  try {
+    const data = await workbench.modelDefaults();
+    const item = data?.effective;
+    defaultModelRef.value = item?.provider && item?.model ? `${item.provider}/${item.model}` : "";
+  } catch {
+    defaultModelRef.value = "";
+  }
+}
+
+onMounted(() => { void reloadDefaultModel(); });
+watch(() => ws.value?.cwd, () => { void reloadDefaultModel(); });
+
+const modelItems = computed(() => {
+  const items: any[] = (ws.value?.models ?? []).map((m: any) => {
+    const value = `${m.provider}/${m.id}`;
+    return {
+      value,
+      label: m.name || m.id,
+      hint: m.provider,
+      model: m,
+      badge: value === defaultModelRef.value ? "默认" : undefined,
+    };
+  });
+  if (ws.value) {
+    items.push({
+      value: "__set-default__",
+      label: defaultModelRef.value ? "把默认模型改成当前所选" : "把当前模型设为新会话默认",
+      hint: defaultModelRef.value ? `当前默认：${defaultModelLabel.value}` : undefined,
+      action: true,
+    });
+  }
+  return items;
+});
 const modelValue = computed(() => (ws.value?.model ? `${ws.value.model.provider}/${ws.value.model.id}` : ""));
 const modelLabel = computed(() => ws.value?.model?.name || ws.value?.model?.id || "选择模型");
-const levelItems = computed(() =>
-  (ws.value?.levels ?? []).map((level: string) => ({ value: level, label: thinkingLabel(level), hint: level })),
-);
+/**
+ * 思考等级只列这个模型真正支持的档位：不支持推理的模型只有「关闭」，
+ * 部分模型也没有 xhigh / max。以前直接列全部，选了没效果。
+ */
+const levelItems = computed(() => {
+  const model = ws.value?.model as any;
+  const supported = supportedThinkingLevels(model);
+  const levels = supported.length ? supported : (ws.value?.levels ?? []);
+  return levels.map((level: string) => ({ value: level, label: thinkingLabel(level), hint: level }));
+});
+const thinkingValue = computed(() => clampThinkingLevel(ws.value?.thinking ?? "off", levelItems.value.map((item) => String(item.value))));
+const thinkingValueLabel = computed(() => thinkingLabel(thinkingValue.value));
+/** 模型选择：普通项切换模型；动作项把「当前模型」写成新会话默认。 */
+async function onPickModel(item: { value: string | number; model?: any }): Promise<void> {
+  if (item.value === "__set-default__") {
+    const model = ws.value?.model as any;
+    if (!model || !workbench.setModelDefaults) return;
+    try {
+      await workbench.setModelDefaults({ scope: "global", provider: model.provider, model: model.id });
+      await reloadDefaultModel();
+      bus.emit("notify", { level: "info", text: `新会话默认模型：${model.name || model.id}` });
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+    }
+    return;
+  }
+  if (item.model) await workbench.setModel(item.model);
+}
+
 const modeItems = [
   { value: "followUp", label: "排队", hint: "当前任务结束后发送" },
   { value: "steer", label: "引导", hint: "插入到当前任务" },
@@ -1602,15 +1664,15 @@ async function abortBash(): Promise<void> {
               :label="modelLabel"
               :title="`模型：${modelValue}`"
               filterable
-              @pick="(item) => workbench.setModel(item.model)"
+              @pick="onPickModel"
             />
             <Picker
               v-if="levelItems.length > 1"
               :items="levelItems"
-              :value="ws?.thinking"
-              :label="`思考：${thinkingLabel(ws?.thinking ?? 'off')}`"
+              :value="thinkingValue"
+              :label="thinkingValueLabel"
               :icon="icons.brain"
-              title="思考等级"
+              :title="`思考等级：${thinkingValueLabel}（${thinkingValue}）`"
               @pick="(item) => workbench.setThinking(String(item.value))"
             />
             <button
