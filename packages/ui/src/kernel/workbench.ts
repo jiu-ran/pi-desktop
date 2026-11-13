@@ -40,6 +40,7 @@ import type {
   McpOverview,
   PiPackagesOverview,
   PiSkillsOverview,
+  PiModelDefaultsOverview,
   PiToolsOverview,
   WorkspaceEntry,
   WorkspaceFileData,
@@ -2638,6 +2639,22 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return mockToolsOverview;
   }
 
+  /** 新会话默认模型 / 思考等级（读写 Pi 的 settings.json）。 */
+  async function modelDefaults(): Promise<PiModelDefaultsOverview | null> {
+    if (!host?.modelDefaults) return null;
+    return host.modelDefaults(state.activeCwd || undefined);
+  }
+
+  async function setModelDefaults(payload: {
+    scope?: "global" | "project";
+    provider?: string;
+    model?: string;
+    thinkingLevel?: string;
+  }): Promise<PiModelDefaultsOverview | null> {
+    if (!host?.setModelDefaults) return null;
+    return host.setModelDefaults(state.activeCwd || "", JSON.parse(JSON.stringify(payload)));
+  }
+
   // 刷新 / 关窗时把防抖窗口里的草稿补写掉：不补的话刚加上的附件会丢。
   if (typeof window !== "undefined") {
     window.addEventListener("pagehide", flushPendingDrafts);
@@ -2768,6 +2785,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     skillsOverview,
     toolsOverview,
     toolsSet,
+    modelDefaults,
+    setModelDefaults,
   };
 }
 

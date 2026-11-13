@@ -46,7 +46,6 @@ export interface AppSettings {
   /** 运行中默认插入方式：followUp = 排队；steer = 引导 */
   streamingMode: "followUp" | "steer";
   /** 新建会话默认思考深度 */
-  defaultThinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** 3 区域修改文件自动保存策略：off = 关闭；afterDelay = 延迟自动保存；onFocusChange = 失焦保存；onWindowChange = 窗口失焦保存 */
   autoSave: AutoSaveMode;
   /** 延迟自动保存时间（毫秒），当 autoSave === 'afterDelay' 时生效 */
@@ -121,7 +120,6 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   sendShortcut: "enter",
   streamingMode: "followUp",
-  defaultThinking: "medium",
   autoSave: "afterDelay",
   autoSaveDelay: 1000,
   maxIdleWorkers: 3,
@@ -167,9 +165,6 @@ function loadSavedSettings(): AppSettings {
     return {
       sendShortcut: parsed.sendShortcut === "ctrl-enter" ? "ctrl-enter" : "enter",
       streamingMode: parsed.streamingMode === "steer" ? "steer" : "followUp",
-      defaultThinking: ["off", "minimal", "low", "medium", "high", "xhigh"].includes(parsed.defaultThinking)
-        ? parsed.defaultThinking
-        : DEFAULT_SETTINGS.defaultThinking,
       autoSave: ["off", "afterDelay", "onFocusChange", "onWindowChange"].includes(parsed.autoSave)
         ? parsed.autoSave
         : DEFAULT_SETTINGS.autoSave,

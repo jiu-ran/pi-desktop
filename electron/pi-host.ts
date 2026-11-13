@@ -28,6 +28,7 @@ import {
   type PiToolsOverview,
 } from "./pi-tools.ts";
 import { listGitBranches, changeGitBranch, type GitBranch } from "./git-branches.ts";
+import { THINKING_LEVELS, applyModelDefault, effectiveModelDefault, modelDefaultOf, type PiModelDefaultsOverview } from "./pi-model-defaults.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -3207,6 +3208,54 @@ export class PiHost {
     });
 
     return this.toolsOverview(cwd || undefined);
+  }
+
+  // ---------- 新会话默认模型与思考等级（Pi 的 defaultProvider / defaultModel / defaultThinkingLevel） ----------
+
+  /** 读全局 / 项目两层的默认模型与思考等级，以及合并后的生效值。 */
+  async modelDefaults(cwd?: string): Promise<PiModelDefaultsOverview> {
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
+    if (cwd) await assertRealWorkspacePath(cwd, effectiveCwd);
+    const trust = cwd ? await this.projectTrustInfo(effectiveCwd) : { trusted: true, writable: true };
+    const { global, project, paths } = readSettings(effectiveCwd, agentDir);
+    return {
+      global: modelDefaultOf(global),
+      project: modelDefaultOf(cwd && trust.trusted ? project : {}),
+      effective: effectiveModelDefault(global, cwd && trust.trusted ? project : {}),
+      thinkingLevels: [...THINKING_LEVELS],
+      projectSettingsPath: cwd ? paths.project : "",
+      projectTrusted: trust.trusted,
+      projectWritable: trust.writable,
+    };
+  }
+
+  /** 写默认模型 / 思考等级；只传 thinkingLevel 就是只改思考等级。 */
+  async setModelDefaults(
+    cwd: string,
+    payload: { scope?: "global" | "project"; provider?: string; model?: string; thinkingLevel?: string },
+  ): Promise<PiModelDefaultsOverview> {
+    const scope = payload?.scope === "project" ? "project" : "global";
+    if (scope === "project" && !cwd) throw new Error("项目级设置需要先打开一个项目");
+    const agentDir = this.agentDirPath();
+    const effectiveCwd = cwd ? path.resolve(cwd) : homedir();
+    if (cwd) await assertRealWorkspacePath(cwd, effectiveCwd);
+    if (scope === "project" && !(await this.projectTrustInfo(effectiveCwd)).writable) {
+      throw new Error("项目级设置需要先信任此项目：Pi 不会加载未信任项目的 .pi/settings.json（设置 → Skills 或 /trust）");
+    }
+    const file = scope === "global" ? path.join(agentDir, "settings.json") : path.join(effectiveCwd, ".pi", "settings.json");
+    await withFileWrite(file, async () => {
+      // 锁内重新读：并发保存时后写的要基于前一个结果
+      const fresh = readSettings(effectiveCwd, agentDir);
+      if (fresh.diagnostics.some((item) => item.startsWith(file))) {
+        throw new Error(`${scope === "global" ? "全局" : "项目"}设置文件不是合法 JSON，先修好再改默认模型`);
+      }
+      const target = scope === "global" ? fresh.global : fresh.project;
+      const next = applyModelDefault(target, payload ?? {});
+      await mkdir(path.dirname(file), { recursive: true });
+      await atomicWriteText(file, JSON.stringify(next, null, 2));
+    });
+    return this.modelDefaults(cwd || undefined);
   }
 
   /**

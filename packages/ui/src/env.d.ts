@@ -405,6 +405,24 @@ export interface PiToolItem {
   defaultEnabled: boolean;
 }
 
+/** 新会话默认模型 / 思考等级（写的是 Pi 的 settings.json）。 */
+export interface PiModelDefaultSetting {
+  provider: string;
+  model: string;
+  thinkingLevel: string;
+}
+
+export interface PiModelDefaultsOverview {
+  global: PiModelDefaultSetting;
+  project: PiModelDefaultSetting;
+  /** 合并后的生效值（项目盖过全局） */
+  effective: PiModelDefaultSetting;
+  thinkingLevels: string[];
+  projectSettingsPath: string;
+  projectTrusted: boolean;
+  projectWritable: boolean;
+}
+
 export interface PiToolsOverview {
   agentDir: string;
   globalSettingsPath: string;
@@ -648,6 +666,12 @@ export interface PiDesktopBridge {
     cwd: string,
     payload: { scope: "global" | "project"; name: string; enabled: boolean },
   ) => Promise<PiToolsOverview>;
+  /** 新会话默认模型 / 思考等级 */
+  modelDefaults: (cwd?: string) => Promise<PiModelDefaultsOverview>;
+  setModelDefaults: (
+    cwd: string,
+    payload: { scope?: "global" | "project"; provider?: string; model?: string; thinkingLevel?: string },
+  ) => Promise<PiModelDefaultsOverview>;
   globalAgents: () => Promise<{ path: string; content: string }>;
   saveGlobalAgents: (content: string) => Promise<{ path: string; content: string }>;
   startTerminal: (cwd: string, command: string, options?: TerminalPtyOptions) => Promise<TerminalTaskInfo>;

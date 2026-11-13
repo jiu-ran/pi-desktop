@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed, onMounted, ref, watch } from "vue";
 import { appSettings } from "../../../services/settings.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { thinkingLabel } from "../../../shared/util.ts";
 import SettingGroup from "./SettingGroup.vue";
 import SelectMenu from "../../shared/SelectMenu.vue";
 import SettingRow from "./SettingRow.vue";
+import type { PiModelDefaultsOverview } from "../../../env.d.ts";
 
 /**
  * 对话与并发：怎么说、怎么排队、文件怎么自动保存。
@@ -14,24 +16,87 @@ import SettingRow from "./SettingRow.vue";
  */
 const { workbench } = useKernel();
 
-const thinkingOptions: Array<{ value: typeof appSettings.defaultThinking; label: string }> = [
-  { value: "off", label: `${thinkingLabel("off")} (off)` },
-  { value: "minimal", label: `${thinkingLabel("minimal")} (minimal)` },
-  { value: "low", label: `${thinkingLabel("low")} (low)` },
-  { value: "medium", label: `${thinkingLabel("medium")} (medium)` },
-  { value: "high", label: `${thinkingLabel("high")} (high)` },
-  { value: "xhigh", label: `${thinkingLabel("xhigh")} (xhigh)` },
-];
+/**
+ * 新会话默认模型 / 思考等级。
+ *
+ * 写的是 Pi 自己的 `defaultProvider` / `defaultModel` / `defaultThinkingLevel`
+ * （`settings.json`），所以终端里的 `pi` 也一致 —— 不会出现「桌面端选了 A、命令行还是 B」。
+ * 这里只影响**新建**会话；当前会话仍用输入框里的模型 / 思考选择器。
+ */
+const active = computed(() => workbench.active.value);
+const availableModels = computed(() =>
+  (active.value?.models ?? []).map((model: any) => ({
+    value: `${model.provider}/${model.id}`,
+    label: model.name || model.id,
+    hint: model.provider,
+  })),
+);
+const modelDefaults = ref<PiModelDefaultsOverview | null>(null);
+const scope = ref<"global" | "project">("global");
+const saving = ref(false);
+const error = ref("");
 
-/** 改思考深度后，立即作用于当前会话（模型不支持就静默忽略） */
-async function applyThinkingNow(): Promise<void> {
-  const active = workbench.active.value;
-  if (!active || active.status !== "ready") return;
+async function loadDefaults(): Promise<void> {
+  if (!workbench.modelDefaults) return;
   try {
-    await workbench.setThinking(appSettings.defaultThinking);
-  } catch {
-    // 当前模型不支持这个等级：保持原样，不打断用户
+    modelDefaults.value = await workbench.modelDefaults();
+    error.value = "";
+  } catch (reason: any) {
+    error.value = reason?.message ?? String(reason);
   }
+}
+
+onMounted(() => { void loadDefaults(); });
+// 换项目/换会话后重新读：生效值取决于项目设置与信任状态
+watch(() => active.value?.cwd, () => { void loadDefaults(); });
+
+const currentScopeSetting = computed(() => {
+  const data = modelDefaults.value;
+  if (!data) return { provider: "", model: "", thinkingLevel: "" };
+  return scope.value === "project" ? data.project : data.global;
+});
+const modelValue = computed(() =>
+  currentScopeSetting.value.provider && currentScopeSetting.value.model
+    ? `${currentScopeSetting.value.provider}/${currentScopeSetting.value.model}`
+    : "",
+);
+const thinkingValue = computed(() => currentScopeSetting.value.thinkingLevel);
+const scopeOptions = computed(() => [
+  { value: "global", label: "全局", hint: "所有项目" },
+  ...(modelDefaults.value?.projectSettingsPath
+    ? [{ value: "project", label: "当前项目", hint: modelDefaults.value.projectWritable ? ".pi/settings.json" : "需要先信任此项目" }]
+    : []),
+]);
+const thinkingOptions = computed(() => [
+  { value: "", label: "跟随 Pi 默认" },
+  ...(modelDefaults.value?.thinkingLevels ?? []).map((level) => ({ value: level, label: `${thinkingLabel(level)} (${level})` })),
+]);
+const disabled = computed(() => saving.value || (scope.value === "project" && !modelDefaults.value?.projectWritable));
+
+async function save(payload: { provider?: string; model?: string; thinkingLevel?: string }): Promise<void> {
+  if (!workbench.setModelDefaults) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const next = await workbench.setModelDefaults({ scope: scope.value, ...payload });
+    if (next) modelDefaults.value = next;
+  } catch (reason: any) {
+    error.value = reason?.message ?? String(reason);
+  } finally {
+    saving.value = false;
+  }
+}
+
+function onModelChange(value: string): void {
+  if (!value) { void save({ provider: "", model: "" }); return; }
+  const [provider, ...rest] = String(value).split("/");
+  void save({ provider, model: rest.join("/") });
+}
+
+function onThinkingChange(value: string): void {
+  void save({ thinkingLevel: value || "" });
+  // 顺手作用到当前会话（模型不支持就静默忽略），跟以前的行为一致
+  if (value && active.value?.status === "ready") void workbench.setThinking(value).catch(() => {});
 }
 </script>
 
@@ -59,8 +124,61 @@ async function applyThinkingNow(): Promise<void> {
       />
     </SettingRow>
 
-    <SettingRow label="默认思考深度（Thinking Level）" hint="新建会话或切换模型时优先采用的思考等级">
-      <SelectMenu v-model="appSettings.defaultThinking" aria-label="默认思考深度" :options="thinkingOptions" @change="applyThinkingNow" />
+  </SettingGroup>
+
+  <SettingGroup title="新会话默认模型与思考等级">
+    <SettingRow
+      label="写入位置"
+      :hint="
+        scope === 'project'
+          ? '写到当前项目的 .pi/settings.json（只对信任过的项目生效）'
+          : '写到 Pi 的全局设置 settings.json，所有项目与终端 pi 都认'
+      "
+    >
+      <SelectMenu v-model="scope" aria-label="写入位置" :options="scopeOptions" @change="loadDefaults" />
+    </SettingRow>
+
+    <SettingRow label="默认模型" hint="新会话启动时用的模型；「跟随 Pi 默认」表示不指定">
+      <SelectMenu
+        :model-value="modelValue"
+        aria-label="默认模型"
+        :disabled="disabled"
+        :options="[{ value: '', label: '跟随 Pi 默认' }, ...availableModels]"
+        @update:model-value="onModelChange"
+      />
+    </SettingRow>
+
+    <SettingRow label="默认思考程度" hint="新会话启动时的思考等级；模型不支持高等级时会自动降级">
+      <SelectMenu
+        :model-value="thinkingValue"
+        aria-label="默认思考程度"
+        :disabled="disabled"
+        :options="thinkingOptions"
+        @update:model-value="onThinkingChange"
+      />
+    </SettingRow>
+
+    <SettingRow
+      v-if="modelDefaults && (modelDefaults.effective.provider || modelDefaults.effective.thinkingLevel)"
+      label="当前生效"
+      hint="项目设置优先于全局设置；新建会话时 Pi 按这份生效值启动"
+    >
+      <span class="settings-status-pill">
+        {{ modelDefaults.effective.provider ? modelDefaults.effective.provider + "/" + modelDefaults.effective.model : "模型跟随 Pi 默认" }}
+        · 思考 {{ modelDefaults.effective.thinkingLevel ? thinkingLabel(modelDefaults.effective.thinkingLevel) : "跟随默认" }}
+      </span>
+    </SettingRow>
+
+    <SettingRow
+      v-if="!availableModels.length"
+      label="暂时拿不到模型列表"
+      hint="打开任意项目后就能从当前可用模型里挑；也可以直接改 settings.json 里的 defaultProvider / defaultModel"
+    >
+      <span class="settings-status-pill muted">—</span>
+    </SettingRow>
+
+    <SettingRow v-if="error" label="保存失败" :hint="error">
+      <span class="settings-status-pill muted">—</span>
     </SettingRow>
   </SettingGroup>
 
