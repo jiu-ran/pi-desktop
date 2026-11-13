@@ -415,11 +415,7 @@ const hasHistory = computed(() => (ws.value?.blocks.length ?? 0) > 0);
 
 /** 新会话默认模型：用来在列表里标「默认」，也用来「设为默认」 */
 const defaultModelRef = ref("");
-const defaultModelLabel = computed(() => {
-  if (!defaultModelRef.value) return "";
-  const model = (ws.value?.models ?? []).find((m: any) => `${m.provider}/${m.id}` === defaultModelRef.value);
-  return model?.name || model?.id || defaultModelRef.value;
-});
+const defaultThinkingRef = ref("");
 
 async function reloadDefaultModel(): Promise<void> {
   if (!workbench.modelDefaults) return;
@@ -427,8 +423,10 @@ async function reloadDefaultModel(): Promise<void> {
     const data = await workbench.modelDefaults();
     const item = data?.effective;
     defaultModelRef.value = item?.provider && item?.model ? `${item.provider}/${item.model}` : "";
+    defaultThinkingRef.value = item?.thinkingLevel ?? "";
   } catch {
     defaultModelRef.value = "";
+    defaultThinkingRef.value = "";
   }
 }
 
@@ -446,12 +444,15 @@ const modelItems = computed(() => {
       badge: value === defaultModelRef.value ? "默认" : undefined,
     };
   });
-  if (ws.value) {
+  const current = ws.value?.model as any;
+  const currentRef = current ? `${current.provider}/${current.id}` : "";
+  if (ws.value && currentRef) {
+    const alreadyDefault = currentRef === defaultModelRef.value;
     items.push({
       value: "__set-default__",
-      label: defaultModelRef.value ? "把默认模型改成当前所选" : "把当前模型设为新会话默认",
-      hint: defaultModelRef.value ? `当前默认：${defaultModelLabel.value}` : undefined,
+      label: alreadyDefault ? "当前模型已设为新会话默认" : `将「${current.name || current.id}」设为默认`,
       action: true,
+      disabled: alreadyDefault,
     });
   }
   return items;
@@ -466,10 +467,42 @@ const levelItems = computed(() => {
   const model = ws.value?.model as any;
   const supported = supportedThinkingLevels(model);
   const levels = supported.length ? supported : (ws.value?.levels ?? []);
-  return levels.map((level: string) => ({ value: level, label: thinkingLabel(level), hint: level }));
+  const items: any[] = levels.map((level: string) => ({
+    value: level,
+    label: thinkingLabel(level),
+    hint: level,
+    badge: level === defaultThinkingRef.value ? "默认" : undefined,
+  }));
+  if (ws.value && levels.length > 1) {
+    const current = thinkingValue.value;
+    const alreadyDefault = current === defaultThinkingRef.value;
+    items.push({
+      value: "__set-default-thinking__",
+      label: alreadyDefault ? "当前思考已设为新会话默认" : `将「${thinkingLabel(current)}」设为默认思考`,
+      action: true,
+      disabled: alreadyDefault,
+    });
+  }
+  return items;
 });
-const thinkingValue = computed(() => clampThinkingLevel(ws.value?.thinking ?? "off", levelItems.value.map((item) => String(item.value))));
+const thinkingValue = computed(() => clampThinkingLevel(ws.value?.thinking ?? "off", supportedThinkingLevels(ws.value?.model as any)));
 const thinkingValueLabel = computed(() => thinkingLabel(thinkingValue.value));
+
+async function onPickThinking(item: { value: string | number }): Promise<void> {
+  if (item.value === "__set-default-thinking__") {
+    const level = thinkingValue.value;
+    if (!workbench.setModelDefaults) return;
+    try {
+      await workbench.setModelDefaults({ scope: "global", thinkingLevel: level });
+      await reloadDefaultModel();
+      bus.emit("notify", { level: "info", text: `新会话默认思考：${thinkingLabel(level)}` });
+    } catch (error: any) {
+      bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+    }
+    return;
+  }
+  await workbench.setThinking(String(item.value));
+}
 /** 模型选择：普通项切换模型；动作项把「当前模型」写成新会话默认。 */
 async function onPickModel(item: { value: string | number; model?: any }): Promise<void> {
   if (item.value === "__set-default__") {
@@ -1667,13 +1700,13 @@ async function abortBash(): Promise<void> {
               @pick="onPickModel"
             />
             <Picker
-              v-if="levelItems.length > 1"
+              v-if="levelItems.filter((item) => !item.action).length > 1"
               :items="levelItems"
               :value="thinkingValue"
               :label="thinkingValueLabel"
               :icon="icons.brain"
               :title="`思考等级：${thinkingValueLabel}（${thinkingValue}）`"
-              @pick="(item) => workbench.setThinking(String(item.value))"
+              @pick="onPickThinking"
             />
             <button
               v-if="ws"

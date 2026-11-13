@@ -10,6 +10,8 @@ export interface PickerItem {
   badge?: string;
   /** true = 底部独立动作（不参与筛选与选中标记） */
   action?: boolean;
+  /** 禁用状态（例如：当前模型已经是默认，不可重复点击） */
+  disabled?: boolean;
 }
 
 const props = withDefaults(
@@ -79,6 +81,7 @@ async function toggle(): Promise<void> {
 }
 
 function pick(item: PickerItem): void {
+  if (item.disabled) return;
   open.value = false;
   emit("pick", item);
 }
@@ -147,7 +150,14 @@ onBeforeUnmount(() => {
         <p v-if="!visible.length" class="picker-empty">没有匹配项</p>
       </div>
       <div v-if="actions.length" class="picker-actions">
-        <button v-for="item in actions" :key="item.value" class="picker-action" @click="pick(item)">
+        <button
+          v-for="item in actions"
+          :key="item.value"
+          class="picker-action"
+          :class="{ disabled: item.disabled }"
+          :disabled="item.disabled"
+          @click="pick(item)"
+        >
           <span class="picker-item-label">{{ item.label }}</span>
           <small v-if="item.hint">{{ item.hint }}</small>
         </button>
