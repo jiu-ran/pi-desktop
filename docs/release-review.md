@@ -50,6 +50,9 @@ git diff --check           # 行尾空白 / 冲突标记
 - [ ] `npm run check` 全部通过，尤其是 `editor-save`、`files`、`history`、`stage`、`terminal`、`terminal-wheel`、`product-boundary`。
 - [ ] **新增检查只要放进 `scripts/checks/*.check.ts` 就行**，不用再改 `package.json` 的脚本链；文件名即 `--only` 的匹配名。
 - [ ] `--changed` 的映射来自检查源码的 `import` 图。新增的检查如果要覆盖某类文件，确保它（或其依赖）`import` 了那些源文件；否则改动不会选中它（只改了 `.vue` / 样式时只跑全局守门，不会假装测过）。
+- [ ] `scripts/checks/` 里只放 `*.check.ts`（自动发现）、`*.electron.mjs`（冒烟用）、`syntax.mjs`、`run-checks.mjs` 和夹具。
+  **一次性探针、截图脚本、反向验证脚本一律写进 `temp/`，用完删**：以前留过 5 个 `_*-probe.mjs` / `_*-shot.mjs`，
+  没人再跑却一直占着目录，还会被 `check:syntax` 白扫一通（v0.8.14 已清掉）。
 
 ## 3. Electron 冒烟
 
