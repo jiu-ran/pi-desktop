@@ -433,9 +433,17 @@
 }
 .md-live .cm-md-tasklabel { color: var(--fg-2); }
 
-/* 块级 widget：代码块 / 表格 / 分割线 */
+/* 块级 widget：代码块 / 表格 / 分割线。
+   外层容器必须用 padding 撑开上下间距（不能用 margin）：CodeMirror 按 getBoundingClientRect()
+   测块高度，不计 margin；只要块级 widget 带了 margin，后面所有行的坐标就会往下漂移。 */
+.md-live .cm-md-codeslot {
+  padding: 0.55em 0;
+}
+.md-live .cm-md-mermaidslot {
+  padding: 0.6em 0;
+}
 .md-live .cm-md-codeblock {
-  margin: 0.55em 0;
+  margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -485,7 +493,7 @@
   font-size: 0.92em;
 }
 .md-live .cm-md-mermaid {
-  margin: 0.6em 0;
+  margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -505,11 +513,13 @@
   text-align: left;
 }
 .md-live .cm-md-rule {
-  margin: 1.1em 0;
+  padding: 1.1em 0;
+}
+.md-live .cm-md-ruleline {
   border-top: 1px solid var(--line);
 }
 .md-live .cm-md-tablewrap {
-  margin: 0.6em 0;
+  padding: 0.6em 0;
 }
 .md-live .cm-md-tablewrap table {
   border-collapse: collapse;

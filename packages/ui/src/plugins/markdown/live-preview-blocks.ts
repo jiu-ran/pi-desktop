@@ -1,7 +1,7 @@
 import { WidgetType } from "@codemirror/view";
 import { renderInlineMarkdown } from "../../shared/inline-markdown.ts";
 import { codeFenceParts, parseMarkdownTable, replaceCodeFenceBody, serializeMarkdownTable } from "../../shared/markdown-block-edit.ts";
-import { highlightCode } from "./markdown-highlight.ts";
+import { highlightCode, type HighlightToken } from "./markdown-highlight.ts";
 import { mermaidRender } from "./markdown.ts";
 
 /**
@@ -34,6 +34,9 @@ export class RuleWidget extends WidgetType {
   toDOM(): HTMLElement {
     const node = document.createElement("div");
     node.className = "cm-md-rule";
+    const line = document.createElement("div");
+    line.className = "cm-md-ruleline";
+    node.appendChild(line);
     return node;
   }
   ignoreEvent(): boolean {
@@ -42,8 +45,9 @@ export class RuleWidget extends WidgetType {
 }
 
 /** 小的「源码」开关（代码块 / 表格 / 图表共用） */
-function sourceToggle(host: LiveBlockHost, from: number): HTMLButtonElement {
-  const open = host.isSourceMode(from);
+function sourceToggle(host: LiveBlockHost, from: number | (() => number)): HTMLButtonElement {
+  const initialFrom = typeof from === "function" ? from() : from;
+  const open = host.isSourceMode(initialFrom);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "cm-md-blocktool";
@@ -56,7 +60,7 @@ function sourceToggle(host: LiveBlockHost, from: number): HTMLButtonElement {
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    host.onToggleSource(from);
+    host.onToggleSource(typeof from === "function" ? from() : from);
   });
   return button;
 }
@@ -158,6 +162,115 @@ function blockHead(labelText: string, actions: HTMLElement[]): HTMLElement {
   return head;
 }
 
+/** 读取代码块里的纯文本（把浏览器偶发插入的末尾 <br> 也当作换行） */
+function readCodeText(root: HTMLElement): string {
+  let out = "";
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.nodeValue ?? "";
+      return;
+    }
+    if (node instanceof HTMLBRElement) {
+      out += "\n";
+      return;
+    }
+    for (const child of node.childNodes) walk(child);
+  };
+  walk(root);
+  return out;
+}
+
+/** 读取 `root` 内当前选区相对于纯文本的 [anchor, focus] 字符偏移 */
+function getCodeSelectionOffsets(root: HTMLElement): { anchor: number; focus: number } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.anchorNode || !sel.focusNode) return null;
+  if (!root.contains(sel.anchorNode) || !root.contains(sel.focusNode)) return null;
+  let total = 0;
+  let anchor: number | null = null;
+  let focus: number | null = null;
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node.nodeValue ?? "").length;
+      if (node === sel.anchorNode) anchor = total + Math.min(sel.anchorOffset, len);
+      if (node === sel.focusNode) focus = total + Math.min(sel.focusOffset, len);
+      total += len;
+      return;
+    }
+    if (node instanceof HTMLBRElement) {
+      if (node === sel.anchorNode) anchor = total;
+      if (node === sel.focusNode) focus = total;
+      total += 1;
+      return;
+    }
+    const children = node.childNodes;
+    for (let i = 0; i < children.length; i += 1) {
+      if (node === sel.anchorNode && sel.anchorOffset === i) anchor = total;
+      if (node === sel.focusNode && sel.focusOffset === i) focus = total;
+      walk(children[i]!);
+    }
+    if (node === sel.anchorNode && sel.anchorOffset >= children.length) anchor = total;
+    if (node === sel.focusNode && sel.focusOffset >= children.length) focus = total;
+  };
+  walk(root);
+  if (anchor === null || focus === null) return null;
+  return { anchor, focus };
+}
+
+/** 根据纯文本字符偏移在重新渲染的高亮 DOM 上恢复光标/选区 */
+function setCodeSelectionOffsets(root: HTMLElement, anchorOffset: number, focusOffset: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const resolve = (target: number): { node: Node; offset: number } => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let passed = 0;
+    let last: Text | null = null;
+    while (walker.nextNode()) {
+      const text = walker.currentNode as Text;
+      const len = (text.nodeValue ?? "").length;
+      last = text;
+      if (passed + len >= target) {
+        return { node: text, offset: Math.max(0, target - passed) };
+      }
+      passed += len;
+    }
+    if (last) return { node: last, offset: (last.nodeValue ?? "").length };
+    return { node: root, offset: 0 };
+  };
+  const anchor = resolve(anchorOffset);
+  const focus = resolve(focusOffset);
+  sel.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+}
+
+/** 把 Shiki 分词结果填入 `code`（保留已有光标/选区） */
+function applyHighlightedTokens(code: HTMLElement, lines: HighlightToken[][]): void {
+  const restore = document.activeElement === code ? getCodeSelectionOffsets(code) : null;
+  code.textContent = "";
+  lines.forEach((tokens, index) => {
+    if (index > 0) code.appendChild(document.createTextNode("\n"));
+    for (const item of tokens) {
+      if (!item.color) {
+        code.appendChild(document.createTextNode(item.content));
+        continue;
+      }
+      const span = document.createElement("span");
+      span.style.color = item.color;
+      span.textContent = item.content;
+      code.appendChild(span);
+    }
+  });
+  if (restore) setCodeSelectionOffsets(code, restore.anchor, restore.focus);
+}
+
+interface CodeDomState {
+  widget: CodeWidget;
+  timer: ReturnType<typeof setTimeout> | null;
+  highlightTimer: ReturnType<typeof setTimeout> | null;
+  paintToken: number;
+  composing: boolean;
+}
+
+type CodeDomElement = HTMLElement & { __piCodeState?: CodeDomState };
+
 /** 代码块：渲染成带语言标签的代码面板，正文可以直接编辑 */
 export class CodeWidget extends WidgetType {
   readonly from: number;
@@ -167,8 +280,6 @@ export class CodeWidget extends WidgetType {
   readonly host: LiveBlockHost;
   /** 构造时「源码面板」是否打开：eq 据此判断要不要重建 DOM */
   readonly paneOpen: boolean;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private paintToken = 0;
 
   constructor(from: number, to: number, source: string, dark: boolean, host: LiveBlockHost) {
     super();
@@ -187,38 +298,77 @@ export class CodeWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-md-codeblock";
-    (wrap as unknown as { __piCode: CodeWidget }).__piCode = this;
-    this.paint(wrap);
-    return wrap;
+    const slot = document.createElement("div") as CodeDomElement;
+    // 外层只用 padding 撑间距，绝不用 margin：CodeMirror 测块高度不计 margin，
+    // 用 margin 会让后面所有行坐标逐步向下漂移，点某行会落到下一行、上下键也会跳行。
+    slot.className = "cm-md-blockslot cm-md-codeslot";
+    slot.__piCodeState = {
+      widget: this,
+      timer: null,
+      highlightTimer: null,
+      paintToken: 0,
+      composing: false,
+    };
+    this.paint(slot);
+    return slot;
   }
 
   updateDOM(dom: HTMLElement): boolean {
-    (dom as unknown as { __piCode: CodeWidget }).__piCode = this;
+    const wrap = dom as CodeDomElement;
     // 面板开关变了交给 CodeMirror 重建 DOM（返回 false = 我没法原地更新）：
     // 原地重绘容易和「正在编辑」的旧节点打架，直接重建最稳。
-    if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
-    if (isEditing(dom)) return true;
-    this.paint(dom);
+    if (wrap.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
+    const state = this.stateOf(wrap);
+    state.widget = this;
+    if (isEditing(wrap)) return true;
+    // 内容、主题与源码开关都没变时（只是文档别处编辑或光标移动）不重绘，避免整块闪烁
+    if (wrap.dataset.renderedSource === this.source && wrap.dataset.renderedDark === (this.dark ? "1" : "0")) {
+      return true;
+    }
+    this.paint(wrap);
     return true;
   }
 
-  destroy(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+  destroy(dom: HTMLElement): void {
+    const state = (dom as CodeDomElement).__piCodeState;
+    if (!state) return;
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = null;
+    if (state.highlightTimer) clearTimeout(state.highlightTimer);
+    state.highlightTimer = null;
   }
 
-  private paint(dom: HTMLElement): void {
+  private stateOf(dom: HTMLElement): CodeDomState {
+    const wrap = dom as CodeDomElement;
+    wrap.__piCodeState ??= {
+      widget: this,
+      timer: null,
+      highlightTimer: null,
+      paintToken: 0,
+      composing: false,
+    };
+    return wrap.__piCodeState;
+  }
+
+  private paint(slot: HTMLElement): void {
+    const state = this.stateOf(slot);
     const parts = codeFenceParts(this.source);
     const showSource = this.paneOpen;
-    dom.dataset.sourcePane = showSource ? "1" : "0";
-    dom.textContent = "";
+    slot.dataset.sourcePane = showSource ? "1" : "0";
+    slot.dataset.renderedSource = this.source;
+    slot.dataset.renderedDark = this.dark ? "1" : "0";
+    slot.textContent = "";
+    const dom = document.createElement("div");
+    dom.className = "cm-md-codeblock";
+    slot.appendChild(dom);
     // 复制的是当前可见的正文（编辑中的临时纯文本也算），读不到时退回 widget 里的源码
-    const readCode = (): string => dom.querySelector("code")?.textContent ?? codeFenceParts(this.source).body;
+    const readCode = (): string => {
+      const el = dom.querySelector("code");
+      return el ? readCodeText(el) : codeFenceParts(state.widget.source).body;
+    };
     dom.appendChild(blockHead(parts.lang || "代码", [
       copyButton(readCode),
-      sourceToggle(this.host, this.from),
+      sourceToggle(this.host, () => state.widget.from),
     ]));
 
     const pre = document.createElement("pre");
@@ -230,14 +380,35 @@ export class CodeWidget extends WidgetType {
     code.dataset.editing = "0";
     code.addEventListener("focus", () => {
       if (code.contentEditable === "false") return;
+      // 保持语法高亮的 <span> 不被清空：点击代码块只进入编辑态，不把代码洗成全白
       code.dataset.editing = "1";
-      code.textContent = parts.body;
     });
-    code.addEventListener("input", () => this.scheduleSync(dom, code));
+    code.addEventListener("compositionstart", () => {
+      state.composing = true;
+      if (state.highlightTimer) {
+        clearTimeout(state.highlightTimer);
+        state.highlightTimer = null;
+      }
+    });
+    code.addEventListener("compositionend", () => {
+      state.composing = false;
+      this.scheduleSync(slot, code);
+      this.scheduleHighlight(slot, code);
+    });
+    code.addEventListener("input", () => {
+      this.scheduleSync(slot, code);
+      if (!state.composing) this.scheduleHighlight(slot, code);
+    });
     code.addEventListener("blur", () => {
       if (code.dataset.editing !== "1") return;
       code.dataset.editing = "0";
-      this.paint(dom);
+      state.composing = false;
+      if (state.timer) this.flushSync(slot, code);
+      if (state.highlightTimer) {
+        clearTimeout(state.highlightTimer);
+        state.highlightTimer = null;
+      }
+      this.runHighlight(slot, code, readCodeText(code));
     });
     pre.appendChild(code);
     dom.appendChild(pre);
@@ -247,43 +418,65 @@ export class CodeWidget extends WidgetType {
       sourcePane(
         dom,
         this.source,
-        (text) => this.host.onEditBlock(this.from, this.to, text),
-        () => this.host.onToggleSource(this.from),
+        (text) => state.widget.host.onEditBlock(state.widget.from, state.widget.to, text),
+        () => state.widget.host.onToggleSource(state.widget.from),
       );
     }
 
     // 高亮：先给纯文本，算好再填色，避免整块闪一下空白
-    const token = ++this.paintToken;
-    if (!parts.lang || parts.lang === "text") return;
-    void highlightCode(parts.body, parts.lang, this.dark)
+    this.runHighlight(slot, code, parts.body);
+  }
+
+  private runHighlight(dom: HTMLElement, code: HTMLElement, body: string): void {
+    const state = this.stateOf(dom);
+    const widget = state.widget;
+    const lang = codeFenceParts(widget.source).lang;
+    const token = ++state.paintToken;
+    if (!lang || lang === "text") return;
+    const dark = widget.dark;
+    void highlightCode(body, lang, dark)
       .then((lines) => {
-        if (token !== this.paintToken || !code.isConnected || code.dataset.editing === "1") return;
-        code.textContent = "";
-        lines.forEach((tokens, index) => {
-          if (index > 0) code.appendChild(document.createTextNode("\n"));
-          for (const item of tokens) {
-            if (!item.color) {
-              code.appendChild(document.createTextNode(item.content));
-              continue;
-            }
-            const span = document.createElement("span");
-            span.style.color = item.color;
-            span.textContent = item.content;
-            code.appendChild(span);
-          }
-        });
+        if (token !== state.paintToken || !code.isConnected || state.composing) return;
+        // 用户在异步高亮期间又输入了新内容：放弃这次过期结果，等最新一次重算
+        if (readCodeText(code) !== body) return;
+        applyHighlightedTokens(code, lines);
       })
       .catch(() => {
         /* 高亮失败保留纯文本 */
       });
   }
 
+  private scheduleHighlight(dom: HTMLElement, code: HTMLElement): void {
+    const state = this.stateOf(dom);
+    if (state.highlightTimer) clearTimeout(state.highlightTimer);
+    state.highlightTimer = setTimeout(() => {
+      state.highlightTimer = null;
+      if (state.composing || !code.isConnected) return;
+      this.runHighlight(dom, code, readCodeText(code));
+    }, 60);
+  }
+
+  private flushSync(dom: HTMLElement, code: HTMLElement): void {
+    const state = this.stateOf(dom);
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    const widget = state.widget;
+    const next = replaceCodeFenceBody(widget.source, readCodeText(code));
+    dom.dataset.renderedSource = next;
+    widget.host.onEditBlock(widget.from, widget.to, next);
+  }
+
   private scheduleSync(dom: HTMLElement, code: HTMLElement): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      const widget = (dom as unknown as { __piCode?: CodeWidget }).__piCode ?? this;
-      widget.host.onEditBlock(widget.from, widget.to, replaceCodeFenceBody(widget.source, code.textContent ?? ""));
+    const state = this.stateOf(dom);
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      const widget = state.widget;
+      const next = replaceCodeFenceBody(widget.source, readCodeText(code));
+      dom.dataset.renderedSource = next;
+      widget.host.onEditBlock(widget.from, widget.to, next);
     }, 120);
   }
 }
@@ -330,6 +523,7 @@ export class TableWidget extends WidgetType {
     // 同上：面板开关变了让 CodeMirror 重建，其余情况编辑中保持 DOM
     if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
     if (isEditing(dom)) return true;
+    if (dom.dataset.renderedSource === this.source) return true;
     this.paint(dom);
     return true;
   }
@@ -342,6 +536,7 @@ export class TableWidget extends WidgetType {
   private paint(dom: HTMLElement): void {
     const showSource = this.paneOpen;
     dom.dataset.sourcePane = showSource ? "1" : "0";
+    dom.dataset.renderedSource = this.source;
     dom.textContent = "";
     const table = parseMarkdownTable(this.source);
     if (!table) {
@@ -350,7 +545,8 @@ export class TableWidget extends WidgetType {
       dom.appendChild(pre);
       return;
     }
-    dom.appendChild(blockHead("表格", [copyButton(() => this.source), sourceToggle(this.host, this.from)]));
+    const widgetOf = (): TableWidget => (dom as unknown as { __piTable?: TableWidget }).__piTable ?? this;
+    dom.appendChild(blockHead("表格", [copyButton(() => widgetOf().source), sourceToggle(this.host, () => widgetOf().from)]));
 
     const scroller = document.createElement("div");
     scroller.className = "cm-md-tablescroll";
@@ -525,24 +721,29 @@ export class MermaidWidget extends WidgetType {
     return codeFenceParts(this.source).body;
   }
   toDOM(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-md-mermaid";
-    (wrap as unknown as { __piMermaid: MermaidWidget }).__piMermaid = this;
-    this.paint(wrap);
-    return wrap;
+    const slot = document.createElement("div");
+    slot.className = "cm-md-blockslot cm-md-mermaidslot";
+    (slot as unknown as { __piMermaid: MermaidWidget }).__piMermaid = this;
+    this.paint(slot);
+    return slot;
   }
   updateDOM(dom: HTMLElement): boolean {
     (dom as unknown as { __piMermaid: MermaidWidget }).__piMermaid = this;
     if (dom.dataset.sourcePane !== (this.paneOpen ? "1" : "0")) return false;
     if (isEditing(dom)) return true;
+    if (dom.dataset.renderedSource === this.source) return true;
     this.paint(dom);
     return true;
   }
-  private paint(wrap: HTMLElement): void {
+  private paint(slot: HTMLElement): void {
     const showSource = this.paneOpen;
-    wrap.dataset.sourcePane = showSource ? "1" : "0";
-    wrap.textContent = "";
-    wrap.appendChild(blockHead("图表", [sourceToggle(this.host, this.from)]));
+    slot.dataset.sourcePane = showSource ? "1" : "0";
+    slot.dataset.renderedSource = this.source;
+    slot.textContent = "";
+    const wrap = document.createElement("div");
+    wrap.className = "cm-md-mermaid";
+    slot.appendChild(wrap);
+    wrap.appendChild(blockHead("图表", [sourceToggle(this.host, () => ((slot as unknown as { __piMermaid?: MermaidWidget }).__piMermaid ?? this).from)]));
     const canvas = document.createElement("div");
     canvas.className = "cm-md-mermaid-canvas";
     wrap.appendChild(canvas);
@@ -551,8 +752,14 @@ export class MermaidWidget extends WidgetType {
       sourcePane(
         wrap,
         this.source,
-        (text) => this.host.onEditBlock(this.from, this.to, text),
-        () => this.host.onToggleSource(this.from),
+        (text) => {
+          const widget = (slot as unknown as { __piMermaid?: MermaidWidget }).__piMermaid ?? this;
+          widget.host.onEditBlock(widget.from, widget.to, text);
+        },
+        () => {
+          const widget = (slot as unknown as { __piMermaid?: MermaidWidget }).__piMermaid ?? this;
+          widget.host.onToggleSource(widget.from);
+        },
       );
     }
   }

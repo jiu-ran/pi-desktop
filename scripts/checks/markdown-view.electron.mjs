@@ -367,26 +367,35 @@ export async function checkMarkdownViewInElectron(win) {
       }
     };
 
-    // 8) 点进代码块：Typora / Obsidian 那样**留在渲染态**就地改，不显示围栏
+    // 8) 点进代码块：Typora / Obsidian 那样**留在渲染态**就地改，不显示围栏，且语法高亮不丢失
     const codeRect = JSON.parse(await evaluate(`(() => {
-      const block = document.querySelector(".md-live .cm-md-codeblock");
-      block.scrollIntoView({ block: "center" });
-      const r = block.getBoundingClientRect();
-      return JSON.stringify({ x: r.left + 30, y: r.top + 16 });
+      const code = document.querySelector(".md-live .cm-md-codeblock code");
+      code.scrollIntoView({ block: "center" });
+      const r = code.getBoundingClientRect();
+      return JSON.stringify({ x: r.left + 30, y: r.top + Math.min(8, r.height / 2) });
     })()`));
     await wait(250);
     await clickAt(codeRect.x, codeRect.y);
     const codeActive = JSON.parse(await evaluate(`(() => {
       const widget = document.querySelector(".md-live .cm-md-codeblock");
+      const code = widget?.querySelector("code");
       const fenceChar = String.fromCharCode(96).repeat(3);
       const fences = [...document.querySelectorAll(".md-live .cm-line")].some((n) => n.textContent.trim().startsWith(fenceChar));
-      return JSON.stringify({ widget: Boolean(widget), fences, editable: widget?.querySelector("code")?.isContentEditable ?? false });
+      return JSON.stringify({
+        widget: Boolean(widget),
+        fences,
+        editable: code?.isContentEditable ?? false,
+        focused: document.activeElement === code,
+        spans: code ? code.querySelectorAll("span").length : 0,
+      });
     })()`));
     assert.equal(codeActive.widget, true, "点代码块不该退回源码，仍应是块级渲染");
     assert.equal(codeActive.fences, false, "点代码块不该露出围栏");
     assert.equal(codeActive.editable, true, "代码正文要能直接编辑");
+    assert.equal(codeActive.focused, true, "点击代码块正文应获得焦点");
+    assert.ok(codeActive.spans >= 3, `点击代码块后仍应保持语法高亮，实际 ${codeActive.spans} 个片段`);
 
-    // 改代码正文 → 写回草稿（围栏与语言标识原样保留）
+    // 改代码正文 → 写回草稿（围栏与语言标识原样保留），并实时刷新语法高亮
     await evaluate(`(() => {
       const code = document.querySelector(".md-live .cm-md-codeblock code");
       code.focus();
@@ -402,11 +411,13 @@ export async function checkMarkdownViewInElectron(win) {
         widget: Boolean(document.querySelector(".md-live .cm-md-codeblock")),
         hasCode: draft.includes("const a = 42;"),
         keepsFence: draft.includes(fenceChar + "js"),
+        spans: document.querySelectorAll(".md-live .cm-md-codeblock code span").length,
       });
     })()`));
     assert.equal(codeEdited.widget, true, "编辑代码块时不该退回源码");
     assert.equal(codeEdited.hasCode, true, "改代码正文要写回草稿");
     assert.equal(codeEdited.keepsFence, true, "围栏与语言标识要保留");
+    assert.ok(codeEdited.spans >= 3, `编辑代码块时应保持语法高亮，实际 ${codeEdited.spans} 个片段`);
 
     // 需要看围栏时点「源码」：渲染结果不消失，下面同时出现源码面板
     await evaluate(`(() => {
@@ -676,9 +687,54 @@ export async function checkMarkdownViewInElectron(win) {
     const midLines = JSON.parse(await readLines());
     assert.ok(midLines.length > 8, `滚动后仍应有内容，实际 ${midLines.length} 行`);
     assert.notDeepEqual(midLines.slice(0, 3), headLines.slice(0, 3), "滚动后应渲染出后面的内容");
+    // 10.5) 块级 widget（分割线/代码块/表格）下方点击行不会向下漂移，键盘上下键逐行移动
+    const blockMd = [
+      "# 大纲",
+      "",
+      "---",
+      "",
+      "```js",
+      "const x = 1;",
+      "```",
+      "",
+      "---",
+      "",
+      "| A | B |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "",
+      "---",
+      "",
+      "## 第一部分：核心基础",
+      "",
+      "### 1.1 基本类型",
+      "",
+      "结尾段落第一行。",
+      "结尾段落第二行。",
+    ].join("\n");
+    await open("md-view-blocks.md", "md-view-blocks.md", blockMd);
+    await poll(`Boolean(document.querySelector(".md-live .cm-md-rule"))`, "多块级文档渲染");
+    await clickLine("第一部分：核心基础", 60);
+    const hitAfterBlocks = JSON.parse(await evaluate(`(() => {
+      const view = window.__piMarkdownView;
+      const line = view.state.doc.lineAt(view.state.selection.main.head);
+      return JSON.stringify({ line: line.number, text: line.text });
+    })()`));
+    assert.ok(hitAfterBlocks.text.includes("第一部分：核心基础"), `多块级组件下点击应命中当前行，实际「${hitAfterBlocks.text}」`);
+    await clickLine("结尾段落第二行", 30);
+    win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Up" });
+    win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Up" });
+    await wait(150);
+    const upOne = await evaluate(`(() => {
+      const view = window.__piMarkdownView;
+      return view.state.doc.lineAt(view.state.selection.main.head).text;
+    })()`);
+    assert.equal(upOne, "结尾段落第一行。", `按上键应回到上一行，实际「${upOne}」`);
     await evaluate(`(() => {
-      const tab = window.__piDesktop.stage.findTab("files", "md-view-changelog.md");
-      if (tab) window.__piDesktop.stage.close(tab.key);
+      for (const name of ["md-view-changelog.md", "md-view-blocks.md"]) {
+        const tab = window.__piDesktop.stage.findTab("files", name);
+        if (tab) window.__piDesktop.stage.close(tab.key);
+      }
       return true;
     })()`);
 
