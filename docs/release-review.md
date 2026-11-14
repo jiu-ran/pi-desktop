@@ -9,10 +9,10 @@
 | 场景 | 跑什么 | 大概耗时 |
 | --- | --- | --- |
 | 改文档 / 文案 / 注释 | 不跑 | — |
-| 改纯逻辑（`shared/`、`electron/` 里的纯函数） | 对应的单个 `node scripts/checks/<相关>.check.ts`；跨文件的再补 `npx tsc --noEmit` | 秒级 |
-| 改样式 / 布局 / 交互 | `npm run check`（含 `css-tokens`、`palette-css` 等守门）；要看真实渲染时写一次性探针（`temp/` 下，用完删） | 几十秒 |
+| 改纯逻辑（`shared/`、`electron/` 里的纯函数） | `npm run check:changed`（按改动文件自动挑相关检查）；对不准时用 `node scripts/checks/run-checks.mjs --only=<名字>` | 秒级 |
+| 改样式 / 布局 / 交互 | `npm run check:changed`（会带上 `css-tokens`、`palette-css` 等全局守门）；要看真实渲染时写一次性探针（`temp/` 下，用完删） | 秒级 |
 | 改窗口创建 / 标题栏 / preload 白名单 / PTY 宿主 / 打包配置 | 一次探针量准关键值，然后跑**一次** `npm run check:smoke` | 数分钟 |
-| 发布新版本 | 本文件第 1–8 节，全部执行 | — |
+| 发布新版本 | `npm run check`（全量 85 项，并行；本机约 35 秒）+ 本文件第 1–8 节 | 约 1 分钟 + 冒烟 |
 
 两条配套规则：
 
@@ -30,14 +30,26 @@
 ## 2. 静态与单元回归
 
 ```bash
-npm run build:electron     # tsc
-npm run typecheck --prefix packages/ui
-npm run check              # 全部 scripts/checks/*.check.ts
+npm run check              # 一条命令：tsc + vue-tsc + check:syntax + 全部 *.check.ts（并行）
 git diff --check           # 行尾空白 / 冲突标记
 ```
 
+检查由 `scripts/checks/run-checks.mjs` 统一调度：自动发现全部 `*.check.ts`，按 CPU 并行，
+失败时只把出错那个检查的最后 30 行打出来，最后给总耗时与最慢的 5 项。本机上串行跑完要 87 秒，
+并行后约 33 秒；其中 `git`（26 秒）与 `git-worktree`（32 秒）是两个真实仓库集成测试，
+并行后墙钟就被它们俩卡住，其余 80 多个检查几乎全在几秒内跑完。常用参数：
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run check` | 全量（发布前 / CI） |
+| `npm run check:changed` | 只跑被改动文件（含未跟踪与未推提交）影响的检查 + 全局守门 |
+| `npm run check:full` | 单并发 + 逐项打印（排查时序问题或想看每一项耗时） |
+| `node scripts/checks/run-checks.mjs --list` | 列出所有检查（`[全局]` 表示永远跟着跑） |
+| `node scripts/checks/run-checks.mjs --only=git,term` | 按名字子串只跑几个 |
+
 - [ ] `npm run check` 全部通过，尤其是 `editor-save`、`files`、`history`、`stage`、`terminal`、`terminal-wheel`、`product-boundary`。
-- [ ] 新增的检查已加入 `package.json` 的 `check` 链，而不是只在本机手工跑过。
+- [ ] **新增检查只要放进 `scripts/checks/*.check.ts` 就行**，不用再改 `package.json` 的脚本链；文件名即 `--only` 的匹配名。
+- [ ] `--changed` 的映射来自检查源码的 `import` 图。新增的检查如果要覆盖某类文件，确保它（或其依赖）`import` 了那些源文件；否则改动不会选中它（只改了 `.vue` / 样式时只跑全局守门，不会假装测过）。
 
 ## 3. Electron 冒烟
 
