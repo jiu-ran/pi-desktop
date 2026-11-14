@@ -26,5 +26,3 @@ assert.equal(applySessionName(empty, "x.jsonl", "有名字")[0].empty, false, "�
 // 5. 键规范化
 assert.equal(sessionKey("C:\\A\\B.jsonl"), sessionKey("c:/a/b.jsonl"));
 assert.equal(sessionKey(""), "__default__");
-
-console.log("session-title-apply OK");

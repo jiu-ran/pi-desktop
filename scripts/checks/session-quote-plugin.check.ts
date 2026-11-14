@@ -71,5 +71,3 @@ const other = (title: string, cwd: string, path = `/sessions/x/${title}.jsonl`, 
   assert.equal(sessionHint(other("a", "C:\\work\\beta", "/x/a.jsonl", now - 5 * 86_400_000), now), "beta · 5 天前");
   assert.equal(sessionHint({ path: "/x/a.jsonl", title: "a" }), "", "没有时间与项目时留空");
 }
-
-console.log("session-quote-plugin.check ok 排除本项目 / 关键词 / 上限 / 提示文案");

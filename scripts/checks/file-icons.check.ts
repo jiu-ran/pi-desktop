@@ -76,5 +76,3 @@ for (const file of removed) {
 }
 const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 assert.equal("icons:file" in pkg.scripts, false, "package.json 里不该再有 icons:file 脚本");
-
-console.log("file-icons OK 只有默认图形（文件夹 / 文件）/ 不区分类型 / 主题参数无效 / Material 已删净");

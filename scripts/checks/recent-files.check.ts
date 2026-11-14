@@ -30,5 +30,3 @@ const recent = loadRecentFiles("/repo");
 assert.equal(recent.length, 20);
 assert.equal(recent[0], "src/f24.ts");
 assert.ok(!recent.includes("src/a.ts"));
-
-console.log("recent-files OK");

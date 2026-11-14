@@ -1,13 +1,10 @@
+import { assert } from "./support/harness.ts";
 import {
   normalizeTerminalText,
   renderTerminalHtml,
   stripTerminalAnsi,
   terminalPlainText,
 } from "../../packages/ui/src/shared/terminal-text.ts";
-
-function assert(condition: unknown, message: string): void {
-  if (!condition) throw new Error(message);
-}
 
 assert(stripTerminalAnsi("\u001B[31m红色\u001B[0m \u001B]0;标题\u0007正常") === "红色 正常", "ANSI 清理错误");
 
@@ -51,5 +48,3 @@ assert(osc === "链接", `OSC 超链接应被丢弃：${JSON.stringify(osc)}`);
 
 const newline = renderTerminalHtml("a\nb");
 assert(newline === "a\nb", "换行应保留");
-
-console.log("terminal-text OK");

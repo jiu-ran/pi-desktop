@@ -34,7 +34,6 @@ const dispose = (await import("../../packages/ui/src/shared/long-task.ts")).inst
 assert.equal(typeof dispose, "function", "总要返回一个可调用的卸载函数");
 dispose();
 
-console.log("long-task.check ok 阈值 / 节流 / 标签 / 无环境兜底");
 
 // 心跳看门狗：卡 3 秒以上才记，且 10 秒内不重复记
 {

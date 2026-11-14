@@ -91,5 +91,3 @@ assert.ok(
 const composer = readFileSync(path.join(repo, "packages/ui/src/components/chat/Composer.vue"), "utf8");
 assert.ok(composer.includes("findPiCommand(parsed.value.name)"), "submit 里要查表，把「只能终端」的命令拦下来");
 assert.ok(composer.includes("terminalCommandNotice"), "拦下来之后要给一句能照做的说明");
-
-console.log(`pi-commands OK ${PI_BUILTIN_COMMANDS.length} 条内置（桌面端 ${PI_BUILTIN_COMMANDS.length - terminal.length} / 需终端 ${terminal.length}）、${DESKTOP_ONLY_COMMANDS.length} 条桌面专属`);

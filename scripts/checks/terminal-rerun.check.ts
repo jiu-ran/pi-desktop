@@ -149,5 +149,3 @@ function createHarness(initial: FakeTask[] = []) {
   assert.notEqual(service.state.tasks[0].status, "running", "停止后不再显示运行中");
   dispose();
 }
-
-console.log("terminal-rerun OK 原地重跑 / 先停再跑 / PTY 拒绝 / 未知任务 / 停止");

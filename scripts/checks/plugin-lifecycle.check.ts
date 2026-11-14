@@ -183,7 +183,6 @@ await disabledOptional.register(optional);
 if (disabledOptional.get(optional.id)?.enabled) throw new Error("重启后忽略了用户停用插件的选择");
 disabledOptional.dispose();
 
-console.log("plugin-lifecycle OK");
 
 // `@` 候选来源：插件注册后出现在 mentionSources，停用后自动移除
 {

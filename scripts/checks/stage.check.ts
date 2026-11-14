@@ -82,5 +82,3 @@ if (Number(stage.tabs.length) !== 1) throw new Error("same project path with dif
 stage.closeWorkspaceTabs("C:/REPO/APP/", (tab) => !tab.dirty);
 if (Number(stage.tabs.length) !== 0) throw new Error("closeWorkspaceTabs should match workspace regardless of path casing/slashes");
 stage.removeWorkspace("c:\\repo\\app");
-
-console.log("stage OK");

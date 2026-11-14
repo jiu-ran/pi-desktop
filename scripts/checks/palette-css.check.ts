@@ -64,5 +64,3 @@ assert.deepEqual(missing, [], `这些类名在模板里用到但 CSS 里没有�
 for (const selector of [".quick-open-state", ".quick-open-foot", ".quick-open-foot kbd"]) {
   assert.ok(ruleBody(selector), `缺少 ${selector} 规则`);
 }
-
-console.log(`palette-css OK 输入行 / 条目 / ${used.size} 个 quick-open 类都有样式`);

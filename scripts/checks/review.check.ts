@@ -73,5 +73,3 @@ assert.equal(appendDraft("", "review"), "review");
 assert.equal(appendDraft("existing", ""), "existing");
 assert.equal(appendDraft("existing\n", "\nreview"), "existing\n\nreview");
 assert.equal(appendDraft("   ", "review"), "review");
-
-console.log("review OK");

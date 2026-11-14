@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installFakeLocalStorage } from "./support/harness.ts";
 
 /**
  * 排队消息的「换投递方式」与「撤回回填」（内核侧）。
@@ -9,20 +10,7 @@ import assert from "node:assert/strict";
  * 2. 重新入队时每个提示词要带上自己的图片（clearQueue 只回文本）；
  * 3. 撤回要把人写的文字交回输入框（附件标记不能进去），失败则队列还原。
  */
-const store = new Map<string, string>();
-(globalThis as any).localStorage = {
-  get length() {
-    return store.size;
-  },
-  key: (index: number) => [...store.keys()][index] ?? null,
-  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-  setItem: (key: string, value: string) => {
-    store.set(key, String(value));
-  },
-  removeItem: (key: string) => {
-    store.delete(key);
-  },
-};
+installFakeLocalStorage();
 
 const { createWorkbench } = await import("../../packages/ui/src/kernel/workbench.ts");
 
@@ -267,5 +255,3 @@ assert.equal(countOf("再插一句"), beforeStop.dup - 2, "同一句话排两次
 assert.equal(stopDraft.includes("<file"), false, `回填文本不能带附件标记，实际「${stopDraft}」`);
 assert.equal(stopDraft, "打断一下\n再插一句\n再插一句\n排队一", `按队列顺序回填人写的文字，实际「${stopDraft}」`);
 assert.ok(calls.some((call) => call.method === "abort"), "中止还要真的发 abort");
-
-console.log("queue-mode OK 排队↔引导 / 拖拽排序 / 重新入队顺序与图片 / 撤回回填 / 中止不回吞 / 失败还原");

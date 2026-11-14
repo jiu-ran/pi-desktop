@@ -119,5 +119,3 @@ const broken = parseAsyncSnapshot([`${ASYNC_WIDGET_PREFIX}{"kind":"pi-subagents.
 assert.ok(broken);
 assert.equal(broken!.runs[0].state, "running", "未知状态回落到运行中");
 assert.equal(broken!.runs[1].label, "");
-
-console.log("subagent-widget OK");

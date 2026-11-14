@@ -57,7 +57,6 @@ try {
   assert.equal(findExecutableOnPath("node", { PATH: path.join(root, "empty") } as NodeJS.ProcessEnv), "", "PATH 里没有就是空");
   assert.equal(findExecutableOnPath("node", { PATH: "" } as NodeJS.ProcessEnv), "", "空 PATH 返回空");
 
-  console.log("pi-entry OK npm 全局 / Unix bin-lib / 直接入口 / 找不到 / PATH 查找");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

@@ -68,7 +68,6 @@ for (const src of ["images/a.png", "./a.png", "../shared/a.png"]) {
   assert.equal(ref.path, src);
 }
 
-console.log("local-image OK 远程 vs 本地 / 盘符 / UNC / POSIX / file URL / 相对路径");
 
 // 7) 从 markdown 里挑出图片地址：位置要准，换回去不能伤到别的字符
 {

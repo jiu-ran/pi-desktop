@@ -1,8 +1,5 @@
 import { createTerminalWheelHandler } from "../../packages/ui/src/shared/terminal-wheel.ts";
-
-function assert(value: unknown, message: string): void {
-  if (!value) throw new Error(message);
-}
+import { assert } from "./support/harness.ts";
 
 let time = 0;
 let alternate = true;
@@ -49,5 +46,3 @@ mouseTracking = false;
 alternate = false;
 assert(handle(wheel(-120)) === true && sent.length === count, "普通 shell 应保留正常 scrollback，不发送翻页按键");
 assert(!sent.some((data) => data === "\u001b[A" || data === "\u001b[B" || data === "\u001bOA" || data === "\u001bOB"), "滚轮永远不应模拟输入历史方向键");
-
-console.log("terminal-wheel OK");

@@ -7,18 +7,12 @@ import { promisify } from "node:util";
 import { PiHost } from "../../electron/pi-host.ts";
 import { badgeCode, badgeKind, isSessionOnly, isStaged, isUnstaged, mergeRepoChanges, type RepoChange } from "../../packages/ui/src/shared/git-changes.ts";
 import { buildChangeTree, flattenChangeTree } from "../../packages/ui/src/shared/git-tree.ts";
+import { assert, expectReject } from "./support/harness.ts";
 
 const execFileAsync = promisify(execFile);
 const root = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-git-")));
 const worktreeRoot = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-worktrees-")));
 const host = new PiHost({ emit() {}, worktreeRoot });
-const assert = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
-const expectReject = async (run: () => Promise<unknown>, message: string) => {
-  let rejected = false;
-  try { await run(); } catch { rejected = true; }
-  assert(rejected, message);
-};
-
 try {
   await writeFile(path.join(root, "a.txt"), "one\n");
 
@@ -228,7 +222,6 @@ try {
   }
 
   console.log("git", commit.overview.branch, commit.overview.commits.length, "merged", merged.length);
-  console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
   await rm(worktreeRoot, { recursive: true, force: true });

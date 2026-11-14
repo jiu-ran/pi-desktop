@@ -208,5 +208,3 @@ assert.ok(preload.includes("pi:tools-overview") && preload.includes("pi:tools-se
 
 const modal = await readFile(path.join(root, "packages/ui/src/components/overlays/SettingsModal.vue"), "utf8");
 assert.ok(modal.includes("ToolSettings"), "设置页要挂上工具开关组件");
-
-console.log(`pi-tools OK ${PI_TOOL_CATALOG.length} 个工具 / defaultTools 解析、合并、写入与启动参数`);

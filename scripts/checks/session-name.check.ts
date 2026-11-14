@@ -44,7 +44,6 @@ try {
     await writeFile(file, `${header}\n${info("中文跨块名称")}\n${line({ type: "message", data: "x".repeat(suffix) })}`);
     assert.equal(await read(), "中文跨块名称", `名称跨块解析 ${suffix}`);
   }
-  console.log("session-name OK");
 } finally { await rm(root, { recursive: true, force: true }); }
 
 // 侧栏时间：显示「最近活动」而不是建会话那天。一直在这个会话里聊，时间必须是刚刚。

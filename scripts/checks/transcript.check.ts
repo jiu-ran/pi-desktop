@@ -144,7 +144,6 @@ const visible = (blocks: Array<{ kind: string; text?: string }>) => blocks.filte
 if (JSON.stringify(visible(replay.blocks)) !== JSON.stringify(visible(snapshot.blocks))) {
   throw new Error("RPC 快照必须能覆盖由事件派生的消息状态");
 }
-console.log("OK");
 
 // 用户消息：附件标记应从正文剥除，图片以数据形式保留供缩略图展示
 const withFiles = createTranscript();
@@ -185,7 +184,6 @@ if (bigBlock.attachments?.[0]?.inlined !== false) throw new Error("大文件应�
 if (bigBlock.attachments?.[0]?.size !== 5242880) throw new Error("大文件大小未解析");
 if (!bigBlock.attachments?.[0]?.name) throw new Error("大文件名丢失");
 
-console.log("attachments ok");
 
 // 发送失败回滚：pushUser 必须返回块，removeBlock 只移除指定块
 const removable = createTranscript();
@@ -201,7 +199,6 @@ removable.removeBlock("not-exists");
 if (removable.blocks.filter((block) => block.id === secondUser.id).length !== 1) {
   throw new Error("removeBlock 不存在的 id 不应改变内容");
 }
-console.log("removeBlock ok");
 
 // 技能调用：正文折叠成卡片，只保留技能名与调用者追加的问题
 const skill = createTranscript();
@@ -227,7 +224,6 @@ const onlySkill = createTranscript();
 onlySkill.loadMessages([{ role: "user", content: [{ type: "text", text: '<skill name="a" location="/x/SKILL.md">\nbody\n</skill>' }] }]);
 if (onlySkill.blocks.length !== 1 || onlySkill.blocks[0].skill?.name !== "a") throw new Error("纯技能消息不应被丢弃");
 
-console.log("skill OK");
 
 // 自动重试：保留尝试次数，成功后收成一行提示
 const retry = createTranscript();
@@ -254,7 +250,6 @@ compaction.applyEvent({
 if (compactionNotice.compaction?.running || compactionNotice.compaction?.summary !== "## 摘要\n保留关键改动") throw new Error("压缩结束应保存摘要");
 if (!compactionNotice.text?.includes("154.2k → 32.0k")) throw new Error("压缩提示应显示 token 变化");
 
-console.log("notices OK");
 
 // 工具调用流式事件：Pi 的 toolcall_start / toolcall_delta 只带 contentIndex + partial，
 // 不含 id / name。必须从 partial 里取，否则会多出一个无名占位块（界面上的空「工具」卡片）。

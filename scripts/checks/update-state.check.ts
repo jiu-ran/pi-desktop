@@ -35,7 +35,6 @@ assert.equal(cancelled.cancelled, true, "取消后返回 cancelled 标记");
 assert.equal(hostCalls, 0, "取消时不能调用宿主移除项目");
 guarded.dispose();
 workbench.dispose();
-console.log("update-state OK");
 
 // 检查失败不能被当成「已是最新」：以前限流（服务器限制请求频率）会显示成最新版本
 {

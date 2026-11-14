@@ -37,5 +37,3 @@ bus.on("sample", () => {
 });
 bus.emit("sample");
 if (afterDispose !== 0) throw new Error("disposed event bus should ignore listeners and events");
-
-console.log("event-bus OK");

@@ -185,7 +185,6 @@ assert.equal(
   "超长内联内容不能进入标题",
 );
 
-console.log(`history.check ok（共 ${history.length} 条，${pages} 页，覆盖 ${covered} 条）`);
 
 // 增量解析：会话文件是只追加的，读取时必须只解析新增的完整行，
 // 否则长会话（实测 85MB / 1.2 万条）每次 hydrate 都要重解析 300ms+，主进程被阻塞、界面像冻住。

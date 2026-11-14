@@ -68,5 +68,3 @@ assert.equal(caretOnLastLine(multiline, multiline.length), true);
 assert.equal(caretOnLastLine(multiline, 6), false, "在第二行时 ↓ 要留给默认行为");
 assert.equal(caretOnFirstLine("", 0), true, "空输入框两个方向都算首/末行");
 assert.equal(caretOnLastLine("", 0), true);
-
-console.log(`prompt-history OK 追加去重裁剪 / ↑↓ 边界 / 草稿还原 / 多行光标（上限 ${PROMPT_HISTORY_LIMIT}）`);

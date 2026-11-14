@@ -136,7 +136,6 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("logger.check ok 默认上限 / 轮转 / 轮转 / 清理 / 脱敏 / 落盘");
 
 // 日志目录是启动时定的一个固定目录（安装目录下的 logs/）：切换目录要把旧缓冲刷干净，
 // 目录不可写时要能探测出来（打包版据此回落到 userData）。
@@ -178,7 +177,6 @@ console.log("logger.check ok 默认上限 / 轮转 / 轮转 / 清理 / 脱敏 / 
     await rm(second, { recursive: true, force: true });
   }
 }
-console.log("logger.check ok 固定日志目录 / 早期日志补写 / 切换刷盘 / 可写探测");
 
 // 上限可调：设置页档位 → logStore 立刻生效并清理超量文件
 {
@@ -216,4 +214,3 @@ console.log("logger.check ok 固定日志目录 / 早期日志补写 / 切换刷
     await rm(dir, { recursive: true, force: true });
   }
 }
-console.log("logger.check ok 上限可调 4MB/默认 / 调小即清理 / 当前文件保留");

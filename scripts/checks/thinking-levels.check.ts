@@ -42,5 +42,3 @@ assert.equal(clampThinkingLevel("minimal", ["off", "low", "high"]), "low", "往�
 assert.equal(clampThinkingLevel("xhigh", ["off", "high"]), "high");
 assert.equal(clampThinkingLevel("nonsense", ["off", "high"]), "off");
 assert.equal(clampThinkingLevel("high", []), "off", "空列表兜底成 off");
-
-console.log("thinking-levels OK 能力判断 / null 过滤 / xhigh-max 门槛 / 收敛");

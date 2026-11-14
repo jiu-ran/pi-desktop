@@ -46,7 +46,6 @@ equal(
   "引号引用替换结果不正确",
 );
 
-console.log("mention.check ok");
 
 // 带空格的目录：引号内的光标要停在右引号前，方便继续补全子路径
 equal(

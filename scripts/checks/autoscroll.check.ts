@@ -55,5 +55,3 @@ assert.equal(
   true,
   "强制贴底（点「回到底部」）照常执行",
 );
-
-console.log("autoscroll OK");

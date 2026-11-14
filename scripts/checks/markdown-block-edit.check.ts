@@ -72,5 +72,3 @@ const updated = replaceCodeFenceBody(code, "const a = 3;");
 assert.equal(updated, ["```ts", "const a = 3;", "```"].join("\n"), `应只改正文：${updated}`);
 assert.equal(replaceCodeFenceBody(code, "第一行\n第二行\n\n"), ["```ts", "第一行", "第二行", "```"].join("\n"), "多行正文，去掉尾部空行");
 assert.equal(replaceCodeFenceBody(code, ""), ["```ts", "```"].join("\n"), "清空正文");
-
-console.log("markdown-block-edit OK 表格解析/序列化/改单元格/追加行/围栏正文替换");

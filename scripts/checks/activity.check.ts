@@ -59,5 +59,3 @@ assert.equal(blockMatchesQuery({ kind: "notice", text: "扩展出错" }, "扩展
 // 运行中的内容不搜：流式输出的正文、pending / running 的块都跳过
 assert.equal(blockMatchesQuery({ kind: "text", text: "正在生成", streaming: true }, "生成"), false, "流式内容不参与搜索");
 assert.equal(blockMatchesQuery({ kind: "text", text: "abc" }, "  "), false, "空搜索词不匹配");
-
-console.log("activity OK 单步描述 / 失败判定 / 搜索文本");

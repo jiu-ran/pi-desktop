@@ -21,5 +21,3 @@ if (shouldCollapseUserText("x".repeat(LONG_USER_TEXT + 1), false)) throw new Err
 if (!shouldCollapseUserText("x".repeat(LONG_USER_TEXT + 1), true)) throw new Error("超长消息应折叠");
 if (shouldCollapseUserText("x".repeat(LONG_USER_TEXT), true)) throw new Error("500 字整不应折叠");
 if (shouldCollapseUserText("  " + "x".repeat(LONG_USER_TEXT) + "  ", true)) throw new Error("两侧空白不计入长度");
-
-console.log("OK");

@@ -74,5 +74,3 @@ assert.ok(
   /options\.background \? "warning" : "error"/.test(workbenchSource),
   "后台自动下载失败要降级成 warning",
 );
-
-console.log("update-auto OK");

@@ -96,7 +96,6 @@ assert.equal(
   "设置页要能看出代理是从哪来的",
 );
 
-console.log("network-mode OK 模式 / 地址规整 / 方案 / 子进程环境 / 文案");
 
 // 主进程有一份同样的实现（electron/network/proxy.ts）：两边必须给出一样的结果，
 // 否则设置页说「走系统代理」而 Pi 子进程实际上直连 —— 最常见的「配了也没用」。
@@ -138,5 +137,3 @@ for (const value of ["127.0.0.1:7890", "http://a:1/path", "socks5://h:1", "ftp:/
 for (const value of ["auto", "system", "direct", "custom", "bogus", undefined]) {
   assert.equal(mainProxy.normalizeNetworkMode(value), normalizeNetworkMode(value), `模式规整要一致：${String(value)}`);
 }
-
-console.log("network-mode OK 两处实现一致（界面 / 主进程）");

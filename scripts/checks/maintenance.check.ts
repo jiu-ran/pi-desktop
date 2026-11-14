@@ -66,7 +66,6 @@ try {
   assert.deepEqual((await readdir(worktrees)).sort(), ["README.txt", "repo-fix-has-files"], "有内容的目录和文件都不动");
   assert.deepEqual(await pruneEmptyWorktreeDirs(path.join(root, "missing")), [], "目录不存在时安静返回");
 
-  console.log("maintenance OK 旧安装包 / 缓存阈值 / 不碰用户数据 / 空残留工作区目录");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

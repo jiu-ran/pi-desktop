@@ -181,5 +181,3 @@ assert.equal(emphasisColor("custom", "#00ff88", "violet", ""), "#00ff88", "单�
 assert.equal(emphasisColor("follow", "#00ff88", "violet", ""), "#8b5cf6", "跟随模式忽略自定义值");
 assert.equal(emphasisColor("custom", "bad", "violet", ""), "#8b5cf6", "非法自定义值退回强调色");
 assert.equal(emphasisColor("follow", "", "custom", "#101010"), "#101010", "跟随模式要跟随自定义强调色");
-
-console.log("appearance.check 通过");

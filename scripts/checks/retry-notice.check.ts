@@ -59,5 +59,3 @@ assert.equal(twice.hint, "检查网络或代理后再发一次");
 assert.equal(networkFailureNotice(0).attempts, 1, "次数最小是 1");
 assert.equal(networkFailureNotice(Number.NaN).attempts, 1, "脏数据也不能出现「重试 NaN 次」");
 assert.equal(networkFailureNotice(2.6).attempts, 3, "四舍五入成整数");
-
-console.log("retry-notice OK 倒计时取整 / 文案 / 收尾 / deadline / 进度条重启 / 断网失败卡文案");

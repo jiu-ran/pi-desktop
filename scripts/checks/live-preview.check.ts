@@ -152,5 +152,3 @@ const lineClasses = (spans: LiveSpan[]) => spans.filter((span) => span.line).map
   const spans = spansFor(doc);
   assert.equal(spans.some((span) => span.hide), false, "自动链接不能被收起");
 }
-
-console.log("live-preview OK 标记收放 / 行内样式 / 链接 / 列表 / 块级 widget / 引用 / setext");

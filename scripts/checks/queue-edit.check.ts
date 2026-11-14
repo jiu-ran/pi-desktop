@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installFakeLocalStorage } from "./support/harness.ts";
 
 /**
  * 编辑排队消息（内核侧）：改文字不能把附件标记改多，也不能把图片弄丢。
@@ -10,14 +11,7 @@ import assert from "node:assert/strict";
  *   用户的话
  * 气泡上就看到两条一模一样的图片路径。这里直接调内核，验证重建后的提示词只有一个标记。
  */
-const store = new Map<string, string>();
-(globalThis as any).localStorage = {
-  get length() { return store.size; },
-  key: (index: number) => [...store.keys()][index] ?? null,
-  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-  setItem: (key: string, value: string) => { store.set(key, String(value)); },
-  removeItem: (key: string) => { store.delete(key); },
-};
+installFakeLocalStorage();
 
 const { createWorkbench } = await import("../../packages/ui/src/kernel/workbench.ts");
 
@@ -166,5 +160,3 @@ assert.equal((String(steerCall!.args[0]).match(/image-1\.png/g) ?? []).length, 1
 // 4) 空文字 + 没有新附件：拒绝，不要把上下文改成空
 const rejected = await workbench.editQueued({ mode: "followUp", text: nowPrompt }, { message: "   " });
 assert.equal(rejected, false, "空内容不应把消息清空");
-
-console.log("queue-edit OK 编辑不重复附件 / 新附件追加 / 引导同样适用 / 图片跟着走");

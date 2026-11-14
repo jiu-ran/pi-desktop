@@ -81,7 +81,6 @@ try {
   const sorted = await readFile(trustFilePath(agentDir), "utf8");
   assert.equal(sorted, `${JSON.stringify({ "C:\\a": false, "C:\\b": true }, null, 2)}\n`, "null 要丢掉、键要排序");
 
-  console.log("project-trust OK 默认不信任 / 写入格式 / 祖先继承 / 覆盖 / 坏文件 / 排序");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

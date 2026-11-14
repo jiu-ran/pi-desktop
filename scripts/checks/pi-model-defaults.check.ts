@@ -71,5 +71,3 @@ assert.equal(
   modelDefaultLabel({ provider: "anthropic", model: "claude-opus", thinkingLevel: "" }, () => "Claude Opus"),
   "Claude Opus · anthropic",
 );
-
-console.log("pi-model-defaults OK 思考等级 / 读设置 / 生效值 / 成对写入与清除 / 展示文案");

@@ -75,5 +75,3 @@ try {
   watcher.closeAll();
   await rm(root, { recursive: true, force: true });
 }
-
-console.log("workspace-watch OK 忽略规则 / 父目录归一 / 真监听 / 去抖合并 / unwatch");

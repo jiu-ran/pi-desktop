@@ -98,5 +98,3 @@ assert.equal(mcpChipLabel({ servers: ["github"], calls: 1 }), "MCP · github");
 assert.equal(mcpChipLabel({ servers: ["github"], calls: 2 }), "MCP · github ×2");
 assert.equal(mcpChipLabel({ servers: ["github", "linkup"], calls: 3 }), "MCP · github +1 ×3");
 assert.equal(mcpChipLabel(null), "");
-
-console.log("mcp-tool OK 解析 / 服务名 / 动词 / 行标 / 组头计数 / codemode 脚本 / chip 文案");

@@ -66,5 +66,3 @@ assert.deepEqual(
   [],
   `这些 CSS 变量从来没定义过，相关声明会静默失效：\n${missing.map(([name, at]) => `  ${name} @ ${at}`).join("\n")}`,
 );
-
-console.log(`css-tokens OK ${defined.size} 个变量已定义 / ${used.size} 处无兜底引用都对得上`);

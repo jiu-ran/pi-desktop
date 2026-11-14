@@ -57,7 +57,6 @@ try {
   try { await host.prepareAttachments(project, [path.join(project, "missing.txt")]); } catch { rejected = true; }
   assert(rejected, "不存在的附件应返回错误");
   console.log("attachments", prepared.items.length, "images", prepared.images.length);
-  console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

@@ -127,7 +127,6 @@ assert.equal(queueDraftText('<file name="C:\\a\\b.png"></file>\n看下图'), "�
 assert.equal(queueDraftText('<file name="C:\\a\\b.png"></file>'), "", "纯附件消息没有用户文字");
 assert.equal(queueDraftText("普通的一句话"), "普通的一句话");
 
-console.log("queue-view.check ok 去重 / 附件匹配 / 撤回文本 / 预览");
 
 // 编辑排队消息：只替换提示词末尾的用户文字，前面的上下文（附件 / 引用）原样保留
 {

@@ -22,5 +22,3 @@ assert.equal(
 );
 assert.equal(normalizeNetworkError(new Error("HTTP 404: Not Found")), "下载资源不存在或已被删除");
 assert.equal(normalizeNetworkError(new Error("SSL certificate problem")), "SSL 证书验证失败，请检查网络环境");
-
-console.log("network.check ok 4xx 不重试 / 限流提示带恢复时间 / 错误文案");

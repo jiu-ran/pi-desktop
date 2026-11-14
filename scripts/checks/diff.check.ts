@@ -47,5 +47,3 @@ if (live.length !== 1 || live[0].file !== "a.ts") throw new Error("实时 diff �
 if (live[0].lines[0].type !== "meta" || !live[0].lines[0].text.startsWith("@@ -1,2 +1,2 @@")) throw new Error("应渲染 hunk 头");
 if (live[0].added !== 2 || live[0].removed !== 1) throw new Error("实时 diff 统计错误");
 if (live[0].lines.filter((line) => line.type === "meta").length !== 2) throw new Error("多 hunk 应保留各自 hunk 头");
-
-console.log("OK");

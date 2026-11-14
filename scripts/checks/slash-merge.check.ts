@@ -78,5 +78,3 @@ assert.equal(scopeLabel("project"), "项目");
 assert.equal(scopeLabel(undefined), "");
 assert.equal(scopeLabel("temporary"), "", "temporary 是 Pi 内部作用域，桌面端不展示");
 assert.deepEqual(GROUPS.map((group) => group.id), ["desktop", "extension", "prompt", "skill"]);
-
-console.log("slash-merge OK 撞名让位 / 分组 / 过滤排序 / 解析 / 作用域");

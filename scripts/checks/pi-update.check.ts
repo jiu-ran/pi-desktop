@@ -53,5 +53,3 @@ assert.equal(
   "上次更新失败（仍是 1.4.0）",
   "失败记录要在设置页说清「还是这个版本」",
 );
-
-console.log("pi-update OK scope=all / self / 版本变化 / 缺失版本号");

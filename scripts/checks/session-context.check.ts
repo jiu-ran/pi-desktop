@@ -60,7 +60,6 @@ assert.ok(block.startsWith('<session name="C:\\sessions\\a&amp;b.jsonl" title="�
 assert.ok(block.includes("第一句") && block.includes("第二句"));
 assert.ok(block.trimEnd().endsWith("</session>"));
 
-console.log("session-context.check ok 截断 / 省略 / 附件剥离 / XML 转义");
 
 // 发送时的拼接顺序：对话上下文 → 文件附件 → 用户这次说的话
 {
@@ -77,7 +76,6 @@ console.log("session-context.check ok 截断 / 省略 / 附件剥离 / XML 转�
   assert.ok(!prompt.includes("\n\n\n"), "不能留下多余空行");
   assert.equal(composePrompt({ message: "只有一句话" }), "只有一句话");
   assert.equal(composePrompt({}), "");
-  console.log("composePrompt OK 顺序 / 去空");
 }
 
 // 条数说明要区分「原始消息」与「有文字的消息」：工具结果占大头时不能让人误以为丢了大半对话

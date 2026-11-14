@@ -138,5 +138,3 @@ assert.equal(page.total, 2);
 assert.equal(page.messages[0]?.role, "user", "默认从最新一页开始");
 const withBashBlock = sliceHistoryPage(parsed, 2, 1, { minBlocks: 2 });
 assert.equal(withBashBlock.messages[0]?.role, "bashExecution", "bashExecution 也要算一个可见块，分页时不能被挤掉");
-
-console.log("bash OK 输入解析 / 流式更新 / 停止与失败 / 会话历史");

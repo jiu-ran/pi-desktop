@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { PiHost } from "../../electron/pi-host.ts";
 import { buildWorktreeConflictPrompt } from "../../packages/ui/src/shared/git-changes.ts";
+import { assert, expectReject } from "./support/harness.ts";
 
 /**
  * 隔离工作区（Git Worktree）回归：创建 / 列表 / 移除、孤儿锁定工作区、
@@ -18,18 +19,11 @@ const execFileAsync = promisify(execFile);
 const root = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-git-wt-")));
 const worktreeRoot = await realpath(await mkdtemp(path.join(tmpdir(), "pi-desktop-worktrees-")));
 const host = new PiHost({ emit() {}, worktreeRoot });
-const assert = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
 const samePath = (a: string, b: string) => {
   const normA = path.resolve(a).replace(/\\/g, "/").toLowerCase();
   const normB = path.resolve(b).replace(/\\/g, "/").toLowerCase();
   return normA === normB;
 };
-const expectReject = async (run: () => Promise<unknown>, message: string) => {
-  let rejected = false;
-  try { await run(); } catch { rejected = true; }
-  assert(rejected, message);
-};
-
 try {
   // 准备：一个带初始提交的仓库；b.txt 已提交、随后被删掉（留着这次未提交删除，
   // 用来验证「主工作区不干净时拒绝合并」）。

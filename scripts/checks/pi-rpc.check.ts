@@ -56,5 +56,3 @@ assert.equal(rpcCommandType("abortBash"), "abort_bash");
 
 // 压缩上下文靠「单命令超时 30 秒」这个数值决定要不要改等事件，两处必须一致
 assert.equal(COMPACT_RPC_TIMEOUT_MS, RPC_DEFAULT_TIMEOUT_MS, "compact-wait 的超时常量与 RPC 客户端不一致");
-
-console.log(`pi-rpc OK 白名单 ${PI_RPC_ALLOWLIST.length} 个方法都有参数表 + 类实现 / 命令类型映射 / 关键字段顺序 / 超时常量一致`);

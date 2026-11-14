@@ -51,7 +51,6 @@ try {
   assert((await readdir(dir)).length === 0, "会话目录应为空");
   assert((await readdir(cwd)).length === 0, "项目目录不应被改动");
   console.log("deleted", trashed.length, "guarded 4");
-  console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

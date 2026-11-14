@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installFakeLocalStorage } from "./support/harness.ts";
 
 /**
  * 引导（steering）消息必须立即出现在对话里。
@@ -6,14 +7,7 @@ import assert from "node:assert/strict";
  * 背景：send() 以前只在「非流式」时做乐观渲染，流式中发送的引导 / 追加消息
  * 要等重开会话从文件读回才显示。这里用假 host 复现：不发任何模型请求。
  */
-const store = new Map<string, string>();
-(globalThis as any).localStorage = {
-  get length() { return store.size; },
-  key: (index: number) => [...store.keys()][index] ?? null,
-  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-  setItem: (key: string, value: string) => { store.set(key, String(value)); },
-  removeItem: (key: string) => { store.delete(key); },
-};
+installFakeLocalStorage();
 
 const { createWorkbench } = await import("../../packages/ui/src/kernel/workbench.ts");
 
@@ -87,5 +81,3 @@ const failThread = failWs.activeThread;
 const failed = await failing.send("这条会失败", { mode: "steer" });
 assert.equal(failed, false, "投递失败应返回 false");
 assert.equal(failThread.blocks.filter((block) => block.kind === "user").length, 0, "投递失败应撤回乐观消息");
-
-console.log("send-steer OK");

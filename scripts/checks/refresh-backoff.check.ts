@@ -38,5 +38,3 @@ assert.equal(quiet.delay, REFRESH_BASE_DELAY, "安静后应回到基础间隔");
 // 从未完成过刷新（lastDone=0）时也按基础间隔起步。
 const cold = nextRefreshDelay(now, { streak: 2 }, 0);
 assert.equal(cold.delay, REFRESH_BASE_DELAY, "没有完成记录时不应该直接退避");
-
-console.log("refresh-backoff OK 基础间隔 / 退避 / 上限 / 安静后恢复");

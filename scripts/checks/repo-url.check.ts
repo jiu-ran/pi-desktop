@@ -43,5 +43,3 @@ assert.equal(cloneTargetPath("C:\\Users\\jiuran\\air", "https://host/a/demo.git"
 assert.equal(cloneTargetPath("/tmp/work", "git@host:a/demo.git"), "/tmp/work/demo");
 // 地址还填不出名字时不要拼出一个「位置本身」当作目标
 assert.equal(cloneTargetPath("/tmp/work", ""), "");
-
-console.log(`repo-url OK ${names.length} 种地址形态 / 分隔符跟随父目录`);

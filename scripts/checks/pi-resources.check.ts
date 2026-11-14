@@ -164,7 +164,6 @@ try {
   assert.equal(parseSkillFrontmatter("---\ndisable-model-invocation: true\n---\n").disableModelInvocation, true);
   assert.deepEqual(parseSkillFrontmatter("没有 frontmatter"), {}, "没有 frontmatter 时返回空");
 
-  console.log("pi-resources OK 来源解析 / 安装位置 / 配置项 / 包内资源 / 自动发现白名单 / SKILL.md frontmatter");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

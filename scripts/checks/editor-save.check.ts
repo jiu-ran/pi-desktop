@@ -40,4 +40,3 @@ assert.ok(stage.allTabs.value.includes(tab), "切换项目保留草稿");
 stage.switchWorkspace("/project-a");
 assert.equal(stage.activeTab.value, tab, "回到项目应恢复原标签");
 assert.equal(tab.data.draft, "draft-never-lost");
-console.log("editor-save OK");

@@ -4,10 +4,7 @@ import { TerminalHost, resolveInteractiveShell, resolvePtyShell, resolveTerminal
 import { formatTerminalDuration, createTerminalService } from "../../packages/ui/src/services/terminal.ts";
 import { resolveClipboardAction } from "../../packages/ui/src/shared/terminal-keys.ts";
 import type { ClipboardKeyEvent } from "../../packages/ui/src/shared/terminal-keys.ts";
-
-function assert(condition: unknown, message: string): void {
-  if (!condition) throw new Error(message);
-}
+import { assert } from "./support/harness.ts";
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -230,7 +227,6 @@ try {
   await host.dispose();
 }
 
-console.log("terminal OK");
 
 // 极短命令可能在 startTerminal 的响应返回前就发出 exit 事件，运行中快照不能覆盖终态。
 const listeners = new Set<(event: any) => void>();

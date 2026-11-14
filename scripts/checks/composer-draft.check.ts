@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
+import { installFakeLocalStorage } from "./support/harness.ts";
 
 // 用最小 localStorage 替身验证草稿持久化（界面侧只依赖 getItem/setItem/removeItem/key/length）。
-const store = new Map<string, string>();
-(globalThis as any).localStorage = {
-  get length() { return store.size; },
-  key: (index: number) => [...store.keys()][index] ?? null,
-  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-  setItem: (key: string, value: string) => { store.set(key, String(value)); },
-  removeItem: (key: string) => { store.delete(key); },
-  clear: () => store.clear(),
-};
+const { store } = installFakeLocalStorage();
 
 const { clearComposerDraft, composerDraftKey, readComposerDraft, writeComposerDraft } = await import(
   "../../packages/ui/src/shared/composer-draft.ts"
@@ -106,5 +99,3 @@ assert.equal(store.has(composerDraftKey("C:\\Proj", "k1.jsonl")), false, "真正
 assert.ok(store.has(composerDraftKey("C:\\Proj", "k40.jsonl")), "最新的草稿要保留");
 const kept = [...store.keys()].length;
 assert.equal(kept, 40, `裁剪后仍应正好是上限条数，实际 ${kept}`);
-
-console.log("composer-draft OK 正文 / 附件 / 隔离 / 空清理 / 旧格式 / 上限");

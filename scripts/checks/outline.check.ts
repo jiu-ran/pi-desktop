@@ -12,5 +12,3 @@ assert.equal(activeOutlineIndex(tops, 796, 600, 1400), 2, "距底 4px 内算到�
 // 内容不足一屏（scrollHeight == clientHeight）同样按最后一轮处理。
 assert.equal(activeOutlineIndex([0, 120], 0, 600, 600), 1, "短会话到底时高亮最后一轮");
 assert.equal(activeOutlineIndex([], 0, 600, 1400), -1, "没有用户消息时不返回索引");
-
-console.log("outline OK 顶部 / 中间 / 到底 / 短会话");

@@ -8,4 +8,3 @@ for (const [level, label] of Object.entries({
 }
 assert.equal(thinkingLabel("future-level"), "future-level", "未知协议等级应保留原值");
 assert.equal(thinkingLabel(""), "", "空等级应安全回退");
-console.log("thinking-label OK");

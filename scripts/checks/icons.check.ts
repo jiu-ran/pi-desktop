@@ -76,5 +76,3 @@ for (const [body, group] of byBody) {
     void body;
   }
 }
-
-console.log(`icons OK Carbon 图标表 ${names.length} 个 / 源码引用 ${referenced.size} 个`);

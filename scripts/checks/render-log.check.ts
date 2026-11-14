@@ -68,5 +68,3 @@ assert.ok(formatLogMessage(["x".repeat(10_000)]).endsWith("…（截断）"));
   const dispose = installRenderLogReporter({ logEvent: () => assert.fail("没有错误不该上报") }, { console: fakeConsole });
   dispose();
 }
-
-console.log("render-log.check ok 格式化 / console 接管 / 卸载 / 上报失败兜底");

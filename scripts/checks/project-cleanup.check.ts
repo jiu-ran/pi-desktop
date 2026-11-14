@@ -23,7 +23,6 @@ import {
   assert.equal(isLegacyLogsDir(["logs"]), true, "只有 logs 算我们的");
   assert.equal(isLegacyLogsDir(["logs", "notes.txt"]), false, "还有别的东西就不能删");
   assert.equal(isLegacyLogsDir(["other"]), false);
-  console.log("project-cleanup OK 忽略行精确匹配 / 目录判定");
 }
 
 // 真造一个仓库：有 .git/info/exclude 与 .pi-desktop/logs，跑一次清理
@@ -56,5 +55,4 @@ import {
   // 顶层入口：不抛错
   await cleanLegacyProjectArtifacts(cwd);
   await cleanLegacyProjectArtifacts(path.join(cwd, "does-not-exist"));
-  console.log("project-cleanup OK 真实目录清理 / 幂等 / 不碰用户内容");
 }

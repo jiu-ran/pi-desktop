@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installFakeLocalStorage } from "./support/harness.ts";
 
 /**
  * 「更新了 Pi 之后，现有会话还在跑旧版本」的回归。
@@ -10,20 +11,7 @@ import assert from "node:assert/strict";
  * 2. 有被跳过的就在提示里说清楚「结束后生效」；
  * 3. 升级失败时不许重启任何东西（避免把正常会话打断）。
  */
-const store = new Map<string, string>();
-(globalThis as any).localStorage = {
-  get length() {
-    return store.size;
-  },
-  key: (index: number) => [...store.keys()][index] ?? null,
-  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
-  setItem: (key: string, value: string) => {
-    store.set(key, String(value));
-  },
-  removeItem: (key: string) => {
-    store.delete(key);
-  },
-};
+installFakeLocalStorage();
 
 const { createWorkbench } = await import("../../packages/ui/src/kernel/workbench.ts");
 const { setupSettings } = await import("../../packages/ui/src/services/settings.ts");
@@ -125,5 +113,3 @@ assert.equal(
   1,
   "失败要给一条错误提示",
 );
-
-console.log("pi-update-restart OK 只重启空闲工作区 / 跳过时说明生效时机 / 失败不重启");

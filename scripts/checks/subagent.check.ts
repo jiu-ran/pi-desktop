@@ -146,7 +146,6 @@ assert.equal(formatDuration(1500), "1.5s");
 assert.equal(formatDuration(125_000), "2m 05s");
 assert.equal(formatDuration(null), "");
 
-console.log("subagent OK");
 
 // ---------- 异步派发（results 为空、只有 asyncId）----------
 // 真实日志：工具只是把任务丢到后台就返回，正文是写给模型看的英文说明。

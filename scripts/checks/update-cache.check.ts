@@ -79,5 +79,3 @@ const noReset = cacheAfterRateLimit(fresh, 0, 1_000_000);
 assert.equal(noReset.blockedUntil, 1_060_000);
 const pastReset = cacheAfterRateLimit(fresh, 500, 1_000_000);
 assert.equal(pastReset.blockedUntil, 1_060_000, "恢复时间已经过去同样要冷却一分钟");
-
-console.log("update-cache OK 归一化 / TTL / 限流 / 条件请求 / 304 / 200 / 限流落盘");

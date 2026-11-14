@@ -80,5 +80,3 @@ assert.equal(new Set(FILE_SORT_OPTIONS.map((option) => `${option.mode}:${option.
 assert.ok(FILE_SORT_OPTIONS.every((option) => option.label.trim().length > 0));
 assert.equal(sameSortSetting({ mode: "mixed", direction: "desc" }, { mode: "mixed", direction: "desc" }), true);
 assert.equal(sameSortSetting({ mode: "mixed", direction: "asc" }, { mode: "folders-first", direction: "asc" }), false);
-
-console.log("file-sort OK 文件夹在前 / 混合 / 双向 / 数字与大小写 / 稳定 / 菜单项");

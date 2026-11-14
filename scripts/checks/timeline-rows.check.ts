@@ -181,5 +181,3 @@ const screenshot = [
     "单步行透传自己的增删行数",
   );
 }
-
-console.log("timeline-rows OK 同前缀淡化 / 参数合并 / 阈值与打断 / 状态传递");

@@ -139,4 +139,3 @@ assert.deepEqual(misdirected, [], `打开了不存在的设置页：${misdirecte
 // ---- 7. 「有新版本」徽标要跳到对应的更新页（以前写死 environment，点了跟更新无关）----
 assert.equal(updateSettingsTab("app"), "pi-desktop", "桌面应用有新版本时应该打开 Pi Desktop 页");
 assert.equal(updateSettingsTab("pi"), "pi-cli", "Pi CLI 有新版本时应该打开 Pi CLI 页");
-console.log(`settings-tabs OK ${SETTINGS_SECTIONS.length} 个分区 / ${SETTINGS_TABS.length} 个页面 / 搜索与归属`);

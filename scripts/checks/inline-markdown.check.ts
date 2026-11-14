@@ -49,5 +49,3 @@ assert.equal(renderInlineMarkdown(""), "");
 // hasInlineMarkdown：用来判断编辑时要不要露源码
 assert.equal(hasInlineMarkdown("纯文本"), false);
 assert.equal(hasInlineMarkdown("**加粗**"), true);
-
-console.log("inline-markdown OK");

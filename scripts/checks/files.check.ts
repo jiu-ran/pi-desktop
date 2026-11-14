@@ -114,7 +114,6 @@ try {
   assert(entryNamePlaceholder("folder") === "文件夹名", "文件夹占位文案");
   assert(entryNamePlaceholder("file").includes("app.ts"), "文件占位要有示例");
 
-  console.log("OK");
 } finally {
   await rm(root, { recursive: true, force: true });
   await rm(external, { force: true });

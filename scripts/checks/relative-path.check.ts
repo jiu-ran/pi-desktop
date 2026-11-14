@@ -55,5 +55,3 @@ assert.equal(anchorOf("#%E5%B8%B8%E8%A7%81"), "常见", "锚点要 URL 解码");
 assert.equal(normalizeAnchor("## 常见 问题"), normalizeAnchor("常见-问题"));
 assert.equal(normalizeAnchor("`code` 用法"), normalizeAnchor("code-用法"));
 assert.equal(normalizeAnchor("中文，标点！"), normalizeAnchor("中文标点"));
-
-console.log("relative-path OK 目录 / 相对路径 / 工作区换算 / 远程地址 / 锚点");
