@@ -561,3 +561,74 @@ func TestUpdateCheckRecomputesAvailability(t *testing.T) {
 		t.Fatalf("version comparison broken")
 	}
 }
+
+// 「恢复 Pi 默认」= 删掉 defaultTools 键。写成空数组是反的：在 Pi 里空数组表示全部关闭。
+func TestToolsResetRemovesSelection(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	global := filepath.Join(agent, "settings.json")
+	if err := os.WriteFile(global, []byte(`{"defaultTools":["bash","edit"],"tuiMode":"fullscreen"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reset, err := toolsReset("", map[string]any{"scope": "global"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(global)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "defaultTools") {
+		t.Fatalf("defaultTools 应该被删掉：%s", raw)
+	}
+	if !strings.Contains(string(raw), "fullscreen") {
+		t.Fatalf("其它键不能被一起删掉：%s", raw)
+	}
+
+	enabled, _ := reset["enabledNames"].([]string)
+	if len(enabled) != 4 {
+		t.Fatalf("恢复后应回到 Pi 默认的 4 个工具，实际 %v", enabled)
+	}
+	for _, name := range []string{"read", "bash", "edit", "write"} {
+		if !strings.Contains(strings.Join(enabled, ","), name) {
+			t.Fatalf("默认工具缺少 %s：%v", name, enabled)
+		}
+	}
+	if reset["globalConfigured"] != false {
+		t.Fatalf("恢复后 globalConfigured 应为 false")
+	}
+}
+
+// 什么都没配 → 显示 Pi 的默认 4 个（不是 0；0 只应该出现在显式空数组时）。
+func TestToolsOverviewDefaultsWhenUnconfigured(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	overview := toolsOverview("")
+	enabled := overview["enabledNames"].([]string)
+	if len(enabled) != 4 {
+		t.Fatalf("未配置时应是 Pi 默认的 4 个，实际 %v", enabled)
+	}
+	if overview["globalConfigured"] != false {
+		t.Fatalf("未配置时 globalConfigured 应为 false")
+	}
+	if overview["effectiveScope"] != "default" {
+		t.Fatalf("effectiveScope 应为 default，实际 %v", overview["effectiveScope"])
+	}
+}
+
+// 显式空数组 = 全部关掉（和「没配」必须区分开）。
+func TestToolsEmptyArrayDisablesAll(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	if err := os.WriteFile(filepath.Join(agent, "settings.json"), []byte(`{"defaultTools":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overview := toolsOverview("")
+	if enabled := overview["enabledNames"].([]string); len(enabled) != 0 {
+		t.Fatalf("空数组应一个都不启用，实际 %v", enabled)
+	}
+	if overview["globalConfigured"] != true {
+		t.Fatalf("空数组也算配置过，globalConfigured 应为 true")
+	}
+}

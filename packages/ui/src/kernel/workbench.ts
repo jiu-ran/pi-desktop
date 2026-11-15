@@ -2651,6 +2651,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return mockToolsOverview;
   }
 
+  /** 恢复 Pi 默认工具选择：删掉 defaultTools 键（不是写空数组）。 */
+  async function toolsReset(payload: { scope: "global" | "project" }): Promise<PiToolsOverview> {
+    if (host?.toolsReset) return host.toolsReset(state.activeCwd || "", JSON.parse(JSON.stringify(payload)));
+    for (const tool of mockToolsOverview.tools) tool.enabled = Boolean(tool.defaultEnabled);
+    mockToolsOverview.enabledNames = mockToolsOverview.tools.filter((tool) => tool.enabled).map((tool) => tool.name);
+    return mockToolsOverview;
+  }
+
   /** 新会话默认模型 / 思考等级（读写 Pi 的 settings.json）。 */
   async function modelDefaults(): Promise<PiModelDefaultsOverview | null> {
     if (!host?.modelDefaults) return null;
@@ -2797,6 +2805,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     skillsOverview,
     toolsOverview,
     toolsSet,
+    toolsReset,
     modelDefaults,
     setModelDefaults,
   };

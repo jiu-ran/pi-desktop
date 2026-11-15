@@ -462,6 +462,13 @@ func (h *Host) ToolsSet(cwd string, payload map[string]any) (map[string]any, err
 	}
 	return result, err
 }
+func (h *Host) ToolsReset(cwd string, payload map[string]any) (map[string]any, error) {
+	result, err := toolsReset(cwd, payload)
+	if err == nil {
+		h.invalidatePiEntry()
+	}
+	return result, err
+}
 
 func (h *Host) ModelDefaults(cwd string) map[string]any { return modelDefaultsOverview(cwd) }
 func (h *Host) SetModelDefaults(cwd string, payload map[string]any) (map[string]any, error) {

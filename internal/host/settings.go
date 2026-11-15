@@ -447,7 +447,12 @@ func hasToolSelection(settings map[string]any) bool {
 	return ok
 }
 
-func mergeToolEntries(base, override any) []string {
+// mergeToolEntries 合并全局 / 项目两层的 defaultTools。
+//
+// 返回值用 any 而不是 []string：两层都没配时要返回真正的 nil，
+// 否则 []string(nil) 装进 any 后不是 nil，resolveToolEntries 会把它当成
+// 「显式空清单」，结果什么都不启用（界面显示 0 / 8，而 Pi 实际用的是默认 4 个）。
+func mergeToolEntries(base, override any) any {
 	if override == nil {
 		if base == nil {
 			return nil
@@ -707,6 +712,60 @@ func toolsSet(cwd string, payload map[string]any) (map[string]any, error) {
 			items[i] = entry
 		}
 		copied["defaultTools"] = items
+		return writeSettingsFile(file, copied)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toolsOverview(cwd), nil
+}
+
+// toolsReset 把某个作用域的工具选择恢复成「Pi 默认」：直接删掉 `defaultTools` 键。
+// 注意不能写成空数组 —— 在 Pi 里 `[]` 表示「一个内置工具都不启用」。
+func toolsReset(cwd string, payload map[string]any) (map[string]any, error) {
+	scope := "global"
+	if asString(payload["scope"]) == "project" {
+		scope = "project"
+	}
+	if scope == "project" && cwd == "" {
+		return nil, errors.New("项目级工具开关需要先打开一个项目")
+	}
+	effectiveCwd, _ := filepath.Abs(cwd)
+	if cwd == "" {
+		effectiveCwd, _ = os.UserHomeDir()
+	}
+	if cwd != "" {
+		if err := assertRealWorkspacePath(cwd, effectiveCwd, false); err != nil {
+			return nil, err
+		}
+	}
+	if scope == "project" {
+		if _, writable := trustInfo(effectiveCwd); !writable {
+			return nil, errors.New("项目级工具设置需要先信任此项目：Pi 不会加载未信任项目的 .pi/settings.json（设置 → Skills 或 /trust）")
+		}
+	}
+	file := filepath.Join(agentDirPath(), "settings.json")
+	if scope == "project" {
+		file = filepath.Join(effectiveCwd, ".pi", "settings.json")
+	}
+	err := withFileWrite(file, func() error {
+		fresh := readSettings(effectiveCwd)
+		for _, diagnostic := range fresh.Diagnostics {
+			if strings.HasPrefix(diagnostic, file) {
+				return errors.New("设置文件不是合法 JSON，先修好再改工具开关")
+			}
+		}
+		target := fresh.Global
+		if scope == "project" {
+			target = fresh.Project
+		}
+		copied := map[string]any{}
+		for key, value := range target {
+			if key == "defaultTools" {
+				continue
+			}
+			copied[key] = value
+		}
 		return writeSettingsFile(file, copied)
 	})
 	if err != nil {

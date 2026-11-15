@@ -182,6 +182,7 @@ const bridge = {
   skillsOverview: (cwd?: string) => invoke("SkillsOverview", cwd ?? ""),
   toolsOverview: (cwd?: string) => invoke("ToolsOverview", cwd ?? ""),
   toolsSet: (cwd: string, payload: any) => invoke("ToolsSet", cwd, payload),
+  toolsReset: (cwd: string, payload: any) => invoke("ToolsReset", cwd, payload),
   modelDefaults: (cwd?: string) => invoke("ModelDefaults", cwd ?? ""),
   setModelDefaults: (cwd: string, payload: any) => invoke("SetModelDefaults", cwd, payload),
   globalAgents: () => invoke("GlobalAgents"),

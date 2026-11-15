@@ -28,6 +28,14 @@ const builtinTools = computed(() => (data.value?.tools ?? []).filter((tool) => t
 const extensionTools = computed(() => (data.value?.tools ?? []).filter((tool) => tool.group === "extension"));
 const enabledCount = computed(() => (data.value?.tools ?? []).filter((tool) => tool.enabled).length);
 const noneEnabled = computed(() => Boolean(data.value) && enabledCount.value === 0);
+/** 当前作用域是否显式写了 defaultTools（空数组 = 手动全关，不能当成「没配」） */
+const scopeConfigured = computed(() =>
+  scope.value === "project" ? Boolean(data.value?.projectConfigured) : Boolean(data.value?.globalConfigured),
+);
+const scopeEntries = computed(() =>
+  scope.value === "project" ? data.value?.projectEntries ?? [] : data.value?.globalEntries ?? [],
+);
+const emptyExplicitly = computed(() => scopeConfigured.value && scopeEntries.value.length === 0);
 const projectHasPlainList = computed(() =>
   (data.value?.projectEntries ?? []).some((entry) => !entry.startsWith("+") && !entry.startsWith("-")),
 );
@@ -96,6 +104,25 @@ async function toggleTool(tool: PiToolItem, enabled: boolean): Promise<void> {
   } catch (error: any) {
     bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
     // 失败时重新读一次，开关回到真实状态
+    await load();
+  } finally {
+    saving.value = "";
+  }
+}
+
+/** 恢复 Pi 默认：直接删掉 defaultTools 键（写成空数组反而表示「全关」）。 */
+async function resetTools(): Promise<void> {
+  if (saving.value) return;
+  saving.value = "reset";
+  try {
+    data.value = await workbench.toolsReset({ scope: scope.value });
+    pendingApply.value = true;
+    bus.emit("notify", {
+      level: "info",
+      text: `已把${scopeLabel.value}工具恢复为 Pi 默认（read / bash / edit / write），重启会话后生效`,
+    });
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
     await load();
   } finally {
     saving.value = "";
@@ -231,7 +258,13 @@ watch(
     </div>
 
     <div v-if="noneEnabled" class="settings-alert err">
-      当前没有启用任何内置工具：模型不能读写文件或执行命令（配置文件里的其它工具条目不受影响）。
+      <template v-if="emptyExplicitly">
+        {{ scopeLabel }}设置里显式写了空的 <code>defaultTools</code>，等于「把所有内置工具都关掉」：模型不能读写文件或执行命令。
+        想恢复 Pi 默认（read / bash / edit / write），点上面的「恢复 Pi 默认」。
+      </template>
+      <template v-else>
+        当前没有启用任何内置工具：模型不能读写文件或执行命令（配置文件里的其它工具条目不受影响）。
+      </template>
     </div>
   </div>
 
@@ -243,13 +276,26 @@ watch(
     <div class="settings-group">
       <div class="settings-group-head">
         <span class="settings-group-title">内置工具（{{ builtinTools.filter((tool) => tool.enabled).length }} / {{ builtinTools.length }}）</span>
+        <button
+          type="button"
+          class="btn ghost small"
+          :disabled="Boolean(saving) || switchesDisabled"
+          title="删掉这一作用域的 defaultTools，让 Pi 用回自己的默认（read / bash / edit / write）"
+          @click="resetTools"
+        >
+          恢复 Pi 默认
+        </button>
       </div>
       <label v-for="tool in builtinTools" :key="tool.name" class="settings-row clickable">
         <div class="settings-row-info">
           <strong>
             {{ tool.label }}
             <span class="settings-plugin-tag">{{ tool.name }}</span>
-            <span v-if="tool.defaultEnabled" class="settings-status-pill muted">默认启用</span>
+            <span
+              v-if="tool.defaultEnabled"
+              class="settings-status-pill muted"
+              :title="tool.enabled ? 'Pi 的默认集合里有这一项' : 'Pi 默认会启用这一项，但当前设置里被关掉了'"
+            >Pi 默认</span>
           </strong>
           <span>{{ tool.description }}</span>
         </div>

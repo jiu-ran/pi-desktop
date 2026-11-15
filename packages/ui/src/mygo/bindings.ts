@@ -337,6 +337,9 @@ export const Host = {
   toolsOverview(cwd: string): Promise<Record<string, unknown>> {
     return call("Host.ToolsOverview", cwd);
   },
+  toolsReset(cwd: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return call("Host.ToolsReset", cwd, payload);
+  },
   toolsSet(cwd: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     return call("Host.ToolsSet", cwd, payload);
   },

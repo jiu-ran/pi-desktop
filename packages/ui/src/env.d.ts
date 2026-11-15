@@ -668,6 +668,8 @@ export interface PiDesktopBridge {
     cwd: string,
     payload: { scope: "global" | "project"; name: string; enabled: boolean },
   ) => Promise<PiToolsOverview>;
+  /** 恢复 Pi 默认：删掉 defaultTools 键（Pi 缺省是 read/bash/edit/write） */
+  toolsReset: (cwd: string, payload: { scope: "global" | "project" }) => Promise<PiToolsOverview>;
   /** 新会话默认模型 / 思考等级 */
   modelDefaults: (cwd?: string) => Promise<PiModelDefaultsOverview>;
   setModelDefaults: (
