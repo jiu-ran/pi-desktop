@@ -120,41 +120,35 @@
 
 /* 岛屿区域 */
 .workspace {
-  display: flex;
-  flex: 1;
-  gap: var(--gap);
-  min-height: 0;
-  overflow: hidden;
-  padding: 0 var(--gap) var(--gap);
-}
-.island {
   position: relative;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  flex: 1;
+  gap: 0;
   min-height: 0;
+  margin: 0 8px 8px;
   overflow: hidden;
-  border: 1px solid var(--card-border, var(--line));
+  border: 1px solid var(--glass-border);
   border-radius: 12px;
   background: var(--glass-bg, var(--bg));
   -webkit-backdrop-filter: blur(28px) saturate(155%);
   backdrop-filter: blur(28px) saturate(155%);
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.2)),
-    var(--card-shadow, 0 1px 2px rgba(0, 0, 0, 0.08));
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(60, 30, 60, 0.05),
+    0 18px 44px rgba(60, 30, 60, 0.10);
 }
-/* 液态玻璃的镜面高光：一圈从左上亮到右下的细边。 */
-.island::before {
+/* 只有整块工作区有一圈玻璃高光，内部区域用细线分区，不再各自成卡。 */
+.workspace::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 6;
   padding: 1px;
   border-radius: inherit;
   background: conic-gradient(
     from 210deg,
     rgba(255, 255, 255, 0.04),
-    var(--glass-highlight, rgba(255, 255, 255, 0.55)) 52deg,
+    var(--glass-highlight) 52deg,
     rgba(255, 255, 255, 0.08) 110deg,
     rgba(255, 255, 255, 0.04) 180deg,
     rgba(255, 255, 255, 0.38) 245deg,
@@ -168,6 +162,18 @@
     linear-gradient(#000 0 0) content-box exclude,
     linear-gradient(#000 0 0);
   pointer-events: none;
+}
+.island {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 /* Kero 的侧栏直接坐在 wash 上，只有主区 / 查看器是白色卡片。 */
 .sidebar {
@@ -189,8 +195,8 @@
   position: relative;
   z-index: 10;
   flex: none;
-  width: 9px;
-  margin: 0 -7px;
+  width: 8px;
+  margin: 0 -4px;
   cursor: col-resize;
   touch-action: none;
 }
@@ -472,6 +478,14 @@
   font-weight: 700;
   line-height: 14px;
   text-align: center;
+}
+
+/* 统一玻璃工作区：内部的舞台 / 面板不再铺自己的底色。 */
+.workspace .area-stage,
+.workspace .area-panel,
+.workspace .stage-tabbar,
+.workspace .area-panel-head {
+  background: transparent;
 }
 
 /* Kero：右侧工具条不占一张卡片，图标直接浮在 wash 上。 */
