@@ -17,11 +17,11 @@
   /* 标题栏高度：浮层用它避开标题栏，必须放在 :root —— Teleport 到 body 的
      元素读不到 .shell 上的私有变量（图片放大层就是这么变成一个小方块的） */
   --titlebar-h: 40px;
-  --frame: #f1e6ef;
-  --wash: linear-gradient(172deg, #e9dcf5 0%, #f1ddef 30%, #f5e7dc 70%, #f7f0d4 100%);
+  --frame: #ebe0f3;
+  --wash: linear-gradient(172deg, #ebe0f3 0%, #f3e7f1 33%, #f7eee4 66%, #f6efcf 100%);
   --card-border: rgba(255, 255, 255, 0.62);
-  --card-shadow: 0 1px 2px rgba(60, 30, 60, 0.05), 0 18px 44px rgba(60, 30, 60, 0.10);
-  --wash-glow: radial-gradient(75% 55% at 82% 0%, rgba(255, 255, 255, 0.42), transparent 70%);
+  --card-shadow: 0 1px 2px rgba(30, 35, 50, 0.05), 0 18px 44px rgba(30, 35, 50, 0.10);
+  --wash-glow: linear-gradient(225deg, rgba(247, 220, 241, 0.75) 0%, transparent 50%);
   --glass-bg: rgba(255, 255, 255, 0.66);
   --glass-strong: rgba(255, 255, 255, 0.84);
   --glass-border: rgba(255, 255, 255, 0.72);

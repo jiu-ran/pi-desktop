@@ -9,6 +9,7 @@ import {
   normalizeHex,
   type EmphasisMode,
 } from "../../../shared/appearance.ts";
+import { WASH_THEMES, washBackground } from "../../../shared/wash-themes.ts";
 import { appSettings, DEFAULT_SETTINGS } from "../../../services/settings.ts";
 import { icons } from "../../../shared/util.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
@@ -21,6 +22,9 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
  */
 const { bus, workbench } = useKernel();
 const state = workbench.state;
+
+/** 缩略图底部那排色点：和 Kero 的主题卡片一样，用固定的语义色。 */
+const WASH_DOTS = ["#ef6f6c", "#f0a23c", "#f2d44b", "#42c08a", "#3b82f6", "#a86ee8", "#e86eb0", "#8b94a8"];
 
 const themeModeHint = computed(() => {
   const mode = THEME_MODES.find((item) => item.id === appSettings.themeMode) ?? THEME_MODES[0];
@@ -73,6 +77,8 @@ const columnWidthLabel = computed(
 /** 「恢复默认外观」只还原外观相关项：不动终端、Agent、MCP 等设置。 */
 const APPEARANCE_KEYS = [
   "themeMode",
+  "lightTheme",
+  "darkTheme",
   "accent",
   "accentCustom",
   "emphasis",
@@ -138,6 +144,72 @@ class="settings-theme-tile"
   </span>
 </span>
 {{ item.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-theme-section">
+      <div class="settings-theme-section-head">
+        <strong>浅色窗口</strong>
+        <span>强制浅色或系统浅色时使用的 wash</span>
+      </div>
+      <div class="settings-wash-grid">
+        <button
+v-for="item in WASH_THEMES"
+:key="`light-${item.id}`"
+type="button"
+class="settings-wash-tile"
+:class="{ active: appSettings.lightTheme === item.id }"
+:aria-pressed="appSettings.lightTheme === item.id"
+:title="`${item.label}（浅色窗口）`"
+@click="appSettings.lightTheme = item.id"
+        >
+<span class="settings-wash-window" :style="{ background: washBackground(item.id, 'light') }">
+  <span class="settings-wash-top">
+    <span class="settings-wash-aa">Aa</span>
+    <span
+      class="settings-wash-chip"
+      :style="{ color: item.accent.light, background: `color-mix(in srgb, ${item.accent.light} 16%, transparent)` }"
+    >~/|</span>
+  </span>
+  <span class="settings-wash-dots">
+    <span v-for="(dot, i) in WASH_DOTS" :key="i" :style="{ background: dot }" />
+  </span>
+</span>
+<span class="settings-wash-label">{{ item.label }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-theme-section">
+      <div class="settings-theme-section-head">
+        <strong>深色窗口</strong>
+        <span>强制深色或系统深色时使用的 wash</span>
+      </div>
+      <div class="settings-wash-grid">
+        <button
+v-for="item in WASH_THEMES"
+:key="`dark-${item.id}`"
+type="button"
+class="settings-wash-tile"
+:class="{ active: appSettings.darkTheme === item.id }"
+:aria-pressed="appSettings.darkTheme === item.id"
+:title="`${item.label}（深色窗口）`"
+@click="appSettings.darkTheme = item.id"
+        >
+<span class="settings-wash-window is-dark" :style="{ background: washBackground(item.id, 'dark') }">
+  <span class="settings-wash-top">
+    <span class="settings-wash-aa">Aa</span>
+    <span
+      class="settings-wash-chip"
+      :style="{ color: item.accent.dark, background: `color-mix(in srgb, ${item.accent.dark} 18%, transparent)` }"
+    >~/|</span>
+  </span>
+  <span class="settings-wash-dots">
+    <span v-for="(dot, i) in WASH_DOTS" :key="i" :style="{ background: dot }" />
+  </span>
+</span>
+<span class="settings-wash-label">{{ item.label }}</span>
         </button>
       </div>
     </div>

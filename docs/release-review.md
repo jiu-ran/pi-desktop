@@ -13,7 +13,7 @@
 | 改 Go 纯逻辑（`internal/host/`） | `go test ./internal/host`；必要时加 `go vet ./...` | 秒级～十几秒 |
 | 改样式 / 布局 / 交互 | `npm run check:changed`（会带上 `css-tokens`、`palette-css` 等全局守门）；要看真实渲染时写一次性探针（`temp/` 下，用完删） | 秒级 |
 | 改窗口 / 绑定签名 / PTY / 打包配置 | 一次探针量准关键值，然后跑**一次** `PI_DESKTOP_SMOKE=1 npx mygo dev` | 数分钟 |
-| 发布新版本 | `npm run check`（56 个前端检查 + `go test ./...`）+ 本文件第 1–8 节 | 约 10 秒 + 冒烟 |
+| 发布新版本 | `npm run check`（57 个前端检查 + `go test ./...`）+ 本文件第 1–8 节 | 约 10 秒 + 冒烟 |
 
 两条配套规则：
 

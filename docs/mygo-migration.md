@@ -98,5 +98,5 @@ PI_DESKTOP_SMOKE_REPO=1 npx mygo dev
 
 - 只在 Windows 上完成了真实窗口、PTY、Pi prompt、打包 exe 的验证；macOS / Linux 需要各跑一次第 3、4 节。
 - WebView 的开发者工具、崩溃转储、GPU 开关不再由应用控制；需要调试时用 WebView2 / Safari 的远程调试。
-- 旧 Electron 时代的 29 个宿主内部检查已删除，等价覆盖在 `internal/host/*_test.go` 与冒烟里；前端 56 个检查全部保留。
+- 旧 Electron 时代的 29 个宿主内部检查已删除，等价覆盖在 `internal/host/*_test.go` 与冒烟里；前端 57 个检查全部保留。
 - 安装包未签名；macOS 首次打开仍需在隐私与安全性里放行。

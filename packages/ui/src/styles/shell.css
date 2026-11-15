@@ -1,6 +1,6 @@
 /*
  * 工作台骨架（参考 JetBrains Air）：
- * 深色窗框 --frame 上浮着圆角“岛”：侧栏 / 主舞台 / 面板 / 右侧工具条，岛之间留 5px 间隙。
+ * wash 窗框上浮着圆角“岛”：侧栏 / 主舞台 / 面板 / 右侧工具条，岛之间留 8px 间隙。
  */
 .shell {
   --gap: 8px;
@@ -136,7 +136,7 @@
   overflow: hidden;
   border: 1px solid var(--card-border, var(--line));
   border-radius: 12px;
-  background: var(--glass-bg, var(--bg));
+  background: color-mix(in srgb, var(--frame) 8%, var(--glass-bg, var(--bg)));
   -webkit-backdrop-filter: blur(28px) saturate(155%);
   backdrop-filter: blur(28px) saturate(155%);
   box-shadow:

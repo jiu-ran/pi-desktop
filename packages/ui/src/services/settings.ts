@@ -20,6 +20,7 @@ import {
   type RadiusId,
   type ThemeMode,
 } from "../shared/appearance.ts";
+import { normalizeWashTheme, type WashThemeId } from "../shared/wash-themes.ts";
 
 const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 
@@ -100,6 +101,10 @@ export interface AppSettings {
   logMaxBytes: number;
   /** 主题模式：跟随系统 / 强制深色 / 强制浅色 */
   themeMode: ThemeMode;
+  /** 浅色窗口使用的 wash 主题 */
+  lightTheme: WashThemeId;
+  /** 深色窗口使用的 wash 主题 */
+  darkTheme: WashThemeId;
   /** 强调色预设 */
   accent: AccentId;
   /** accent = "custom" 时用的颜色（#rrggbb）；空串表示还没挑过 */
@@ -145,6 +150,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   logMaxBytes: 8 * 1024 * 1024,
   // 默认用 Kero 的浅色 wash；想跟系统走由用户自己选「跟随系统」
   themeMode: "light",
+  lightTheme: "petal",
+  darkTheme: "petal",
   accent: "default",
   accentCustom: "#5b8def",
   emphasis: "follow",
@@ -201,6 +208,8 @@ function loadSavedSettings(): AppSettings {
       themeMode: parsed.themeMode
         ? normalizeThemeMode(parsed.themeMode)
         : normalizeThemeMode(readStorage("pi-desktop.theme") ?? "dark"),
+      lightTheme: normalizeWashTheme(parsed.lightTheme),
+      darkTheme: normalizeWashTheme(parsed.darkTheme),
       accent: normalizeAccent(parsed.accent),
       accentCustom: normalizeHex(parsed.accentCustom, DEFAULT_SETTINGS.accentCustom),
       emphasis: normalizeEmphasisMode(parsed.emphasis),
