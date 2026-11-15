@@ -120,35 +120,41 @@
 
 /* 岛屿区域 */
 .workspace {
-  position: relative;
   display: flex;
   flex: 1;
-  gap: 0;
+  gap: var(--gap);
   min-height: 0;
-  margin: 0 8px 8px;
   overflow: hidden;
-  border: 1px solid var(--glass-border);
+  padding: 0 var(--gap) var(--gap);
+}
+.island {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--card-border, var(--line));
   border-radius: 12px;
   background: var(--glass-bg, var(--bg));
   -webkit-backdrop-filter: blur(28px) saturate(155%);
   backdrop-filter: blur(28px) saturate(155%);
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 1px 2px rgba(60, 30, 60, 0.05),
-    0 18px 44px rgba(60, 30, 60, 0.10);
+    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.2)),
+    var(--card-shadow, 0 1px 2px rgba(0, 0, 0, 0.08));
 }
-/* 只有整块工作区有一圈玻璃高光，内部区域用细线分区，不再各自成卡。 */
-.workspace::before {
+/* 液态玻璃的镜面高光：一圈从左上亮到右下的细边。 */
+.island::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: 5;
   padding: 1px;
   border-radius: inherit;
   background: conic-gradient(
     from 210deg,
     rgba(255, 255, 255, 0.04),
-    var(--glass-highlight) 52deg,
+    var(--glass-highlight, rgba(255, 255, 255, 0.55)) 52deg,
     rgba(255, 255, 255, 0.08) 110deg,
     rgba(255, 255, 255, 0.04) 180deg,
     rgba(255, 255, 255, 0.38) 245deg,
@@ -163,31 +169,13 @@
     linear-gradient(#000 0 0);
   pointer-events: none;
 }
-.island {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-/* Kero 的侧栏直接坐在 wash 上，只有主区 / 查看器是白色卡片。 */
+/* 侧栏也是岛屿，和主区 / 面板保持同一套玻璃材质。 */
 .sidebar {
   flex: 0 1 auto;
   width: 272px;
   min-width: 180px;
   container-type: inline-size;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
 }
-.sidebar::before { display: none; }
 @container (max-width: 230px) {
   .project-branch { display: none; }
 }
@@ -195,8 +183,8 @@
   position: relative;
   z-index: 10;
   flex: none;
-  width: 8px;
-  margin: 0 -4px;
+  width: 9px;
+  margin: 0 -7px;
   cursor: col-resize;
   touch-action: none;
 }
@@ -480,7 +468,7 @@
   text-align: center;
 }
 
-/* 统一玻璃工作区：内部的舞台 / 面板不再铺自己的底色。 */
+/* 岛屿内部不再铺自己的底色，整块玻璃透出 wash。 */
 .workspace .area-stage,
 .workspace .area-panel,
 .workspace .stage-tabbar,
