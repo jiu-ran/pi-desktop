@@ -600,26 +600,3 @@ func isWriteableDir(dir string) bool {
 var _ = fs.SkipDir
 var _ = errors.New
 
-// readFileTail 只读文件末尾的一段，避免为了找会话名称把 80MB 文件整个读进来。
-func readFileTail(file string, maxBytes int64) ([]byte, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	size := info.Size()
-	start := int64(0)
-	if size > maxBytes {
-		start = size - maxBytes
-	}
-	data := make([]byte, size-start)
-	n, err := f.ReadAt(data, start)
-	if err != nil && n == 0 {
-		return nil, err
-	}
-	return data[:n], nil
-}

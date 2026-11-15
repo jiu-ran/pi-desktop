@@ -632,3 +632,78 @@ func TestToolsEmptyArrayDisablesAll(t *testing.T) {
 		t.Fatalf("空数组也算配置过，globalConfigured 应为 true")
 	}
 }
+
+// 会话改名记录可能离文件末尾很远（改完之后又追加了几十上百 MB），只看尾部会退回首条消息当标题，
+// 于是桌面端显示的名字和 Pi CLI 不一致。
+func TestSessionNameFoundBeyondTailWindow(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "2026-10-19T11-07-51-575Z_01a153d8.jsonl")
+	var body strings.Builder
+	body.WriteString(`{"type":"session","id":"s1","timestamp":"2026-10-19T11:07:51.000Z","cwd":"C:\work"}` + "\n")
+	body.WriteString(`{"type":"message","id":"m1","parentId":null,"timestamp":"2026-10-19T11:07:51.700Z","message":{"role":"user","content":[{"type":"text","text":"请先了解一下本项目"}]}}` + "\n")
+	body.WriteString(`{"type":"session_info","id":"n1","parentId":"m1","timestamp":"2026-10-23T15:07:03.095Z","name":"Pi Desktop"}` + "\n")
+	pad := strings.Repeat("x", 900)
+	for i := 0; i < 4000; i++ {
+		body.WriteString(fmt.Sprintf(`{"type":"message","id":"m%d","parentId":"m1","timestamp":"2026-10-24T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}`+"\n", i, pad))
+	}
+	if err := os.WriteFile(file, []byte(body.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() < 3*1024*1024 {
+		t.Fatalf("测试文件太小，没覆盖到尾部窗口之外：%d", info.Size())
+	}
+	if got := readSessionName(file, info.Size(), "请先了解一下本项目"); got != "Pi Desktop" {
+		t.Fatalf("应读到远处的改名记录，实际 %q", got)
+	}
+	// 缓存之后继续追加内容，名字不能丢
+	handle, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Close()
+	if _, err := handle.WriteString(`{"type":"message","id":"mz","parentId":"m1","timestamp":"2026-10-25T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"more"}]}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSessionName(file, info.Size(), "请先了解一下本项目"); got != "Pi Desktop" {
+		t.Fatalf("追加内容后名字丢了，实际 %q", got)
+	}
+}
+
+// 改名（含清除）写在文件末尾时要立刻生效，不能等下次全量扫描。
+func TestSessionNamePicksUpLaterRename(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "2026-11-16T00-00-00-000Z_rename.jsonl")
+	body := `{"type":"session","id":"s2","timestamp":"2026-11-16T00:00:00.000Z"}` + "\n" +
+		`{"type":"message","id":"m1","parentId":null,"timestamp":"2026-11-16T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"原始标题"}]}}` + "\n"
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(file)
+	if got := readSessionName(file, info.Size(), "原始标题"); got != "原始标题" {
+		t.Fatalf("没有改名记录时应回落到首条消息，实际 %q", got)
+	}
+
+	appendLine := func(line string) {
+		handle, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer handle.Close()
+		if _, err := handle.WriteString(line + "\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendLine(`{"type":"session_info","id":"n1","parentId":"m1","timestamp":"2026-11-16T00:00:02.000Z","name":"改过的名字"}`)
+	if got := readSessionName(file, info.Size(), "原始标题"); got != "改过的名字" {
+		t.Fatalf("追加的改名没生效，实际 %q", got)
+	}
+	appendLine(`{"type":"session_info","id":"n2","parentId":"n1","timestamp":"2026-11-16T00:00:03.000Z","name":""}`)
+	// 空名字表示清除自定义标题：调用方（会话列表 / snapshot）会回落到首条消息
+	if got := readSessionName(file, info.Size(), "原始标题"); got != "" {
+		t.Fatalf("清空名字后应返回空标题，实际 %q", got)
+	}
+}

@@ -1,8 +1,10 @@
 package host
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -147,9 +149,16 @@ func firstUserTitleFromMessages(messages []map[string]any) string {
 
 // ---------- 会话名称（session_info） ----------
 
+// 会话名称是 Pi 写进 JSONL 的一条 `session_info` 记录（后写的覆盖前面的，空名字表示清除）。
+// 改名不会挪动文件里的位置，所以「最近一次改名」可能离文件末尾很远：这个长会话在 10 月
+// 改过名，之后又追加了 100 多 MB，只看尾部就找不到了（CLI 从文件头扫，所以两边不一致）。
+//
+// 文件只追加，于是记住「已经扫到第几个字节」，下次只看新追加的部分；第一次碰到老文件
+// 才从尾部 2MB 开始试，找不到再从头完整扫一遍。
 type sessionNameCache struct {
-	size    int64
+	scanned int64 // 已经扫到的字节偏移
 	mtimeMs int64
+	hasName bool
 	name    string
 }
 
@@ -174,15 +183,44 @@ func readSessionName(file string, size int64, legacy any) string {
 	sessionNameMu.Lock()
 	cached, hasCached := sessionNameCacheMap[key]
 	sessionNameMu.Unlock()
-	if hasCached && cached.size == actualSize && cached.mtimeMs == mtimeMs {
-		return cached.name
+	if hasCached && cached.scanned == actualSize && cached.mtimeMs == mtimeMs {
+		if cached.hasName {
+			return cached.name
+		}
+		return legacyName
 	}
-	name, found := scanSessionName(file, actualSize)
-	if !found {
-		name = legacyName
+
+	state := sessionNameCache{}
+	if hasCached && actualSize >= cached.scanned {
+		state = cached
 	}
+	if actualSize > state.scanned {
+		if state.scanned > 0 {
+			// 只扫新追加的字节：改名总是追加在末尾
+			if name, found, err := scanSessionNameRange(file, state.scanned, actualSize); err == nil && found {
+				state.hasName, state.name = true, name
+			}
+		} else {
+			tailStart := actualSize - sessionNameColdScan
+			if tailStart < 0 {
+				tailStart = 0
+			}
+			found := false
+			if name, ok, err := scanSessionNameRange(file, tailStart, actualSize); err == nil && ok {
+				state.hasName, state.name, found = true, name, true
+			}
+			if !found && tailStart > 0 {
+				if name, ok, err := scanSessionNameRange(file, 0, actualSize); err == nil && ok {
+					state.hasName, state.name = true, name
+				}
+			}
+		}
+	}
+	state.scanned = actualSize
+	state.mtimeMs = mtimeMs
+
 	sessionNameMu.Lock()
-	sessionNameCacheMap[key] = sessionNameCache{size: actualSize, mtimeMs: mtimeMs, name: name}
+	sessionNameCacheMap[key] = state
 	if len(sessionNameCacheMap) > 200 {
 		for old := range sessionNameCacheMap {
 			if old != key {
@@ -192,30 +230,44 @@ func readSessionName(file string, size int64, legacy any) string {
 		}
 	}
 	sessionNameMu.Unlock()
-	return name
+	if state.hasName {
+		return state.name
+	}
+	return legacyName
 }
 
-// scanSessionName 从文件尾部最多回看 2MB，按行从后往前找最后一条 session_info。
-func scanSessionName(file string, size int64) (string, bool) {
-	data, err := readFileTail(file, sessionNameColdScan)
+// scanSessionNameRange 扫 [start,end) 这段，返回最后一条 session_info 的名字。
+// start 落在某一行中间时，那半行解析失败会被跳过。
+func scanSessionNameRange(file string, start, end int64) (string, bool, error) {
+	if end <= start {
+		return "", false, nil
+	}
+	f, err := os.Open(file)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
-	lines := strings.Split(string(data), "\n")
-	for index := len(lines) - 1; index >= 0; index-- {
-		line := strings.TrimSpace(lines[index])
-		if line == "" || !strings.Contains(line, `"session_info"`) {
-			continue
-		}
-		var entry map[string]any
-		if json.Unmarshal([]byte(line), &entry) != nil || entry["type"] != "session_info" {
-			continue
-		}
-		return sessionTitleFromText(asString(entry["name"])), true
+	defer f.Close()
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", false, err
 	}
-	return "", false
+	reader := bufio.NewReaderSize(io.LimitReader(f, end-start), sessionNameChunkSize)
+	name := ""
+	found := false
+	for {
+		line, readErr := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" && strings.Contains(trimmed, `"session_info"`) {
+			var entry map[string]any
+			if json.Unmarshal([]byte(trimmed), &entry) == nil && entry["type"] == "session_info" {
+				name = sessionTitleFromText(asString(entry["name"]))
+				found = true
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return name, found, nil
 }
-
 // ---------- 历史解析 ----------
 
 func parseSessionEntries(text string) []map[string]any {
