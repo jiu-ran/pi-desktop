@@ -130,6 +130,10 @@ type PiRpcClient struct {
 	buffer    strings.Builder
 	stopping  bool
 	started   bool
+	// exited 在子进程退出时关闭（cmd.Wait 返回）；Stop 用它判断要不要硬杀
+	exited chan struct{}
+	// job 是这个 Pi 进程所在的 Job（Windows 有效）；Stop 时用它连带结束子孙进程
+	job processJob
 
 	command PiCommand
 	cwd     string
@@ -193,11 +197,17 @@ func (c *PiRpcClient) Start() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("Pi 进程启动失败：%w", err)
 	}
+	// Windows：放进 Job，停这个 worker 时连带结束 Pi 拉起的 MCP server 等子进程
+	job := newProcessJob()
+	job.join(cmd.Process)
+	exited := make(chan struct{})
 
 	c.mu.Lock()
 	c.cmd = cmd
 	c.stdin = stdin
 	c.process = cmd.Process
+	c.exited = exited
+	c.job = job
 	c.mu.Unlock()
 
 	go func() {
@@ -215,6 +225,7 @@ func (c *PiRpcClient) Start() error {
 	go c.readStdout(stdout)
 	go func() {
 		err := cmd.Wait()
+		close(exited)
 		c.mu.Lock()
 		if c.cmd != cmd {
 			c.mu.Unlock()
@@ -502,30 +513,43 @@ func (c *PiRpcClient) Stop() error {
 	c.mu.Lock()
 	cmd := c.cmd
 	stdin := c.stdin
-	proc := c.process
+	exited := c.exited
+	job := c.job
 	c.stopping = true
 	c.cmd = nil
 	c.stdin = nil
 	c.process = nil
+	c.exited = nil
+	c.job = 0
 	c.mu.Unlock()
 	if stdin != nil {
 		_ = stdin.Close()
 	}
-	if cmd != nil && proc != nil {
-		killProcess(cmd)
-		done := make(chan struct{})
-		go func() {
-			_, _ = proc.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(1200 * time.Millisecond):
-			_ = proc.Kill()
+	if cmd != nil && cmd.Process != nil {
+		// 先关 stdin 等它自己退：Pi 收到 EOF 会顺手关掉自己拉起的 MCP server。
+		// 只给一小段时间，超时后再强杀（Windows 的 Job 会兜底子孙进程）。
+		if exited == nil || !waitClosed(exited, 800*time.Millisecond) {
+			killProcess(cmd)
+			// 直接子进程结束不代表子孙也结束，Windows 上按 Job 一起清掉
+			job.terminate()
+			if exited != nil {
+				waitClosed(exited, 1200*time.Millisecond)
+			}
 		}
 	}
+	job.close()
 	c.rejectAll(errors.New("RPC 客户端已停止"))
 	return nil
+}
+
+// waitClosed 等 channel 关闭，返回是否在超时前关掉。
+func waitClosed(ch <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-ch:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func (c *PiRpcClient) rejectAll(err error) {

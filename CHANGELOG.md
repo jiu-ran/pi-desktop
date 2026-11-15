@@ -5,6 +5,20 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 修复
+
+- **关掉软件后 Pi 还挂着**：Windows 上 `Process.Kill()` 只结束直接子进程，Pi 拉起的 MCP server、子代理会变成孤儿一直留在后台（父进程没了它们还在）。现在宿主给每个 Pi worker 建一个 Job 对象，停 worker 时连带结束整棵进程树；宿主异常退出时系统也会一起收掉。停 worker 前先关 stdin 给 Pi 一点自己收尾的时间，只有超时才强杀。
+- **不记住上次打开的项目**：`recent-workspaces.json` 永远是空数组，关掉再开要重新选目录。
+- **升级后仍提示「有更新」**：更新检查复用了旧版本算出的 `updateAvailable`，现在每次都按当前版本重算。
+- **模型 / 思考菜单被活动头压住**：菜单改用 `marginLeft` 定位，不再用 `transform`（那会创建层叠上下文）。
+- **工具开关把「没配过」当成「全关掉」**：没写 `defaultTools` 时页面显示「内置工具 0 / 8」并报红，实际 Pi 用的是默认的 `read` / `bash` / `edit` / `write` 四个。现在显示 4 / 8；只有显式写了 `[]` 才是 0 / 8，并提示可以恢复默认。每项后面的徽标也由「默认启用」改成「Pi 默认」，避免和关闭状态自相矛盾。
+
+### 新增
+
+- 设置 → 扩展 → 工具开关：「恢复 Pi 默认」按钮，直接删掉这一作用域的 `defaultTools` 键（Pi 缺省就是四个内置工具）。
+
 ## [0.9.0] - 2026-11-16
 
 桌面端从 Electron 迁移到 **MyGo（Go 宿主 + 系统 WebView）**，前端仍为 Vue 3 + TypeScript，业务交互与 Pi 兼容规则保持不变。

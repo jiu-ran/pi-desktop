@@ -1084,6 +1084,7 @@ func (h *Host) stopAll() {
 	pools := h.pools
 	h.pools = map[string]*workspacePool{}
 	h.mu.Unlock()
+	var stopping sync.WaitGroup
 	for _, pool := range pools {
 		pool.mu.Lock()
 		clients := []*PiRpcClient{}
@@ -1097,9 +1098,16 @@ func (h *Host) stopAll() {
 		pool.standby = nil
 		pool.mu.Unlock()
 		for _, client := range clients {
-			_ = client.Stop()
+			// 并发停：每个客户端要等 Pi 自己退（关闭 stdin 后的短暂宽限），
+			// 串起来会让退出变慢
+			stopping.Add(1)
+			go func(target *PiRpcClient) {
+				defer stopping.Done()
+				_ = target.Stop()
+			}(client)
 		}
 	}
+	stopping.Wait()
 }
 
 func (h *Host) respondExtensionUI(cwd string, response map[string]any, sessionFile string) error {

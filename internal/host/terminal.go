@@ -386,6 +386,7 @@ func (m *terminalManager) startLegacy(cwd, command string, options map[string]an
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("无法启动命令：%w", err)
 	}
+	terminalJob().join(cmd.Process)
 	task.cmd = cmd
 	task.pid = cmd.Process.Pid
 	task.interactive = false
@@ -439,6 +440,7 @@ func (m *terminalManager) startShell(cwd string) (map[string]any, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("无法启动交互式会话：%w", err)
 	}
+	terminalJob().join(cmd.Process)
 	task.cmd = cmd
 	task.stdin = stdin
 	task.pid = cmd.Process.Pid
@@ -493,6 +495,7 @@ func (m *terminalManager) startPTY(cwd string, cols, rows int, options map[strin
 		_ = term.Close()
 		return nil, fmt.Errorf("无法启动终端：%w", err)
 	}
+	terminalJob().join(cmd.Process)
 	_ = term.Resize(size.cols, size.rows)
 	task := &terminalTask{
 		id: newTaskID(), command: profile.Label, cwd: cwd, shell: profile.Label,
