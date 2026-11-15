@@ -1,5 +1,5 @@
 // 对 scripts/checks 下所有 .mjs / .cjs 做语法检查，并禁止写死本机路径。
-// 这些文件不经过 tsc，也不一定被 npm run check 执行；语法错误只会在 CI 的 Electron 冒烟中暴露。
+// 这些文件不经过 tsc，用它守住脚本语法和跨机可移植性。
 //
 // 两种用法：
 //   node scripts/checks/syntax.mjs            # 单独跑（并行，几十个文件几百毫秒）

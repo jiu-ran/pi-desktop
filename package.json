@@ -21,7 +21,7 @@
     "dist": "mygo build",
     "build:ui": "npm run build --prefix packages/ui",
     "check": "node scripts/checks/run-checks.mjs && npm run check:go",
-    "check:go": "go test ./...",
+    "check:go": "go vet ./... && go test ./...",
     "check:changed": "node scripts/checks/run-checks.mjs --changed",
     "check:full": "node scripts/checks/run-checks.mjs --jobs=1 --verbose",
     "check:syntax": "node scripts/checks/syntax.mjs",

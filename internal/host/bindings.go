@@ -81,11 +81,11 @@ func (h *Host) Locate(customPath string) PiLocation {
 }
 
 func (h *Host) CheckPiUpdate(customPath string) map[string]any {
-	return checkPiUpdate(customPath)
+	return h.checkPiUpdate(customPath)
 }
 
 func (h *Host) UpdatePi(customPath, scope string) map[string]any {
-	result := updatePi(customPath, scope)
+	result := h.updatePi(customPath, scope)
 	if asBool(result["ok"]) {
 		h.invalidatePiEntry()
 	}
@@ -176,7 +176,7 @@ func (h *Host) Forget(cwd string) []string {
 		return h.Recent()
 	}
 	h.revokeWorkspace(authorized)
-	h.watcher.roots = map[string]struct{}{}
+	h.watcher.unwatch(authorized)
 	return forgetRecent(recentFile(), authorized)
 }
 
@@ -278,6 +278,7 @@ func (h *Host) RemoveProject(cwd string, options map[string]any) map[string]any 
 			result = value
 		}
 	}
+	h.watcher.unwatch(cwd)
 	h.revokeWorkspace(cwd)
 	recent := forgetRecent(recentFile(), cwd)
 	result["recent"] = recent
@@ -338,7 +339,11 @@ func (h *Host) ExportSessionJSONL(cwd, target string) (map[string]any, error) {
 	}
 	file := strings.TrimSpace(target)
 	if file != "" {
-		file = filepath.Join(cwd, file)
+		_, resolved, pathErr := workspacePath(cwd, file)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		file = resolved
 	} else {
 		stamp := strings.NewReplacer(":", "-", ".", "-").Replace(time.Now().UTC().Format("2006-01-02T15:04:05"))
 		file = filepath.Join(cwd, "pi-session-"+stamp+".jsonl")
@@ -633,12 +638,12 @@ func (h *Host) McpImportJSON(cwd string, payload map[string]any) (map[string]any
 
 func (h *Host) PackagesOverview(cwd string) map[string]any { return packagesOverview(cwd) }
 func (h *Host) PackagesInstall(cwd string, payload map[string]any) (map[string]any, error) {
-	return packagesInstall(cwd, payload)
+	return h.packagesInstall(cwd, payload)
 }
 func (h *Host) PackagesRemove(cwd string, payload map[string]any) (map[string]any, error) {
-	return packagesRemove(cwd, payload)
+	return h.packagesRemove(cwd, payload)
 }
 func (h *Host) PackagesUpdate(cwd string, payload map[string]any) (map[string]any, error) {
-	return packagesUpdate(cwd, payload)
+	return h.packagesUpdate(cwd, payload)
 }
 func (h *Host) SkillsOverview(cwd string) map[string]any { return skillsOverview(cwd) }

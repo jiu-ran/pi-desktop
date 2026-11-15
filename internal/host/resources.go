@@ -543,19 +543,30 @@ func skillsOverview(cwd string) map[string]any {
 
 // ---------- pi CLI ----------
 
-func runPiCommand(args []string, cwd string, timeout time.Duration) (int, string) {
-	command, _, err := resolvePiCommand("")
+func (h *Host) runPiCommand(args []string, cwd string, timeout time.Duration) (int, string) {
+	var (
+		command PiCommand
+		err     error
+	)
+	if h != nil {
+		command, err = h.piCommand()
+	} else {
+		command, _, err = resolvePiCommand("")
+	}
 	if err != nil {
 		return 1, err.Error()
 	}
-	ctxTimeout := timeout
-	_ = ctxTimeout
 	cmd := exec.Command(command.Exe, command.Args(args...)...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(os.Environ(), "FORCE_COLOR=0", "GIT_TERMINAL_PROMPT=0")
+	var baseEnv map[string]string
+	if h != nil {
+		baseEnv = h.childEnv()
+	}
+	cmd.Env = envSlice(baseEnv, "FORCE_COLOR=0", "GIT_TERMINAL_PROMPT=0")
 	hideWindow(cmd)
+	prepareProcessGroup(cmd)
 	done := make(chan struct{})
 	var output []byte
 	var runErr error
@@ -566,6 +577,7 @@ func runPiCommand(args []string, cwd string, timeout time.Duration) (int, string
 	select {
 	case <-done:
 	case <-time.After(timeout):
+		killProcess(cmd)
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -609,7 +621,7 @@ func normalizeInstallSource(raw, cwd string) string {
 	return "npm:" + trimmed
 }
 
-func packagesInstall(cwd string, payload map[string]any) (map[string]any, error) {
+func (h *Host) packagesInstall(cwd string, payload map[string]any) (map[string]any, error) {
 	local := asBool(payload["local"])
 	if local && cwd == "" {
 		return nil, errors.New("当前未打开项目目录，无法安装到项目级配置")
@@ -626,14 +638,14 @@ func packagesInstall(cwd string, payload map[string]any) (map[string]any, error)
 	if local && cwd != "" {
 		targetCwd = cwd
 	}
-	code, output := runPiCommand(args, targetCwd, 180*time.Second)
+	code, output := h.runPiCommand(args, targetCwd, 180*time.Second)
 	if code != 0 {
 		return nil, errors.New("安装失败：" + firstNonEmpty(tailText(output, 400), "pi install 异常退出"))
 	}
 	return packagesOverview(cwd), nil
 }
 
-func packagesRemove(cwd string, payload map[string]any) (map[string]any, error) {
+func (h *Host) packagesRemove(cwd string, payload map[string]any) (map[string]any, error) {
 	local := asBool(payload["local"])
 	args := []string{"remove", asString(payload["source"])}
 	if local {
@@ -643,21 +655,21 @@ func packagesRemove(cwd string, payload map[string]any) (map[string]any, error) 
 	if local && cwd != "" {
 		targetCwd = cwd
 	}
-	code, output := runPiCommand(args, targetCwd, 180*time.Second)
+	code, output := h.runPiCommand(args, targetCwd, 180*time.Second)
 	if code != 0 {
 		return nil, errors.New("卸载失败：" + firstNonEmpty(tailText(output, 400), "pi remove 异常退出"))
 	}
 	return packagesOverview(cwd), nil
 }
 
-func packagesUpdate(cwd string, payload map[string]any) (map[string]any, error) {
+func (h *Host) packagesUpdate(cwd string, payload map[string]any) (map[string]any, error) {
 	args := []string{"update"}
 	if source := asString(payload["source"]); source != "" {
 		args = append(args, "--extension", source)
 	} else {
 		args = append(args, "--extensions")
 	}
-	code, output := runPiCommand(args, cwd, 180*time.Second)
+	code, output := h.runPiCommand(args, cwd, 180*time.Second)
 	if code != 0 {
 		return nil, errors.New("更新失败：" + firstNonEmpty(tailText(output, 400), "pi update 异常退出"))
 	}

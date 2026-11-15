@@ -193,7 +193,7 @@ func findPiOnPath() string {
 
 // runShell 执行一条 shell 命令行（Windows 走 cmd /c，Unix 走 sh -c）。
 // 返回退出码与合并后的输出。
-func runShell(commandLine string, timeout time.Duration) (int, string) {
+func runShell(commandLine string, env map[string]string, timeout time.Duration) (int, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var cmd *exec.Cmd
@@ -208,7 +208,15 @@ func runShell(commandLine string, timeout time.Duration) (int, string) {
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", commandLine)
 	}
 	hideWindow(cmd)
-	cmd.Env = os.Environ()
+	prepareProcessGroup(cmd)
+	cmd.Cancel = func() error {
+		killProcess(cmd)
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+	cmd.Env = envSlice(env)
 	output, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -232,7 +240,7 @@ func quoteShellPath(value string) string {
 }
 
 func probePiVersion(bin string) string {
-	code, output := runShell(quoteShellPath(bin)+" --version", 10*time.Second)
+	code, output := runShell(quoteShellPath(bin)+" --version", nil, 10*time.Second)
 	if code != 0 {
 		return ""
 	}
@@ -293,13 +301,23 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-func checkPiUpdate(customPath string) map[string]any {
-	located := locatePi(customPath)
+func (h *Host) checkPiUpdate(customPath string) map[string]any {
+	targetPath := strings.TrimSpace(customPath)
+	if targetPath == "" && h != nil {
+		h.mu.Lock()
+		targetPath = h.piCustomPath
+		h.mu.Unlock()
+	}
+	located := locatePi(targetPath)
 	current := located.Version
 	if !located.Found {
 		return map[string]any{"current": "", "latest": "", "updateAvailable": false, "error": firstNonEmpty(located.Error, "未检测到本机 pi 命令")}
 	}
-	code, output := runShell("npm view "+piRuntimePackage+" version", 20*time.Second)
+	var env map[string]string
+	if h != nil {
+		env = h.childEnv()
+	}
+	code, output := runShell("npm view "+piRuntimePackage+" version", env, 20*time.Second)
 	latest := ""
 	if code == 0 {
 		fields := strings.Fields(output)
@@ -313,8 +331,14 @@ func checkPiUpdate(customPath string) map[string]any {
 	return map[string]any{"current": current, "latest": latest, "updateAvailable": latest != current}
 }
 
-func updatePi(customPath, scope string) map[string]any {
-	before := locatePi(customPath)
+func (h *Host) updatePi(customPath, scope string) map[string]any {
+	targetPath := strings.TrimSpace(customPath)
+	if targetPath == "" && h != nil {
+		h.mu.Lock()
+		targetPath = h.piCustomPath
+		h.mu.Unlock()
+	}
+	before := locatePi(targetPath)
 	from := before.Version
 	if !before.Found || before.Path == "" {
 		return map[string]any{"ok": false, "from": "", "to": "", "log": firstNonEmpty(before.Error, "未检测到本机 pi 命令")}
@@ -323,12 +347,16 @@ func updatePi(customPath, scope string) map[string]any {
 	if scope == "all" {
 		args = " update --all --no-approve"
 	}
-	code, output := runShell(quoteShellPath(before.Path)+args, 180*time.Second)
+	var env map[string]string
+	if h != nil {
+		env = h.childEnv()
+	}
+	code, output := runShell(quoteShellPath(before.Path)+args, env, 180*time.Second)
 	tail := strings.Join(lastLines(strings.Split(output, "\n"), 30), "\n")
 	if code != 0 {
 		return map[string]any{"ok": false, "from": from, "to": from, "log": firstNonEmpty(tail, "pi update 异常退出")}
 	}
-	after := locatePi(customPath)
+	after := locatePi(targetPath)
 	to := after.Version
 	if to == "" {
 		to = from

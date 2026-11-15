@@ -109,6 +109,11 @@ type rpcPending struct {
 	timer   *time.Timer
 }
 
+type rpcListener struct {
+	id int64
+	fn func(map[string]any)
+}
+
 // PiRpcClient 是 Pi RPC（一行一个 JSON）的客户端。
 type PiRpcClient struct {
 	mu      sync.Mutex
@@ -116,8 +121,9 @@ type PiRpcClient struct {
 	stdin   io.WriteCloser
 	process *os.Process
 
-	listeners []func(map[string]any)
-	pending   map[string]*rpcPending
+	listeners  []rpcListener
+	listenerID int64
+	pending    map[string]*rpcPending
 	requestID int64
 	stderr    strings.Builder
 	exitErr   error
@@ -171,6 +177,7 @@ func (c *PiRpcClient) Start() error {
 		cmd.Env = os.Environ()
 	}
 	hideWindow(cmd)
+	prepareProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("Pi 进程启动失败：%w", err)
@@ -276,7 +283,10 @@ func (c *PiRpcClient) handleLine(line string) {
 		}
 	}
 	c.mu.Lock()
-	listeners := append([]func(map[string]any){}, c.listeners...)
+	listeners := make([]func(map[string]any), len(c.listeners))
+	for i, item := range c.listeners {
+		listeners[i] = item.fn
+	}
 	c.mu.Unlock()
 	for _, listener := range listeners {
 		listener(data)
@@ -285,14 +295,18 @@ func (c *PiRpcClient) handleLine(line string) {
 
 func (c *PiRpcClient) OnEvent(listener func(map[string]any)) func() {
 	c.mu.Lock()
-	c.listeners = append(c.listeners, listener)
-	index := len(c.listeners) - 1
+	c.listenerID++
+	id := c.listenerID
+	c.listeners = append(c.listeners, rpcListener{id: id, fn: listener})
 	c.mu.Unlock()
 	return func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if index >= 0 && index < len(c.listeners) {
-			c.listeners = append(c.listeners[:index], c.listeners[index+1:]...)
+		for i, item := range c.listeners {
+			if item.id == id {
+				c.listeners = append(c.listeners[:i], c.listeners[i+1:]...)
+				return
+			}
 		}
 	}
 }

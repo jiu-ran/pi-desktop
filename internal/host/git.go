@@ -27,10 +27,23 @@ func userDataDir() string {
 func worktreeRoot() string { return filepath.Join(userDataDir(), "worktrees") }
 
 func runGit(cwd string, args ...string) (string, error) {
+	return runGitEnv(cwd, nil, args...)
+}
+
+func (h *Host) runGit(cwd string, args ...string) (string, error) {
+	var env map[string]string
+	if h != nil {
+		env = h.childEnv()
+	}
+	return runGitEnv(cwd, env, args...)
+}
+
+func runGitEnv(cwd string, env map[string]string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	cmd.Env = envSlice(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	hideWindow(cmd)
+	prepareProcessGroup(cmd)
 	type result struct {
 		output []byte
 		err    error
@@ -54,6 +67,7 @@ func runGit(cwd string, args ...string) (string, error) {
 		}
 		return string(res.output), nil
 	case <-time.After(120 * time.Second):
+		killProcess(cmd)
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -396,7 +410,7 @@ func (h *Host) performGitAction(cwd, action string, payload map[string]any) (map
 		if asString(overview["upstream"]) == "" && strings.TrimSpace(gitProbe(root, "remote")) == "" {
 			return nil, errors.New("没有配置远程仓库，无法获取更新")
 		}
-		if _, err := runGit(root, "fetch", "--all", "--prune"); err != nil {
+		if _, err := h.runGit(root, "fetch", "--all", "--prune"); err != nil {
 			return nil, err
 		}
 		message = "已获取远程更新"
@@ -404,7 +418,7 @@ func (h *Host) performGitAction(cwd, action string, payload map[string]any) (map
 		if asString(overview["upstream"]) == "" {
 			return nil, errors.New("当前分支没有上游分支，请先推送一次以建立跟踪关系")
 		}
-		if _, err := runGit(root, "pull", "--no-edit"); err != nil {
+		if _, err := h.runGit(root, "pull", "--no-edit"); err != nil {
 			return nil, err
 		}
 		message = "已拉取远程更新"
@@ -417,7 +431,7 @@ func (h *Host) performGitAction(cwd, action string, payload map[string]any) (map
 			return nil, errors.New("没有配置远程仓库，无法推送")
 		}
 		if asString(overview["upstream"]) != "" {
-			if _, err := runGit(root, "push"); err != nil {
+			if _, err := h.runGit(root, "push"); err != nil {
 				return nil, err
 			}
 		} else {
@@ -432,7 +446,7 @@ func (h *Host) performGitAction(cwd, action string, payload map[string]any) (map
 			if !found {
 				remote = remotes[0]
 			}
-			if _, err := runGit(root, "push", "-u", remote, asString(overview["branch"])); err != nil {
+			if _, err := h.runGit(root, "push", "-u", remote, asString(overview["branch"])); err != nil {
 				return nil, err
 			}
 		}
@@ -725,7 +739,7 @@ func (h *Host) gitClone(url, target string) (map[string]any, error) {
 			return nil, errors.New("目标目录已存在且不为空，请换一个位置")
 		}
 	}
-	if _, err := runGit(parent, "clone", "--", source, dest); err != nil {
+	if _, err := h.runGit(parent, "clone", "--", source, dest); err != nil {
 		return nil, err
 	}
 	canonical, err := realPath(dest)

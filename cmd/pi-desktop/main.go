@@ -20,12 +20,16 @@ func main() {
 	}
 
 	host.ConfigureLogs()
+	configureAppMenu()
 	h := host.New()
 	h.LogEvent("info", "main", "Pi Desktop 宿主启动")
 	mygo.BindAs("Host", h)
 
 	mygo.App.OnSecondInstance(func(_ []string, _ string) {
 		h.FocusMainWindow()
+	})
+	mygo.App.OnQuit(func() {
+		host.Shutdown(h)
 	})
 
 	mygo.App.WhenReady(func() {
@@ -36,6 +40,7 @@ func main() {
 			Height:          900,
 			MinWidth:        980,
 			MinHeight:       640,
+			StateKey:        "main",
 			BackgroundColor: "#111214",
 			Page: mygo.PageOptions{
 				DevTools: mygo.DevToolsAuto,
@@ -49,7 +54,7 @@ func main() {
 			opts.Frameless = true
 		}
 		win := mygo.NewWindow(opts)
-		h.AttachWindow(win)
+		host.AttachWindow(h, win)
 		if os.Getenv("PI_DESKTOP_SMOKE") == "1" {
 			host.RunSmoke(win)
 		}
@@ -58,4 +63,27 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// configureAppMenu 在 macOS 上覆盖 MyGo 默认菜单：保留系统编辑、窗口与退出快捷键，
+// 去掉 Cmd+W 关闭窗口、Cmd+R 刷新与快捷键缩放，避免和终端/编辑器及设置页缩放冲突。
+func configureAppMenu() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	viewItems := []*mygo.MenuItem{
+		{Role: mygo.RoleToggleFullScreen},
+	}
+	if mygo.IsDev() {
+		viewItems = append([]*mygo.MenuItem{
+			{Role: mygo.RoleToggleDevTools},
+			mygo.Separator(),
+		}, viewItems...)
+	}
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+		{Role: mygo.RoleAppMenu},
+		{Role: mygo.RoleEditMenu},
+		{Label: "View", Submenu: viewItems},
+		{Role: mygo.RoleWindowMenu},
+	}))
 }

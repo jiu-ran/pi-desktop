@@ -408,6 +408,7 @@ func sliceHistoryPage(history []map[string]any, endIndex, limit, minTurns, minBl
 }
 
 type historyCache struct {
+	mu      sync.Mutex
 	mtimeMs int64
 	size    int64
 	offset  int64
@@ -420,37 +421,56 @@ var (
 	historyCaches  = map[string]*historyCache{}
 )
 
+func cloneHistorySlice(items []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(items))
+	copy(out, items)
+	return out
+}
+
 func readSessionHistory(file string) []map[string]any {
 	info, err := os.Stat(file)
 	if err != nil || info.IsDir() {
 		return []map[string]any{}
 	}
 	key := normPathKey(file)
+	mtime := info.ModTime().UnixMilli()
+	size := info.Size()
+
 	historyCacheMu.Lock()
 	hit := historyCaches[key]
 	historyCacheMu.Unlock()
-	if hit != nil && hit.mtimeMs == info.ModTime().UnixMilli() && hit.size == info.Size() {
-		return hit.history
-	}
-	if hit != nil && info.Size() > hit.offset {
-		// 只解析新追加的完整行。
-		f, err := os.Open(file)
-		if err == nil {
-			_, _ = f.Seek(hit.offset, 0)
-			buf := make([]byte, info.Size()-hit.offset)
-			n, _ := f.Read(buf)
-			f.Close()
-			chunk := buf[:n]
-			if lastBreak := lastIndexByte(chunk, '\n'); lastBreak >= 0 {
-				hit.entries = append(hit.entries, parseSessionEntries(string(chunk[:lastBreak+1]))...)
-				hit.offset += int64(lastBreak + 1)
-			}
-			hit.history = messagesFromEntries(hit.entries)
-			hit.size = info.Size()
-			hit.mtimeMs = info.ModTime().UnixMilli()
-			return hit.history
+
+	if hit != nil {
+		hit.mu.Lock()
+		if hit.mtimeMs == mtime && hit.size == size {
+			out := cloneHistorySlice(hit.history)
+			hit.mu.Unlock()
+			return out
 		}
+		if size > hit.offset {
+			// 只解析新追加的完整行。
+			f, err := os.Open(file)
+			if err == nil {
+				_, _ = f.Seek(hit.offset, 0)
+				buf := make([]byte, size-hit.offset)
+				n, _ := f.Read(buf)
+				_ = f.Close()
+				chunk := buf[:n]
+				if lastBreak := lastIndexByte(chunk, '\n'); lastBreak >= 0 {
+					hit.entries = append(hit.entries, parseSessionEntries(string(chunk[:lastBreak+1]))...)
+					hit.offset += int64(lastBreak + 1)
+				}
+				hit.history = messagesFromEntries(hit.entries)
+				hit.size = size
+				hit.mtimeMs = mtime
+				out := cloneHistorySlice(hit.history)
+				hit.mu.Unlock()
+				return out
+			}
+		}
+		hit.mu.Unlock()
 	}
+
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return []map[string]any{}
@@ -458,7 +478,7 @@ func readSessionHistory(file string) []map[string]any {
 	entries := parseSessionEntries(string(data))
 	history := messagesFromEntries(entries)
 	historyCacheMu.Lock()
-	historyCaches[key] = &historyCache{mtimeMs: info.ModTime().UnixMilli(), size: info.Size(), offset: info.Size(), entries: entries, history: history}
+	historyCaches[key] = &historyCache{mtimeMs: mtime, size: size, offset: size, entries: entries, history: history}
 	if len(historyCaches) > 24 {
 		for old := range historyCaches {
 			if old != key {
@@ -468,7 +488,7 @@ func readSessionHistory(file string) []map[string]any {
 		}
 	}
 	historyCacheMu.Unlock()
-	return history
+	return cloneHistorySlice(history)
 }
 
 func lastIndexByte(data []byte, b byte) int {

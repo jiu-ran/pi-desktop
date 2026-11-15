@@ -93,10 +93,31 @@ func newAppUpdater(proxy func() string) *appUpdater {
 }
 
 func appVersion() string {
-	if version := mygo.App.Version(); version != "" {
+	if version := strings.TrimSpace(mygo.App.Version()); version != "" {
 		return version
 	}
-	return "0.8.14"
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for range 4 {
+		data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+		if err == nil {
+			var pkg struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			}
+			if json.Unmarshal(data, &pkg) == nil && pkg.Name == "pi-desktop" && strings.TrimSpace(pkg.Version) != "" {
+				return strings.TrimSpace(pkg.Version)
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 func compareVersions(left, right string) int {
@@ -175,6 +196,9 @@ func (u *appUpdater) saveCache(state updateCacheState) {
 
 func (u *appUpdater) check(manual bool) appUpdateCheck {
 	current := appVersion()
+	if current == "" {
+		return appUpdateCheck{Error: "无法获取当前应用版本，请从发布页查看最新版本"}
+	}
 	ttl := int64(autoCheckMS)
 	if manual {
 		ttl = manualCheck
@@ -377,6 +401,9 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 	}
 	latest := strings.TrimPrefix(strings.TrimPrefix(stable.TagName, "v"), "V")
 	current := appVersion()
+	if current == "" {
+		return preparedUpdate{}, errors.New("无法获取当前应用版本，请从发布页手动下载")
+	}
 	if compareVersions(latest, current) <= 0 {
 		return preparedUpdate{}, errors.New("当前已是最新版本")
 	}
@@ -410,11 +437,12 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 	if sha == "" {
 		return preparedUpdate{}, errors.New("安装包缺少 SHA-256 校验值，请从发布页手动下载")
 	}
-	updateDir := filepath.Join(userDataDir(), "updates")
+	updateDir := u.updatesDir()
 	if err := os.MkdirAll(updateDir, 0o755); err != nil {
 		return preparedUpdate{}, err
 	}
 	filePath := filepath.Join(updateDir, filepath.Base(asset.Name))
+	u.cleanupDir(filePath)
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
 	response, err := u.httpClient().Do(request)
 	if err != nil {
@@ -460,6 +488,39 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 	u.prepared[latest] = prepared
 	u.mu.Unlock()
 	return prepared, nil
+}
+
+func (u *appUpdater) updatesDir() string {
+	return filepath.Join(userDataDir(), "updates")
+}
+
+func (u *appUpdater) cleanup(keepPath string) {
+	u.mu.Lock()
+	busy := u.cancel != nil || u.installing
+	u.mu.Unlock()
+	if busy {
+		return
+	}
+	u.cleanupDir(keepPath)
+}
+
+func (u *appUpdater) cleanupDir(keepPath string) {
+	dir := u.updatesDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	keepClean := ""
+	if keepPath != "" {
+		keepClean = filepath.Clean(keepPath)
+	}
+	for _, entry := range entries {
+		target := filepath.Join(dir, entry.Name())
+		if keepClean != "" && samePath(target, keepClean) {
+			continue
+		}
+		_ = os.RemoveAll(target)
+	}
 }
 
 func (u *appUpdater) cancelDownload() bool {

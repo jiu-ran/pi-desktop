@@ -1,7 +1,10 @@
 package host
 
 import (
+	"net/url"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -18,8 +21,10 @@ var DiskChangeEvent = mygo.NewEvent[map[string]any]("files:disk-change")
 // TerminalEvent 对应原来的 pi:terminal-event。
 var TerminalEvent = mygo.NewEvent[map[string]any]("pi:terminal-event")
 
-// DiscoveryEvent 通知界面 Pi 的定位结果发生变化（设置页 / 状态条）。
-var DiscoveryEvent = mygo.NewEvent[map[string]any]("pi:location")
+type startAttempt struct {
+	done chan struct{}
+	err  error
+}
 
 // Host 是界面能调用的唯一服务。所有状态都在这里，方法名与原来的
 // window.piDesktop 一一对应（首字母大写后由 MyGo 生成 lowerCamel）。
@@ -28,7 +33,7 @@ type Host struct {
 	win   *mygo.Window
 	pools map[string]*workspacePool
 
-	starting map[string]chan error
+	starting map[string]*startAttempt
 
 	authorized  map[string]string
 	attachments map[string]string
@@ -46,12 +51,13 @@ type Host struct {
 	networkCustom string
 	updates       *appUpdater
 	watcher       *workspaceWatcher
+	crashTimes    []time.Time
 }
 
 func New() *Host {
 	h := &Host{
 		pools:          map[string]*workspacePool{},
-		starting:       map[string]chan error{},
+		starting:       map[string]*startAttempt{},
 		authorized:     map[string]string{},
 		attachments:    map[string]string{},
 		maxIdleWorkers: 3,
@@ -65,10 +71,104 @@ func New() *Host {
 	return h
 }
 
-func (h *Host) AttachWindow(win *mygo.Window) {
+// AttachWindow 把主窗口绑定到宿主并挂接安全与生命周期钩子；作为包级函数避免暴露给前端 JS 绑定。
+func AttachWindow(h *Host, win *mygo.Window) {
+	if h != nil {
+		h.attachWindow(win)
+	}
+}
+
+// Shutdown 释放宿主全部资源；作为包级函数避免暴露给前端 JS 绑定。
+func Shutdown(h *Host) {
+	if h != nil {
+		h.shutdown()
+	}
+}
+
+func (h *Host) attachWindow(win *mygo.Window) {
 	h.mu.Lock()
+	if win == nil || h.win != nil {
+		h.mu.Unlock()
+		return
+	}
 	h.win = win
 	h.mu.Unlock()
+
+	go h.updates.cleanup("")
+
+	if page := win.Page(); page != nil {
+		page.OnWillNavigate(func(e *mygo.NavigateEvent) {
+			if isAllowedRendererURL(e.URL) {
+				return
+			}
+			e.PreventDefault()
+			if e.UserInitiated && isAllowedExternalURL(e.URL) {
+				target := e.URL
+				go func() { _ = mygo.Shell.OpenExternal(target) }()
+			}
+		})
+		page.SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
+			if isAllowedExternalURL(req.URL) {
+				target := req.URL
+				go func() { _ = mygo.Shell.OpenExternal(target) }()
+			}
+			return nil
+		})
+		page.OnRenderProcessGone(func(reason string) {
+			logError("renderer", "渲染进程异常退出："+reason)
+			if h.recordCrashAndShouldReload() {
+				page.Reload()
+				return
+			}
+			go func() {
+				result, err := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent: win, Type: mygo.MessageError, Title: "界面渲染进程多次异常退出",
+					Message:       "渲染进程在 60 秒内多次崩溃，是否尝试重新加载界面？",
+					Buttons:       []string{"退出应用", "重新加载"},
+					DefaultButton: 1, CancelButton: 0,
+				})
+				if err == nil && result.Button == 1 {
+					h.resetCrashWindow()
+					page.Reload()
+					return
+				}
+				mygo.App.Quit()
+			}()
+		})
+		page.OnContextMenu(func(e *mygo.ContextMenuEvent) {
+			if !e.Editable && e.SelectionText == "" {
+				e.PreventDefault()
+				return
+			}
+			if e.Menu == nil {
+				return
+			}
+			removed := []string{
+				mygo.ContextMenuBack,
+				mygo.ContextMenuForward,
+				mygo.ContextMenuReload,
+				mygo.ContextMenuStop,
+				mygo.ContextMenuPrint,
+				mygo.ContextMenuOpenLink,
+				mygo.ContextMenuOpenLinkInNewWindow,
+				mygo.ContextMenuDownloadLink,
+				mygo.ContextMenuOpenImageInNewWindow,
+				mygo.ContextMenuDownloadImage,
+				mygo.ContextMenuOpenFrameInNewWindow,
+				mygo.ContextMenuOpenMediaInNewWindow,
+				mygo.ContextMenuDownloadMedia,
+				mygo.ContextMenuShare,
+				"saveAs",
+				"createQrCode",
+				"webCapture",
+			}
+			if !mygo.IsDev() {
+				removed = append(removed, mygo.ContextMenuInspect)
+			}
+			e.Menu.Remove(removed...)
+		})
+	}
+
 	win.OnMaximize(func() { h.emitWindowState() })
 	win.OnUnmaximize(func() { h.emitWindowState() })
 	win.OnEnterFullScreen(func() { h.emitWindowState() })
@@ -93,10 +193,69 @@ func (h *Host) AttachWindow(win *mygo.Window) {
 		}()
 	})
 	win.OnClosed(func() {
-		h.watcher.close()
-		h.stopAll()
-		h.terminals.stopAll()
+		h.shutdown()
 	})
+}
+
+func (h *Host) shutdown() {
+	if h.updates != nil {
+		h.updates.cancelDownload()
+	}
+	if h.watcher != nil {
+		h.watcher.close()
+	}
+	h.stopAll()
+	if h.terminals != nil {
+		h.terminals.stopAll()
+	}
+	logs.flush()
+}
+
+func (h *Host) recordCrashAndShouldReload() bool {
+	now := time.Now()
+	cutoff := now.Add(-60 * time.Second)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	kept := h.crashTimes[:0]
+	for _, ts := range h.crashTimes {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	kept = append(kept, now)
+	h.crashTimes = kept
+	return len(kept) < 3
+}
+
+func (h *Host) resetCrashWindow() {
+	h.mu.Lock()
+	h.crashTimes = nil
+	h.mu.Unlock()
+}
+
+func isAllowedRendererURL(rawURL string) bool {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	switch scheme {
+	case "about", "mygo":
+		return true
+	case "http", "https":
+		host := strings.ToLower(parsed.Hostname())
+		if host == "mygo.localhost" {
+			return true
+		}
+		if mygo.IsDev() && (host == "localhost" || host == "127.0.0.1" || host == "::1") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Host) currentWindow() *mygo.Window {

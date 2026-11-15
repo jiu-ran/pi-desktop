@@ -46,12 +46,6 @@ export interface ShellProfile {
   source: string;
 }
 
-/**
- * Window is a native window hosting a web page, or the Content of package
- * ui. Create windows with NewWindow once the application is ready.
- */
-export interface Window {}
-
 // ---- Services ----
 
 /**
@@ -59,9 +53,6 @@ export interface Window {}
  * window.piDesktop 一一对应（首字母大写后由 MyGo 生成 lowerCamel）。
  */
 export const Host = {
-  attachWindow(win: Window | null): Promise<void> {
-    return call("Host.AttachWindow", win);
-  },
   call(cwd: string, method: string, args: unknown[], sessionFile: string): Promise<unknown> {
     return call("Host.Call", cwd, method, args, sessionFile);
   },
@@ -381,6 +372,4 @@ export const events = {
   filesDiskChange: event<Record<string, unknown>>("files:disk-change"),
   /** TerminalEvent 对应原来的 pi:terminal-event。 */
   piTerminalEvent: event<Record<string, unknown>>("pi:terminal-event"),
-  /** DiscoveryEvent 通知界面 Pi 的定位结果发生变化（设置页 / 状态条）。 */
-  piLocation: event<Record<string, unknown>>("pi:location"),
 } as const;

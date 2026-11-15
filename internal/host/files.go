@@ -590,18 +590,6 @@ func mustRegexp(pattern string) *regexp.Regexp {
 	return regexp.MustCompile(pattern)
 }
 
-func randomSuffix() string {
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	var b strings.Builder
-	seed := time.Now().UnixNano()
-	for i := 0; i < 6; i++ {
-		b.WriteByte(alphabet[seed%int64(len(alphabet))])
-		seed /= int64(len(alphabet))
-		seed += int64(i * 7919)
-	}
-	return b.String()
-}
-
 // ---------- Git 分支（只读 HEAD，不调用 git） ----------
 
 func gitBranch(cwd string) string {

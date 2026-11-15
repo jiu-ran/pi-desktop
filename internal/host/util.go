@@ -285,6 +285,31 @@ func shortHash(value string) string {
 	return hex.EncodeToString(sum[:])[:8]
 }
 
+func randomSuffix() string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		for i := range buf {
+			buf[i] = alphabet[int(buf[i])%len(alphabet)]
+		}
+		return string(buf[:])
+	}
+	return fmt.Sprintf("%06x", os.Getpid()&0xffffff)
+}
+
+func envSlice(env map[string]string, extra ...string) []string {
+	var out []string
+	if env != nil {
+		out = make([]string, 0, len(env)+len(extra))
+		for k, v := range env {
+			out = append(out, k+"="+v)
+		}
+	} else {
+		out = os.Environ()
+	}
+	return append(out, extra...)
+}
+
 func randomUUID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

@@ -228,7 +228,7 @@ func (h *Host) runMcpAuth(cwd string, args []string, timeout time.Duration) (map
 	if target == "" {
 		target, _ = os.UserHomeDir()
 	}
-	code, output := runPiCommand(append([]string{"mcp"}, args...), target, timeout)
+	code, output := h.runPiCommand(append([]string{"mcp"}, args...), target, timeout)
 	if code != 0 {
 		return nil, errors.New(firstNonEmpty(output, fmt.Sprintf("pi mcp %s 失败（退出码 %d）", args[0], code)))
 	}
@@ -248,7 +248,7 @@ func (h *Host) mcpProbe(cwd string) (map[string]any, error) {
 	if target == "" {
 		target, _ = os.UserHomeDir()
 	}
-	code, output := runPiCommand([]string{"mcp", "list", "--json"}, target, 45*time.Second)
+	code, output := h.runPiCommand([]string{"mcp", "list", "--json"}, target, 45*time.Second)
 	extraErrors := []string{}
 	if code == 0 {
 		var parsed map[string]any

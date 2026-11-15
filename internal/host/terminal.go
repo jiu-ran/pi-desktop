@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -84,12 +85,22 @@ func (m *terminalManager) emit(event map[string]any) {
 	m.host.emit(TerminalEvent, event)
 }
 
+func (t *terminalTask) isActive() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.status == "running" || t.status == "stopping"
+}
+
 func (m *terminalManager) runningCount() int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	count := 0
+	tasks := make([]*terminalTask, 0, len(m.tasks))
 	for _, task := range m.tasks {
-		if task.status == "running" || task.status == "stopping" {
+		tasks = append(tasks, task)
+	}
+	m.mu.Unlock()
+	count := 0
+	for _, task := range tasks {
+		if task.isActive() {
 			count++
 		}
 	}
@@ -221,17 +232,32 @@ func (t *terminalTask) finish(m *terminalManager, code *int, signal string) {
 	})
 }
 
+func (t *terminalTask) finishedAt() (bool, int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	at := t.endedAt
+	if at == 0 {
+		at = t.startedAt
+	}
+	return t.finished, at
+}
+
 func (m *terminalManager) add(task *terminalTask) {
 	m.mu.Lock()
 	m.tasks[task.id] = task
-	// 只保留最近 20 条已完成记录。
+	// 只保留最近 20 条已完成记录，超限时按结束时间从最旧开始淘汰。
 	if len(m.tasks) > 20 {
-		var finished []*terminalTask
-		for _, item := range m.tasks {
-			if item.finishedState() {
-				finished = append(finished, item)
+		type finishedItem struct {
+			id string
+			at int64
+		}
+		var finished []finishedItem
+		for id, item := range m.tasks {
+			if done, at := item.finishedAt(); done {
+				finished = append(finished, finishedItem{id: id, at: at})
 			}
 		}
+		sort.Slice(finished, func(i, j int) bool { return finished[i].at < finished[j].at })
 		for _, item := range finished {
 			if len(m.tasks) <= 20 {
 				break
@@ -243,6 +269,76 @@ func (m *terminalManager) add(task *terminalTask) {
 	m.emit(map[string]any{"type": "start", "task": task.info()})
 }
 
+// utf8ChunkDecoder 保留分片末尾未完结的多字节 UTF-8 前缀，等下一次 Read 拼齐后再解码，避免中文或框线字符跨边界出现乱码。
+type utf8ChunkDecoder struct {
+	pending []byte
+}
+
+func (d *utf8ChunkDecoder) decode(chunk []byte) string {
+	if len(chunk) == 0 {
+		return ""
+	}
+	buf := chunk
+	if len(d.pending) > 0 {
+		buf = make([]byte, len(d.pending)+len(chunk))
+		copy(buf, d.pending)
+		copy(buf[len(d.pending):], chunk)
+		d.pending = nil
+	}
+	// 从末尾最多回退 3 个续接字节（10xxxxxx），寻找可能被截断的起始字节（11xxxxxx）。
+	tail := len(buf)
+	for tail > 0 && len(buf)-tail < utf8.UTFMax-1 && (buf[tail-1]&0xC0) == 0x80 {
+		tail--
+	}
+	if tail > 0 && (buf[tail-1]&0xC0) == 0xC0 && !utf8.FullRune(buf[tail-1:]) {
+		d.pending = append([]byte(nil), buf[tail-1:]...)
+		buf = buf[:tail-1]
+	}
+	if len(buf) == 0 {
+		return ""
+	}
+	return strings.ToValidUTF8(string(buf), "\ufffd")
+}
+
+func (d *utf8ChunkDecoder) flush() string {
+	if len(d.pending) == 0 {
+		return ""
+	}
+	out := strings.ToValidUTF8(string(d.pending), "\ufffd")
+	d.pending = nil
+	return out
+}
+
+func readTerminalStream(task *terminalTask, reader io.Reader, stream string, warnOnError bool) {
+	buf := make([]byte, 32*1024)
+	var dec utf8ChunkDecoder
+	emitText := func(text string) bool {
+		if text == "" {
+			return true
+		}
+		task.appendOutput(text)
+		select {
+		case task.dataCh <- terminalChunk{stream, text}:
+			return true
+		case <-task.done:
+			return false
+		}
+	}
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 && !emitText(dec.decode(buf[:n])) {
+			return
+		}
+		if err != nil {
+			emitText(dec.flush())
+			if warnOnError && !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "closed") {
+				logWarn("terminal", "读取终端失败："+err.Error())
+			}
+			return
+		}
+	}
+}
+
 func (t *terminalTask) finishedState() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -250,7 +346,7 @@ func (t *terminalTask) finishedState() bool {
 }
 
 func newTaskID() string {
-	return fmt.Sprintf("term-%s-%s", time.Now().Format("1"), randomSuffix())
+	return fmt.Sprintf("term-%s-%s", time.Now().Format("150405"), randomSuffix())
 }
 
 func (m *terminalManager) startLegacy(cwd, command string, options map[string]any) (map[string]any, error) {
@@ -284,6 +380,7 @@ func (m *terminalManager) startLegacy(cwd, command string, options map[string]an
 	cmd.Dir = cwd
 	cmd.Env = terminalEnv(false)
 	hideWindow(cmd)
+	prepareProcessGroup(cmd)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
@@ -294,26 +391,8 @@ func (m *terminalManager) startLegacy(cwd, command string, options map[string]an
 	task.interactive = false
 	m.add(task)
 	task.startWriter(m)
-	read := func(reader io.Reader, stream string) {
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := reader.Read(buf)
-			if n > 0 {
-				text := strings.ToValidUTF8(string(buf[:n]), "�")
-				task.appendOutput(text)
-				select {
-				case task.dataCh <- terminalChunk{stream, text}:
-				case <-task.done:
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}
-	go read(stdout, "stdout")
-	go read(stderr, "stderr")
+	go readTerminalStream(task, stdout, "stdout", false)
+	go readTerminalStream(task, stderr, "stderr", false)
 	go func() {
 		err := cmd.Wait()
 		code := 0
@@ -350,6 +429,7 @@ func (m *terminalManager) startShell(cwd string) (map[string]any, error) {
 	cmd.Dir = cwd
 	cmd.Env = terminalEnv(false)
 	hideWindow(cmd)
+	prepareProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -364,26 +444,8 @@ func (m *terminalManager) startShell(cwd string) (map[string]any, error) {
 	task.pid = cmd.Process.Pid
 	m.add(task)
 	task.startWriter(m)
-	read := func(reader io.Reader, stream string) {
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := reader.Read(buf)
-			if n > 0 {
-				text := strings.ToValidUTF8(string(buf[:n]), "�")
-				task.appendOutput(text)
-				select {
-				case task.dataCh <- terminalChunk{stream, text}:
-				case <-task.done:
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}
-	go read(stdout, "stdout")
-	go read(stderr, "stderr")
+	go readTerminalStream(task, stdout, "stdout", false)
+	go readTerminalStream(task, stderr, "stderr", false)
 	go func() {
 		err := cmd.Wait()
 		code := 0
@@ -445,27 +507,7 @@ func (m *terminalManager) startPTY(cwd string, cols, rows int, options map[strin
 	task.ptyCmd = cmd
 	m.add(task)
 	task.startWriter(m)
-	go func() {
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := term.Read(buf)
-			if n > 0 {
-				text := strings.ToValidUTF8(string(buf[:n]), "�")
-				task.appendOutput(text)
-				select {
-				case task.dataCh <- terminalChunk{"stdout", text}:
-				case <-task.done:
-					return
-				}
-			}
-			if err != nil {
-				if !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "closed") {
-					logWarn("terminal", "读取终端失败："+err.Error())
-				}
-				return
-			}
-		}
-	}()
+	go readTerminalStream(task, term, "stdout", true)
 	go func() {
 		err := cmd.Wait()
 		code := 0
@@ -535,7 +577,7 @@ func (m *terminalManager) writePTY(id, data string, binary bool) (bool, error) {
 	}
 	var payload []byte
 	if binary {
-		payload = []byte(data)
+		payload = latin1Bytes(data)
 	} else {
 		payload = []byte(data)
 	}
@@ -543,6 +585,14 @@ func (m *terminalManager) writePTY(id, data string, binary bool) (bool, error) {
 		return false, fmt.Errorf("写入终端失败：%w", err)
 	}
 	return true, nil
+}
+
+func latin1Bytes(data string) []byte {
+	out := make([]byte, 0, len(data))
+	for _, r := range data {
+		out = append(out, byte(r))
+	}
+	return out
 }
 
 func (m *terminalManager) resizePTY(id string, cols, rows int) bool {

@@ -55,6 +55,21 @@ func (w *workspaceWatcher) watch(root string) {
 	w.addDirs(abs)
 }
 
+func (w *workspaceWatcher) unwatch(root string) {
+	if root == "" {
+		return
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return
+	}
+	w.mu.Lock()
+	delete(w.roots, abs)
+	delete(w.pending, abs)
+	delete(w.dirs, abs)
+	w.mu.Unlock()
+}
+
 func (w *workspaceWatcher) addDirs(root string) {
 	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry == nil {
@@ -142,13 +157,17 @@ func (w *workspaceWatcher) handle(event fsnotify.Event) {
 
 func (w *workspaceWatcher) flush() {
 	w.mu.Lock()
+	closed := w.closed
 	pending, dirs := w.pending, w.dirs
 	w.pending = map[string]map[string]bool{}
 	w.dirs = map[string]map[string]bool{}
 	w.timer = nil
 	w.mu.Unlock()
+	if closed {
+		return
+	}
 	for root, paths := range pending {
-		if len(paths) == 0 || w.closed {
+		if len(paths) == 0 {
 			continue
 		}
 		relativePaths := make([]string, 0, len(paths))
@@ -167,9 +186,10 @@ func (w *workspaceWatcher) flush() {
 
 func (w *workspaceWatcher) close() {
 	w.mu.Lock()
+	already := w.closed
 	w.closed = true
 	w.mu.Unlock()
-	if w.watcher != nil {
+	if !already && w.watcher != nil {
 		_ = w.watcher.Close()
 	}
 }

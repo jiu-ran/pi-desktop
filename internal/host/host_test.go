@@ -1,11 +1,14 @@
 package host
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -59,6 +62,14 @@ func TestModelDefaultsWritesPiSettings(t *testing.T) {
 	agent := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", agent)
 	cwd := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, err error) error {
+			if err == nil {
+				_ = os.Chmod(p, 0o700)
+			}
+			return nil
+		})
+	})
 
 	if _, err := setModelDefaults(cwd, map[string]any{"scope": "global", "provider": "deepseek", "model": "flash", "thinkingLevel": "high"}); err != nil {
 		t.Fatal(err)
@@ -84,6 +95,14 @@ func TestToolsToggle(t *testing.T) {
 	agent := t.TempDir()
 	t.Setenv("PI_CODING_AGENT_DIR", agent)
 	cwd := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, err error) error {
+			if err == nil {
+				_ = os.Chmod(p, 0o700)
+			}
+			return nil
+		})
+	})
 	result, err := toolsSet(cwd, map[string]any{"scope": "global", "name": "write", "enabled": false})
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +130,17 @@ func TestToolsToggle(t *testing.T) {
 
 func TestWorkspaceFiles(t *testing.T) {
 	cwd := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, err error) error {
+			if err == nil {
+				_ = os.Chmod(p, 0o700)
+			}
+			return nil
+		})
+	})
 	writeFile(t, filepath.Join(cwd, "a.txt"), "hello")
 	h := &Host{authorized: map[string]string{}, attachments: map[string]string{}, watcher: newWorkspaceWatcher(nil)}
+	defer h.watcher.close()
 
 	entries, err := h.listDirectory(cwd, "")
 	if err != nil || len(entries) != 1 || asString(entries[0]["name"]) != "a.txt" {
@@ -147,6 +175,14 @@ func TestGitOverviewAndWorktree(t *testing.T) {
 	mygo.App.SetPath(mygo.PathUserData, t.TempDir())
 	defer mygo.App.SetPath(mygo.PathUserData, "")
 	cwd := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, err error) error {
+			if err == nil {
+				_ = os.Chmod(p, 0o700)
+			}
+			return nil
+		})
+	})
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -164,6 +200,7 @@ func TestGitOverviewAndWorktree(t *testing.T) {
 	writeFile(t, filepath.Join(cwd, "a.txt"), "two")
 
 	h := &Host{authorized: map[string]string{}, attachments: map[string]string{}, watcher: newWorkspaceWatcher(nil), startGen: map[string]int{}}
+	defer h.watcher.close()
 	overview, err := h.gitOverview(cwd)
 	if err != nil {
 		t.Fatal(err)
@@ -224,5 +261,245 @@ func TestFindReleaseAssetPrefersWindowsSetup(t *testing.T) {
 	})
 	if got.Name != "pi-desktop-0.9.0-amd64.AppImage" {
 		t.Fatalf("应优先选择 AppImage，实际 %q", got.Name)
+	}
+}
+
+func TestLatin1BytesAndTaskID(t *testing.T) {
+	raw := latin1Bytes("\x00\x7f\u009b\u00ff")
+	want := []byte{0x00, 0x7f, 0x9b, 0xff}
+	if !bytes.Equal(raw, want) {
+		t.Fatalf("latin1Bytes = %x, want %x", raw, want)
+	}
+	id := newTaskID()
+	parts := strings.Split(id, "-")
+	if len(parts) != 3 || parts[0] != "term" || len(parts[1]) != 6 {
+		t.Fatalf("unexpected task id = %q", id)
+	}
+}
+
+func TestAppVersionAndUpdateCleanup(t *testing.T) {
+	mygo.App.SetPath(mygo.PathUserData, t.TempDir())
+	defer mygo.App.SetPath(mygo.PathUserData, "")
+
+	if ver := appVersion(); ver == "" {
+		t.Fatal("appVersion should read package.json version when mygo.App.Version is empty")
+	}
+
+	updater := newAppUpdater(nil)
+	dir := updater.updatesDir()
+	keep := filepath.Join(dir, "pi-desktop-setup-0.9.0-amd64.exe")
+	stale := filepath.Join(dir, "pi-desktop-setup-0.8.13-amd64.exe")
+	part := keep + ".part"
+	writeFile(t, keep, "new")
+	writeFile(t, stale, "old")
+	writeFile(t, part, "part")
+
+	updater.cleanupDir(keep)
+	if !fileExists(keep) {
+		t.Fatal("keep installer should remain after cleanupDir")
+	}
+	if fileExists(stale) || fileExists(part) {
+		t.Fatal("stale installer and .part file should be removed")
+	}
+	updater.cleanup("")
+	if fileExists(keep) {
+		t.Fatal("cleanup(\"\") should remove all cached installers")
+	}
+}
+
+func TestWatcherUnwatchAndFlushClosed(t *testing.T) {
+	root := t.TempDir()
+	w := newWorkspaceWatcher(nil)
+	defer w.close()
+
+	w.watch(root)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				w.watch(root)
+				w.unwatch(root)
+			}
+		}()
+	}
+	wg.Wait()
+	w.close()
+	w.flush()
+}
+
+func TestRendererURLGuardAndCrashLimit(t *testing.T) {
+	if !isAllowedRendererURL("mygo://localhost/index.html") {
+		t.Fatal("expected mygo://localhost to be allowed")
+	}
+	if !isAllowedRendererURL("about:blank") {
+		t.Fatal("expected about:blank to be allowed")
+	}
+	if isAllowedRendererURL("https://example.com") {
+		t.Fatal("expected external https URL to be blocked from in-app navigation")
+	}
+	if isAllowedRendererURL("javascript:alert(1)") {
+		t.Fatal("expected javascript: URL to be blocked")
+	}
+
+	h := New()
+	defer Shutdown(h)
+	if !h.recordCrashAndShouldReload() || !h.recordCrashAndShouldReload() {
+		t.Fatal("first two crashes within 60s should reload")
+	}
+	if h.recordCrashAndShouldReload() {
+		t.Fatal("third crash within 60s should stop auto-reload")
+	}
+	h.resetCrashWindow()
+	if !h.recordCrashAndShouldReload() {
+		t.Fatal("after resetCrashWindow should reload again")
+	}
+}
+
+func TestWorkerSlotConcurrentState(t *testing.T) {
+	slot := &workerSlot{}
+	var wg sync.WaitGroup
+	for i := range 6 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for j := range 50 {
+				slot.applyState(map[string]any{
+					"sessionFile":  "/tmp/s.jsonl",
+					"isStreaming":  j%2 == 0,
+					"isCompacting": idx%2 == 0,
+				}, false)
+				slot.setStreaming(true)
+				slot.setCompacting(false)
+				_, _, _ = slot.stateFields()
+				_, _ = slot.snapshotInfo()
+				_ = slot.busy()
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestUTF8ChunkDecoderAndUniqueRandomSuffix(t *testing.T) {
+	// 3-byte Chinese + 4-byte emoji split at every single byte boundary
+	sample := "你好👋世界"
+	raw := []byte(sample)
+	for split := 1; split < len(raw); split++ {
+		var dec utf8ChunkDecoder
+		got := dec.decode(raw[:split]) + dec.decode(raw[split:]) + dec.flush()
+		if got != sample {
+			t.Fatalf("split %d: got %q, want %q", split, got, sample)
+		}
+	}
+	// 1-byte-at-a-time streaming with invalid byte in middle
+	var dec utf8ChunkDecoder
+	stream := append([]byte("a"), 0xe4, 0xb8, 0xad, 0xff, 0xf0, 0x9f, 0x91, 0x8b, 'z')
+	var out strings.Builder
+	for i := range stream {
+		out.WriteString(dec.decode(stream[i : i+1]))
+	}
+	out.WriteString(dec.flush())
+	if out.String() != "a中\ufffd👋z" {
+		t.Fatalf("byte-by-byte got %q", out.String())
+	}
+
+	seen := map[string]bool{}
+	for range 200 {
+		seen[randomSuffix()] = true
+	}
+	if len(seen) < 190 {
+		t.Fatalf("randomSuffix collided too often: %d/200 unique", len(seen))
+	}
+}
+
+func TestRpcOnEventUnsubscribeByID(t *testing.T) {
+	c := NewPiRpcClient(PiCommand{}, "", nil, nil)
+	var a, b int
+	offA := c.OnEvent(func(map[string]any) { a++ })
+	offB := c.OnEvent(func(map[string]any) { b++ })
+
+	c.handleLine(`{"type":"agent_start"}`)
+	offA()
+	c.handleLine(`{"type":"agent_start"}`)
+	offB()
+	c.handleLine(`{"type":"agent_start"}`)
+
+	if a != 1 || b != 2 {
+		t.Fatalf("listener counts a=%d b=%d, want a=1 b=2", a, b)
+	}
+}
+
+func TestSessionHistoryCacheConcurrentReads(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "concurrent.jsonl")
+	writeFile(t, file, `{"type":"session","version":3,"id":"r"}`+"\n"+
+		`{"type":"message","id":"m1","parentId":"r","message":{"role":"user","content":"hi"}}`+"\n")
+	defer clearSessionHistoryCache(file)
+
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 25 {
+				hist := readSessionHistory(file)
+				if len(hist) == 0 {
+					t.Error("expected non-empty history")
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestTerminalManagerPrunesOldestFinished(t *testing.T) {
+	h := New()
+	defer Shutdown(h)
+	m := h.terminals
+	for i := 1; i <= 25; i++ {
+		task := &terminalTask{
+			id:        fmt.Sprintf("t-%02d", i),
+			finished:  true,
+			status:    "exited",
+			startedAt: int64(i * 10),
+			endedAt:   int64(i * 100),
+		}
+		m.add(task)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.tasks) != 20 {
+		t.Fatalf("tasks len = %d, want 20", len(m.tasks))
+	}
+	for i := 1; i <= 5; i++ {
+		if _, exists := m.tasks[fmt.Sprintf("t-%02d", i)]; exists {
+			t.Fatalf("oldest finished task t-%02d should have been pruned", i)
+		}
+	}
+	for i := 6; i <= 25; i++ {
+		if _, exists := m.tasks[fmt.Sprintf("t-%02d", i)]; !exists {
+			t.Fatalf("newer finished task t-%02d should be retained", i)
+		}
+	}
+}
+
+func TestHostChildEnvAndEnvSlice(t *testing.T) {
+	h := New()
+	defer Shutdown(h)
+	h.networkApply("custom", "http://127.0.0.1:7890")
+	env := h.childEnv()
+	if env["HTTPS_PROXY"] != "http://127.0.0.1:7890" || env["HTTP_PROXY"] != "http://127.0.0.1:7890" {
+		t.Fatalf("unexpected proxy env: %#v", env)
+	}
+	joined := strings.Join(envSlice(env, "GIT_TERMINAL_PROMPT=0"), "\n")
+	if !strings.Contains(joined, "HTTPS_PROXY=http://127.0.0.1:7890") || !strings.Contains(joined, "GIT_TERMINAL_PROMPT=0") {
+		t.Fatalf("envSlice missing expected entries")
+	}
+	h.networkApply("direct", "")
+	envDirect := h.childEnv()
+	if envDirect["NO_PROXY"] != "*" || envDirect["HTTPS_PROXY"] != "" {
+		t.Fatalf("unexpected direct env: %#v", envDirect)
 	}
 }

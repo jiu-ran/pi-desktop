@@ -128,7 +128,7 @@ function pickChecks() {
   if (!hit.length) {
     // 只改了 UI 组件 / 样式 / DOM 层：没有单元检查覆盖，这里不假装测过了
     console.log("[check] 这些改动没有对应的单元检查（多在 .vue / 样式 / DOM 层），只跑了全局守门；");
-    console.log("[check] 要完整回归用 `npm run check`，要看真实渲染用 `npm run check:smoke`。");
+    console.log("[check] 要完整回归用 `npm run check`，要看真实窗口冒烟用 `PI_DESKTOP_SMOKE=1 npx mygo dev`。");
   }
   return chosen;
 }

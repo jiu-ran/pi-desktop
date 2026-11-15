@@ -34,6 +34,44 @@ func (s *workerSlot) setStreaming(value bool) {
 	s.mu.Unlock()
 }
 
+func (s *workerSlot) setCompacting(value bool) {
+	s.mu.Lock()
+	s.compacting = value
+	s.mu.Unlock()
+}
+
+func (s *workerSlot) setSessionFile(file string) {
+	s.mu.Lock()
+	s.sessionFile = file
+	s.mu.Unlock()
+}
+
+func (s *workerSlot) applyState(state map[string]any, keepExistingFile bool) string {
+	file := asString(state["sessionFile"])
+	s.mu.Lock()
+	if !keepExistingFile || file != "" {
+		s.sessionFile = file
+	}
+	s.streaming = asBool(state["isStreaming"])
+	s.compacting = asBool(state["isCompacting"])
+	s.lastState = state
+	out := s.sessionFile
+	s.mu.Unlock()
+	return out
+}
+
+func (s *workerSlot) sessionPath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionFile
+}
+
+func (s *workerSlot) snapshotInfo() (string, map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionFile, s.lastState
+}
+
 func (s *workerSlot) busy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,40 +225,36 @@ func (h *Host) open(cwd string, options map[string]any) (map[string]any, error) 
 		return nil, errors.New("Pi 宿主正在关闭")
 	}
 	_, hasPool := h.pools[cwd]
-	start, starting := h.starting[cwd]
+	attempt, starting := h.starting[cwd]
 	gen := h.startGen[cwd]
-	h.mu.Unlock()
+	if !hasPool && !starting {
+		attempt = &startAttempt{done: make(chan struct{})}
+		h.starting[cwd] = attempt
+		h.mu.Unlock()
+		go func() {
+			err := h.startWorkspace(cwd, gen)
+			attempt.err = err
+			close(attempt.done)
+			h.mu.Lock()
+			if h.starting[cwd] == attempt {
+				delete(h.starting, cwd)
+			}
+			h.mu.Unlock()
+		}()
+	} else {
+		h.mu.Unlock()
+	}
 
 	if !hasPool {
-		if !starting {
-			start = make(chan error, 1)
-			h.mu.Lock()
-			h.starting[cwd] = start
-			h.mu.Unlock()
-			go func() {
-				err := h.startWorkspace(cwd, gen)
-				h.mu.Lock()
-				if h.starting[cwd] == start {
-					delete(h.starting, cwd)
-				}
-				h.mu.Unlock()
-				start <- err
-			}()
-		}
 		select {
-		case err := <-start:
-			if err != nil {
-				// 重新放回结果，让并发的 open 也能看到失败。
-				select {
-				case start <- err:
-				default:
-				}
+		case <-attempt.done:
+			if attempt.err != nil {
 				h.discardWorkspace(cwd)
-				return nil, err
+				return nil, attempt.err
 			}
 		case <-time.After(startTimeout):
 			h.mu.Lock()
-			if h.starting[cwd] == start {
+			if h.starting[cwd] == attempt {
 				delete(h.starting, cwd)
 			}
 			h.startGen[cwd]++
@@ -290,17 +324,13 @@ func (h *Host) spawnWorker(cwd string, pool *workspacePool, options map[string]a
 			slot.setStreaming(true)
 		case "agent_settled":
 			slot.setStreaming(false)
-			h.pruneIdleWorkers(cwd, pool)
+			h.pruneIdleWorkers(pool)
 		case "compaction_start":
-			slot.mu.Lock()
-			slot.compacting = true
-			slot.mu.Unlock()
+			slot.setCompacting(true)
 			logPi("info", "compaction", "开始压缩上下文")
 		case "compaction_end":
-			slot.mu.Lock()
-			slot.compacting = false
-			slot.mu.Unlock()
-			h.pruneIdleWorkers(cwd, pool)
+			slot.setCompacting(false)
+			h.pruneIdleWorkers(pool)
 			logPi("info", "compaction", "压缩结束")
 		}
 		file, _, _ := slot.stateFields()
@@ -346,18 +376,15 @@ func (h *Host) spawnWorker(cwd string, pool *workspacePool, options map[string]a
 		}
 	}
 
-	slot.sessionFile = asString(state["sessionFile"])
-	slot.streaming = asBool(state["isStreaming"])
-	slot.compacting = asBool(state["isCompacting"])
-	slot.lastState = state
+	sessionFile := slot.applyState(state, false)
 	pool.mu.Lock()
-	if slot.sessionFile != "" {
-		pool.workers[normPathKey(slot.sessionFile)] = slot
+	if sessionFile != "" {
+		pool.workers[normPathKey(sessionFile)] = slot
 	}
 	pool.client = slot.client
-	pool.activeSessionFile = slot.sessionFile
+	pool.activeSessionFile = sessionFile
 	pool.mu.Unlock()
-	h.pruneIdleWorkers(cwd, pool)
+	h.pruneIdleWorkers(pool)
 	return slot, nil
 }
 
@@ -458,7 +485,7 @@ func (h *Host) findIdleSlot(pool *workspacePool) *workerSlot {
 	return nil
 }
 
-func (h *Host) pruneIdleWorkers(cwd string, pool *workspacePool) {
+func (h *Host) pruneIdleWorkers(pool *workspacePool) {
 	h.mu.Lock()
 	maxIdle := h.maxIdleWorkers
 	h.mu.Unlock()
@@ -505,20 +532,21 @@ func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 		return nil, err
 	}
 	pool := h.requirePool(cwd)
+	if pool == nil {
+		return nil, errors.New("这个工作区已关闭")
+	}
+	oldFile := slot.sessionPath()
+	currentFile := slot.applyState(state, true)
 	pool.mu.Lock()
 	if file := asString(state["sessionFile"]); file != "" {
-		oldKey := normPathKey(slot.sessionFile)
+		oldKey := normPathKey(oldFile)
 		newKey := normPathKey(file)
 		if oldKey != "" && oldKey != newKey {
 			delete(pool.workers, oldKey)
 		}
-		slot.sessionFile = file
 		pool.workers[newKey] = slot
 	}
-	slot.streaming = asBool(state["isStreaming"])
-	slot.compacting = asBool(state["isCompacting"])
-	slot.lastState = state
-	keep := []string{asString(state["sessionFile"])}
+	keep := []string{currentFile}
 	for _, worker := range pool.workers {
 		file, _, _ := worker.stateFields()
 		keep = append(keep, file)
@@ -586,7 +614,7 @@ func (h *Host) call(cwd, method string, args []any, sessionFile string) (any, er
 		h.maxIdleWorkers = limit
 		h.mu.Unlock()
 		for _, pool := range h.allPools() {
-			h.pruneIdleWorkers(cwd, pool)
+			h.pruneIdleWorkers(pool)
 		}
 		return map[string]any{"maxIdleWorkers": limit}, nil
 	}
@@ -653,16 +681,16 @@ func (h *Host) call(cwd, method string, args []any, sessionFile string) (any, er
 		}
 		state, err := client.GetState()
 		if err == nil {
+			nextFile := slot.applyState(state, false)
 			pool.mu.Lock()
 			if oldFile != "" {
 				delete(pool.workers, normPathKey(oldFile))
 			}
-			slot.sessionFile = asString(state["sessionFile"])
-			if slot.sessionFile != "" {
-				pool.workers[normPathKey(slot.sessionFile)] = slot
+			if nextFile != "" {
+				pool.workers[normPathKey(nextFile)] = slot
 			}
 			pool.client = client
-			pool.activeSessionFile = slot.sessionFile
+			pool.activeSessionFile = nextFile
 			pool.mu.Unlock()
 		}
 		return result, nil
@@ -721,12 +749,13 @@ func (h *Host) switchSession(cwd string, pool *workspacePool, targetFile string)
 	existing := pool.workers[normPathKey(targetFile)]
 	pool.mu.Unlock()
 	if existing != nil {
+		existingFile := existing.sessionPath()
 		pool.mu.Lock()
 		pool.client = existing.client
-		pool.activeSessionFile = existing.sessionFile
+		pool.activeSessionFile = existingFile
 		pool.mu.Unlock()
 		return map[string]any{
-			"cancelled": false, "sessionFile": existing.sessionFile, "reusedWorker": true,
+			"cancelled": false, "sessionFile": existingFile, "reusedWorker": true,
 			"workerStates": pool.workerStates(),
 		}, nil
 	}
@@ -756,22 +785,17 @@ func (h *Host) switchSession(cwd string, pool *workspacePool, targetFile string)
 		if err != nil {
 			return nil, err
 		}
-		idle.mu.Lock()
-		idle.sessionFile = asString(state["sessionFile"])
-		idle.streaming = asBool(state["isStreaming"])
-		idle.compacting = asBool(state["isCompacting"])
-		idle.lastState = state
-		idle.mu.Unlock()
+		idleFile := idle.applyState(state, false)
 		pool.mu.Lock()
-		pool.workers[normPathKey(idle.sessionFile)] = idle
+		pool.workers[normPathKey(idleFile)] = idle
 		pool.client = idle.client
-		pool.activeSessionFile = idle.sessionFile
+		pool.activeSessionFile = idleFile
 		pool.mu.Unlock()
 		response := map[string]any{}
 		for key, value := range result {
 			response[key] = value
 		}
-		response["sessionFile"] = idle.sessionFile
+		response["sessionFile"] = idleFile
 		response["state"] = state
 		response["workerStates"] = pool.workerStates()
 		return response, nil
@@ -780,8 +804,9 @@ func (h *Host) switchSession(cwd string, pool *workspacePool, targetFile string)
 	if err != nil {
 		return nil, err
 	}
+	spawnedFile, spawnedState := spawned.snapshotInfo()
 	return map[string]any{
-		"cancelled": false, "sessionFile": spawned.sessionFile, "state": spawned.lastState,
+		"cancelled": false, "sessionFile": spawnedFile, "state": spawnedState,
 		"workerStates": pool.workerStates(),
 	}, nil
 }
@@ -809,24 +834,19 @@ func (h *Host) newSession(cwd string, pool *workspacePool, parent string) (any, 
 		if err != nil {
 			return nil, err
 		}
-		idle.mu.Lock()
-		idle.sessionFile = asString(state["sessionFile"])
-		idle.streaming = asBool(state["isStreaming"])
-		idle.compacting = asBool(state["isCompacting"])
-		idle.lastState = state
-		idle.mu.Unlock()
+		idleFile := idle.applyState(state, false)
 		pool.mu.Lock()
-		if idle.sessionFile != "" {
-			pool.workers[normPathKey(idle.sessionFile)] = idle
+		if idleFile != "" {
+			pool.workers[normPathKey(idleFile)] = idle
 		}
 		pool.client = idle.client
-		pool.activeSessionFile = idle.sessionFile
+		pool.activeSessionFile = idleFile
 		pool.mu.Unlock()
 		response := map[string]any{}
 		for key, value := range result {
 			response[key] = value
 		}
-		response["sessionFile"] = idle.sessionFile
+		response["sessionFile"] = idleFile
 		response["state"] = state
 		response["sessions"] = listSessions(cwd)
 		response["workerStates"] = pool.workerStates()
@@ -836,8 +856,9 @@ func (h *Host) newSession(cwd string, pool *workspacePool, parent string) (any, 
 	if err != nil {
 		return nil, err
 	}
+	spawnedFile, spawnedState := spawned.snapshotInfo()
 	return map[string]any{
-		"cancelled": false, "sessionFile": spawned.sessionFile, "state": spawned.lastState,
+		"cancelled": false, "sessionFile": spawnedFile, "state": spawnedState,
 		"sessions": listSessions(cwd), "workerStates": pool.workerStates(),
 	}, nil
 }
@@ -939,7 +960,7 @@ func (h *Host) deleteSession(cwd, file string) ([]sessionSummary, error) {
 				if normPathKey(pool.activeSessionFile) == targetKey {
 					for _, next := range pool.workers {
 						pool.client = next.client
-						pool.activeSessionFile = next.sessionFile
+						pool.activeSessionFile = next.sessionPath()
 						break
 					}
 				}
@@ -965,14 +986,14 @@ func (h *Host) deleteSession(cwd, file string) ([]sessionSummary, error) {
 				if err != nil {
 					return nil, err
 				}
+				nextFile := slot.applyState(state, false)
 				pool.mu.Lock()
 				delete(pool.workers, targetKey)
-				slot.sessionFile = asString(state["sessionFile"])
-				if slot.sessionFile != "" {
-					pool.workers[normPathKey(slot.sessionFile)] = slot
+				if nextFile != "" {
+					pool.workers[normPathKey(nextFile)] = slot
 				}
 				pool.client = slot.client
-				pool.activeSessionFile = slot.sessionFile
+				pool.activeSessionFile = nextFile
 				pool.mu.Unlock()
 			}
 		}
@@ -1032,7 +1053,7 @@ func (h *Host) restart(cwd, sessionFile string) (map[string]any, error) {
 			if err != nil {
 				return nil, err
 			}
-			return h.snapshot(cwd, replacement.sessionFile)
+			return h.snapshot(cwd, replacement.sessionPath())
 		}
 		h.discardWorkspace(cwd)
 	}
