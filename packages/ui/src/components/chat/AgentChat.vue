@@ -903,8 +903,8 @@ watch(searchMatches, () => {
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">
-            <div class="empty-thread-mark" aria-hidden="true">
-              <img src="../../assets/pi-icon.png" alt="" />
+            <div class="empty-thread-mark pi-emblem is-sm" aria-hidden="true">
+              <span class="pi-emblem-glyph">π</span>
             </div>
             <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
