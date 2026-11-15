@@ -328,7 +328,7 @@ func (h *Host) checkPiUpdate(customPath string) map[string]any {
 	if latest == "" {
 		return map[string]any{"current": current, "latest": "", "updateAvailable": false, "error": "无法查询最新版本，请检查网络"}
 	}
-	return map[string]any{"current": current, "latest": latest, "updateAvailable": latest != current}
+	return map[string]any{"current": current, "latest": latest, "updateAvailable": compareVersions(latest, current) > 0}
 }
 
 func (h *Host) updatePi(customPath, scope string) map[string]any {

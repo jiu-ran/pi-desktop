@@ -1293,6 +1293,12 @@
 
 /* 输入框 */
 .composer-wrap { flex: none; padding: 0 clamp(10px, 3vw, 24px) 14px; }
+/* 输入框里的弹出层（模型 / 思考、斜杠命令、@ 选择器、附件）都要盖住对话里吸顶的
+   活动头（`.activity-head` 是 z-index 4）。弹出层自己 z-index 再高也没用：
+   只要中间某一层因为 transform / 滤镜 / 透明度变成了 z-index:0 的堆叠上下文，
+   菜单就会被 4 压住（实测：模型菜单向右挪动时就会中招）。
+   把整条输入框抬到对话之上，内部以后再变堆叠上下文也不会漏。 */
+.composer-wrap { position: relative; z-index: 50; }
 .composer-inner { display: flex; flex-direction: column; gap: 9px; max-width: var(--column); margin: 0 auto; }
 .composer {
   position: relative;

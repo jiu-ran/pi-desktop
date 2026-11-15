@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
       v-if="open"
       ref="menuEl"
       class="picker-menu model-thinking-menu"
-      :style="offsetX ? { transform: `translateX(${Math.round(offsetX)}px)` } : undefined"
+      :style="offsetX ? { marginLeft: `${Math.round(offsetX)}px` } : undefined"
       @keydown.esc="open = false"
     >
       <input

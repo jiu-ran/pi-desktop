@@ -122,14 +122,15 @@ func readRecent(file string) []string {
 func writeRecent(file, cwd string) []string {
 	var next []string
 	_ = withFileWrite(file, func() error {
-		next = append([]string{cwd}, readRecent(file)...)
-		filtered := []string{}
-		for _, item := range next {
+		// 刚打开的这个放最前，其余（可能重复的）依次跟在后面。
+		// 以前写成 append(cwd) 再过滤掉与 cwd 相同的项，结果把刚加的那条也删掉了，
+		// 于是「最近项目」永远是空的，重启后回到空白页。
+		next = []string{cwd}
+		for _, item := range readRecent(file) {
 			if !samePath(item, cwd) {
-				filtered = append(filtered, item)
+				next = append(next, item)
 			}
 		}
-		next = filtered
 		if len(next) > 20 {
 			next = next[:20]
 		}

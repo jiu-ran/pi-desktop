@@ -113,7 +113,7 @@ onBeforeUnmount(() => {
       ref="menuEl"
       class="picker-menu"
       :class="align"
-      :style="offsetX ? { transform: `translateX(${Math.round(offsetX)}px)` } : undefined"
+      :style="offsetX ? { marginLeft: `${Math.round(offsetX)}px` } : undefined"
     >
       <input
         v-if="filterable"

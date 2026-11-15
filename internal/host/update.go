@@ -157,6 +157,21 @@ func compareVersions(left, right string) int {
 	return 0
 }
 
+// withCurrent 用当前版本重算「有更新」。
+// 缓存里的结论可能是旧版本时算的：0.8.14 时查到 0.9.0 有更新，升到 0.9.0 后命中
+// 缓存 / 304，如果继续沿用旧结论，就会一直显示「有更新 0.9.0」。
+func (c appUpdateCheck) withCurrent(current string) appUpdateCheck {
+	c.Current = current
+	c.UpdateAvailable = c.Latest != "" && compareVersions(c.Latest, current) > 0
+	return c
+}
+
+// cachedResult 标记这次结论是复用缓存 / 304 的，界面据此提示「刚检查过」
+func (c appUpdateCheck) cachedResult() appUpdateCheck {
+	c.Cached = true
+	return c
+}
+
 func (u *appUpdater) httpClient() *http.Client {
 	if u.client != nil {
 		return u.client
@@ -210,10 +225,7 @@ func (u *appUpdater) check(manual bool) appUpdateCheck {
 		return appUpdateCheck{Current: current, Error: "GitHub 接口暂时限流，请在 " + until + " 之后重试"}
 	}
 	if state.At > 0 && state.Current == current && now-state.At < ttl {
-		result := state.Result
-		result.Current = current
-		result.Cached = true
-		return result
+		return state.Result.withCurrent(current).cachedResult()
 	}
 	request, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+updateOwner+"/"+updateRepo+"/releases?per_page=20", nil)
 	request.Header.Set("Accept", "application/vnd.github+json")
@@ -230,10 +242,7 @@ func (u *appUpdater) check(manual bool) appUpdateCheck {
 	if response.StatusCode == http.StatusNotModified {
 		state.At = now
 		u.saveCache(state)
-		result := state.Result
-		result.Current = current
-		result.Cached = true
-		return result
+		return state.Result.withCurrent(current).cachedResult()
 	}
 	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests {
 		until := now + 60*60*1000

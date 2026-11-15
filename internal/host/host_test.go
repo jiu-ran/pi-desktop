@@ -503,3 +503,61 @@ func TestHostChildEnvAndEnvSlice(t *testing.T) {
 		t.Fatalf("unexpected direct env: %#v", envDirect)
 	}
 }
+
+// 最近项目：最后一次打开的目录必须排在最前，而且不能被「去重」顺手删掉。
+// 之前的写法是「先把新路径拼到最前，再过滤掉与它相同的项」，结果刚加的那条被删了，
+// 最近项目永远是空的，重启后回到空白页。
+func TestWriteRecentKeepsNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first")
+	second := filepath.Join(dir, "second")
+	for _, path := range []string{first, second} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(dir, "recent-workspaces.json")
+
+	writeRecent(file, first)
+	if got := readRecent(file); len(got) != 1 || got[0] != first {
+		t.Fatalf("after opening first: %#v", got)
+	}
+
+	// 再打开第二个、然后回到第一个：两个都要在，顺序按最近打开
+	writeRecent(file, second)
+	writeRecent(file, first)
+	got := readRecent(file)
+	if len(got) != 2 || got[0] != first || got[1] != second {
+		t.Fatalf("recent order wrong: %#v", got)
+	}
+
+	// 不存在的目录在读取时被丢掉，但不会影响其它项
+	if err := os.RemoveAll(second); err != nil {
+		t.Fatal(err)
+	}
+	if got := readRecent(file); len(got) != 1 || got[0] != first {
+		t.Fatalf("missing dir should be dropped: %#v", got)
+	}
+}
+
+// 更新检查的缓存 / 304 分支要按「当前版本」重算有没有更新。
+// 否则 0.8.14 时看到的「0.9.0 有更新」在升级到 0.9.0 之后会一直挂着。
+func TestUpdateCheckRecomputesAvailability(t *testing.T) {
+	cached := appUpdateCheck{Latest: "0.9.0", UpdateAvailable: true}
+	if got := cached.withCurrent("0.9.0"); got.UpdateAvailable {
+		t.Fatalf("same version must not look like an update: %#v", got)
+	}
+	if !cached.withCurrent("0.8.14").UpdateAvailable {
+		t.Fatalf("older current version should still see the update")
+	}
+	if cached.withCurrent("0.9.0").cachedResult().Cached != true {
+		t.Fatalf("cached result should be flagged")
+	}
+	empty := appUpdateCheck{}
+	if empty.withCurrent("0.9.0").UpdateAvailable {
+		t.Fatalf("empty latest must not look like an update")
+	}
+	if compareVersions("v0.9.0", "0.9.0") != 0 || compareVersions("0.10.0", "0.9.9") <= 0 {
+		t.Fatalf("version comparison broken")
+	}
+}
