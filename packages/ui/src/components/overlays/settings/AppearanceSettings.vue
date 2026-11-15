@@ -9,7 +9,7 @@ import {
   normalizeHex,
   type EmphasisMode,
 } from "../../../shared/appearance.ts";
-import { WASH_THEMES, washBackground } from "../../../shared/wash-themes.ts";
+import { DARK_WASH_THEMES, LIGHT_WASH_THEMES, washBackground } from "../../../shared/wash-themes.ts";
 import { appSettings, DEFAULT_SETTINGS } from "../../../services/settings.ts";
 import { icons } from "../../../shared/util.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
@@ -155,7 +155,7 @@ class="settings-theme-tile"
       </div>
       <div class="settings-wash-grid">
         <button
-v-for="item in WASH_THEMES"
+v-for="item in LIGHT_WASH_THEMES"
 :key="`light-${item.id}`"
 type="button"
 class="settings-wash-tile"
@@ -169,7 +169,7 @@ class="settings-wash-tile"
     <span class="settings-wash-aa">Aa</span>
     <span
       class="settings-wash-chip"
-      :style="{ color: item.accent.light, background: `color-mix(in srgb, ${item.accent.light} 16%, transparent)` }"
+      :style="{ color: item.accent, background: `color-mix(in srgb, ${item.accent} 16%, transparent)` }"
     >~/|</span>
   </span>
   <span class="settings-wash-dots">
@@ -188,7 +188,7 @@ class="settings-wash-tile"
       </div>
       <div class="settings-wash-grid">
         <button
-v-for="item in WASH_THEMES"
+v-for="item in DARK_WASH_THEMES"
 :key="`dark-${item.id}`"
 type="button"
 class="settings-wash-tile"
@@ -202,7 +202,7 @@ class="settings-wash-tile"
     <span class="settings-wash-aa">Aa</span>
     <span
       class="settings-wash-chip"
-      :style="{ color: item.accent.dark, background: `color-mix(in srgb, ${item.accent.dark} 18%, transparent)` }"
+      :style="{ color: item.accent, background: `color-mix(in srgb, ${item.accent} 20%, transparent)` }"
     >~/|</span>
   </span>
   <span class="settings-wash-dots">

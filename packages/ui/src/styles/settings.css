@@ -11,7 +11,7 @@
    遮罩从标题栏下方开始（.overlay 的 inset），因此原生窗口按钮区不需要跟着压暗，
    也就不存在「渲染慢一步」的问题。 */
 .overlay.settings-overlay {
-  --scrim-alpha: 0.18;
+  --scrim-alpha: 0.12;
   place-items: center;
   padding-top: 0;
   z-index: 115;
@@ -26,7 +26,7 @@
   opacity: 1;
 }
 :root[data-theme="light"] .overlay.settings-overlay {
-  --scrim-alpha: 0.1;
+  --scrim-alpha: 0.06;
 }
 .overlay.settings-overlay.leaving {
   background: transparent;
@@ -41,19 +41,57 @@
 }
 
 .settings-modal {
+  position: relative;
   display: grid;
   grid-template-columns: 208px minmax(0, 1fr);
   width: min(1040px, calc(95vw - 16px));
   height: min(736px, calc(88vh - 16px));
   overflow: hidden;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--card-border, var(--line-2));
   border-radius: calc(var(--radius) + 4px);
-  background: var(--bg);
-  box-shadow: var(--shadow);
+  background:
+    var(--wash-glow, transparent),
+    color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(36px) saturate(165%);
+  backdrop-filter: blur(36px) saturate(165%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.2)),
+    var(--shadow);
   cursor: auto;
   opacity: 0;
   transform: translateY(16px) scale(0.985);
   transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.settings-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  padding: 1px;
+  border-radius: inherit;
+  opacity: 0.45;
+  background: conic-gradient(
+    from 210deg,
+    rgba(255, 255, 255, 0.04),
+    var(--glass-highlight, rgba(255, 255, 255, 0.55)) 52deg,
+    rgba(255, 255, 255, 0.08) 110deg,
+    rgba(255, 255, 255, 0.04) 180deg,
+    rgba(255, 255, 255, 0.32) 245deg,
+    rgba(255, 255, 255, 0.04) 320deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+:root[data-theme="light"] .settings-modal {
+  background:
+    var(--wash-glow, transparent),
+    color-mix(in srgb, var(--bg) 84%, transparent);
 }
 .overlay.settings-overlay.open .settings-modal {
   opacity: 1;
@@ -72,7 +110,7 @@
   min-height: 0;
   padding: 14px 10px 10px;
   border-right: 1px solid var(--line);
-  background: var(--bg-2);
+  background: color-mix(in srgb, var(--bg-2) 52%, transparent);
 }
 .settings-brand {
   display: flex;
@@ -207,8 +245,8 @@
   color: var(--fg);
 }
 .settings-nav-item.active {
-  border-color: var(--line);
-  background: var(--bg);
+  border-color: var(--line-2);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
   color: var(--fg);
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
@@ -302,7 +340,7 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--bg);
+  background: transparent;
 }
 /* 内容滚起来之后页头下方补一条阴影，长页面才分得清「标题区」和「内容区」 */
 .settings-head.scrolled {
@@ -401,7 +439,8 @@
   padding: 2px 14px 4px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--bg-1);
+  background: color-mix(in srgb, var(--bg-1) 62%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-highlight, #fff) 35%, transparent);
 }
 .settings-group.fill {
   flex: 1;
@@ -1139,7 +1178,7 @@
   gap: 8px;
   padding: 10px 24px;
   border-top: 1px solid var(--line);
-  background: var(--bg-1);
+  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
 }
 .settings-footer-hint {
   flex: 1;
@@ -1314,8 +1353,10 @@
     0 4px 12px rgba(0, 0, 0, 0.32);
 }
 .settings-wash-tile.active .settings-wash-window {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .settings-wash-top {
   display: flex;

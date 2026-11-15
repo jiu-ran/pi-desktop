@@ -2,9 +2,8 @@ import { watchEffect } from "vue";
 import { appSettings } from "./settings.ts";
 import {
   WASH_THEMES,
+  washEntry,
   washGradient,
-  washGlow,
-  washTheme,
   type WashScheme,
   type WashThemeId,
 } from "../shared/wash-themes.ts";
@@ -19,42 +18,21 @@ export interface ThemeSpec {
   vars: Record<string, string>;
 }
 
-/** 两套配色共用的底色；wash / frame / 用户气泡由具体主题在 buildTheme 里补。 */
-const LIGHT_VARS: Record<string, string> = {
-  "--card-border": "rgba(255, 255, 255, 0.62)",
-  "--card-shadow": "0 1px 2px rgba(30, 35, 50, 0.05), 0 18px 44px rgba(30, 35, 50, 0.10)",
-  "--glass-bg": "rgba(255, 255, 255, 0.66)",
-  "--glass-strong": "rgba(255, 255, 255, 0.84)",
-  "--glass-border": "rgba(255, 255, 255, 0.72)",
-  "--glass-highlight": "rgba(255, 255, 255, 0.95)",
-  "--bg": "#ffffff",
-  "--bg-1": "#f8f7f9",
-  "--bg-2": "#f1eff3",
-  "--bg-3": "#e9e6ed",
-  "--hover": "rgba(30, 30, 42, 0.055)",
-  "--press": "rgba(30, 30, 42, 0.11)",
-  "--line": "rgba(30, 30, 42, 0.075)",
-  "--line-2": "rgba(30, 30, 42, 0.14)",
-  "--fg": "#26232b",
-  "--fg-2": "#6f6a77",
-  "--fg-3": "#a19cab",
+const LIGHT_SEMANTIC_VARS: Record<string, string> = {
   "--accent": "#3b6cf6",
   "--accent-fg": "#ffffff",
   "--emphasis": "var(--accent)",
   "--accent-soft": "rgba(59, 108, 246, 0.12)",
-  "--ok": "#22863a",
-  "--ok-fg": "#22863a",
+  "--ok": "#1f883d",
+  "--ok-fg": "#1f883d",
   "--warn": "#c27b0f",
   "--err": "#d93a35",
   "--code": "#8a63d2",
-  "--add-bg": "rgba(34, 134, 58, 0.10)",
-  "--add-fg": "#1f7a3a",
+  "--add-bg": "rgba(31, 136, 61, 0.10)",
+  "--add-fg": "#1a7433",
   "--del-bg": "rgba(217, 58, 53, 0.10)",
   "--del-fg": "#b32d29",
-  "--input-bg": "#ffffff",
-  "--shadow": "0 12px 36px rgba(30, 35, 50, 0.14)",
-  "--term-bg": "#ffffff",
-  "--term-fg": "#2a2730",
+  "--shadow": "0 14px 40px rgba(24, 28, 42, 0.14)",
   "--ansi-black": "#1d1d1f",
   "--ansi-red": "#d3302f",
   "--ansi-green": "#22863a",
@@ -73,24 +51,7 @@ const LIGHT_VARS: Record<string, string> = {
   "--ansi-bright-white": "#b4b4bb",
 };
 
-const DARK_VARS: Record<string, string> = {
-  "--card-border": "rgba(255, 255, 255, 0.10)",
-  "--card-shadow": "0 1px 2px rgba(0, 0, 0, 0.25), 0 18px 44px rgba(0, 0, 0, 0.32)",
-  "--glass-bg": "rgba(35, 35, 40, 0.74)",
-  "--glass-strong": "rgba(48, 48, 55, 0.84)",
-  "--glass-border": "rgba(255, 255, 255, 0.11)",
-  "--glass-highlight": "rgba(255, 255, 255, 0.20)",
-  "--bg": "#232328",
-  "--bg-1": "#2a2a30",
-  "--bg-2": "#323239",
-  "--bg-3": "#3c3c44",
-  "--hover": "rgba(255, 255, 255, 0.06)",
-  "--press": "rgba(255, 255, 255, 0.12)",
-  "--line": "rgba(255, 255, 255, 0.075)",
-  "--line-2": "rgba(255, 255, 255, 0.12)",
-  "--fg": "#ececf0",
-  "--fg-2": "#a9a9b4",
-  "--fg-3": "#83838f",
+const DARK_SEMANTIC_VARS: Record<string, string> = {
   "--accent": "#6b93ff",
   "--accent-fg": "#ffffff",
   "--emphasis": "var(--accent)",
@@ -104,10 +65,7 @@ const DARK_VARS: Record<string, string> = {
   "--add-fg": "#74e397",
   "--del-bg": "rgba(255, 105, 97, 0.14)",
   "--del-fg": "#ff8a84",
-  "--input-bg": "#1b1b20",
-  "--shadow": "0 12px 36px rgba(0, 0, 0, 0.45)",
-  "--term-bg": "#232328",
-  "--term-fg": "#e6e6ea",
+  "--shadow": "0 16px 48px rgba(0, 0, 0, 0.52)",
   "--ansi-black": "#3a3a40",
   "--ansi-red": "#ff6b64",
   "--ansi-green": "#4fd17a",
@@ -126,29 +84,46 @@ const DARK_VARS: Record<string, string> = {
   "--ansi-bright-white": "#f5f5f7",
 };
 
-/** 当前配色 + 用户选的 wash → 一份可直接写进 :root 的主题。 */
+/** 当前配色 + 用户选的 wash → 一份可直接写进 :root 的完整主题变量。 */
 export function buildTheme(scheme: WashScheme, washId: string): ThemeSpec {
-  const definition = washTheme(washId);
-  const side = definition[scheme];
+  const entry = washEntry(washId, scheme);
+  const p = entry.palette;
   return {
-    id: `${scheme}-${definition.id}`,
-    wash: definition.id,
-    label: definition.label,
+    id: `${scheme}-${entry.id}`,
+    wash: entry.id,
+    label: entry.label,
     scheme,
     codeTheme: { light: "github-light", dark: "github-dark" },
     titlebar: {
-      color: side.frame,
-      symbolColor: scheme === "dark" ? "#a9a9b4" : "#5d5863",
+      color: p.frame,
+      symbolColor: p.fg2,
     },
     vars: {
-      ...(scheme === "dark" ? DARK_VARS : LIGHT_VARS),
-      "--frame": side.frame,
-      "--wash": washGradient(definition.id, scheme),
-      "--wash-glow": washGlow(definition.id, scheme),
-      // 用户消息跟着 wash 轻微染色，不同主题下不会突然冒出一块粉色
-      "--user-bg": scheme === "dark"
-        ? `color-mix(in srgb, ${side.frame} 26%, #2a2a30)`
-        : `color-mix(in srgb, ${side.frame} 16%, #ffffff)`,
+      ...(scheme === "dark" ? DARK_SEMANTIC_VARS : LIGHT_SEMANTIC_VARS),
+      "--frame": p.frame,
+      "--wash": washGradient(entry.id, scheme),
+      "--wash-glow": p.glow,
+      "--card-border": p.cardBorder,
+      "--card-shadow": p.cardShadow,
+      "--glass-bg": p.glassBg,
+      "--glass-strong": p.glassStrong,
+      "--glass-border": p.glassBorder,
+      "--glass-highlight": p.glassHighlight,
+      "--bg": p.bg,
+      "--bg-1": p.bg1,
+      "--bg-2": p.bg2,
+      "--bg-3": p.bg3,
+      "--input-bg": p.inputBg,
+      "--term-bg": p.termBg,
+      "--term-fg": p.fg,
+      "--user-bg": p.userBg,
+      "--fg": p.fg,
+      "--fg-2": p.fg2,
+      "--fg-3": p.fg3,
+      "--line": p.line,
+      "--line-2": p.line2,
+      "--hover": p.hover,
+      "--press": p.press,
     },
   };
 }
@@ -178,7 +153,7 @@ export function setupTheme(
       const theme = currentTheme();
       const root = document.documentElement;
       // data-theme 只表示明暗（终端 / 设置遮罩等选择器依赖它）；
-      // 具体 wash 放在 data-wash，方便以后按主题做细节。
+      // 具体 wash 放在 data-wash，方便按主题微调。
       root.dataset.theme = theme.scheme;
       root.dataset.wash = theme.wash;
       root.style.colorScheme = theme.scheme;

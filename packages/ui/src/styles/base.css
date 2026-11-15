@@ -12,31 +12,31 @@
   font-display: swap;
 }
 
-/* 变量由主题插件写入 :root，这里只给首帧兜底（Kero rex 浅色） */
+/* 变量由主题插件写入 :root，这里只给首帧兜底（云樱浅色） */
 :root {
   /* 标题栏高度：浮层用它避开标题栏，必须放在 :root —— Teleport 到 body 的
      元素读不到 .shell 上的私有变量（图片放大层就是这么变成一个小方块的） */
   --titlebar-h: 40px;
-  --frame: #ebe0f3;
-  --wash: linear-gradient(172deg, #ebe0f3 0%, #f3e7f1 33%, #f7eee4 66%, #f6efcf 100%);
-  --card-border: rgba(255, 255, 255, 0.62);
-  --card-shadow: 0 1px 2px rgba(30, 35, 50, 0.05), 0 18px 44px rgba(30, 35, 50, 0.10);
-  --wash-glow: linear-gradient(225deg, rgba(247, 220, 241, 0.75) 0%, transparent 50%);
-  --glass-bg: rgba(255, 255, 255, 0.66);
-  --glass-strong: rgba(255, 255, 255, 0.84);
-  --glass-border: rgba(255, 255, 255, 0.72);
-  --glass-highlight: rgba(255, 255, 255, 0.95);
-  --bg: #ffffff;
-  --bg-1: #f8f4f7;
-  --bg-2: #f0e9ef;
-  --bg-3: #e8dfe8;
-  --hover: rgba(60, 30, 60, 0.055);
-  --press: rgba(60, 30, 60, 0.11);
-  --line: rgba(60, 30, 60, 0.075);
-  --line-2: rgba(60, 30, 60, 0.14);
-  --fg: #26232b;
-  --fg-2: #6f6a77;
-  --fg-3: #a19cab;
+  --frame: #efe1f7;
+  --wash: linear-gradient(165deg, #efe1f7 0%, #f7e4ef 33%, #fcece4 67%, #fcf4df 100%);
+  --card-border: rgba(255, 255, 255, 0.68);
+  --card-shadow: 0 1px 2px rgba(60, 30, 60, 0.05), 0 18px 44px rgba(60, 30, 60, 0.09);
+  --wash-glow: radial-gradient(68% 58% at 88% 6%, rgba(244, 174, 218, 0.72), transparent 68%), radial-gradient(60% 55% at 12% 96%, rgba(253, 224, 174, 0.56), transparent 70%);
+  --glass-bg: rgba(255, 251, 254, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.90);
+  --glass-border: rgba(255, 255, 255, 0.80);
+  --glass-highlight: rgba(255, 255, 255, 0.96);
+  --bg: #fefbfd;
+  --bg-1: #f9f2f7;
+  --bg-2: #f1e7ef;
+  --bg-3: #e7dbe6;
+  --hover: rgba(56, 28, 66, 0.055);
+  --press: rgba(56, 28, 66, 0.10);
+  --line: rgba(56, 28, 66, 0.08);
+  --line-2: rgba(56, 28, 66, 0.14);
+  --fg: #241d29;
+  --fg-2: #6b5f73;
+  --fg-3: #9e91a8;
   --accent: #2a7deb;
   --accent-fg: #ffffff;
   --accent-soft: rgba(42, 125, 235, 0.12);
