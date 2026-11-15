@@ -33,6 +33,71 @@ var historyRoles = map[string]bool{"user": true, "assistant": true, "toolResult"
 
 var attachmentMarkerRe = regexp.MustCompile(`(?s)<(file|directory) name="([^"]*)"[^>]*>.*?</(?:file|directory)>`)
 
+// 引用会话时，首条消息以 `<session name="<文件>" title="<标题>" messages="N">` 开头。
+// 直接拿原文当标题会显示成一串路径（Pi CLI 就是这样），所以改成「被引用会话的名字（引用）」。
+var (
+	sessionQuoteHeaderRe = regexp.MustCompile(`^<session\s[^>]*>`)
+	sessionQuoteNameRe   = regexp.MustCompile(`name="([^"]*)"`)
+	sessionQuoteTitleRe  = regexp.MustCompile(`title="([^"]*)"`)
+)
+
+const quotedTitleSuffix = "（引用）"
+
+// parseQuotedSessionHeader 拆出引用头里的会话文件与当时记录的标题。
+func parseQuotedSessionHeader(text string) (path, title string, ok bool) {
+	header := sessionQuoteHeaderRe.FindString(strings.TrimSpace(text))
+	if header == "" {
+		return "", "", false
+	}
+	if sub := sessionQuoteNameRe.FindStringSubmatch(header); len(sub) >= 2 {
+		path = unescapeXML(sub[1])
+	}
+	if sub := sessionQuoteTitleRe.FindStringSubmatch(header); len(sub) >= 2 {
+		title = strings.TrimSpace(unescapeXML(sub[1]))
+	}
+	return path, title, true
+}
+
+// quotedTitleText 统一成「X（引用）」并限制长度。
+func quotedTitleText(title string) string {
+	title = strings.TrimSpace(strings.TrimSuffix(title, quotedTitleSuffix))
+	if title == "" {
+		return ""
+	}
+	limit := sessionTitleMax - len([]rune(quotedTitleSuffix)) - 1 // 还要留一位给省略号
+	if runes := []rune(title); limit > 0 && len(runes) > limit {
+		title = string(runes[:limit]) + "…"
+	}
+	return title + quotedTitleSuffix
+}
+
+// resolveQuotedTitle 优先用被引用会话**当前**的名字（用户可能后来改过名），读不到才用引用时记下的标题。
+func resolveQuotedTitle(text string) (string, bool) {
+	path, title, ok := parseQuotedSessionHeader(text)
+	if !ok {
+		return "", false
+	}
+	if live := liveSessionTitle(path); live != "" {
+		title = live
+	}
+	if result := quotedTitleText(title); result != "" {
+		return result, true
+	}
+	return "", false
+}
+
+// liveSessionTitle 读被引用会话文件里存的会话名（不再递归解析它自己的首条消息）。
+func liveSessionTitle(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	info, err := os.Stat(filepath.Clean(path))
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return readSessionName(filepath.Clean(path), info.Size(), nil)
+}
+
 func attachmentNameFromPath(path string) string {
 	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '\\' || r == '/' })
 	if len(parts) == 0 {
@@ -42,6 +107,9 @@ func attachmentNameFromPath(path string) string {
 }
 
 func sessionTitleFromText(text string) string {
+	if _, title, ok := parseQuotedSessionHeader(text); ok && title != "" {
+		return quotedTitleText(title)
+	}
 	fallback := ""
 	stripped := attachmentMarkerRe.ReplaceAllStringFunc(text, func(match string) string {
 		sub := attachmentMarkerRe.FindStringSubmatch(match)
@@ -65,6 +133,13 @@ func sessionTitleFromText(text string) string {
 	return source
 }
 
+// userTextTitle 给「用户消息 → 标题」用：引用会话要现读被引用会话的名字，其余走纯文本规则。
+func userTextTitle(text string) string {
+	if quoted, ok := resolveQuotedTitle(text); ok {
+		return quoted
+	}
+	return sessionTitleFromText(text)
+}
 func unescapeXML(value string) string {
 	replacer := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&amp;", "&")
 	return replacer.Replace(value)
@@ -88,7 +163,7 @@ func firstUserTitle(lines []string) string {
 		}
 		content := message["content"]
 		if text, ok := content.(string); ok && text != "" {
-			if title := sessionTitleFromText(text); title != "" {
+			if title := userTextTitle(text); title != "" {
 				return title
 			}
 		}
@@ -97,7 +172,7 @@ func firstUserTitle(lines []string) string {
 				partMap := asMap(part)
 				if partMap["type"] == "text" {
 					if text, ok := partMap["text"].(string); ok {
-						if title := sessionTitleFromText(text); title != "" {
+						if title := userTextTitle(text); title != "" {
 							return title
 						}
 					}
@@ -133,6 +208,9 @@ func firstUserTitleFromMessages(messages []map[string]any) string {
 				}
 			}
 			text = strings.Join(parts, " ")
+		}
+		if quoted, ok := resolveQuotedTitle(text); ok {
+			return quoted
 		}
 		text = regexp.MustCompile(`(?s)<[^>]*>.*?</[^>]*>`).ReplaceAllString(text, " ")
 		text = strings.Join(strings.Fields(text), " ")

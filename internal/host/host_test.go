@@ -707,3 +707,62 @@ func TestSessionNamePicksUpLaterRename(t *testing.T) {
 		t.Fatalf("清空名字后应返回空标题，实际 %q", got)
 	}
 }
+// 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
+// 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
+func TestSessionTitleFromQuotedSession(t *testing.T) {
+	quote := func(title string) string {
+		return `<session name="C:/agent/sessions/--C--x--/2026-10-19T11-07-51-575Z_01a153d8.jsonl" title="` + title + `" messages="8">
+<session name="…">正文略</session>
+</session>
+继续做别的`
+	}
+	cases := []struct{ input, want string }{
+		{quote("Pi Desktop"), "Pi Desktop（引用）"},
+		{quote("Pi Desktop（引用）"), "Pi Desktop（引用）"},
+		{quote("A &amp; B"), "A & B（引用）"},
+		{"普通消息", "普通消息"},
+		{"<file name=\"C:/a/b.md\"></file>", "b.md"},
+	}
+	for _, item := range cases {
+		if got := sessionTitleFromText(item.input); got != item.want {
+			t.Fatalf("标题应为 %q，实际 %q", item.want, got)
+		}
+	}
+	// 没有 title 属性时保持原样（退回首条消息原文），不要凭空造名字
+	if got := sessionTitleFromText(quote("")); !strings.HasPrefix(got, "<session name=") {
+		t.Fatalf("没有标题时不应改写，实际 %q", got)
+	}
+	long := strings.Repeat("长", 60)
+	got := sessionTitleFromText(quote(long))
+	if !strings.HasSuffix(got, quotedTitleSuffix) || len([]rune(got)) > sessionTitleMax {
+		t.Fatalf("超长标题要截断并保留后缀，实际 %q（%d 字符）", got, len([]rune(got)))
+	}
+}
+
+// 引用头里记的是「引用那一刻」的标题；被引用会话后来改了名，列表要跟上新名字。
+func TestQuotedTitleUsesLiveSessionName(t *testing.T) {
+	dir := t.TempDir()
+	quoted := filepath.Join(dir, "2026-10-19T11-07-51-575Z_quoted.jsonl")
+	body := `{"type":"session","id":"q1","timestamp":"2026-10-19T11:07:51.000Z"}` + "\n" +
+		`{"type":"message","id":"m1","parentId":null,"timestamp":"2026-10-19T11:07:52.000Z","message":{"role":"user","content":[{"type":"text","text":"请先了解一下本项目"}]}}` + "\n" +
+		`{"type":"session_info","id":"n1","parentId":"m1","timestamp":"2026-10-23T15:07:03.095Z","name":"Pi Desktop"}` + "\n"
+	if err := os.WriteFile(quoted, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 引用时记下的还是旧标题
+	text := `<session name="` + strings.ReplaceAll(quoted, `\`, `/`) + `" title="请先了解一下本项目" messages="8">
+<session name="…">正文略</session>
+</session>
+帮我看看这个`
+	if got := userTextTitle(text); got != "Pi Desktop（引用）" {
+		t.Fatalf("应跟上传记后的名字，实际 %q", got)
+	}
+	// 被引用会话不存在时退回引用时记下的标题
+	missing := `<session name="C:/nope/does-not-exist.jsonl" title="旧标题" messages="8">正文</session>`
+	if got := userTextTitle(missing); got != "旧标题（引用）" {
+		t.Fatalf("找不到被引用会话时应退回记下的标题，实际 %q", got)
+	}
+	if got := sessionTitleFromText(text); got != "请先了解一下本项目（引用）" {
+		t.Fatalf("纯函数不应读文件，实际 %q", got)
+	}
+}
