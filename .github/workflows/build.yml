@@ -124,6 +124,17 @@ jobs:
       - name: List artifacts
         run: ls -lh artifacts
 
+      # download-artifact 会保留每个 artifact 内部的目录层级（windows-amd64/…），
+      # 而校验与上传都只看 artifacts/ 根目录，不摊平就会生成一份空的 SHA256SUMS 并上传 0 个文件
+      # （v0.9.0 首次发布就踩了这个坑）。
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          cd artifacts
+          find . -mindepth 2 -type f -exec mv -f {} . \;
+          find . -mindepth 1 -type d -exec rm -rf {} +
+          ls -lh
+
       # GitHub 上传时会将文件名空格改成点；校验清单必须使用最终下载文件名。
       - name: Normalize release filenames
         shell: bash
