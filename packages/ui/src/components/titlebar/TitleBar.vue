@@ -8,7 +8,7 @@ import WindowControls from "./WindowControls.vue";
 
 /**
  * 顶部标题栏：
- * 左侧：应用徽标 · 项目与会话栏开关 · 新建任务 · 项目/分支/任务面包屑
+ * 左侧：Pi 字标 · 项目与会话栏开关 · 新建任务 · 项目/分支/任务面包屑
  * 右侧：扩展状态 · Pi CLI 连接状态 · 主题切换 · 偏好设置 · 扩展工具面板开关
  */
 const platform = (globalThis as any).piDesktop?.platform ?? "web";
@@ -90,7 +90,7 @@ const piTitle = computed(() => {
 <template>
   <header class="titlebar" @dblclick="onTitlebarDoubleClick">
     <div class="tb-left">
-      <img class="tb-logo" src="../../assets/pi-icon.png" alt="Pi Desktop" title="Pi Desktop" />
+      <span class="tb-brand" title="Pi Desktop">Pi</span>
       <button
         class="tb-btn"
         :class="{ active: state.sidebarOpen }"
