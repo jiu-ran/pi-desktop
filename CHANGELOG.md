@@ -5,7 +5,7 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布] - MyGo 重构
+## [0.9.0] - 2026-11-16
 
 桌面端从 Electron 迁移到 **MyGo（Go 宿主 + 系统 WebView）**，前端仍为 Vue 3 + TypeScript，业务交互与 Pi 兼容规则保持不变。
 
