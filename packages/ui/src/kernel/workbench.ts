@@ -215,7 +215,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     },
     recent: [] as string[],
     activeCwd: "",
-    theme: readStorage(THEME_KEY) === "light" ? "light" : "dark",
+    theme: readStorage(THEME_KEY) === "dark" ? "dark" : "light",
     sidebarOpen: true,
     sidebarWidth: savedSidebarWidth(),
     panelWidth: savedWidth(PANEL_WIDTH_KEY, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, 320),

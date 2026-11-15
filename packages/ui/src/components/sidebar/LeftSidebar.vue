@@ -118,6 +118,14 @@ function isGroupCurrent(group: any, item: any): boolean {
   return group.ws.sessionFile.replace(/\\/g, "/").toLowerCase() === item.path.replace(/\\/g, "/").toLowerCase();
 }
 
+function attentionCount(group: any): number {
+  let count = group.ws?.status === "error" ? 1 : 0;
+  for (const item of group.sessions) {
+    if (completedUnread[item.path]) count += 1;
+  }
+  return count;
+}
+
 function isActive(group: any, item: any): boolean {
   return projectPathKey(group.cwd) === projectPathKey(state.activeCwd) && isGroupCurrent(group, item);
 }
@@ -401,6 +409,7 @@ function openProjectMenu(event: MouseEvent): void {
             <span v-html="icons.branch" />{{ group.branch }}
           </button>
           <span v-if="group.count" class="project-count" :title="`${group.count} 个任务`">{{ group.count > 99 ? "99+" : group.count }}</span>
+          <span v-if="attentionCount(group)" class="project-attention">{{ attentionCount(group) }} 待查看</span>
           <span v-if="group.ws?.status === 'starting'" class="project-status starting">
             <span class="mini-spinner" />启动中
           </span>

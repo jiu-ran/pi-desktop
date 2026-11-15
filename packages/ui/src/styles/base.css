@@ -12,58 +12,66 @@
   font-display: swap;
 }
 
-/* 变量由主题插件写入 :root，这里只给首帧兜底（Air 深色） */
+/* 变量由主题插件写入 :root，这里只给首帧兜底（Kero rex 浅色） */
 :root {
   /* 标题栏高度：浮层用它避开标题栏，必须放在 :root —— Teleport 到 body 的
      元素读不到 .shell 上的私有变量（图片放大层就是这么变成一个小方块的） */
   --titlebar-h: 40px;
-  --frame: #090909;
-  --bg: #18191b;
-  --bg-1: #1f2023;
-  --bg-2: #25262a;
-  --bg-3: #2e3034;
-  --hover: rgba(255, 255, 255, 0.06);
-  --press: rgba(255, 255, 255, 0.12);
-  --line: #2a2b2f;
-  --line-2: #393b40;
-  --fg: #e0e1e4;
-  --fg-2: #909192;
-  --fg-3: #6b6c70;
+  --frame: #f1e6ef;
+  --wash: linear-gradient(172deg, #e9dcf5 0%, #f1ddef 30%, #f5e7dc 70%, #f7f0d4 100%);
+  --card-border: rgba(255, 255, 255, 0.62);
+  --card-shadow: 0 1px 2px rgba(60, 30, 60, 0.05), 0 18px 44px rgba(60, 30, 60, 0.10);
+  --wash-glow: radial-gradient(75% 55% at 82% 0%, rgba(255, 255, 255, 0.42), transparent 70%);
+  --glass-bg: rgba(255, 255, 255, 0.66);
+  --glass-strong: rgba(255, 255, 255, 0.84);
+  --glass-border: rgba(255, 255, 255, 0.72);
+  --glass-highlight: rgba(255, 255, 255, 0.95);
+  --bg: #ffffff;
+  --bg-1: #f8f4f7;
+  --bg-2: #f0e9ef;
+  --bg-3: #e8dfe8;
+  --hover: rgba(60, 30, 60, 0.055);
+  --press: rgba(60, 30, 60, 0.11);
+  --line: rgba(60, 30, 60, 0.075);
+  --line-2: rgba(60, 30, 60, 0.14);
+  --fg: #26232b;
+  --fg-2: #6f6a77;
+  --fg-3: #a19cab;
   --accent: #2a7deb;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(42, 125, 235, 0.16);
-  --ok: #169068;
-  --ok-fg: #3fc28f;
-  --warn: #e5a23d;
-  --err: #e5534b;
-  --code: #df8538;
-  --add-bg: rgba(22, 144, 104, 0.16);
-  --add-fg: #5fd3a5;
-  --del-bg: rgba(229, 83, 75, 0.15);
-  --del-fg: #f08b84;
-  --user-bg: #303133;
-  --input-bg: #090909;
-  --shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --accent-soft: rgba(42, 125, 235, 0.12);
+  --ok: #22863a;
+  --ok-fg: #22863a;
+  --warn: #c27b0f;
+  --err: #d93a35;
+  --code: #8a63d2;
+  --add-bg: rgba(34, 134, 58, 0.10);
+  --add-fg: #1f7a3a;
+  --del-bg: rgba(217, 58, 53, 0.10);
+  --del-fg: #b32d29;
+  --user-bg: #f4eef4;
+  --input-bg: #ffffff;
+  --shadow: 0 12px 36px rgba(60, 30, 60, 0.14);
 
-  /* 终端表面与 ANSI 调色板（深色） */
-  --term-bg: #111214;
-  --term-fg: #d7dae0;
-  --ansi-black: #5c6370;
-  --ansi-red: #e06c75;
-  --ansi-green: #98c379;
-  --ansi-yellow: #e5c07b;
-  --ansi-blue: #61afef;
-  --ansi-magenta: #c678dd;
-  --ansi-cyan: #56b6c2;
-  --ansi-white: #c8ccd4;
-  --ansi-bright-black: #7f848e;
-  --ansi-bright-red: #ff7b86;
-  --ansi-bright-green: #b5e890;
-  --ansi-bright-yellow: #ffd68a;
-  --ansi-bright-blue: #82c4ff;
-  --ansi-bright-magenta: #e09eff;
-  --ansi-bright-cyan: #7fd6e0;
-  --ansi-bright-white: #f0f2f5;
+  /* 终端表面与 ANSI 调色板（Kero 浅色） */
+  --term-bg: #ffffff;
+  --term-fg: #2a2730;
+  --ansi-black: #1d1d1f;
+  --ansi-red: #d3302f;
+  --ansi-green: #22863a;
+  --ansi-yellow: #b08800;
+  --ansi-blue: #2f5bd8;
+  --ansi-magenta: #a033c4;
+  --ansi-cyan: #0f8199;
+  --ansi-white: #8e8e93;
+  --ansi-bright-black: #5f5f66;
+  --ansi-bright-red: #ef4444;
+  --ansi-bright-green: #2fa84f;
+  --ansi-bright-yellow: #d4a017;
+  --ansi-bright-blue: #3b82f6;
+  --ansi-bright-magenta: #c04ee0;
+  --ansi-bright-cyan: #14a3bf;
+  --ansi-bright-white: #b4b4bb;
 
   --radius: 8px;
   --radius-sm: 6px;
@@ -71,7 +79,7 @@
   --code-font-size: 12.5px;
   --font: "Inter", "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 /* 外观设置里的「关闭界面动效」：弹层过渡、加载动画、平滑滚动一并停掉 */

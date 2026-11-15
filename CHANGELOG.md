@@ -18,6 +18,12 @@
 - 拖放路径改用 MyGo `onFileDrop`，无边框窗口用 CSS `--app-region` 拖动。
 - 构建命令改为 `mygo dev` / `mygo build`；CI 改用 `actions/setup-go` 与 MyGo 打包。
 
+### 界面
+
+- 参考 Kero 的 wash + 液态玻璃视觉：默认浅色改为粉紫到奶油的渐变窗框，侧栏透明，主区 / 编辑器 / 面板变成带镜面高光与柔和阴影的毛玻璃卡片。
+- 侧栏项目标题弱化为分组标签，数量紧贴项目名；会话行改为右侧时间 / 状态、选中时白色玻璃胶囊。
+- 输入框、起点卡片和搜索框同步使用毛玻璃与内高光；深色主题换成深梅子 wash，保留原有布局与全部功能。
+
 ### 移除
 
 - 删除 `electron/`、Electron / electron-builder / `node-pty` 依赖与 29 个只测 Electron 内部模块的检查；保留的 56 个前端检查全部通过。

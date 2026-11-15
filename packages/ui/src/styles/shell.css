@@ -3,11 +3,11 @@
  * 深色窗框 --frame 上浮着圆角“岛”：侧栏 / 主舞台 / 面板 / 右侧工具条，岛之间留 5px 间隙。
  */
 .shell {
-  --gap: 6px;
+  --gap: 8px;
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--frame);
+  background: var(--wash-glow, transparent), var(--wash, var(--frame));
 }
 
 /* 标题栏：可拖动，按钮区域不可拖动 */
@@ -128,16 +128,60 @@
   padding: 0 var(--gap) var(--gap);
 }
 .island {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-radius: 10px;
-  background: var(--bg);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 3%, transparent);
+  border: 1px solid var(--card-border, var(--line));
+  border-radius: 12px;
+  background: var(--glass-bg, var(--bg));
+  -webkit-backdrop-filter: blur(28px) saturate(155%);
+  backdrop-filter: blur(28px) saturate(155%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.2)),
+    var(--card-shadow, 0 1px 2px rgba(0, 0, 0, 0.08));
 }
-.sidebar { flex: 0 1 auto; width: 272px; min-width: 180px; container-type: inline-size; }
+/* 液态玻璃的镜面高光：一圈从左上亮到右下的细边。 */
+.island::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 210deg,
+    rgba(255, 255, 255, 0.04),
+    var(--glass-highlight, rgba(255, 255, 255, 0.55)) 52deg,
+    rgba(255, 255, 255, 0.08) 110deg,
+    rgba(255, 255, 255, 0.04) 180deg,
+    rgba(255, 255, 255, 0.38) 245deg,
+    rgba(255, 255, 255, 0.04) 320deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+/* Kero 的侧栏直接坐在 wash 上，只有主区 / 查看器是白色卡片。 */
+.sidebar {
+  flex: 0 1 auto;
+  width: 272px;
+  min-width: 180px;
+  container-type: inline-size;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.sidebar::before { display: none; }
 @container (max-width: 230px) {
   .project-branch { display: none; }
 }
@@ -428,4 +472,22 @@
   font-weight: 700;
   line-height: 14px;
   text-align: center;
+}
+
+/* Kero：右侧工具条不占一张卡片，图标直接浮在 wash 上。 */
+.workspace > .toolstrip {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  overflow: visible;
+}
+.workspace > .toolstrip::before { display: none; }
+.workspace > .toolstrip .activity-btn.active {
+  background: color-mix(in srgb, #fff 58%, transparent);
+}
+.dark .workspace > .toolstrip .activity-btn.active {
+  background: rgba(255, 255, 255, 0.09);
 }

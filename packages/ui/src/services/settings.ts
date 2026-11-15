@@ -143,8 +143,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activityMerge: true,
   uiZoom: 1,
   logMaxBytes: 8 * 1024 * 1024,
-  // 默认仍是深色（沿用产品原本的样子）；想跟系统走由用户自己选「跟随系统」
-  themeMode: "dark",
+  // 默认用 Kero 的浅色 wash；想跟系统走由用户自己选「跟随系统」
+  themeMode: "light",
   accent: "default",
   accentCustom: "#5b8def",
   emphasis: "follow",
@@ -217,6 +217,13 @@ function loadSavedSettings(): AppSettings {
 }
 
 export const appSettings = reactive<AppSettings>(loadSavedSettings());
+
+// Kero 风格迁移：老版本默认深色，升级后第一次启动切到浅色 wash。
+// 之后用户自己切换的主题会照常保存，不再覆盖。
+if (typeof localStorage !== "undefined" && localStorage.getItem("pi-desktop.kero-look-v1") === null) {
+  appSettings.themeMode = "light";
+  localStorage.setItem("pi-desktop.kero-look-v1", "1");
+}
 
 export const settingsModalState = reactive({
   open: false,

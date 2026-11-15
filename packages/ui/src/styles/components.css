@@ -2242,3 +2242,235 @@ button.crumb.crumb-branch:hover {
   border-color: var(--accent);
   color: var(--fg);
 }
+
+/* ---------------------------------------------------------------------
+ * Kero 风格：wash 上的透明侧栏、白色选中行、右侧状态；卡片交给 shell.css
+ * ------------------------------------------------------------------- */
+
+.titlebar { height: 42px; }
+.tb-logo { width: 20px; height: 20px; margin-right: 2px; border-radius: 5px; }
+
+.tasks { padding-top: 2px; }
+.tasks-head { height: 30px; padding: 0 8px 0 10px; }
+.tasks-title { display: none; }
+.tasks-head .icon-btn { margin-left: auto; }
+.tasks-search {
+  height: 28px;
+  margin: 0 8px 8px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line-2) 55%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #fff 42%, transparent);
+}
+.dark .tasks-search { background: rgba(255, 255, 255, 0.055); }
+.tasks-search:hover { background: color-mix(in srgb, #fff 58%, transparent); }
+.dark .tasks-search:hover { background: rgba(255, 255, 255, 0.075); }
+.tasks-search:focus-within {
+  background: color-mix(in srgb, #fff 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.dark .tasks-search:focus-within { background: rgba(255, 255, 255, 0.09); }
+.tasks-search input { font-size: 12px; }
+
+.tasks-list { padding: 0 6px 14px; }
+.project { margin-top: 13px; }
+.project:first-child { margin-top: 3px; }
+.project-row {
+  height: 28px;
+  padding: 0 6px;
+  gap: 4px;
+  border-radius: 6px;
+  color: var(--fg-2);
+}
+.project-row:hover { background: var(--hover); color: var(--fg); padding-right: 52px; }
+.project.current .project-row { background: transparent; color: var(--fg); }
+.project.current .project-row:hover { background: var(--hover); }
+.project-caret { width: 11px; opacity: 0.55; }
+.project-name { font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.project.current .project-name { color: var(--fg); }
+.project-branch { display: none; }
+.project-count {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font: 500 11px/1.4 var(--font);
+}
+.project-attention {
+  margin-left: auto;
+  color: var(--warn);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.project-status {
+  height: auto;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-weight: 500;
+}
+.project-attention + .project-status { margin-left: 6px; }
+.project-status.running, .project-status.starting, .project-status.compacting {
+  background: transparent;
+  color: var(--fg-3);
+}
+.project-status-dot { width: 7px; height: 7px; }
+.project-actions { right: 2px; }
+
+.task-list { gap: 2px; margin-top: 2px; }
+.task-row {
+  height: 34px;
+  padding: 0 8px 0 10px;
+  gap: 6px;
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 13px;
+}
+.task-row:hover:not(:disabled) { background: color-mix(in srgb, #fff 52%, transparent); color: var(--fg); }
+.dark .task-row:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.task-row.active {
+  background: color-mix(in srgb, #fff 92%, transparent);
+  color: var(--fg);
+  box-shadow: 0 1px 3px rgba(60, 30, 60, 0.12);
+}
+.dark .task-row.active {
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.task-row.active .task-title { font-weight: 600; }
+.task-title { order: 1; font-size: 13px; }
+.task-time, .task-badge { order: 2; font-size: 11px; color: var(--fg-3); }
+.task-state { order: 3; width: 15px; height: 15px; margin-left: 1px; }
+.task-actions { order: 4; }
+.task-row.active::before,
+.task-row.state-running::before,
+.task-row.state-compacting::before { display: none; }
+.task-row.state-running:not(.active),
+.task-row.state-compacting:not(.active) { background: transparent; }
+
+.starter {
+  border-color: color-mix(in srgb, var(--line) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  box-shadow: 0 1px 2px rgba(60, 30, 60, 0.04);
+}
+.starter:hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
+  background: color-mix(in srgb, #fff 86%, transparent);
+}
+.dark .starter { background: rgba(255, 255, 255, 0.035); }
+.dark .starter:hover { background: rgba(255, 255, 255, 0.06); }
+.composer {
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  box-shadow: 0 1px 2px rgba(60, 30, 60, 0.05), 0 12px 32px rgba(60, 30, 60, 0.10);
+}
+.dark .composer {
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+.empty-thread-mark {
+  background: linear-gradient(160deg, #fff, color-mix(in srgb, var(--bg-1) 80%, transparent));
+  box-shadow: 0 12px 32px rgba(60, 30, 60, 0.12), inset 0 1px 0 #fff;
+}
+.dark .empty-thread-mark {
+  background: linear-gradient(160deg, var(--bg-2), var(--bg-1));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+/* 项目标题：数量紧跟在名字后，待查看 / 运行状态靠右，像 Kero 的 sidebar 行。 */
+.project-name { flex: 0 1 auto; max-width: calc(100% - 74px); }
+.project-attention, .project-status { margin-left: auto; }
+
+/* Kero 的状态标记：工作是深色缺口圆环，完成是实心勾，不再用蓝色高亮。 */
+.task-orbit {
+  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+  border-top-color: var(--fg-2);
+  border-right-color: var(--fg-2);
+}
+.task-state[data-state="active"] .task-dot,
+.task-state[data-state="ready"] .task-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--fg-3);
+  box-shadow: none;
+}
+.task-check {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+/* Kero 的项目标题始终是弱化的分组标签，强调留给会话行。 */
+.project-name, .project.current .project-name { color: var(--fg-2); }
+.project-row:hover .project-name, .project.current .project-row:hover .project-name { color: var(--fg); }
+
+/* 液态玻璃：侧栏搜索、选中行、输入框和起点卡片都带一层薄玻璃与顶部高光。 */
+.tasks-search,
+.task-row.active,
+.composer,
+.starter {
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+}
+.tasks-search {
+  background: color-mix(in srgb, #fff 48%, transparent);
+  border-color: var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.dark .tasks-search { background: rgba(255, 255, 255, 0.06); }
+.task-row.active {
+  border: 1px solid var(--glass-border);
+  background: var(--glass-strong);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 3px rgba(60, 30, 60, 0.10),
+    0 6px 18px rgba(60, 30, 60, 0.07);
+}
+.dark .task-row.active {
+  background: var(--glass-strong);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 3px rgba(0, 0, 0, 0.25),
+    0 6px 18px rgba(0, 0, 0, 0.2);
+}
+.composer {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(60, 30, 60, 0.05),
+    0 14px 36px rgba(60, 30, 60, 0.12);
+}
+.dark .composer {
+  background: var(--glass-bg);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 14px 36px rgba(0, 0, 0, 0.3);
+}
+.starter {
+  background: color-mix(in srgb, #fff 48%, transparent);
+  border-color: var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.dark .starter { background: rgba(255, 255, 255, 0.04); }
+
+/* 选中行的玻璃边比整张卡片更轻，避免像描了一圈白线。 */
+.task-row.active {
+  border-color: color-mix(in srgb, var(--glass-border) 48%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 68%, transparent),
+    0 1px 3px rgba(60, 30, 60, 0.08),
+    0 6px 16px rgba(60, 30, 60, 0.06);
+}
+.dark .task-row.active {
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 3px rgba(0, 0, 0, 0.25),
+    0 6px 16px rgba(0, 0, 0, 0.2);
+}
