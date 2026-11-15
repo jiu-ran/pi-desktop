@@ -4,27 +4,27 @@ Pi Desktop 是本机 Pi Coding Agent 的桌面工作台。Pi 是唯一的 Agent�
 
 ## 桌面端永远不能做
 
-- 渲染进程不得导入 Node.js、Electron 主进程模块、Pi 的 npm 包，也不得自行启动 Pi。
-- 不直接依赖 Pi 的 npm 包；会话只通过 RPC 驱动本机 `pi`，配置 / 资源 / 技能的读写集中在 `electron/pi-host.ts` 与 `electron/pi-resources.ts`。
+- 渲染进程不得导入 Node.js、宿主内部模块、Pi 的 npm 包，也不得自行启动 Pi。
+- 不直接依赖 Pi 的 npm 包；会话只通过 RPC 驱动本机 `pi`，配置 / 资源 / 技能的读写集中在 `internal/host/` 的 Go 宿主。
 - 应用代码不得直接调用模型服务，也不得创建第二个 Agent 会话。
 - 除上面两个文件（宿主层）外，应用代码不得读写系统提示词、提示词模板或 Pi 的配置。
 - 渲染进程只能通过 `window.piDesktop` 使用预先声明的宿主能力。
-- 宿主调用 Pi 时只能使用明确列出的 RPC 方法，白名单位于 `electron/pi-host.ts`。
+- 宿主调用 Pi 时只能使用明确列出的 RPC 方法，白名单位于 `internal/host/pool.go`。
 - 桌面端不得根据消息内容自行计算 token、费用或压缩结果，这些数据只能展示 Pi 返回的结果。
 - 附件只能作为用户明确选择的文件内容或图片交给 Pi，不能追加隐藏任务指令。
 
 ## 允许的职责
 
-- Electron 主进程负责窗口、系统对话框、文件权限和 Pi 进程生命周期。
+- MyGo 宿主（`cmd/pi-desktop` + `internal/host`）负责窗口、系统对话框、文件权限和 Pi 进程生命周期。
 - 对话里的图片可以按本地路径读取显示（用户自己贴的 `![](C:\…\a.png)`）：只读、只认图片类型、单文件上限 20 MB，读完转成 data URL 交给渲染层；绝对路径允许落在工作区之外。除此外不新增其它越界读取能力。
-- `electron/pi-host.ts` 负责工作区隔离、RPC 白名单、会话 Worker 和受控文件操作。
+- `internal/host/pool.go` 负责工作区隔离、RPC 白名单、会话 Worker 和受控文件操作；文件 / Git / 终端各有独立文件。
 - Vue 界面可以维护由 RPC 快照和 Pi 事件派生的临时视图状态。
 - 设置界面可以管理桌面端自己的显示、编辑和更新偏好。
-- 可选的终端插件允许用户明确启动本地 shell / CLI 与一次性后台命令（包括用户手动运行 `pi` 等工具）；只有 Electron 的终端宿主可以创建 PTY，界面只通过固定 IPC 传递按键和尺寸。该功能不会自动启动第二个 Agent 或调用模型，默认关闭；shell 选择与自定义可执行路径属于桌面端偏好。
+- 可选的终端插件允许用户明确启动本地 shell / CLI 与一次性后台命令（包括用户手动运行 `pi` 等工具）；只有 Go 终端宿主可以创建 PTY，界面只通过固定绑定传递按键和尺寸。该功能不会自动启动第二个 Agent 或调用模型，默认关闭；shell 选择与自定义可执行路径属于桌面端偏好。
 
 ## 自动检查
 
-`scripts/checks/product-boundary.check.ts` 会扫描应用源码及边界文档。新增一个上述禁止项时，必须同时说明它属于哪一项例外；不能静默扩大桌面端的职责。
+渲染层由 `product-boundary` 时代的 TypeScript 检查改为人工评审 + `go test ./internal/host`；新增一个上述禁止项时，必须同时说明它属于哪一项例外，不能静默扩大桌面端的职责。
 
 ## 能力归属：Pi 自带 vs 桌面端插件
 

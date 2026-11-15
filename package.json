@@ -4,90 +4,37 @@
   "private": true,
   "version": "0.8.14",
   "author": "jiu-ran",
-  "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（Electron + Vue 3 + TypeScript）",
+  "description": "基于本机 Pi Coding Agent CLI 的跨平台桌面工作台（MyGo + Vue 3 + Go）",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/jiu-ran/pi-desktop.git"
   },
   "type": "module",
-  "main": "dist-electron/main.js",
   "engines": {
     "node": ">=22.18.0"
   },
   "scripts": {
-    "dev": "npm run build:electron && concurrently -k \"npm run dev --prefix packages/ui\" \"wait-on tcp:1420 && electron .\"",
-    "start": "npm run build:electron && electron .",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "dev": "mygo dev",
+    "start": "mygo dev",
+    "build": "mygo build",
+    "dist": "mygo build",
     "build:ui": "npm run build --prefix packages/ui",
-    "build": "npm run build:electron && npm run build:ui",
-    "dist": "npm run build && electron-builder",
-"check": "node scripts/checks/run-checks.mjs",
-"check:changed": "node scripts/checks/run-checks.mjs --changed",
-"check:full": "node scripts/checks/run-checks.mjs --jobs=1 --verbose",
-    "check:smoke": "npm run build && electron scripts/checks/smoke.electron.mjs",
+    "check": "node scripts/checks/run-checks.mjs && npm run check:go",
+    "check:go": "go test ./...",
+    "check:changed": "node scripts/checks/run-checks.mjs --changed",
+    "check:full": "node scripts/checks/run-checks.mjs --jobs=1 --verbose",
     "check:syntax": "node scripts/checks/syntax.mjs",
     "icons:build": "node scripts/build-icons.mjs"
   },
-  "build": {
-    "appId": "dev.pi.desktop",
-    "productName": "Pi Desktop",
-    "files": [
-      "dist-electron/**/*",
-      "packages/ui/dist/**/*",
-      "package.json",
-      "LICENSE",
-      "THIRD-PARTY-NOTICES.md",
-      "licenses/**/*"
-    ],
-    "asarUnpack": [
-      "node_modules/**/*"
-    ],
-    "npmRebuild": false,
-    "win": {
-      "icon": "build/icon.ico",
-      "target": [
-        "zip",
-        "nsis"
-      ]
-    },
-    "mac": {
-      "icon": "build/icon.png",
-      "target": [
-        "zip",
-        "dmg"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": false,
-      "perMachine": false,
-      "include": "installer.nsh"
-    },
-    "linux": {
-      "icon": "build/icon.png",
-      "target": [
-        "tar.gz",
-        "AppImage"
-      ],
-      "category": "Development"
-    }
-  },
-  "dependencies": {
-    "node-pty": "1.1.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@lezer/markdown": "^1.8.1",
     "@types/node": "^25.6.0",
-    "concurrently": "^9.1.2",
-    "electron": "45.0.0",
-    "electron-builder": "26.15.3",
-    "typescript": "^7.0.2",
-    "wait-on": "^8.0.3"
+    "mygo-cli": "0.9.1",
+    "typescript": "^7.0.2"
   },
   "allowScripts": {
-    "node-pty@1.1.0": true,
-    "electron@45.0.0": true
+    "mygo-cli@0.9.1": true
   }
 }

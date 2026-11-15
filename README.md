@@ -1,38 +1,42 @@
 # Pi Desktop
 
-基于本机 **Pi Agent CLI** 的跨平台桌面客户端（Electron + Vue 3 + TypeScript）。界面布局与配色参考 JetBrains Air：深色窗框上的圆角“岛”、按项目分组的任务列表、标题栏面包屑、中央多标签文件编辑器、右侧多面板文件树与变更审查，以及底栏带模型与思考等级的输入框。
+基于本机 **Pi Agent CLI** 的跨平台桌面客户端（**MyGo + Go + Vue 3 + TypeScript**）。界面布局与配色参考 JetBrains Air：深色窗框上的圆角“岛”、按项目分组的任务列表、标题栏面包屑、中央多标签文件编辑器、右侧多面板文件树与变更审查，以及底栏带模型与思考等级的输入框。
 
 桌面端不内置 Pi 的推理与工具执行，而是通过 RPC 驱动用户已安装的 `pi`。同时，桌面端会读取会话 JSONL，并通过宿主层管理已暴露的 Pi 配置与资源（全局 / 项目 MCP、软件包、Skills 和设置）；默认使用 `~/.pi/agent`，也支持 `PI_CODING_AGENT_DIR` 覆盖。项目文件操作仍限制在当前工作区目录内。
 
 ## 下载与安装
 
-- **预构建安装包 / 便携包**：前往 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载对应系统的最新版本（Windows `.exe` / `.zip`、macOS `.dmg` / `.zip`、Linux `.AppImage` / `.tar.gz`）。
-- **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）；从源码构建还需要 Node.js `>= 22.18.0`。
-  会话跑的就是这份本机 `pi`（入口由 `electron/pi-entry.ts` 从 PATH 或「设置 → Pi CLI」的自定义路径反解），所以 `pi update` 之后桌面端当场就是新版本；没装 `pi` 时应用能打开但不会启动会话。
+- **预构建安装包 / 便携包**：前往 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载对应系统的最新版本（Windows `.exe` / `.zip`、macOS `.dmg`、Linux `.tar.gz` / `.deb` / `.rpm`）。
+- **前置条件**：本机需已安装并可在命令行运行 `pi`（`@earendil-works/pi-coding-agent`）；从源码构建还需要 Go `>= 1.27.3` 与 Node.js `>= 22.18.0`。
+  会话跑的就是这份本机 `pi`（入口由 `internal/host/entry.go` 从 PATH 或「设置 → Pi CLI」的自定义路径反解），所以 `pi update` 之后桌面端当场就是新版本；没装 `pi` 时应用能打开但不会启动会话。
 
 ## 从源码运行与打包
 
+前置条件：Go **1.27.3+**、Node.js **22.18+**、本机已安装并可在命令行运行 `pi`，以及 `git`（版本控制面板与隔离工作区需要）。
+
 ```bash
 npm install
-npm install --prefix packages/ui
-npm run dev          # 编译 Electron 主进程并启动 Vite + Electron 开发环境
-npm run build        # 构建 Electron 主进程与前端静态资源
-npm start            # 直接启动桌面端
-npm run dist         # 打包当前系统安装包与便携包（输出到 dist/）
-npm run check        # TypeScript 检查 + 各层自检（包含 Mermaid 高度计算检查）
-npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编辑器冒烟检查
+npm ci --prefix packages/ui
+npm run dev          # mygo dev：启动 Vite，编译 Go 宿主并打开桌面窗口（改 Go 会自动重启）
+npm run build        # mygo build：构建前端并编译当前平台的可执行文件
+npm run dist         # 同上；需要安装包时 mygo build 会同时产出 NSIS / dmg / tar.gz / deb / rpm 等
+npm run check        # 56 个界面 / 纯逻辑检查 + go test ./...
+npm run check:go     # 只跑 Go 宿主测试
 ```
 
-发布前请对照 [`docs/release-review.md`](docs/release-review.md) 的清单执行依赖审计、冒烟、打包与手工验收。
-升级本机 `pi` 之后，按 [`docs/pi-compatibility.md`](docs/pi-compatibility.md) 复查桌面端自己实现的配置 / 资源 / RPC 规则是否还跟得上。
+产物在 `dist-mygo/<os>-<arch>/`：Windows 是 `Pi Desktop.exe`（约 36 MB，不再打包 Chromium）与安装包，macOS 是 `.app` / `.dmg`，Linux 是 `tar.gz` / `deb` / `rpm`。`mygo build -platform windows/amd64,darwin/universal,linux/amd64` 可以在同一台机器上交叉构建。
 
-完整终端使用 `node-pty`（N-API 原生模块）：Windows / macOS 使用随依赖提供的预构建产物；Linux 安装依赖时需要 `python3`、`make`、`g++`（例如先安装 `build-essential python3`）。npm 12 若提示安装脚本被拦截，运行 `npm install-scripts approve node-pty`。原生模块通过 `asarUnpack` 随包解压分发，打包阶段不重复进行 Electron ABI 重编译。
+发布前请对照 [`docs/release-review.md`](docs/release-review.md) 的清单执行测试、打包与手工验收。
+升级本机 `pi` 之后，按 [`docs/pi-compatibility.md`](docs/pi-compatibility.md) 复查宿主自己实现的配置 / 资源 / RPC 规则是否还跟得上。
+宿主架构与迁移对照见 [`docs/mygo-migration.md`](docs/mygo-migration.md)。
 
 开发服务器默认监听 `127.0.0.1:1420`。如果只需要调试前端，可以在 `packages/ui` 下运行 `npm run dev`。
 
-主进程使用 Electron 45（运行 `npx --no-install electron --version` 可查看当前版本）。渲染进程加载了内容安全策略（CSP），只允许自身脚本 / 样式、`data:` / `blob:` / `https` 图片与本地工作线程；新增依赖如果依赖 `eval`、内联脚本或远程 `http` 资源，需要同步调整 `packages/ui/index.html` 的策略。
+渲染进程加载了内容安全策略（CSP），只允许自身脚本 / 样式、`data:` / `blob:` / `https` 图片与本地工作线程；新增依赖如果依赖 `eval`、内联脚本或远程 `http` 资源，需要同步调整 `packages/ui/index.html` 的策略。
 
-开发实例使用独立的 Chromium profile（`%APPDATA%/Pi Desktop Dev`），与已安装的 Pi Desktop 互不影响，可以同时运行；需要自定义目录时设置 `PI_DESKTOP_PROFILE` 环境变量。
+`mygo dev` 使用独立的开发应用名（`Pi Desktop Dev`）与 userData 目录，与已安装版互不影响，可以同时运行。日志写在程序目录的 `logs/`；安装目录不可写时回落到 userData。
+
+终端使用 Go 的 ConPTY / Unix PTY 实现，不需要 `node-pty` 原生模块或 C++ 工具链。Windows 10 1809+、macOS 13+、Linux（glibc 2.28+）自带终端能力。
 
 ## 当前功能
 
@@ -81,7 +85,7 @@ npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编�
 - 点击标题栏 **+ / 新建终端** 启动真实 PTY 会话：Windows 默认读取 `%ComSpec%`（通常是 CMD）并使用 ConPTY，macOS / Linux 默认读取 `$SHELL` / 用户登录 shell。直接点击终端屏幕输入，支持连续命令、Tab 补全、方向键、密码输入、全屏界面和鼠标报告；可运行本机已经安装的 Pi、Claude Code、Codex、mysql、psql、Node REPL、vim / top 等 CLI。应用不会代为安装或登录这些工具。
 - 在「设置 → 终端」修改新建会话的默认 shell：自动列出已安装的 pwsh、Windows PowerShell、Git Bash、CMD，以及 macOS / Linux 的 Zsh、Bash、Fish 等；也支持选择自定义绝对可执行路径和 JSON 字符串数组启动参数。只校验文件、不执行探测命令，参数分开传给宿主，不拼接为 shell 命令。这里选择的是 shell，不会修改 Windows Terminal 等外部终端应用的默认设置。
 - **+ 旁的「其他 shell…」菜单**可临时用另一 shell 新建会话，不改变已保存的默认配置。shell、历史命令和「全部任务」菜单统一跟随深浅主题，支持方向键、Home / End、Enter 选择、Esc 关闭和 Tab 离开；历史命令只填入底部草稿，不直接执行。修改默认配置只影响未来的新会话，已有终端仍使用启动时的 shell。
-- **Ctrl+C 中断终端内的当前程序**，不会把整个 shell 当作后台任务强制结束；输入 `exit` 退出 shell，或者点击标签右侧 × 结束并关闭该会话的进程树。Esc、Ctrl+W、Ctrl+L 等按键原样交给终端程序，聚焦终端时不会误触发 Electron 关窗 / 刷新等菜单快捷键。
+- **Ctrl+C 中断终端内的当前程序**，不会把整个 shell 当作后台任务强制结束；输入 `exit` 退出 shell，或者点击标签右侧 × 结束并关闭该会话的进程树。Esc、Ctrl+W、Ctrl+L 等按键原样交给终端程序，聚焦终端时不会误触发宿主关窗 / 刷新等快捷键。
 - 鼠标滚轮优先交给应用协商的鼠标协议；全屏备用屏幕没有滚轮协议时，改用 PageUp / PageDown 滚动内容，而不是模拟 ↑ / ↓ 去切换 Agent 的输入历史。普通 shell 仍滚动终端日志，键盘 ↑ / ↓ 的历史命令功能不变。
 - 终端内的复制粘贴用键盘完成：选中内容后 `Ctrl+C` 复制（Windows / Linux），无选中时 `Ctrl+C` 仍中断当前程序；`Ctrl+V` 粘贴（Windows），macOS 用 `Cmd+C` / `Cmd+V`，所有平台都支持 `Ctrl+Shift+C` / `Ctrl+Shift+V` 与 `Ctrl+Insert` / `Shift+Insert`。密码是否回显由终端程序控制，PTY 输入不进入应用的命令历史、不做人为回显。shell 自身的历史遵循该 shell 的设置。
 - 可以同时启动多个终端和一次性后台任务（总共最多 8 个运行中）；每个 PTY 会话保留独立屏幕和滚动位置，切换任务、收起面板不会中断程序或重放控制序列。面板/窗口尺寸变化会同步行列数，适配全屏程序；终端主题跟随深色 / 浅色界面。
@@ -89,7 +93,7 @@ npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编�
 - 面板分为四层：标题栏只放新建 / 清理 / 设置 / 收起等全局操作，任务标签行负责切换（每个标签右侧的 × 结束并关闭该任务），输出区顶部一行显示状态、耗时、shell、目录与退出码，底部始终是后台命令栏。窗口变窄时辅助信息与快捷键提示自动隐藏；面板高度低于 220px 时进入紧凑模式，压缩各层留白而不是挤掉终端内容。
 - 底部命令输入框始终可用：打开终端后仍可直接输入并按 Enter 启动一次性后台命令，命令不会发送给当前终端，也不会把全屏程序切走，只在任务列表新增一条记录并短暂提示「已提交后台任务」；终端结束后同样可以继续跑后台命令，右侧提供「新建终端」。一次性任务同样使用设置中选定的默认 shell，支持 ANSI 颜色与样式、自动跟随 / 回到最新、自动换行、复制 / 清空输出、停止进程树和清理已结束任务；↑ / ↓ 回溯历史，Ctrl / Cmd + L 清屏。
 - **后台命令原地重跑**：选中一条跑过的后台命令、输入框留空时，右下角按钮变成「重新执行」，Enter 就在**这个标签里**再跑一次（输出清空、标签位置不变，不会又开一个新标签）；右上角的刷新按钮做同一件事，「编辑」图标则只把命令填回输入框，方便改完再跑。运行中的任务在同一位置有「停止」，也可以关标签时会先结束整棵进程树。
-- 任务由 Electron 主进程托管，切换项目或刷新窗口后可接回；宿主保留每个任务最近 1 MB 的原始输出，界面日志缓存最多 500 KB。重新加载时只能恢复该尾部记录；已有 PTY 屏幕在日志裁剪时不会重置。面板可拖拽调高并记住，最多占窗口高度的 55%（最高 640px）。
+- 任务由 Go 宿主托管，切换项目或刷新窗口后可接回；宿主保留每个任务最近 1 MB 的原始输出，界面日志缓存最多 500 KB。重新加载时只能恢复该尾部记录；已有 PTY 屏幕在日志裁剪时不会重置。面板可拖拽调高并记住，最多占窗口高度的 55%（最高 640px）。
 
 ### 扩展工具与设置
 
@@ -100,7 +104,7 @@ npm run check:smoke  # 构建 Electron 后运行宿主、网络、终端、编�
 - **RPC 事件**：实时查看 Pi 子进程发出的 JSON-RPC 事件及完整载荷，并可复制 JSON。
 - **插件管理**：按界面区域（对话区域 / 文件区域 / 扩展工具 / 工作台工具）分组启用或停用插件；核心插件不可停用，选择会保存在本地。判断标准见 [产品边界](docs/product-boundary.md)：**Pi 自带的能力留在核心**（对话与内置工具、会话、`@` 文件引用、斜杠命令、模型与思考等级、Skills / MCP / Packages / AGENTS.md），**其它能力一律做成插件**（子代理、Mermaid、引用对话、项目文件树、版本控制、终端、RPC 事件）。
 - **工具开关**：设置 → 扩展 → 工具开关可启用 / 停用 Pi 的内置工具（`read` / `bash` / `edit` / `write` / `grep` / `find` / `ls` / `powershell`）与 `codemode` / `tool_search`，写入 Pi 的 `defaultTools`（全局或当前项目，沿用 Pi 的合并规则；项目级需要先信任项目）。终端里的 `pi` 也使用同一份选择；桌面端启动 Pi 时会用 `--tools +name/-name` 校正已有会话（Pi 1.3 起恢复会话会保留当时的工具）。MCP 工具不由这里控制，仍看 MCP 页的暴露模式。开关在下次启动 Pi 时生效，设置页可一键重启空闲会话。
-- **出网方式**：设置 → Pi Desktop → 网络可选**自动**（有代理环境变量就沿用，否则跟随系统）/ **系统代理** / **直连** / **自定义地址**（如 `127.0.0.1:7890`，可省略 `http://`）。桌面端有两条独立的网络路径，这里一次管两处：应用自己的请求（检查更新、下载安装包）走 Electron 的 session 代理；Pi 的模型请求、MCP、`pi update` 走子进程的 `HTTP(S)_PROXY` 环境变量 —— Pi 用的是 undici 的 `EnvHttpProxyAgent`，看不见系统代理设置，所以系统代理由桌面端转换后注入。已在运行的会话要重启才会换上新规则，设置页有「重启空闲会话」。
+- **出网方式**：设置 → Pi Desktop → 网络可选**自动**（有代理环境变量就沿用，否则跟随系统）/ **系统代理** / **直连** / **自定义地址**（如 `127.0.0.1:7890`，可省略 `http://`）。桌面端有两条独立的网络路径，这里一次管两处：应用自己的请求（检查更新、下载安装包）走 Go 宿主的 HTTP 客户端代理；Pi 的模型请求、MCP、`pi update` 走子进程的 `HTTP(S)_PROXY` 环境变量 —— Pi 用的是 undici 的 `EnvHttpProxyAgent`，看不见系统代理设置，所以系统代理由桌面端转换后注入。已在运行的会话要重启才会换上新规则，设置页有「重启空闲会话」。
 - **主题与设置**：切换深色 / 浅色主题，配置发送快捷键、消息密度、自动保存、Worker 上限、自动压缩 / 重试、Pi 工具开关、Pi 软件包、Skills、MCP 和插件。设置界面按「对话与 Agent / 界面 / 桌面端」分组导航，右侧是带标题与说明的卡片式配置区。悬停提示统一使用跟随主题的浮层，长内容可滚动，不再出现系统白底提示。
 - **运行日志**：写在安装目录下的 `logs/`，跟着程序走（整机安装、安装目录不可写时回落到用户数据目录 `%APPDATA%/Pi Desktop/logs`），分 `app` / `renderer` / `pi` / `perf` 四个文件，记录启动退出、IPC 失败与慢调用、前端报错、会话与压缩事件、界面卡死时抓到的调用栈。单文件 8MB 轮转、总量上限 100MB、从最旧删起；内容先脱敏（token、Bearer、密钥、超长 base64）。设置 → 运行日志可查看目录、占用、打开或一键清理。
 - **软件更新**：启动时可检查 Pi Desktop 的 GitHub Release；发现新版本后在标题栏和设置页提示，并由用户手动打开下载页面。
@@ -116,7 +120,7 @@ main.ts                 组合根：创建内核、注册内置插件
   ├─ plugins/            功能插件：文件、版本控制、事件、Markdown、Mermaid、子代理、引用对话、终端等
   ├─ services/           主题、设置、命令面板、扩展 UI 等跨界面服务
   ├─ kernel/             事件总线、插件管理、工作区状态、会话投影、内容舞台
-  └─ electron/           窗口、IPC、Pi Worker 池与后台任务宿主；每个工作区可运行并行 RPC 会话
+  └─ internal/host/      Go 宿主：窗口绑定、Pi Worker 池、文件 / Git / 终端 / 更新；每个工作区可运行并行 RPC 会话
 ```
 
 ### 插件清单
@@ -133,16 +137,16 @@ main.ts                 组合根：创建内核、注册内置插件
 
 插件可通过 `dock` 贡献工作台停靠组件，`defaultEnabled: false` 声明主动启用的可选功能；终端屏幕按需加载，未启用时不注册终端命令或启动宿主订阅。内置插件清单位于 [`packages/ui/src/plugins/index.ts`](packages/ui/src/plugins/index.ts)，插件生命周期和注册接口位于 [`packages/ui/src/kernel/plugin-manager.ts`](packages/ui/src/kernel/plugin-manager.ts)。插件停用时会执行其清理回调、取消订阅并关闭对应面板 / 详情标签。
 
-### Electron 边界
+### MyGo / Go 宿主边界
 
-- [`electron/terminal-host.ts`](electron/terminal-host.ts) 托管一次性后台命令与 node-pty 会话：原始输出限长、分批上报，退出时清理进程树和终端句柄；[`PtyTerminal.vue`](packages/ui/src/components/terminal/PtyTerminal.vue) 为每个会话维护独立 xterm 屏幕。终端仍只在已授权项目目录启动，后续 `cd` 等行为由用户运行的 shell 控制。
-- [`electron/pi-host.ts`](electron/pi-host.ts) 负责每个工作区的 Pi Worker 池、会话目录、白名单 RPC，以及文件创建、重命名、删除和回收站操作。
-- [`electron/main.ts`](electron/main.ts) 与 [`electron/preload.cts`](electron/preload.cts) 负责窗口和 IPC；渲染进程只通过 `window.piDesktop` 访问宿主能力。窗口禁止附加 `webview`，导航按允许列表校验，打包版限制单实例。
-- 文件写入由 [`electron/atomic-file.ts`](electron/atomic-file.ts) 统一串行化并原子替换；宿主在写入前校验调用方持有的内容版本，发现外部修改时拒绝覆盖。
-- IPC 参数和返回值都会被纯化为可结构化克隆的 JSON 数据，前端响应式 Proxy 不会直接穿过进程边界。
+- `cmd/pi-desktop/main.go` 创建 MyGo 窗口并把 `Host` 绑定给前端；Windows / Linux 使用无边框窗口，macOS 保留系统标题栏与红绿灯。单实例锁、窗口关闭时的未保存草稿确认都在宿主里完成。
+- `internal/host/pool.go` 为每个工作区维护 Pi Worker 池：启动 `pi --mode rpc`、按 `sessionId` 切换 / 新建 / 压缩 / 删除会话，启动超时与 `startGen` 防止陈旧进程覆盖新状态。每个 Worker 一条 JSONL RPC，30 秒默认超时，白名单之外的命令直接拒绝。
+- `internal/host/terminal.go` 用 Go 的 ConPTY / Unix PTY 托管终端与一次性后台命令：输出按 24ms 批量上报、UTF-8 清洗、退出时杀进程树；界面仍只通过固定绑定传按键与尺寸，终端只在已授权项目目录启动。
+- `internal/host/files.go` / `git.go` / `worktree.go` 负责受控文件操作、Git 状态与写操作、隔离工作区；所有路径经过工作区边界与真实路径（防符号链接逃逸）校验，文件写入带 revision 冲突检测并原子替换。
+- `internal/host/settings.go` / `resources.go` / `mcp.go` 读写 `settings.json`、`trust.json`、模型默认值、工具开关、扩展 / 技能 / 提示词 / 主题与 MCP 配置。
+- 绑定层 `internal/host/bindings.go` 导出 `Host.*` 方法；前端桥 `packages/ui/src/mygo/host.ts` 把它们适配成原来的 `window.piDesktop` 形状，业务代码不需要改调用方式。事件通过 `on("pi:event")`、`app:window-state`、`files:disk-change`、`pi:terminal-event` 推送。
 - 宿主会隐藏 `.git`、`node_modules` 和 `.pi` 等目录；所有项目路径都经过工作区边界校验。
-- 渲染进程崩溃（Chromium 层面的 `crashed`，不是 JS 异常）时窗口本来会停在纯黑：现在会自动重载，一分钟内连崩三次改用原生对话框给出「重新加载界面 / 退出」；同时开启本地崩溃转储（不上传），日志里能查到 `renderer.log` 的对应记录。若最近 24 小时崩溃 3 次以上，下次启动会自动关闭硬件加速（也可用 `PI_DESKTOP_DISABLE_GPU=1` 手动关闭）。
-- 最大化 / 还原走系统原生：放大动画、还原回原位置都是系统行为。唯一的补丁是**动画结束后切一次全屏** —— 原生最大化客户区比屏幕矮 1 DIP（实测 1536×863 vs 1536×864），矮掉的那条露出的是桌面（深色界面下就是底部一条白线），而全屏客户区正好等于屏幕、也不画圆角、内容还不位移，所以 260ms 后切全屏正好补掉这条缝，前后只差 1 DIP。代价是最大化状态其实是 fullscreen，按钮图标统一按「全屏或最大化」判断。
+- 开发模式下 Go 代码改动由 `mygo dev` 自动重编译并重启；生产构建把前端 `packages/ui/dist` 嵌入可执行文件，不再有 Electron / Chromium / node-pty 运行时。
 
 ## 关键目录与文件
 
@@ -152,13 +156,13 @@ main.ts                 组合根：创建内核、注册内置插件
 | 工作台骨架 | `packages/ui/src/shell/Shell.vue` | 摆放标题栏、对话区、编辑器、面板和活动栏 |
 | 内核 | `packages/ui/src/kernel/workbench.ts` | 多工作区状态、会话切换、发送 / 停止、文件操作 |
 | 内核 | `packages/ui/src/kernel/transcript.ts` | 把 Pi 消息与流式事件折叠成统一的消息块 |
-| 终端 | `electron/terminal-host.ts` + `packages/ui/src/services/terminal.ts` + `components/terminal/` | 一次性后台命令、真实 PTY / xterm 屏幕、原始输入、resize、任务状态和底部面板 |
+| 终端 | `internal/host/terminal.go` + `packages/ui/src/services/terminal.ts` + `components/terminal/` | 一次性后台命令、真实 PTY / xterm 屏幕、原始输入、resize、任务状态和底部面板 |
 | 插件 | `packages/ui/src/plugins/files/` | 文件树、编辑器和文件操作 |
 | 插件 | `packages/ui/src/plugins/markdown/` | Markdown 预览与 Mermaid 共用渲染开关 |
 | 插件 | `packages/ui/src/plugins/mermaid/` | Mermaid 插件启停生命周期 |
 | 渲染修复 | `packages/ui/src/plugins/markdown/mermaid-fit.ts` | 按 SVG 视图框比例修正 Mermaid 预览高度 |
-| 宿主 | `electron/pi-host.ts` | Pi Worker 池、白名单 RPC、文件系统操作 |
-| 自检 | `scripts/checks/` | transcript、会话历史分页、会话标题、Diff、宿主、删除、附件、文件树和 Mermaid 高度检查 |
+| 宿主 | `internal/host/*.go` | Pi Worker 池、白名单 RPC、文件 / Git / 终端 / 设置 / 更新 |
+| 自检 | `scripts/checks/` + `internal/host/*_test.go` | 界面纯逻辑检查、Go 会话分页 / 模型默认值 / 工具开关 / 工作区文件 / Git 与 worktree 测试 |
 
 ## 架构
 
@@ -172,11 +176,11 @@ main.ts                 组合根：创建内核、注册内置插件
 - RPC 事件详情页的按钮复制格式化 JSON。
 - 项目文件右键菜单复制绝对路径或项目内相对路径。
 
-这些操作依赖 Electron 的安全剪贴板环境；失败时会通过界面通知反馈。
+这些操作走系统剪贴板与回收站 API；失败时会通过界面通知反馈。
 
 ## 通知
 
-界面提示和错误 Toast 统一使用中文文案：Electron IPC 的技术前缀会被移除，常见文件系统 / 网络错误会翻译成可读说明；无法识别的外部错误保留原始细节，并以「操作失败：」或「提示：」开头。
+界面提示和错误 Toast 统一使用中文文案：宿主绑定的技术前缀会被移除，常见文件系统 / 网络错误会翻译成可读说明；无法识别的外部错误保留原始细节，并以「操作失败：」或「提示：」开头。
 
 ## 许可
 

@@ -20,6 +20,7 @@
   height: var(--titlebar-h);
   padding: 0 0 0 10px;
   -webkit-app-region: drag;
+  --app-region: drag;
   user-select: none;
 }
 .shell[data-platform="darwin"] .titlebar { padding: 0 12px 0 82px; }
@@ -54,7 +55,7 @@
 /* 关闭按钮用系统的报警红，深浅主题都保持可读的文字色 */
 .wc-close:hover { background: #c42b1c; color: #fff; }
 .wc-close:active { background: #b0261e; color: #fff; }
-.titlebar button, .titlebar input, .titlebar a, .titlebar .no-drag { -webkit-app-region: no-drag; }
+.titlebar button, .titlebar input, .titlebar a, .titlebar .no-drag { -webkit-app-region: no-drag; --app-region: no-drag; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .tb-left { flex: 1; overflow: hidden; }
 .tb-right { flex: none; }

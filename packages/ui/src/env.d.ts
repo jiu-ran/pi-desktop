@@ -538,6 +538,8 @@ export type TerminalEvent =
 export interface PiDesktopBridge {
   platform: string;
   getPathForFile?: (file: File) => string;
+  /** MyGo 宿主：等待 onFileDrop 送来本次拖放的路径（WebView 的 File 没有 path） */
+  resolveDroppedPaths?: () => Promise<string[]>;
   /** 窗口底色（无边框窗口缩放 / 首帧会露出来） */
   setWindowBackground: (color: string) => Promise<boolean>;
   /** 自绘窗口按钮（Windows / Linux；macOS 用系统红绿灯，不暴露） */

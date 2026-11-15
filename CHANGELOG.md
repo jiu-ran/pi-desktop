@@ -5,6 +5,23 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布] - MyGo 重构
+
+桌面端从 Electron 迁移到 **MyGo（Go 宿主 + 系统 WebView）**，前端仍为 Vue 3 + TypeScript，业务交互与 Pi 兼容规则保持不变。
+
+### 变更
+
+- 主进程 / preload / IPC 换成 Go 的 `internal/host` 与 MyGo 绑定；`window.piDesktop` 由 `packages/ui/src/mygo/host.ts` 适配，界面代码基本不改。
+- 运行时不再打包 Chromium：Windows 可执行文件约 36 MB（原安装包约 120 MB），启动更快、内存更低。
+- 终端从 `node-pty` 换成 Go 的 ConPTY / Unix PTY，不再需要 C++ 工具链和原生模块重编译。
+- 文件、Git、隔离工作区、会话分页、设置 / 资源 / MCP、代理、更新检查、日志、单实例锁全部在 Go 宿主重写。
+- 拖放路径改用 MyGo `onFileDrop`，无边框窗口用 CSS `--app-region` 拖动。
+- 构建命令改为 `mygo dev` / `mygo build`；CI 改用 `actions/setup-go` 与 MyGo 打包。
+
+### 移除
+
+- 删除 `electron/`、Electron / electron-builder / `node-pty` 依赖与 29 个只测 Electron 内部模块的检查；保留的 56 个前端检查全部通过。
+
 ## [0.8.14] - 2026-11-15
 
 `.md` 实时预览的两处点击手感问题，外加提交时回归检查的提速。

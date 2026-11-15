@@ -5,27 +5,27 @@
 ## 当前版本
 
 - 依赖：**不依赖 Pi 的 npm 包**；安装包里没有 Pi 的副本
-- 会话运行时：**本机安装的 pi**（`pi --mode rpc`），入口由 `electron/pi-entry.ts` 从 PATH / 设置里的自定义路径反解成 `dist/cli.js`；找不到就提示安装
-- 通信方式：自己实现的 `PiRpcClient`（`electron/pi-rpc.ts`），用 `process.execPath` + `ELECTRON_RUN_AS_NODE` 起进程，不要求 `node` 在 PATH 里
-- 配置 / 资源 / 技能：自己实现（`electron/pi-resources.ts`）
-- 白名单：`electron/pi-rpc-allowlist.ts`
+- 会话运行时：**本机安装的 pi**（`pi --mode rpc`），入口由 `internal/host/entry.go` 从 PATH / 设置里的自定义路径反解成 `dist/cli.js`；找不到就提示安装
+- 通信方式：自己实现的 `PiRpcClient`（`internal/host/rpc.go`），由 Go 宿主直接起 `node dist/cli.js` 或独立 `pi` 可执行文件，不依赖桌面端自带的 Node
+- 配置 / 资源 / 技能：自己实现（`internal/host/resources.go`）
+- 白名单：`internal/host/pool.go（`allowedRpcMethods`）`
 
 ## 适配项
 
 | 适配 | 位置 | 原因 | 删除条件 |
 |---|---|---|---|
-| 使用 RPC 而非进程内 SDK 会话 | `electron/pi-host.ts` | 保持桌面端与 Pi 进程隔离 | Pi 提供受支持的嵌入式主机 API 且产品决定改变运行方式 |
-| 会话跑本机 pi，不用依赖里的副本 | `electron/pi-entry.ts` | 产品边界要求不内置 Pi 的推理与工具执行；用户 `pi update` 后桌面端要立刻用上新版本 | Pi 官方提供「指定 CLI 入口」的正规 API |
-| 自己实现 RPC 客户端 | `electron/pi-rpc.ts` | 不想把整个 Pi 包拖进安装包；也不想因上游写死 `spawn("node")` 而要求用户装 Node | Pi 官方提供无依赖的 RPC 客户端 |
-| 自己读写设置 / 软件包 / 技能 | `electron/pi-resources.ts` | 同上；只依赖 Pi 的磁盘约定（settings.json / `pi` 字段 / 目录布局） | Pi 把这些能力全部做成带 `--json` 的 CLI |
-| 附件在发送前转换为文件和图片内容 | `electron/pi-host.ts` | 当前 RPC 提示接口接收文本和图片，不接收桌面端附件对象 | Pi 提示接口原生支持受控文件附件 |
+| 使用 RPC 而非进程内 SDK 会话 | `internal/host/pool.go 等 Go 宿主` | 保持桌面端与 Pi 进程隔离 | Pi 提供受支持的嵌入式主机 API 且产品决定改变运行方式 |
+| 会话跑本机 pi，不用依赖里的副本 | `internal/host/entry.go` | 产品边界要求不内置 Pi 的推理与工具执行；用户 `pi update` 后桌面端要立刻用上新版本 | Pi 官方提供「指定 CLI 入口」的正规 API |
+| 自己实现 RPC 客户端 | `internal/host/rpc.go` | 不想把整个 Pi 包拖进安装包；也不想因上游写死 `spawn("node")` 而要求用户装 Node | Pi 官方提供无依赖的 RPC 客户端 |
+| 自己读写设置 / 软件包 / 技能 | `internal/host/resources.go` | 同上；只依赖 Pi 的磁盘约定（settings.json / `pi` 字段 / 目录布局） | Pi 把这些能力全部做成带 `--json` 的 CLI |
+| 附件在发送前转换为文件和图片内容 | `internal/host/pool.go 等 Go 宿主` | 当前 RPC 提示接口接收文本和图片，不接收桌面端附件对象 | Pi 提示接口原生支持受控文件附件 |
 | 界面缓存派生自 RPC 快照和事件 | `packages/ui/src/kernel` | 界面需要立即响应，但不能变成第二份会话记录 | 界面能直接订阅 Pi 的完整只读状态并仍满足响应要求 |
 | `/` 命令由桌面端自己实现一遍 | `packages/ui/src/shared/pi-commands.ts`、`services/slash-commands.ts` | RPC 的 `get_commands` 只返回扩展 / 提示模板 / 技能三类，Pi 的 24 条内置命令都得自己接 | Pi 的 RPC 直接提供内置命令的枚举与执行 |
-| 项目信任自己读写 `trust.json` | `electron/project-trust.ts` | Pi 在 RPC 模式下拿不到「信不信任这个目录」的回答，默认按不信任处理，项目级扩展 / 技能 / MCP 会静默不加载 | Pi 的 RPC 提供 trust 查询与设置 |
-| 出网方式自己选，并转成子进程环境变量 | `electron/network/mode.ts`、`packages/ui/src/shared/network-mode.ts` | Pi 用 undici 的 `EnvHttpProxyAgent`，只认 `HTTP(S)_PROXY`；系统代理设置它看不见，RPC 也没有「设置代理」的命令 | Pi 的 RPC 或设置里提供代理配置 |
-| 会话导入 / JSONL 导出自己实现 | `electron/pi-host.ts`（`importSession` / `exportSessionJsonl`） | RPC 只有 `export_html`，没有 import / jsonl 导出 | Pi 的 RPC 补齐这两条命令 |
-| 对话里的 `!` / `!!` 走 RPC `bash` | `electron/pi-rpc.ts`、`packages/ui/src/shared/bash-input.ts` | 命令输出要在对话里边跑边看；RPC 的最终结果与流式增量靠桌面端生成的 `id` 关联 | Pi 的 RPC 取消 `bash` / `abort_bash` 或改为其它协议 |
-| 工具开关写入 `defaultTools`，启动时用 `--tools` 校正 | `electron/pi-tools.ts`、`packages/ui/src/components/overlays/settings/ToolSettings.vue` | RPC 没有运行时启停工具的接口；`defaultTools` 只在启动时读取，已有会话还会从记录里恢复自己的工具 | Pi 的 RPC 提供工具清单与运行时启停 |
+| 项目信任自己读写 `trust.json` | `internal/host/settings.go` | Pi 在 RPC 模式下拿不到「信不信任这个目录」的回答，默认按不信任处理，项目级扩展 / 技能 / MCP 会静默不加载 | Pi 的 RPC 提供 trust 查询与设置 |
+| 出网方式自己选，并转成子进程环境变量 | `internal/host/network.go`、`packages/ui/src/shared/network-mode.ts` | Pi 用 undici 的 `EnvHttpProxyAgent`，只认 `HTTP(S)_PROXY`；系统代理设置它看不见，RPC 也没有「设置代理」的命令 | Pi 的 RPC 或设置里提供代理配置 |
+| 会话导入 / JSONL 导出自己实现 | `internal/host/pool.go 等 Go 宿主`（`importSession` / `exportSessionJsonl`） | RPC 只有 `export_html`，没有 import / jsonl 导出 | Pi 的 RPC 补齐这两条命令 |
+| 对话里的 `!` / `!!` 走 RPC `bash` | `internal/host/rpc.go`、`packages/ui/src/shared/bash-input.ts` | 命令输出要在对话里边跑边看；RPC 的最终结果与流式增量靠桌面端生成的 `id` 关联 | Pi 的 RPC 取消 `bash` / `abort_bash` 或改为其它协议 |
+| 工具开关写入 `defaultTools`，启动时用 `--tools` 校正 | `internal/host/settings.go`、`packages/ui/src/components/overlays/settings/ToolSettings.vue` | RPC 没有运行时启停工具的接口；`defaultTools` 只在启动时读取，已有会话还会从记录里恢复自己的工具 | Pi 的 RPC 提供工具清单与运行时启停 |
 
 ## 自己实现部分的已知差异
 

@@ -27,18 +27,16 @@ jobs:
         include:
           - platform: windows
             os: windows-latest
-            builder_args: --win
+            target: windows/amd64
           - platform: macos
             os: macos-latest
-            builder_args: --mac
+            target: darwin/universal
           - platform: linux
             os: ubuntu-latest
-            builder_args: --linux
+            target: linux/amd64
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
     steps:
       - name: Checkout
@@ -56,43 +54,28 @@ jobs:
             package-lock.json
             packages/ui/package-lock.json
 
-      - name: Install Linux build dependencies
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux packaging dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 build-essential python3
+          sudo apt-get install -y fakeroot dpkg rpm zstd
 
       - name: Install dependencies
         run: |
           npm ci
           npm ci --prefix packages/ui
 
-      # 桌面端会话跑的是本机 pi（不内置）：`npm run check` 里的 host 检查与冒烟都要真起进程
-      - name: Install Pi CLI
-        run: npm install -g @earendil-works/pi-coding-agent@1.2.0
-
-      - name: Prepare POSIX PTY helper permissions
-        if: runner.os != 'Windows'
-        shell: bash
-        run: find node_modules/node-pty -type f -name spawn-helper -exec chmod +x {} \;
-
       - name: Run regression checks
         run: npm run check
 
-      - name: Build app
-        run: npm run build
-
-      - name: Run Electron smoke checks
-        if: runner.os == 'Windows'
-        shell: bash
-        run: npx --no-install electron scripts/checks/smoke.electron.mjs
-
-      - name: Package app
-        run: npx --no-install electron-builder ${{ matrix.builder_args }} --publish never
-
-      - name: Verify packaged PTY
-        if: runner.os == 'Windows'
-        run: npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar
+      - name: Build and package
+        run: npx mygo build -platform ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.2
@@ -101,13 +84,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist/*.exe
-            dist/*.msi
-            dist/*.zip
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.tar.gz
-            dist/*.blockmap
+            dist-mygo/**/*.exe
+            dist-mygo/**/*.msi
+            dist-mygo/**/*.zip
+            dist-mygo/**/*.dmg
+            dist-mygo/**/*.tar.gz
+            dist-mygo/**/*.deb
+            dist-mygo/**/*.rpm
+            dist-mygo/**/*.pkg.tar.zst
 
   release:
     name: Publish release
@@ -149,7 +133,7 @@ jobs:
         shell: bash
         run: |
           cd artifacts
-          find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.tar.gz' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload to GitHub Release
@@ -160,8 +144,10 @@ jobs:
             artifacts/*.exe
             artifacts/*.zip
             artifacts/*.dmg
-            artifacts/*.AppImage
             artifacts/*.tar.gz
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.pkg.tar.zst
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           name: Pi Desktop ${{ inputs.release_tag || github.ref_name }}
           body_path: release-notes.md

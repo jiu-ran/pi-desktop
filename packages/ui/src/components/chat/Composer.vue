@@ -922,7 +922,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   if (!hasDroppablePayload(event.dataTransfer)) return;
   event.preventDefault();
   dragOver.value = false;
-  const paths = workbench.extractDroppedPaths(event.dataTransfer);
+  const paths = await workbench.extractDroppedPaths(event.dataTransfer);
   if (!paths.length) return;
   try {
     await workbench.addFiles(paths);

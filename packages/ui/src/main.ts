@@ -1,4 +1,5 @@
-import { createApp } from "vue";
+import "./mygo/host.ts";
+import { createApp, watchEffect } from "vue";
 import App from "./App.vue";
 import { createKernel, KERNEL_KEY } from "./kernel/index.ts";
 import { builtinPlugins } from "./plugins/index.ts";
@@ -23,6 +24,11 @@ async function boot(): Promise<void> {
   };
   app.mount("#app");
   window.__piDesktop = kernel;
+  // 有未保存草稿时让 Go 侧的关闭确认知道，系统关闭按钮也走同一套判断。
+  watchEffect(() => {
+    const dirty = kernel.stage.allTabs.value.some((tab) => tab.dirty || (tab.data as any)?.saving);
+    void (window as any).piDesktop?.setDirty?.(dirty);
+  });
   // 渲染侧长任务写进主进程的卡顿日志：卡死时能分清是主进程还是渲染进程。
   installLongTaskReporter({
     report: (ms, label) => (window as any).piDesktop?.reportLongTask?.(ms, label),

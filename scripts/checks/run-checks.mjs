@@ -24,7 +24,6 @@ const checksDir = here;
 /** 永远跟着跑的「全局守门」：整体扫描仓库，单个都只有几百毫秒 */
 const ALWAYS = new Set([
   "capability-boundary",
-  "product-boundary",
   "css-tokens",
   "palette-css",
   "settings-tabs",

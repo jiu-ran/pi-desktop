@@ -18,6 +18,8 @@ const windowControls = (globalThis as any).piDesktop?.windowControls as
 
 /** 无边框窗口不再有系统标题栏，双击最大化要自己接（点按钮不算） */
 function onTitlebarDoubleClick(event: MouseEvent): void {
+  // MyGo 的无边框窗口自己处理拖动区域的双击，再调一次会把最大化又还原。
+  if ((globalThis as any).__piDesktopHost === "mygo") return;
   if (!windowControls) return;
   if ((event.target as HTMLElement | null)?.closest("button")) return;
   void windowControls.toggleMaximize();

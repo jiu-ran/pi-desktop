@@ -1065,7 +1065,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
   }
 
-  function extractDroppedPaths(dataTransfer: DataTransfer | null): string[] {
+  async function extractDroppedPaths(dataTransfer: DataTransfer | null): Promise<string[]> {
     if (!dataTransfer) return [];
     const collected: string[] = [];
 
@@ -1086,12 +1086,19 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
     // 2. 支持从操作系统文件管理器（Explorer / Finder）拖拽文件或文件夹
     if (dataTransfer.files?.length) {
-      const external: string[] = [];
-      for (const file of Array.from(dataTransfer.files)) {
-        const resolved = host?.getPathForFile?.(file) || (file as any)?.path || "";
-        if (typeof resolved === "string" && resolved.trim()) external.push(resolved.trim());
+      // MyGo / WebView 里 File 没有 path，路径由宿主的 onFileDrop 异步送来；
+      // Electron 的同步 getPathForFile 仅作为旧宿主的兜底。
+      const dropped = (await host?.resolveDroppedPaths?.()) ?? [];
+      if (dropped.length) {
+        collected.push(...dropped);
+      } else {
+        const external: string[] = [];
+        for (const file of Array.from(dataTransfer.files)) {
+          const resolved = host?.getPathForFile?.(file) || (file as any)?.path || "";
+          if (typeof resolved === "string" && resolved.trim()) external.push(resolved.trim());
+        }
+        collected.push(...external);
       }
-      collected.push(...external);
     }
 
     return [...new Set(collected)];

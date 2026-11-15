@@ -4,16 +4,16 @@
 
 ## 终端组件
 
-- **node-pty 1.1.0**：<https://github.com/microsoft/node-pty>，MIT；版权与许可全文见
-  [`licenses/node-pty-MIT.txt`](licenses/node-pty-MIT.txt)。用于 Electron 主进程中的 Windows ConPTY / Unix PTY。
-  原生模块和辅助程序保留在 `app.asar.unpacked/node_modules/node-pty/`，不从压缩归档执行。
-  `electron/terminal-pty-cleanup.ts` 为本项目的兼容清理代码，针对该固定版本的 Windows 资源回收问题，未修改依赖源码。
+- **MyGo 0.9.1**：<https://github.com/egoist/mygo>，MIT。提供桌面窗口、系统 WebView、原生对话框、单实例锁、文件拖放、剪贴板 / 回收站 / 打开外链等宿主能力。
+- **go-pty 0.2.3**：<https://github.com/aymanbagabas/go-pty>，MIT。用于 Windows ConPTY 与 Unix PTY；其传递依赖 `creack/pty`（MIT）与 `u-root`（BSD-3-Clause）随静态链接进入可执行文件。
+- **fsnotify 1.9.0**：<https://github.com/fsnotify/fsnotify>，BSD-3-Clause。用于工作区文件变更监听。
+- **Go 标准库与 `golang.org/x/*`**：BSD-3-Clause，随 Go 工具链静态链接。
 - **xterm.js 6.0.0**：<https://github.com/xtermjs/xterm.js>，MIT；版权与许可全文见
   [`licenses/xterm-MIT.txt`](licenses/xterm-MIT.txt)。用于终端屏幕、光标、备用屏幕、键盘和鼠标控制序列的解析。
 - **@xterm/addon-fit 0.11.0**：同属 xterm.js 项目，MIT；版权与许可全文见
   [`licenses/xterm-addon-fit-MIT.txt`](licenses/xterm-addon-fit-MIT.txt)。用于根据面板实际尺寸适配终端行列数。
 
-分发应用时保留上述许可文件；node-pty 依赖目录中的 winpty / ConPTY 第三方版权文件同样随包保留。
+分发应用时保留上述许可文件与各自仓库中的 LICENSE。Go 依赖是静态链接，不需要在安装目录保留单独的原生模块。
 
 ## Markdown 编辑器
 
@@ -55,9 +55,9 @@
   - `packages/ui/src/shared/review.ts`、`packages/ui/src/components/shared/DiffView.vue`、`packages/ui/src/plugins/git/GitStage.vue`：
     Diff 行内评审的锚点、行号 / 侧别 / 代码上下文与提示词封装，参考 `apps/web/src/chat/reviewPackage.ts`、
     `planView.ts` 的评审包结构；本项目改为 Vue 组件 + 纯函数，并限制为实时 Git diff 可评审。
-  - `electron/pi-host.ts`、`packages/ui/src/plugins/git/GitPanel.vue`：`git worktree` 隔离工作区的分支命名、
+  - `internal/host/worktree.go`、`packages/ui/src/plugins/git/GitPanel.vue`：`git worktree` 隔离工作区的分支命名、
     去重与「主工作区 / 外部工作区 / 托管工作区」边界，参考 `packages/server/src/workspaces/workspaces.ts`；
-    本项目按 Electron 主进程 / 渲染进程边界重新实现，未复用其持久化与子 Agent 逻辑。
+    本项目按 Go 宿主 / 渲染进程边界重新实现，未复用其持久化与子 Agent 逻辑。
 - 修改说明：上游为 React 19 + Zustand + Tailwind，本项目为 Vue 3 + TypeScript + 手写 CSS；
   移植时改写为 Vue 组合式 API，纯逻辑拆分为可测试函数（见 `scripts/checks/stats.check.ts`、`scripts/checks/git.check.ts`、
   `scripts/checks/transcript.check.ts`、`scripts/checks/review.check.ts`），并适配本项目既有的事件模型与安全边界。数据仍由 pi 的

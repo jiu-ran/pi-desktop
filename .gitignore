@@ -1,9 +1,12 @@
 node_modules
 packages/ui/node_modules
 packages/ui/dist
-dist-electron
 dist
 *.tsbuildinfo
 
 # 开发时日志目录（打包版写在安装目录下）
 logs/
+
+# MyGo 开发构建与产物
+.mygo/
+dist-mygo/

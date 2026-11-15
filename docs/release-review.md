@@ -1,18 +1,19 @@
 # 发布前检查清单
 
-本清单用于主分支发布前的自检；`thinkrail` 工作台改动已在 v0.2.0 合并。这里的命令都在仓库根目录执行，Windows PowerShell / Git Bash、macOS、Linux 通用（路径分隔符按本机调整）。
+本清单用于主分支发布前的自检。命令都在仓库根目录执行，Windows Git Bash、macOS、Linux 通用（路径分隔符按本机调整）。项目现在由 **MyGo + Go 宿主 + Vue 3 前端** 组成，不再有 Electron 主进程、`node-pty` 或 `app.asar`。
 
 ## 0. 验证分级：日常小验证，发布前完整跑
 
-**完整链路（冒烟 + 打包产物）只在发布新版本前执行**，日常改动不做这件事——一次冒烟要五分钟，连跑几次比改动本身还贵。
+**完整链路（冒烟 + 打包产物）只在发布新版本前执行**，日常改动不做这件事。
 
 | 场景 | 跑什么 | 大概耗时 |
 | --- | --- | --- |
 | 改文档 / 文案 / 注释 | 不跑 | — |
-| 改纯逻辑（`shared/`、`electron/` 里的纯函数） | `npm run check:changed`（按改动文件自动挑相关检查）；对不准时用 `node scripts/checks/run-checks.mjs --only=<名字>` | 秒级 |
+| 改前端纯逻辑（`packages/ui/src/shared/`、`kernel/` 里的纯函数） | `npm run check:changed`（按改动文件自动挑相关检查）；对不准时用 `node scripts/checks/run-checks.mjs --only=<名字>` | 秒级 |
+| 改 Go 纯逻辑（`internal/host/`） | `go test ./internal/host`；必要时加 `go vet ./...` | 秒级～十几秒 |
 | 改样式 / 布局 / 交互 | `npm run check:changed`（会带上 `css-tokens`、`palette-css` 等全局守门）；要看真实渲染时写一次性探针（`temp/` 下，用完删） | 秒级 |
-| 改窗口创建 / 标题栏 / preload 白名单 / PTY 宿主 / 打包配置 | 一次探针量准关键值，然后跑**一次** `npm run check:smoke` | 数分钟 |
-| 发布新版本 | `npm run check`（全量 85 项，并行；本机约 35 秒）+ 本文件第 1–8 节 | 约 1 分钟 + 冒烟 |
+| 改窗口 / 绑定签名 / PTY / 打包配置 | 一次探针量准关键值，然后跑**一次** `PI_DESKTOP_SMOKE=1 npx mygo dev` | 数分钟 |
+| 发布新版本 | `npm run check`（56 个前端检查 + `go test ./...`）+ 本文件第 1–8 节 | 约 10 秒 + 冒烟 |
 
 两条配套规则：
 
@@ -23,99 +24,98 @@
 
 - [ ] `package.json` 的 `version` 与 `CHANGELOG.md` 的版本段落一致，日期已填。
 - [ ] `package-lock.json` 与 `packages/ui/package-lock.json` 都已提交（CI 使用 `npm ci`）。
-- [ ] `npm audit` 与 `npm audit --prefix packages/ui` 均无 high / critical；`moderate` 若来自仅构建期使用的 `electron-builder` 工具链，需要在 Release 说明中注明。
-- [ ] Electron 使用当前受支持的稳定大版本（当前 `45.x`）；升级后必须重跑第 3、4 节的终端与打包检查。
-- [ ] `node-pty` 固定为 `1.1.0`，`node_modules/node-pty` 的预构建产物与目标平台匹配；改动 `electron/terminal-pty-cleanup.ts` 或升级 `node-pty` 时重跑终端冒烟。
+- [ ] `go.mod` / `go.sum` 已提交；Go 版本不低于 `go.mod` 里的 `go` 指令（当前 1.27.3）。
+- [ ] `npm audit` 与 `npm audit --prefix packages/ui` 均无 high / critical；构建期 `mygo-cli` 的 moderate 视情况在 Release 说明中注明。
+- [ ] `mygo` 与 `mygo-runtime` 版本一致（当前 `0.9.1`）；升级 MyGo 后重跑窗口、PTY、打包三节。
+- [ ] 没有残留 Electron / `node-pty` 依赖：`rg '"electron"|node-pty' package.json packages/ui/package.json` 应为空。
 
 ## 2. 静态与单元回归
 
 ```bash
-npm run check              # 一条命令：tsc + vue-tsc + check:syntax + 全部 *.check.ts（并行）
+npm run check              # tsc + vue-tsc + check:syntax + 全部 *.check.ts + go test ./...
+npm run check:go           # 只跑 Go 测试
+go vet ./...               # 可选，发布前建议
 git diff --check           # 行尾空白 / 冲突标记
 ```
 
-检查由 `scripts/checks/run-checks.mjs` 统一调度：自动发现全部 `*.check.ts`，按 CPU 并行，
-失败时只把出错那个检查的最后 30 行打出来，最后给总耗时与最慢的 5 项。本机上串行跑完要 87 秒，
-并行后约 33 秒；其中 `git`（26 秒）与 `git-worktree`（32 秒）是两个真实仓库集成测试，
-并行后墙钟就被它们俩卡住，其余 80 多个检查几乎全在几秒内跑完。常用参数：
+前端检查由 `scripts/checks/run-checks.mjs` 统一调度：自动发现全部 `*.check.ts`，按 CPU 并行，
+失败时只把出错那个检查的最后 30 行打出来，最后给总耗时与最慢的 5 项。常用参数：
 
 | 命令 | 用途 |
 | --- | --- |
 | `npm run check` | 全量（发布前 / CI） |
-| `npm run check:changed` | 只跑被改动文件（含未跟踪与未推提交）影响的检查 + 全局守门 |
+| `npm run check:changed` | 只跑被改动文件影响的检查 + 全局守门 |
 | `npm run check:full` | 单并发 + 逐项打印（排查时序问题或想看每一项耗时） |
 | `node scripts/checks/run-checks.mjs --list` | 列出所有检查（`[全局]` 表示永远跟着跑） |
 | `node scripts/checks/run-checks.mjs --only=git,term` | 按名字子串只跑几个 |
 
-- [ ] `npm run check` 全部通过，尤其是 `editor-save`、`files`、`history`、`stage`、`terminal`、`terminal-wheel`、`product-boundary`。
-- [ ] **新增检查只要放进 `scripts/checks/*.check.ts` 就行**，不用再改 `package.json` 的脚本链；文件名即 `--only` 的匹配名。
-- [ ] `--changed` 的映射来自检查源码的 `import` 图。新增的检查如果要覆盖某类文件，确保它（或其依赖）`import` 了那些源文件；否则改动不会选中它（只改了 `.vue` / 样式时只跑全局守门，不会假装测过）。
-- [ ] `scripts/checks/` 里只放 `*.check.ts`（自动发现）、`*.electron.mjs`（冒烟用）、`syntax.mjs`、`run-checks.mjs`、`support/` 和夹具。
-  **一次性探针、截图脚本、反向验证脚本一律写进 `temp/`，用完删**：以前留过 5 个 `_*-probe.mjs` / `_*-shot.mjs`，
-  没人再跑却一直占着目录，还会被 `check:syntax` 白扫一通（v0.8.14 已清掉）。
+- [ ] `npm run check` 全部通过；Go 侧重点看会话分页、模型默认值、工具开关、工作区文件、Git / worktree 五组测试。
+- [ ] **新增前端检查只要放进 `scripts/checks/*.check.ts` 就行**，不用再改 `package.json`；文件名即 `--only` 的匹配名。
+- [ ] 新增 Go 行为时在 `internal/host/*_test.go` 里补测试，尽量用 `t.TempDir()`，不要在仓库里留产物。
+- [ ] **一次性探针、截图脚本、反向验证脚本一律写进 `temp/`，用完删**。
 
-### 写一个新检查
+## 3. 宿主冒烟
 
-```ts
-import { assert, assertEqual, expectReject, installFakeLocalStorage } from "./support/harness.ts";
-
-assertEqual(parse("a"), "A", "…");           // 失败信息自带「期望 / 实际」
-installFakeLocalStorage();                     // 要加载 workbench / settings 时先装
-const { createWorkbench } = await import("../../packages/ui/src/kernel/workbench.ts");
-```
-
-- 断言、临时目录、轮询、假 localStorage 都从 `support/harness.ts` 拿，**不要每个文件再抄一遍**。
-- **不要写收尾的 `console.log("xxx OK")`**：`run-checks.mjs` 自己会打 `ok <名字> (耗时)`；
-  只有带数据（数量、分支、路径）的日志才值得留。
-
-## 3. Electron 冒烟
+在开发模式下跑完整探针（会打开真实窗口、启动本机 `pi`、创建临时 git 仓库）：
 
 ```bash
-npm run check:smoke
+PI_DESKTOP_SMOKE=1 \
+PI_DESKTOP_SMOKE_PTY=1 \
+PI_DESKTOP_SMOKE_BASH=1 \
+PI_DESKTOP_SMOKE_PROMPT=1 \
+PI_DESKTOP_SMOKE_UI=1 \
+PI_DESKTOP_SMOKE_SETTINGS=1 \
+PI_DESKTOP_SMOKE_REPO=1 \
+npx mygo dev
 ```
 
-覆盖内容：
-
-| 模块 | 断言 |
+| 探针 | 断言 |
 |---|---|
-| 网络层 | 超时、取消、下载校验、原子替换、架构选择 |
-| 终端 | 可选插件启停、真实 PTY、全屏备用屏幕、方向键与滚轮区分、Tab、Ctrl+W 放行、多会话、resize、Ctrl+C |
-| 编辑器 | 保存、外部修改冲突、切换项目保留草稿、Markdown 高亮、Mermaid 时序图、不可信 HTML 被拦截 |
-| 版本控制 | 本地分支切换、新建、草稿 / 运行任务保护、暂存分区与真实 Diff、中文路径、窄面板 |
-| 终端界面 | 深浅主题下拉、键盘导航、历史只填入、浮层生命周期、窄对话布局 |
+| `host` | 窗口标题、MyGo 运行时、Pi 定位（版本 / 路径）、最近项目、会话目录、模型数量、shell profile |
+| `PTY` | ConPTY / Unix PTY 能起 shell、回显 `hello-mygo`、退出码正常 |
+| `bash` | 一次性后台命令能收完整输出与退出码 |
+| `prompt` | 真实 `pi --mode rpc` 能收到一条 prompt 并返回文本 |
+| `UI` | 前端已加载、`openWorkspace` 返回文件列表、`gitBranch` 可用、截图落盘 |
+| `settings` | 工具 / 模型 / 技能 / 包 / MCP / 信任 / 智能体 / 日志 / 网络 / 更新缓存各接口不报错 |
+| `repo` | 临时 git 仓库的读写、暂存、提交、worktree 创建与移除 |
 
-- [ ] 输出包含 `[result] PASS` 和 `[errors] none`。CI 的 Windows job 在打包前执行同一套冒烟。
-- [ ] 自动化窗口被其它窗口遮挡时，xterm DOM 渲染会被 Chromium 节流；`scripts/checks/smoke.electron.mjs` 已关闭 native occlusion / 后台节流，若未来删除这些开关，终端冒烟会出现假阴性。
+- [ ] 日志里出现 `smoke: ... PASS` / 统计行，退出码为 0；截图在临时目录（`%TEMP%/pi-desktop-mygo-smoke.png`）。
+- [ ] 日志落在仓库 `logs/`（开发模式）或 userData `logs/`；没有 panic、`found pointer to free object`、非法 UTF-8 报错。
+- [ ] 生产可执行文件也能跑最小探针：`PI_DESKTOP_SMOKE=1 "dist-mygo/windows-amd64/Pi Desktop.exe"`。
 
 ## 4. 打包产物
 
 ```bash
-npm run build
-npx --no-install electron-builder --dir
+npx mygo build                    # 当前平台：exe/app + 安装包
+npx mygo build -skip-installer    # 只出可执行文件，打包检查用
+npx mygo build -platform windows/amd64,darwin/universal,linux/amd64
 ```
 
-- [ ] `dist/win-unpacked`（或对应平台目录）能启动，界面正常渲染，标题栏、侧边栏、欢迎页没有缺失。
-- [ ] 打包版加载 `app.asar` 内的 `dist-electron/terminal-host.js` 后能启动 PTY 并正常退出：`npx --no-install electron scripts/checks/packaged-pty.electron.mjs dist/win-unpacked/resources/app.asar`（Windows CI 同样执行）。
-- [ ] `dist/` 中的安装包文件名、图标、版本号正确。
-- [ ] 打包产物里没有 `@earendil-works`（桌面端不内置 Pi；`find dist/win-unpacked/resources -name "*earendil*"` 应为空）。
-- [ ] `CSP` 生效但未拦截自身资源：渲染进程控制台没有 `Refused to ...` 或 `Content Security Policy` 报错。
+- [ ] `dist-mygo/<os>-<arch>/` 下的可执行文件能启动，界面正常渲染，标题栏、侧边栏、欢迎页没有缺失。
+- [ ] Windows exe 约 35–40 MB；安装包能安装 / 卸载，开始菜单与桌面快捷方式行为正确。
+- [ ] macOS `.app` / `.dmg` 能打开；未签名时按第 7 节说明放行。
+- [ ] Linux `tar.gz` / `deb` / `rpm` 至少各验一个；`tar.gz` 内含 `install.sh`，可在无包管理器环境安装到 `~/.local`。
+- [ ] 打包产物里没有 `@earendil-works`（`rg -a "earendil" dist-mygo` 应为空）。
+- [ ] `CSP` 生效但未拦截自身资源：WebView 控制台没有 `Refused to ...` 或 `Content Security Policy` 报错。
+- [ ] 开发模式与安装版可以同时运行（单实例锁只作用于同一个可执行文件 / userData）。
 
 ## 5. 手工验收（每轮发布至少一遍）
 
-### 文件保存与多项目
+### 窗口与文件保存
 
+- [ ] Windows / Linux 无边框窗口可拖动、双击标题栏最大化、右上角最小化 / 最大化 / 关闭正常；macOS 红绿灯位置正确。
 - [ ] 打开项目 A 的文件，改内容但不保存；切换到项目 B，再切回 A，草稿仍在。
 - [ ] 关闭自动保存时关闭脏标签 / 停用文件插件 / 移除项目，都会出现确认；确认放弃后不会写盘。
+- [ ] 有未保存草稿时关闭窗口，弹出原生确认；取消后窗口仍在。
 - [ ] 在外部编辑器或 Agent 修改同一文件后再保存，界面提示冲突并保留草稿，磁盘内容没有被覆盖。
-- [ ] 保存失败（只读目录、磁盘满）后草稿仍在，错误提示为中文且可重试。
 - [ ] 图片 / 二进制文件在文本编辑器中只读，不会被保存覆盖。
 
 ### 更新与退出
 
 - [ ] 下载更新时取消，`.part` 临时文件被清理，界面回到可重试状态。
-- [ ] 断网或代理不可用时，更新检查给出可读错误，不出现无限转圈。
-- [ ] 有未保存改动时退出应用，会先保存或确认；取消退出后窗口仍在。
-- [ ] 安装新版本后，已有桌面快捷方式保留；首次安装或快捷方式缺失时出现创建选项。
+- [ ] 断网、直连、系统代理、自定义代理四种模式下，更新检查与 Pi 请求都按预期走；代理不可用时给出可读错误。
+- [ ] 安装新版本后自动重启，已有桌面快捷方式保留。
+- [ ] 退出后没有残留 `pi` / shell / 终端进程（Windows 任务管理器确认）。
 
 ### 终端与全屏 CLI
 
@@ -124,7 +124,7 @@ npx --no-install electron-builder --dir
 - [ ] 全屏 CLI 中滚轮是内容翻页，不会回溯输入历史；普通 shell 中滚轮仍是 scrollback。
 - [ ] 终端聚焦时 Ctrl+W / Ctrl+L 交给终端程序，不关闭窗口或刷新界面。
 - [ ] 修改「设置 → 终端」的默认 shell 后，只影响新建会话；一次性后台命令也使用新 shell。
-- [ ] 停止 / 结束会话后没有残留进程或 ConPTY 句柄（Windows 用任务管理器确认）。
+- [ ] 停止 / 结束会话后没有残留进程或 ConPTY 句柄。
 
 ### 会话与流式
 
@@ -132,6 +132,7 @@ npx --no-install electron-builder --dir
 - [ ] 分叉会话（v3 JSONL 多分支）只显示当前分支的消息。
 - [ ] 回复结束后才出现复制按钮；Token 用量与实际调用一致，不是全 0。
 - [ ] 切换项目 / 会话时没有「未知的会话文件」类错误。
+- [ ] 拖拽文件到输入框、粘贴图片、`@` 文件补全都正常（拖放路径由 MyGo 的 `onFileDrop` 异步解析）。
 
 ### 离线与网络
 
@@ -141,16 +142,16 @@ npx --no-install electron-builder --dir
 ## 6. CI 与发布
 
 - [ ] `.github/workflows/build.yml` 的 `build` job 只有 `contents: read`，`release` job 才提升为 `write`。
-- [ ] CI 在 Linux 安装 `build-essential python3`（`node-pty`），并缓存两份 lockfile。
-- [ ] 打 tag（`v*`）后三个平台都产出产物，`SHA256SUMS.txt` 覆盖全部安装包。
-- [ ] Release 说明用中文，列出新增功能、修复、已知限制与校验方式；优先维护 `docs/releases/v<版本>.md`，CI 使用 `scripts/release-notes.mjs` 生成说明，不再自动生成英文提交列表。
+- [ ] CI 使用 `actions/setup-go` 读取 `go.mod`，Linux 安装 `fakeroot dpkg rpm zstd`。
+- [ ] 打 tag（`v*`）后三个平台都产出产物，`SHA256SUMS.txt` 覆盖 exe / zip / dmg / tar.gz / deb / rpm。
+- [ ] Release 说明用中文，列出新增功能、修复、已知限制与校验方式；优先维护 `docs/releases/v<版本>.md`，CI 使用 `scripts/release-notes.mjs` 生成说明。
 
 ## 7. 已知限制（随 Release 说明）
 
+- Windows 依赖系统 WebView2（Windows 11 自带；Windows 10 若缺失需安装 Evergreen Runtime）。MyGo 不会把 Chromium 打进安装包。
 - macOS 安装包未签名 / 未公证，首次打开需要在「系统设置 → 隐私与安全性」允许；Windows 未做代码签名，SmartScreen 可能提示未知发布者。
-- Linux 的 `AppImage` 需要 `libfuse2`；无 FUSE 环境可用 `tar.gz`。
+- Linux 使用 `tar.gz` 内的 `install.sh` 安装到 `~/.local`，或使用 `deb` / `rpm` / Arch 包；桌面环境需要 WebKitGTK 4.1。
 - 终端依赖本机已安装的 CLI 与 shell；应用不会代为安装、登录或配置这些工具。
-- 完整终端使用原生模块 `node-pty`，源码安装需要 C++ 工具链；npm 12 可能要求 `npm install-scripts approve node-pty`。
 - 单个终端会话保留 1 MB 原始输出（界面 500 KB），更早的内容只能在该程序的界面内查看。
 - 文本文件读取 / 保存上限 20 MB，超过 2 MB 以只读大文件模式打开；超限文件请用系统程序打开。
 

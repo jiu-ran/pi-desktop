@@ -19,6 +19,7 @@
     "@xterm/xterm": "^6.0.0",
     "markstream-vue": "^2.0.19",
     "mermaid": "12.2.0",
+    "mygo-runtime": "^0.9.1",
     "shiki": "^4.5.0",
     "vue": "^3.5.13"
   },
@@ -31,5 +32,9 @@
     "typescript": "^5.7.2",
     "vite": "6.4.5",
     "vue-tsc": "^3.3.13"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "@carbon/icons@11.91.0": true
   }
 }

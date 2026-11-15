@@ -9,11 +9,12 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ]
   },
   "include": [
-    "electron/**/*.ts",
-    "electron/**/*.cts",
     "packages/ui/src/**/*.ts",
     "scripts/checks/**/*.ts"
   ]

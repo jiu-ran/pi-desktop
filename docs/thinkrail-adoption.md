@@ -2,7 +2,7 @@
 
 [ThinkRail](https://github.com/JetBrains/thinkrail)（JetBrains，Apache-2.0）同样围绕
 `@earendil-works/pi-coding-agent` 构建，但采用 React 19 + Bun/Turbo 的单仓架构。
-本分支 `thinkrail` 挑选其中与本项目（Vue 3 + Electron + RPC 宿主）契合的做法逐步移植，
+本分支 `thinkrail` 挑选其中与本项目（Vue 3 + MyGo / Go RPC 宿主）契合的做法逐步移植，
 不改变现有产品边界：用量、Git 状态、会话状态仍以 pi / Git 为准，前端不自行累加或推断。
 
 许可说明见仓库根目录的 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md)。
@@ -43,6 +43,6 @@
 ## 明确不采纳
 
 - 不引入 React / Tailwind / Zustand：本项目已是 Vue 3 + 手写设计令牌，重写成本高于收益。
-- 不引入 Bun / Turbo 单仓：现有 npm + vite + Electron 构建链已满足发布需求。
+- 不引入 Bun / Turbo 单仓：现有 npm + vite + MyGo 构建链已满足发布需求。
 - 不复制上游的 Specs 工作流与 JetBrains AI 登录：属于 ThinkRail 的产品能力，不是通用 UI 改进。
-- 不把 `pi` 直接 value-import 进渲染进程：仍通过 `electron/pi-host.ts` 的 RPC 边界调用，保持崩溃隔离。
+- 不把 `pi` 直接 value-import 进渲染进程：仍通过 `internal/host/pool.go` 的 RPC 边界调用，保持崩溃隔离。
