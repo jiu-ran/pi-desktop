@@ -199,33 +199,49 @@ function syncCollapse(): void {
   collapseGroupId.value = found;
 }
 
+/** 收起后的落点：折叠头贴住滚动区顶部，用一小段缓动滚过去（瞬移看着像页面坏了）。 */
+function scrollHeaderToTop(el: HTMLElement, headerOffset: number): void {
+  const max = Math.max(0, el.scrollHeight - el.clientHeight);
+  const target = Math.max(0, Math.min(max, el.scrollTop + headerOffset - 6));
+  const start = el.scrollTop;
+  const distance = target - start;
+  if (Math.abs(distance) < 2) return;
+  const reducedMotion =
+    typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  if (reducedMotion) {
+    el.scrollTop = target;
+    lastAutoScrollTop = el.scrollTop;
+    return;
+  }
+  const duration = 140;
+  const startedAt = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.scrollTop = start + distance * eased;
+    // 每帧都记成「自己滚的」，否则这些滚动会被当作用户意图，打断贴底与上滑加载
+    lastAutoScrollTop = el.scrollTop;
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 async function collapseActivity(): Promise<void> {
   const id = collapseGroupId.value;
   if (!id) return;
   const el = scroller.value;
   const node = el?.querySelector<HTMLElement>(`.activity-group[data-activity-id="${id}"]`) ?? null;
 
-  const beforeHeight = node?.getBoundingClientRect().height ?? 0;
   activityOverrides.value = { ...activityOverrides.value, [id]: false };
   collapseGroupId.value = null;
   await nextTick();
   if (!el || !node) return;
 
-  const delta = beforeHeight - node.getBoundingClientRect().height;
-  if (delta <= 0) return;
-
-  const max = Math.max(0, el.scrollHeight - el.clientHeight);
-  if (el.scrollTop >= delta) {
-    // 上方已经滚过 delta：把滚动位置往回挪同样多，组后面的内容在屏幕上原地不动。
-    el.scrollTop = Math.min(max, el.scrollTop - delta);
-  } else {
-    // 还没滚到那么多（这段记录就在开头附近，或者页面底部没有余量）：
-    // 退而求其次，让收起后的折叠头贴住滚动区顶部，落点是刚收起的那条记录。
-    const header = node.querySelector<HTMLElement>(".activity-head");
-    const offset = (header ?? node).getBoundingClientRect().top - el.getBoundingClientRect().top;
-    el.scrollTop = Math.max(0, Math.min(max, el.scrollTop + offset - 6));
-  }
-  lastAutoScrollTop = el.scrollTop;
+  // 从记录中间收起时，原来那几行已经不在了，落点只能是「这条记录本身」：
+  // 把折叠头送到滚动区顶部，视线留在刚收起的那条记录上，再展开的开关也就在眼前。
+  const header = node.querySelector<HTMLElement>(".activity-head");
+  const offset = (header ?? node).getBoundingClientRect().top - el.getBoundingClientRect().top;
+  scrollHeaderToTop(el, offset);
 }
 const jumpLabel = computed(() => {
   if (ws.value?.streaming) return unreadCount.value ? `${unreadCount.value} 条新内容` : "正在回复";
