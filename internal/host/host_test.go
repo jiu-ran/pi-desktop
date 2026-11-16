@@ -766,3 +766,132 @@ func TestQuotedTitleUsesLiveSessionName(t *testing.T) {
 		t.Fatalf("纯函数不应读文件，实际 %q", got)
 	}
 }
+
+func readDefaultTools(t *testing.T, file string) ([]string, bool) {
+	t.Helper()
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	entries, ok := value["defaultTools"]
+	if !ok {
+		return nil, false
+	}
+	items, _ := entries.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, asString(item))
+	}
+	return out, true
+}
+
+// 开关写成 Pi 的增量写法（+name / -name），这样 Pi 以后调整默认集合时会跟着走。
+func TestToolsToggleWritesModifiers(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	cwd := t.TempDir()
+	file := filepath.Join(agent, "settings.json")
+
+	// 没配置过 → 打开 grep：只记 +grep
+	if _, err := toolsSet(cwd, map[string]any{"scope": "global", "name": "grep", "enabled": true}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, ok := readDefaultTools(t, file); !ok || len(entries) != 1 || entries[0] != "+grep" {
+		t.Fatalf("打开 grep 应写 [+grep]，实际 %v（存在=%v）", entries, ok)
+	}
+
+	// 起 Pi 时把结果翻译成 --tools 参数
+	if args := strings.Join(toolArgs(cwd), " "); !strings.Contains(args, "+grep") {
+		t.Fatalf("--tools 里应带上 +grep，实际 %q", args)
+	}
+	// 再关掉 grep → 与继承一致，键直接删掉（不能留空数组）
+	result, err := toolsSet(cwd, map[string]any{"scope": "global", "name": "grep", "enabled": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readDefaultTools(t, file); ok {
+		t.Fatal("关回去后应该删掉 defaultTools 键")
+	}
+	if enabled := result["enabledNames"].([]string); len(enabled) != 4 {
+		t.Fatalf("应回到 Pi 默认的 4 个，实际 %v", enabled)
+	}
+
+	// 关掉默认工具 → 只记 -bash
+	if _, err := toolsSet(cwd, map[string]any{"scope": "global", "name": "bash", "enabled": false}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := readDefaultTools(t, file); len(entries) != 1 || entries[0] != "-bash" {
+		t.Fatalf("关掉 bash 应写 [-bash]，实际 %v", entries)
+	}
+}
+
+// 全部关掉要写成空数组（Pi 里 [] 表示一个都不启用），不是四个 -name。
+func TestToolsToggleAllOffWritesEmptyArray(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	cwd := t.TempDir()
+	for _, name := range []string{"read", "bash", "edit", "write"} {
+		if _, err := toolsSet(cwd, map[string]any{"scope": "global", "name": name, "enabled": false}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, ok := readDefaultTools(t, filepath.Join(agent, "settings.json"))
+	if !ok || len(entries) != 0 {
+		t.Fatalf("全关应写 [] ，实际 %v（存在=%v）", entries, ok)
+	}
+}
+
+// 项目级只记与全局的差异，跟着全局走。
+func TestToolsProjectWritesDiffAgainstGlobal(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	if err := os.WriteFile(filepath.Join(agent, "settings.json"), []byte(`{"defaultTools":["+grep"],"defaultProjectTrust":"always"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	projectFile := filepath.Join(cwd, ".pi", "settings.json")
+
+	// 继承全局 = read/bash/edit/write/grep（5 个），项目里关掉 grep → -grep
+	result, err := toolsSet(cwd, map[string]any{"scope": "project", "name": "grep", "enabled": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := readDefaultTools(t, projectFile); len(entries) != 1 || entries[0] != "-grep" {
+		t.Fatalf("项目级应写 [-grep]，实际 %v", entries)
+	}
+	enabled := result["enabledNames"].([]string)
+	if len(enabled) != 4 {
+		t.Fatalf("项目里关掉 grep 后应剩 4 个，实际 %v", enabled)
+	}
+
+	// 再打开 → 与全局一致，项目设置里的键删掉（跟随全局）
+	if _, err := toolsSet(cwd, map[string]any{"scope": "project", "name": "grep", "enabled": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readDefaultTools(t, projectFile); ok {
+		t.Fatal("与全局一致后应删掉项目里的 defaultTools")
+	}
+}
+
+// 旧版写过完整清单的文件，切开关后要重写成等价的增量写法。
+func TestToolsToggleRewritesLegacyPlainList(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	cwd := t.TempDir()
+	file := filepath.Join(agent, "settings.json")
+	if err := os.WriteFile(file, []byte(`{"defaultTools":["grep"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := toolsSet(cwd, map[string]any{"scope": "global", "name": "find", "enabled": true}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := readDefaultTools(t, file)
+	want := []string{"-read", "-bash", "-edit", "-write", "+grep", "+find"}
+	if strings.Join(entries, ",") != strings.Join(want, ",") {
+		t.Fatalf("应重写成 %v，实际 %v", want, entries)
+	}
+}

@@ -50,10 +50,10 @@ const scopeHint = computed(() => {
     if (!data.value.projectSettingsPath) return "先打开一个项目，才能写项目级工具开关。";
     if (!data.value.projectWritable) return "项目级工具设置需要先信任此项目：Pi 不会加载未信任项目的 .pi/settings.json。";
     if (data.value.projectConfigured && data.value.projectEntries.length === 0) {
-      return "当前项目显式设置了空的工具清单：全局有配置时继承全局，全局也没配置时表示全部停用。重新打开任一开关会把它改成完整清单。";
+      return "当前项目显式设置了空的工具清单：全局有配置时继承全局，全局也没配置时表示全部停用。重新打开任一开关会把它改成按需增减。";
     }
     if (!data.value.projectConfigured) {
-      return "保存后会在这个项目的 .pi/settings.json 里写一份完整清单：之后这个项目不再跟随全局，全局开关仍影响其它项目与终端。";
+      return "保存后只在这个项目的 .pi/settings.json 里记下与全局的差异（+name / -name）：全局开关后续变化仍会影响这里。";
     }
     return "";
   }

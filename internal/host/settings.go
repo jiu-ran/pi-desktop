@@ -638,6 +638,60 @@ func toolsOverview(cwd string) map[string]any {
 	}
 }
 
+// toolInheritedSelection 返回这个作用域「没有自己配置时」会用的选择：
+// 全局是 Pi 默认的四个内置工具，项目是全局的解析结果。
+func toolInheritedSelection(scope string, state settingsState) []string {
+	if scope == "project" {
+		return resolveToolEntries(state.Global["defaultTools"])
+	}
+	return append([]string{}, piDefaultToolNames...)
+}
+
+// toolSelectionDiff 把「目标选择」写成相对继承选择的增量清单（Pi 的 +name / -name 写法），
+// 这样以后 Pi 调整默认工具集合时，用户的选择会跟着走，不会被固化的完整清单压住。
+//
+// 返回 nil 表示与继承完全一致（调用方应删掉 defaultTools 键）；
+// 返回非 nil 的空切片表示「一个工具都不要」，写成 []。
+func toolSelectionDiff(target, inherited []string) []string {
+	if len(target) == 0 {
+		return []string{}
+	}
+	want := map[string]bool{}
+	for _, name := range target {
+		want[name] = true
+	}
+	have := map[string]bool{}
+	for _, name := range inherited {
+		have[name] = true
+	}
+	entries := []string{}
+	seen := map[string]bool{}
+	emit := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		switch {
+		case want[name] && !have[name]:
+			entries = append(entries, "+"+name)
+		case !want[name] && have[name]:
+			entries = append(entries, "-"+name)
+		}
+	}
+	for _, tool := range piToolCatalog {
+		emit(tool.Name)
+	}
+	for _, name := range target {
+		emit(name)
+	}
+	for _, name := range inherited {
+		emit(name)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return entries
+}
 func toolsSet(cwd string, payload map[string]any) (map[string]any, error) {
 	scope := "global"
 	if asString(payload["scope"]) == "project" {
@@ -699,16 +753,26 @@ func toolsSet(cwd string, payload map[string]any) (map[string]any, error) {
 			}
 		}
 		next = dedupeStrings(next)
+		// 只记「与继承选择的差异」：+name 表示新增，-name 表示去掉；没有差异就删掉键，
+		// 让这个作用域重新跟随继承（全局跟随 Pi 默认，项目跟随全局）。
+		entries := toolSelectionDiff(next, toolInheritedSelection(scope, fresh))
 		target := fresh.Global
 		if scope == "project" {
 			target = fresh.Project
 		}
 		copied := map[string]any{}
 		for key, value := range target {
+			if key == "defaultTools" {
+				continue
+			}
 			copied[key] = value
 		}
-		items := make([]any, len(next))
-		for i, entry := range next {
+		if entries == nil {
+			// 与继承一致：不留空数组（空数组在 Pi 里表示一个都不启用）
+			return writeSettingsFile(file, copied)
+		}
+		items := make([]any, len(entries))
+		for i, entry := range entries {
 			items[i] = entry
 		}
 		copied["defaultTools"] = items
