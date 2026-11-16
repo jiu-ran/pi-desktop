@@ -27,6 +27,7 @@ const props = defineProps<{
 
 defineEmits<{ toggle: [] }>();
 
+
 /** 给读屏用的增删行数文案；没有改动时为空串 */
 const statText = computed(() => {
   const parts: string[] = [];
@@ -69,17 +70,8 @@ const statText = computed(() => {
     </button>
     <div v-if="expanded" class="activity-body" :data-activity-body="group.id">
       <slot />
-      <!-- 展开记录很长时不用滚回组头：贴底悬浮在右侧，滚到组内任何位置都能收起 -->
-      <button
-        type="button"
-        class="activity-collapse"
-        title="收起执行记录"
-        aria-label="收起执行记录"
-        @click="$emit('toggle')"
-      >
-        <span class="activity-collapse-icon" v-html="icons.chevronRight" />
-        收起
-      </button>
     </div>
   </section>
 </template>
+
+

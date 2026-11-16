@@ -172,6 +172,39 @@ const changedDiff = computed(() => changedTotals.value.added > 0 || changedTotal
 // 「回到最新」与未读数参考 ThinkRail 的 reading band / follow 状态（Apache-2.0）。
 const unreadCount = computed(() => Math.max(0, (ws.value?.blocks.length ?? 0) - seenBlocks.value));
 const showJump = computed(() => !stick.value && Boolean(ws.value?.blocks.length));
+
+/**
+ * 展开的执行记录很长、组头已经滚出视野时，右下角给一个「收起」：
+ * 固定定位在聊天区里（和「回到底部」上下错开 56px），不依赖 sticky，
+ * 因此不会被容器夹住、也不会压到记录的最后一行。
+ */
+const collapseGroupId = ref<string | null>(null);
+
+function syncCollapse(): void {
+  const el = scroller.value;
+  if (!el) {
+    collapseGroupId.value = null;
+    return;
+  }
+  const viewport = el.getBoundingClientRect();
+  let found: string | null = null;
+  for (const node of el.querySelectorAll<HTMLElement>(".activity-group.expanded")) {
+    const rect = node.getBoundingClientRect();
+    // 组头已经滚到可视区上方、组尾还在底部（留 80px 缓冲）→ 这段记录值得单独收起
+    if (rect.top < viewport.top && rect.bottom > viewport.bottom - 80) {
+      found = node.dataset.activityId ?? null;
+      break;
+    }
+  }
+  collapseGroupId.value = found;
+}
+
+function collapseActivity(): void {
+  const id = collapseGroupId.value;
+  if (!id) return;
+  activityOverrides.value = { ...activityOverrides.value, [id]: false };
+  collapseGroupId.value = null;
+}
 const jumpLabel = computed(() => {
   if (ws.value?.streaming) return unreadCount.value ? `${unreadCount.value} 条新内容` : "正在回复";
   if (unreadCount.value) return `${unreadCount.value} 条新消息`;
@@ -228,6 +261,7 @@ function setScrollTop(el: HTMLElement, top: number): void {
 function onScroll(): void {
   const el = scroller.value;
   if (!el) return;
+  syncCollapse();
   // 位置还停在我们上次设置的地方 → 这次事件是自己滚出来的，不算用户意图。
   if (isSelfScroll(el.scrollTop, lastAutoScrollTop)) return;
   // 刚打开会话时 hydrate / DOM 替换会触发非用户滚动，不能据此放弃贴底。
@@ -797,6 +831,7 @@ function toggleActivity(group: { id: string; entries: Array<{ block: any }> }): 
     ...activityOverrides.value,
     [group.id]: !activityOpen(group),
   };
+  void nextTick(syncCollapse);
 }
 
 function toggleSearch(): void {
@@ -1093,6 +1128,12 @@ watch(searchMatches, () => {
           <span>{{ jumpLabel }}</span>
         </button>
       </Transition>
+      <Transition name="jump-fade">
+        <button v-if="collapseGroupId" type="button" class="collapse-activity" title="收起执行记录" @click="collapseActivity">
+          <span class="collapse-activity-icon" v-html="icons.chevronRight" />
+          <span>收起</span>
+        </button>
+      </Transition>
       <aside v-if="outline.length" class="chat-outline" data-tooltip-group aria-label="用户消息大纲">
           <button
             v-for="item in outline"
@@ -1149,6 +1190,35 @@ watch(searchMatches, () => {
   font-size: 12px;
   cursor: pointer;
 }
+
+.collapse-activity {
+  position: absolute;
+  z-index: 6;
+  right: 18px;
+  /* 让开右下角的「回到底部」（bottom 14px + 高 28px），中间留 14px */
+  bottom: 56px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-2) 94%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.collapse-activity:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.collapse-activity-icon { display: grid; place-items: center; color: var(--accent); transform: rotate(-90deg); }
+.collapse-activity-icon svg { width: 12px; height: 12px; }
 
 .jump-latest:hover {
   border-color: var(--accent);
