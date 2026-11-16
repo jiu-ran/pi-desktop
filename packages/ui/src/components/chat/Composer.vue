@@ -13,6 +13,7 @@ import { PI_BUILTIN_COMMANDS, findPiCommand, terminalCommandNotice } from "../..
 import { bashEditorText, parseBashInput, setBashEditorText, toggleBashMode } from "../../shared/bash-input.ts";
 import { appSettings } from "../../services/settings.ts";
 import { openWorktreeDialog } from "../../services/worktree-dialog.ts";
+import { openMenu } from "../sidebar/ui.ts";
 import { EMPTY_HISTORY_STATE, appendPromptHistory, caretOnFirstLine, caretOnLastLine, recallNext, recallPrevious, type PromptHistoryState } from "../../shared/prompt-history.ts";
 import { readStorage, writeStorage } from "../../shared/storage.ts";
 import type { WorkspaceEntry } from "../../env.d.ts";
@@ -28,6 +29,77 @@ const stopQueueEditListener = bus.on("queue:edit", onQueueEditRequest);
 onBeforeUnmount(stopQueueEditListener);
 const ws = computed(() => workbench.active.value);
 const input = ref<HTMLTextAreaElement | null>(null);
+
+/**
+ * 输入框的右键菜单：用应用自己的菜单（和文件树 / 会话列表同一种），
+ * 不用 WebView 的原生菜单（Emoji / Writing direction / More tools 那一套，
+ * 样式和整窗玻璃视觉不搭，还有一堆用不上的项）。
+ *
+ * 打开菜单会让 textarea 失焦，所以先把选区记下来，执行命令前再还原。
+ */
+function openComposerMenu(event: MouseEvent): void {
+  const el = input.value;
+  if (!el) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const hasSelection = end > start;
+  const readOnly = el.readOnly || el.disabled;
+  const restore = (): void => {
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(start, end);
+  };
+  const command = (name: string) => () => {
+    restore();
+    document.execCommand(name);
+  };
+  openMenu(event, [
+    { label: "撤销", hint: "Ctrl+Z", disabled: readOnly, run: command("undo") },
+    { label: "重做", hint: "Ctrl+Shift+Z", disabled: readOnly, run: command("redo") },
+    { separator: true },
+    { label: "剪切", hint: "Ctrl+X", disabled: readOnly || !hasSelection, run: command("cut") },
+    { label: "复制", hint: "Ctrl+C", disabled: !hasSelection, run: command("copy") },
+    { label: "粘贴", hint: "Ctrl+V", disabled: readOnly, run: () => void pasteIntoComposer(start, end) },
+    { separator: true },
+    {
+      label: "全选",
+      hint: "Ctrl+A",
+      disabled: readOnly,
+      run: () => {
+        el.focus({ preventScroll: true });
+        el.select();
+      },
+    },
+  ]);
+}
+
+/** 菜单里的「粘贴」：执行命令拿不到剪贴板，改走宿主读取再插入（失败就提示用快捷键）。 */
+async function pasteIntoComposer(start: number, end: number): Promise<void> {
+  const el = input.value;
+  if (!el) {
+    return;
+  }
+  let text = "";
+  try {
+    text = (await window.piDesktop?.readClipboard?.()) ?? "";
+  } catch {
+    text = "";
+  }
+  if (!text) {
+    bus.emit("notify", { level: "warning", text: "读不到剪贴板内容，可以用 Ctrl+V 粘贴" });
+    return;
+  }
+  el.focus({ preventScroll: true });
+  el.setSelectionRange(start, end);
+  if (!document.execCommand("insertText", false, text)) {
+    const value = el.value;
+    el.value = value.slice(0, start) + text + value.slice(end);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
 const mode = computed({
   get: () => appSettings.streamingMode,
   set: (val: "followUp" | "steer") => {
@@ -1634,6 +1706,7 @@ async function abortBash(): Promise<void> {
               spellcheck="false"
               @keydown="onKeydown"
               @keyup="onAtKey"
+              @contextmenu="openComposerMenu"
             />
             <span v-if="argHint" class="arg-hint" aria-hidden="true"><span class="arg-ghost">{{ draft }}</span>{{ argHint }}</span>
           </div>
