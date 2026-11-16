@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 活动折叠头参考 ThinkRail（Apache-2.0）的 ActivityGroup，见 THIRD-PARTY-NOTICES.md。
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { icons } from "../../shared/util.ts";
 
 const props = defineProps<{
@@ -27,6 +27,38 @@ const props = defineProps<{
 
 defineEmits<{ toggle: [] }>();
 
+/**
+ * 组头是 sticky 的，但只在「真的贴在滚动区顶部」时才该显出底色和分隔线：
+ * 展开后如果一直带底色，看起来像整块被高亮成卡片，和正文的平面排版不一致。
+ * 这里用一条 1px 的哨兵元素判断：它滚出滚动区顶部时，说明组头已经吸住了。
+ */
+const sentinelEl = ref<HTMLElement | null>(null);
+const stuck = ref(false);
+let stuckObserver: IntersectionObserver | null = null;
+
+function observeStuck(): void {
+  stuckObserver?.disconnect();
+  stuckObserver = null;
+  stuck.value = false;
+  const target = sentinelEl.value;
+  if (!target || typeof IntersectionObserver === "undefined") return;
+  const scrollRoot = target.closest(".timeline") as HTMLElement | null;
+  stuckObserver = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) stuck.value = !entry.isIntersecting;
+    },
+    { root: scrollRoot, threshold: 0 },
+  );
+  stuckObserver.observe(target);
+}
+
+onMounted(observeStuck);
+onBeforeUnmount(() => {
+  stuckObserver?.disconnect();
+  stuckObserver = null;
+});
+
 /** 给读屏用的增删行数文案；没有改动时为空串 */
 const statText = computed(() => {
   const parts: string[] = [];
@@ -44,9 +76,11 @@ const statText = computed(() => {
     :data-live="group.live"
     :data-errored="group.errored"
   >
+    <span ref="sentinelEl" class="activity-sentinel" aria-hidden="true" />
     <button
       type="button"
       class="activity-head"
+      :class="{ 'is-stuck': stuck }"
       :aria-expanded="expanded"
       :aria-label="`${expanded ? '收起' : '展开'}${label || '活动'}（${group.steps.length} 步）：${group.summary}${statText}${duration ? ` · ${duration}` : ''}`"
       :title="group.detail"

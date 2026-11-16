@@ -880,16 +880,18 @@
   cursor: pointer;
 }
 .activity-head:hover { border-color: var(--line); background: var(--bg-1); color: var(--fg-2); }
-/* 展开后组头会吸顶：变成不透明的整条分隔带（贴住滚动区顶部），
-   避免 94% 半透明 + 圆角在内容滑过时糊成一团、还透着下面的字。 */
-.activity-group.expanded .activity-head {
+/* 组头平时和正文一样是透明的一行（展开后也不做高亮条）：只有真的吸在滚动区顶部时
+   才显出底色和分隔线，避免内容滑过时半透明糊字，也避免整块看起来像被高亮成卡片。
+   吸顶判定见 ActivityGroup.vue 里的 1px 哨兵 + IntersectionObserver。 */
+.activity-sentinel { display: block; height: 1px; margin-bottom: -1px; pointer-events: none; }
+.activity-head.is-stuck {
   border-radius: 0;
   border-bottom-color: var(--line);
   background: var(--bg);
   backdrop-filter: none;
-  box-shadow: 0 8px 12px -12px rgba(15, 20, 35, 0.45);
+  box-shadow: none;
 }
-.activity-group.expanded .activity-head:hover {
+.activity-head.is-stuck:hover {
   border-bottom-color: var(--line);
   background: var(--bg);
 }
@@ -931,13 +933,14 @@
 @container (max-width: 360px) {
   .activity-summary { display: none; }
 }
+/* 展开区不再画左侧竖线：那会让整块看起来像套了一个卡片，和正文的平面排版不一致。
+   只保留缩进，步骤行自己靠缩进与 hover 底色区分。 */
 .activity-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin: 3px 0 4px 12px;
-  padding: 3px 0 2px 10px;
-  border-left: 1px solid var(--line);
+  padding: 3px 0 2px 0;
 }
 /* 耗时不再做成一块底色芯片：和吸顶的组头叠在一起时，彩色小块太抢眼 */
 .activity-duration {
