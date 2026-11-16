@@ -204,32 +204,26 @@ async function collapseActivity(): Promise<void> {
   if (!id) return;
   const el = scroller.value;
   const node = el?.querySelector<HTMLElement>(`.activity-group[data-activity-id="${id}"]`) ?? null;
-  const beforeHeight = node?.getBoundingClientRect().height ?? 0;
-  // 组头相对滚动区顶部的位置，下面「贴顶」时要用
-  const beforeTop = node && el ? node.getBoundingClientRect().top - el.getBoundingClientRect().top : 0;
 
+  const beforeHeight = node?.getBoundingClientRect().height ?? 0;
   activityOverrides.value = { ...activityOverrides.value, [id]: false };
   collapseGroupId.value = null;
   await nextTick();
+  if (!el || !node) return;
 
-  const afterHeight = node?.getBoundingClientRect().height ?? 0;
-  const delta = beforeHeight - afterHeight;
-  if (!el || delta <= 0) return;
+  const delta = beforeHeight - node.getBoundingClientRect().height;
+  if (delta <= 0) return;
 
-  // 收起会让下面的内容整体上移 delta。优先把滚动位置补回来，让视线落点几乎不动：
-  // 这样「看的是记录后面的内容」时，收起前后看到的是同一段。
   const max = Math.max(0, el.scrollHeight - el.clientHeight);
-  const compensated = Math.min(max, el.scrollTop + delta);
-  const canCompensate = compensated - el.scrollTop >= delta - 1;
-
-  if (canCompensate) {
-    el.scrollTop = compensated;
-  } else if (node) {
-    // 这段记录就在页面底部，下面没有内容可以锚定：退而求其次，让收起后的组头贴住滚动区顶部，
-    // 落点是「刚收起的这条记录」，不会跳到别处。
+  if (el.scrollTop >= delta) {
+    // 上方已经滚过 delta：把滚动位置往回挪同样多，组后面的内容在屏幕上原地不动。
+    el.scrollTop = Math.min(max, el.scrollTop - delta);
+  } else {
+    // 还没滚到那么多（这段记录就在开头附近，或者页面底部没有余量）：
+    // 退而求其次，让收起后的折叠头贴住滚动区顶部，落点是刚收起的那条记录。
     const header = node.querySelector<HTMLElement>(".activity-head");
-    const headerTop = header ? header.getBoundingClientRect().top - el.getBoundingClientRect().top : beforeTop;
-    el.scrollTop = Math.max(0, Math.min(max, el.scrollTop + headerTop - 4));
+    const offset = (header ?? node).getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTop = Math.max(0, Math.min(max, el.scrollTop + offset - 6));
   }
   lastAutoScrollTop = el.scrollTop;
 }
