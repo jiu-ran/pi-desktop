@@ -857,12 +857,12 @@
   .notice-spin { animation: none; }
 }
 
-/* 连续工具 / 思考的活动组：折叠头在组内吸顶，展开后保留原工具卡片 */
+/* 连续工具 / 思考的活动组。
+   组头不做 sticky：吸顶时会盖住内容、还要额外交互提示，和正文的平面排版不一致；
+   现在它和其他内容一样随滚动走，展开后也不会在顶部留一条悬浮的条。 */
 .activity-group { position: relative; margin: 1px 0; }
 .activity-head {
-  position: sticky;
-  z-index: 4;
-  top: 0;
+  position: static;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -872,29 +872,13 @@
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(8px);
+  background: transparent;
   color: var(--fg-3);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 .activity-head:hover { border-color: var(--line); background: var(--bg-1); color: var(--fg-2); }
-/* 组头平时和正文一样是透明的一行（展开后也不做高亮条）：只有真的吸在滚动区顶部时
-   才显出底色和分隔线，避免内容滑过时半透明糊字，也避免整块看起来像被高亮成卡片。
-   吸顶判定见 ActivityGroup.vue 里的 1px 哨兵 + IntersectionObserver。 */
-.activity-sentinel { display: block; height: 1px; margin-bottom: -1px; pointer-events: none; }
-.activity-head.is-stuck {
-  border-radius: 0;
-  border-bottom-color: var(--line);
-  background: var(--bg);
-  backdrop-filter: none;
-  box-shadow: none;
-}
-.activity-head.is-stuck:hover {
-  border-bottom-color: var(--line);
-  background: var(--bg);
-}
 .activity-caret { display: grid; flex: none; place-items: center; transition: transform 140ms ease; }
 .activity-caret.open { transform: rotate(90deg); }
 .activity-icon { display: grid; flex: none; color: var(--accent); }
