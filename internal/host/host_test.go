@@ -710,16 +710,17 @@ func TestSessionNamePicksUpLaterRename(t *testing.T) {
 // 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
 // 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
 func TestSessionTitleFromQuotedSession(t *testing.T) {
-	quote := func(title string) string {
+	quote := func(title, tail string) string {
 		return `<session name="C:/agent/sessions/--C--x--/2026-10-19T11-07-51-575Z_01a153d8.jsonl" title="` + title + `" messages="8">
 <session name="…">正文略</session>
-</session>
-继续做别的`
+</session>` + tail
 	}
 	cases := []struct{ input, want string }{
-		{quote("Pi Desktop"), "Pi Desktop（引用）"},
-		{quote("Pi Desktop（引用）"), "Pi Desktop（引用）"},
-		{quote("A &amp; B"), "A & B（引用）"},
+		{quote("Pi Desktop", ""), "Pi Desktop（引用）"},
+		{quote("Pi Desktop（引用）", ""), "Pi Desktop（引用）"},
+		{quote("A &amp; B", ""), "A & B（引用）"},
+		// 引用块后面还有用户自己写的内容时，用那段内容当标题
+		{quote("Pi Desktop", "\n你是否能调用内置工具"), "你是否能调用内置工具"},
 		{"普通消息", "普通消息"},
 		{"<file name=\"C:/a/b.md\"></file>", "b.md"},
 	}
@@ -729,11 +730,11 @@ func TestSessionTitleFromQuotedSession(t *testing.T) {
 		}
 	}
 	// 没有 title 属性时保持原样（退回首条消息原文），不要凭空造名字
-	if got := sessionTitleFromText(quote("")); !strings.HasPrefix(got, "<session name=") {
+	if got := sessionTitleFromText(quote("", "")); !strings.HasPrefix(got, "<session name=") {
 		t.Fatalf("没有标题时不应改写，实际 %q", got)
 	}
 	long := strings.Repeat("长", 60)
-	got := sessionTitleFromText(quote(long))
+	got := sessionTitleFromText(quote(long, ""))
 	if !strings.HasSuffix(got, quotedTitleSuffix) || len([]rune(got)) > sessionTitleMax {
 		t.Fatalf("超长标题要截断并保留后缀，实际 %q（%d 字符）", got, len([]rune(got)))
 	}
@@ -749,21 +750,24 @@ func TestQuotedTitleUsesLiveSessionName(t *testing.T) {
 	if err := os.WriteFile(quoted, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// 引用时记下的还是旧标题
-	text := `<session name="` + strings.ReplaceAll(quoted, `\`, `/`) + `" title="请先了解一下本项目" messages="8">
+	// 引用时记下的还是旧标题；用户自己写的内容优先当标题，出处跟上传记后的名字
+	header := `<session name="` + strings.ReplaceAll(quoted, `\`, `/`) + `" title="请先了解一下本项目" messages="8">
 <session name="…">正文略</session>
-</session>
-帮我看看这个`
-	if got := userTextTitle(text); got != "Pi Desktop（引用）" {
-		t.Fatalf("应跟上传记后的名字，实际 %q", got)
+</session>`
+	text := header + "\n帮我看看这个"
+	if got := userTextTitle(text); got != "帮我看看这个" {
+		t.Fatalf("有正文时标题应是正文，实际 %q", got)
 	}
-	// 被引用会话不存在时退回引用时记下的标题
+	if _, quotedName, ok := resolveQuotedMessage(text); !ok || quotedName != "Pi Desktop" {
+		t.Fatalf("应跟上传记后的名字，实际 %q（识别=%v）", quotedName, ok)
+	}
+	// 只有引用块、且被引用会话不存在时，退回引用时记下的标题
 	missing := `<session name="C:/nope/does-not-exist.jsonl" title="旧标题" messages="8">正文</session>`
 	if got := userTextTitle(missing); got != "旧标题（引用）" {
 		t.Fatalf("找不到被引用会话时应退回记下的标题，实际 %q", got)
 	}
-	if got := sessionTitleFromText(text); got != "请先了解一下本项目（引用）" {
-		t.Fatalf("纯函数不应读文件，实际 %q", got)
+	if got := sessionTitleFromText(text); got != "帮我看看这个" {
+		t.Fatalf("纯函数也应按正文取标题（不读文件），实际 %q", got)
 	}
 }
 
@@ -893,5 +897,51 @@ func TestToolsToggleRewritesLegacyPlainList(t *testing.T) {
 	want := []string{"-read", "-bash", "-edit", "-write", "+grep", "+find"}
 	if strings.Join(entries, ",") != strings.Join(want, ",") {
 		t.Fatalf("应重写成 %v，实际 %v", want, entries)
+	}
+}
+
+// 引用会话的标题优先用用户自己写的内容；只有引用块时才用「原会话名（引用）」。
+func TestQuotedMessageTitlePrefersUserText(t *testing.T) {
+	dir := t.TempDir()
+	quoted := filepath.Join(dir, "2026-10-19T11-07-51-575Z_quoted.jsonl")
+	body := `{"type":"session","id":"q1","timestamp":"2026-10-19T11:07:51.000Z"}` + "\n" +
+		`{"type":"session_info","id":"n1","parentId":null,"timestamp":"2026-10-23T15:07:03.095Z","name":"Pi Desktop"}` + "\n"
+	if err := os.WriteFile(quoted, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	header := `<session name="` + strings.ReplaceAll(quoted, `\`, `/`) + `" title="旧标题" messages="8">正文略</session>`
+
+	messageLine := func(text string) string {
+		content, _ := json.Marshal([]map[string]any{{"type": "text", "text": text}})
+		entry, _ := json.Marshal(map[string]any{
+			"type":      "message",
+			"id":        "m1",
+			"parentId":  nil,
+			"timestamp": "2026-11-16T00:00:00.000Z",
+			"message":   map[string]any{"role": "user", "content": json.RawMessage(content)},
+		})
+		return string(entry)
+	}
+
+	title, quotedName := firstUserTitleWithQuote([]string{messageLine(header + "\n你是否能调用内置工具")})
+	if title != "你是否能调用内置工具" {
+		t.Fatalf("有正文时标题应是正文，实际 %q", title)
+	}
+	if quotedName != "Pi Desktop" {
+		t.Fatalf("引用的会话名应为 Pi Desktop，实际 %q", quotedName)
+	}
+
+	title, quotedName = firstUserTitleWithQuote([]string{messageLine(header)})
+	if title != "Pi Desktop（引用）" {
+		t.Fatalf("只有引用块时标题应是「Pi Desktop（引用）」，实际 %q", title)
+	}
+	if quotedName != "Pi Desktop" {
+		t.Fatalf("引用的会话名应为 Pi Desktop，实际 %q", quotedName)
+	}
+
+	// 普通消息不受影响
+	title, quotedName = firstUserTitleWithQuote([]string{messageLine("普通消息")})
+	if title != "普通消息" || quotedName != "" {
+		t.Fatalf("普通消息应为 (普通消息, 空)，实际 (%q, %q)", title, quotedName)
 	}
 }

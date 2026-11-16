@@ -821,6 +821,17 @@
 }
 
 .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-quote {
+  order: 1;
+  flex: none;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 99px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--fg-3);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
 .task-time { flex: none; color: var(--fg-3); font-size: 11px; }
 
 .task-badge, .crumb-badge {
@@ -2328,7 +2339,8 @@ button.crumb.crumb-branch:hover {
 .task-list { gap: 2px; margin-top: 2px; }
 .task-row {
   height: 34px;
-  padding: 0 8px 0 10px;
+  /* 会话比项目名再缩进一格，体现层级 */
+  padding: 0 8px 0 34px;
   gap: 6px;
   border-radius: 7px;
   color: var(--fg);

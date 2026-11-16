@@ -33,6 +33,8 @@ export interface SessionSummary {
   path: string;
   title: string;
   empty: boolean;
+  /** Quoted 非空表示这个会话是引用另一个会话开的，值是那次引用时的会话名（列表上显示「引用」标记） */
+  quoted?: string;
   timestamp: number;
   cwd?: string;
   project?: string;

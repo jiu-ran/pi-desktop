@@ -138,6 +138,11 @@ function isRunning(group: any, item: any): boolean {
   );
 }
 
+/** 会话在列表 / 悬浮提示里的文案：引用了别的会话时补一句出处。 */
+function sessionLabel(item: any): string {
+  return item?.quoted ? `${item.title}（引用「${item.quoted}」）` : String(item?.title ?? "");
+}
+
 function queuedCount(group: any, item: any): number {
   const thread = group.ws?.getThread?.(item?.path);
   if (!thread) return 0;
@@ -436,7 +441,7 @@ function openProjectMenu(event: MouseEvent): void {
                 `state-${taskState(group, item).kind}`,
                 { active: isActive(group, item), running: isRunning(group, item) },
               ]"
-              :title="`${item.title} — ${taskState(group, item).tooltip}`"
+              :title="`${sessionLabel(item)} — ${taskState(group, item).tooltip}`"
               @click="selectSession(group, item)"
             >
               <span
@@ -456,6 +461,7 @@ function openProjectMenu(event: MouseEvent): void {
                 <span v-else class="task-dot" />
               </span>
               <span class="task-title">{{ item.title }}</span>
+              <span v-if="item.quoted" class="task-quote" :title="`引用了会话「${item.quoted}」`">引用</span>
               <span
                 v-if="taskState(group, item).badge"
                 class="task-badge"

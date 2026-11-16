@@ -71,21 +71,47 @@ func quotedTitleText(title string) string {
 	return title + quotedTitleSuffix
 }
 
-// resolveQuotedTitle 优先用被引用会话**当前**的名字（用户可能后来改过名），读不到才用引用时记下的标题。
-func resolveQuotedTitle(text string) (string, bool) {
-	path, title, ok := parseQuotedSessionHeader(text)
+
+// quotedSessionName 取被引用会话「当前」的名字：改过名也能跟上，读不到就用引用时记下的标题。
+func quotedSessionName(text string) (string, bool) {
+	path, embedded, ok := parseQuotedSessionHeader(text)
 	if !ok {
 		return "", false
 	}
-	if live := liveSessionTitle(path); live != "" {
-		title = live
+	name := liveSessionTitle(path)
+	if name == "" {
+		name = embedded
 	}
-	if result := quotedTitleText(title); result != "" {
-		return result, true
-	}
-	return "", false
+	return strings.TrimSpace(name), name != ""
 }
 
+// quotedMessageBody 取引用块之后用户自己写的内容（引用消息形如 <session …>…</session> 后跟正文）。
+func quotedMessageBody(text string) string {
+	end := strings.LastIndex(text, "</session>")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(text[end+len("</session>"):])
+}
+
+// resolveQuotedMessage 处理「引用会话」的首条消息：
+// 用户自己写的正文优先当标题，没有正文才用「被引用会话的名字（引用）」。
+// 第二个返回值是被引用会话的名字，用于列表上的「引用」标记。
+func resolveQuotedMessage(text string) (title, quoted string, ok bool) {
+	quoted, hasQuote := quotedSessionName(text)
+	if !hasQuote {
+		return "", "", false
+	}
+	if body := quotedMessageBody(text); body != "" {
+		if title := sessionTitleFromText(body); title != "" {
+			return title, quoted, true
+		}
+	}
+	if title := quotedTitleText(quoted); title != "" {
+		return title, quoted, true
+	}
+	return "", quoted, false
+}
 // liveSessionTitle 读被引用会话文件里存的会话名（不再递归解析它自己的首条消息）。
 func liveSessionTitle(path string) string {
 	if strings.TrimSpace(path) == "" {
@@ -107,9 +133,20 @@ func attachmentNameFromPath(path string) string {
 }
 
 func sessionTitleFromText(text string) string {
-	if _, title, ok := parseQuotedSessionHeader(text); ok && title != "" {
-		return quotedTitleText(title)
+	if _, title, ok := parseQuotedSessionHeader(text); ok {
+		// 引用消息：用户自己写的内容优先，其次才是「被引用的会话名（引用）」
+		if body := quotedMessageBody(text); body != "" {
+			return compactTitleText(body)
+		}
+		if title != "" {
+			return quotedTitleText(title)
+		}
 	}
+	return compactTitleText(text)
+}
+
+// compactTitleText 压成单行标题并截断：附件标记换成文件名，其余空白折叠。
+func compactTitleText(text string) string {
 	fallback := ""
 	stripped := attachmentMarkerRe.ReplaceAllStringFunc(text, func(match string) string {
 		sub := attachmentMarkerRe.FindStringSubmatch(match)
@@ -135,8 +172,8 @@ func sessionTitleFromText(text string) string {
 
 // userTextTitle 给「用户消息 → 标题」用：引用会话要现读被引用会话的名字，其余走纯文本规则。
 func userTextTitle(text string) string {
-	if quoted, ok := resolveQuotedTitle(text); ok {
-		return quoted
+	if title, _, ok := resolveQuotedMessage(text); ok {
+		return title
 	}
 	return sessionTitleFromText(text)
 }
@@ -145,7 +182,15 @@ func unescapeXML(value string) string {
 	return replacer.Replace(value)
 }
 
+// firstUserTitle 只取标题，给不需要「引用」信息的调用方用。
 func firstUserTitle(lines []string) string {
+	title, _ := firstUserTitleWithQuote(lines)
+	return title
+}
+
+// firstUserTitleWithQuote 返回首条用户消息的标题，以及它引用的是哪个会话（没有引用时为空）。
+// 引用消息里用户自己写的内容优先；只有引用块没有正文时才退成「原会话名（引用）」。
+func firstUserTitleWithQuote(lines []string) (string, string) {
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -163,8 +208,11 @@ func firstUserTitle(lines []string) string {
 		}
 		content := message["content"]
 		if text, ok := content.(string); ok && text != "" {
-			if title := userTextTitle(text); title != "" {
-				return title
+			if title, quoted, ok := resolveQuotedMessage(text); ok {
+				return title, quoted
+			}
+			if title := sessionTitleFromText(text); title != "" {
+				return title, ""
 			}
 		}
 		if parts, ok := content.([]any); ok {
@@ -172,21 +220,24 @@ func firstUserTitle(lines []string) string {
 				partMap := asMap(part)
 				if partMap["type"] == "text" {
 					if text, ok := partMap["text"].(string); ok {
-						if title := userTextTitle(text); title != "" {
-							return title
+						if title, quoted, ok := resolveQuotedMessage(text); ok {
+							return title, quoted
+						}
+						if title := sessionTitleFromText(text); title != "" {
+							return title, ""
 						}
 					}
 				}
 			}
 			for _, part := range parts {
 				if asMap(part)["type"] == "image" {
-					return "图片消息"
+					return "图片消息", ""
 				}
 			}
 		}
-		return "新会话"
+		return "新会话", ""
 	}
-	return ""
+	return "", ""
 }
 
 func firstUserTitleFromMessages(messages []map[string]any) string {
@@ -209,8 +260,8 @@ func firstUserTitleFromMessages(messages []map[string]any) string {
 			}
 			text = strings.Join(parts, " ")
 		}
-		if quoted, ok := resolveQuotedTitle(text); ok {
-			return quoted
+		if title, _, ok := resolveQuotedMessage(text); ok {
+			return title
 		}
 		text = regexp.MustCompile(`(?s)<[^>]*>.*?</[^>]*>`).ReplaceAllString(text, " ")
 		text = strings.Join(strings.Fields(text), " ")
@@ -651,6 +702,8 @@ type sessionSummary struct {
 	Path      string `json:"path"`
 	Title     string `json:"title"`
 	Empty     bool   `json:"empty"`
+	// Quoted 非空表示这个会话是引用另一个会话开的，值是那次引用时的会话名（列表上显示「引用」标记）
+	Quoted    string `json:"quoted,omitempty"`
 	Timestamp int64  `json:"timestamp"`
 	Cwd       string `json:"cwd,omitempty"`
 	Project   string `json:"project,omitempty"`
@@ -707,12 +760,13 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 		summary.Project = project
 		return summary, true
 	}
-	title := firstUserTitle(lines)
+	title, quoted := firstUserTitleWithQuote(lines)
 	customTitle := readSessionName(file, info.Size(), header["name"])
 	summary := sessionSummary{
 		ID:        file,
 		Path:      file,
 		Title:     firstNonEmpty(customTitle, title, "新会话"),
+		Quoted:    quoted,
 		Empty:     customTitle == "" && title == "",
 		Timestamp: sessionTimestamp(header["timestamp"], info.ModTime().UnixMilli()),
 		Cwd:       cwd,
@@ -720,7 +774,7 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 	}
 	sessionMetaMu.Lock()
 	sessionMetaCache[key] = sessionMetaCached{mtimeMs: info.ModTime().UnixMilli(), size: info.Size(), summary: sessionSummary{
-		ID: summary.ID, Path: summary.Path, Title: summary.Title, Empty: summary.Empty, Timestamp: summary.Timestamp,
+		ID: summary.ID, Path: summary.Path, Title: summary.Title, Quoted: summary.Quoted, Empty: summary.Empty, Timestamp: summary.Timestamp,
 	}}
 	sessionMetaMu.Unlock()
 	return summary, true
