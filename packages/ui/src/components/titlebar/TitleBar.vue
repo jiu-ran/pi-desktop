@@ -161,7 +161,7 @@ const piTitle = computed(() => {
       <button
         class="tb-btn"
         :title="state.theme === 'dark' ? '当前：深色主题（点击切换浅色）' : '当前：浅色主题（点击切换深色）'"
-        @click="theme.toggleTheme()"
+        @click="theme.toggleTheme({ x: $event.clientX, y: $event.clientY })"
         v-html="state.theme === 'dark' ? icons.moon : icons.sun"
       />
 

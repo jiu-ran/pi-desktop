@@ -9,7 +9,13 @@ import {
   normalizeHex,
   type EmphasisMode,
 } from "../../../shared/appearance.ts";
-import { DARK_WASH_THEMES, LIGHT_WASH_THEMES, washBackground } from "../../../shared/wash-themes.ts";
+import {
+  DARK_WASH_THEMES,
+  LIGHT_WASH_THEMES,
+  washBackground,
+  type DarkWashThemeId,
+  type LightWashThemeId,
+} from "../../../shared/wash-themes.ts";
 import { appSettings, DEFAULT_SETTINGS } from "../../../services/settings.ts";
 import { icons } from "../../../shared/util.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
@@ -20,7 +26,17 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
  * 改任何一项都立即生效并保存；页里的「实时预览」用的是同一个文档，
  * 所以强调色 / 圆角 / 字号一变，预览立即跟着变。
  */
-const { bus, workbench } = useKernel();
+const { bus, workbench, theme } = useKernel();
+
+/** 选 wash 时从点击处把新配色「擦」出来，和标题栏的主题切换同一套动画 */
+function pickWash(kind: "light", id: LightWashThemeId, event: MouseEvent): void;
+function pickWash(kind: "dark", id: DarkWashThemeId, event: MouseEvent): void;
+function pickWash(kind: "light" | "dark", id: string, event: MouseEvent): void {
+  theme.revealAround({ x: event.clientX, y: event.clientY }, () => {
+    if (kind === "light") appSettings.lightTheme = id as LightWashThemeId;
+    else appSettings.darkTheme = id as DarkWashThemeId;
+  });
+}
 const state = workbench.state;
 
 /** 缩略图底部那排色点：和 Kero 的主题卡片一样，用固定的语义色。 */
@@ -162,7 +178,7 @@ class="settings-wash-tile"
 :class="{ active: appSettings.lightTheme === item.id }"
 :aria-pressed="appSettings.lightTheme === item.id"
 :title="`${item.label}（浅色窗口）`"
-@click="appSettings.lightTheme = item.id"
+@click="pickWash('light', item.id, $event)"
         >
 <span class="settings-wash-window" :style="{ background: washBackground(item.id, 'light') }">
   <span class="settings-wash-top">
@@ -195,7 +211,7 @@ class="settings-wash-tile"
 :class="{ active: appSettings.darkTheme === item.id }"
 :aria-pressed="appSettings.darkTheme === item.id"
 :title="`${item.label}（深色窗口）`"
-@click="appSettings.darkTheme = item.id"
+@click="pickWash('dark', item.id, $event)"
         >
 <span class="settings-wash-window is-dark" :style="{ background: washBackground(item.id, 'dark') }">
   <span class="settings-wash-top">

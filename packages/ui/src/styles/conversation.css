@@ -45,6 +45,22 @@
   height: 52px;
   border-radius: 15px;
 }
+.connecting-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 13px;
+}
+/* 正在连接 Pi 时徽标轻轻呼吸：强调「在等就行，不用点」 */
+.empty-thread.is-connecting .pi-emblem {
+  animation: emblem-breathe 2.4s var(--ease-in-out) infinite;
+}
+@keyframes emblem-breathe {
+  0%, 100% { transform: scale(1); box-shadow: inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.25)), 0 12px 32px rgba(15, 20, 35, 0.14); }
+  50% { transform: scale(1.035); box-shadow: inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.25)), 0 16px 40px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
 .pi-emblem-glyph {
   color: var(--fg);
   font-family: Georgia, "Times New Roman", serif;
@@ -862,7 +878,7 @@
    现在它和其他内容一样随滚动走，展开后也不会在顶部留一条悬浮的条。 */
 .activity-group { position: relative; margin: 1px 0; }
 .activity-head {
-  position: static;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -899,6 +915,28 @@
   gap: 6px;
 }
 .activity-head :is(.stat-add, .stat-del) { font-size: 11px; }
+/* 正在执行：一条柔光从折叠头左侧扫过，代替转圈图标提示「还在跑」。
+   只叠一层半透明渐变，不改变高度，也不影响文字。 */
+.activity-group.live .activity-head::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent) 14%, transparent) 46%,
+    transparent 74%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: activity-sheen 2.8s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+@keyframes activity-sheen {
+  0% { background-position: 180% 0; }
+  60%, 100% { background-position: -80% 0; }
+}
 .activity-group.errored .activity-head { color: var(--err); }
 .activity-group.errored .activity-title { color: var(--err); }
 .activity-error {
@@ -930,6 +968,19 @@
 }
 @keyframes activity-body-in {
   from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 展开后每一行依次浮起（最多错开 6 行），像把记录一层层铺开 */
+.activity-body > * {
+  animation: activity-step-in var(--motion) var(--ease-out) both;
+}
+.activity-body > *:nth-child(2) { animation-delay: 28ms; }
+.activity-body > *:nth-child(3) { animation-delay: 56ms; }
+.activity-body > *:nth-child(4) { animation-delay: 84ms; }
+.activity-body > *:nth-child(5) { animation-delay: 112ms; }
+.activity-body > *:nth-child(6) { animation-delay: 140ms; }
+@keyframes activity-step-in {
+  from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
 }
 /* 耗时不再做成一块底色芯片：和吸顶的组头叠在一起时，彩色小块太抢眼 */

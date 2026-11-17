@@ -98,6 +98,13 @@
   transition-duration: 0.001ms !important;
   scroll-behavior: auto !important;
 }
+/* 主题切换的圆形揭示由 JS 驱动 clip-path，这里只负责关掉默认的整屏交叉淡入 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root *,
   :root *::before,

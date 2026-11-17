@@ -1026,9 +1026,11 @@ watch(searchMatches, () => {
           
           <!-- 新建任务 / 重新连接期间给一个明确的进度：以前挂的是从未被赋值的
                ws.loading，这块提示永远不出现，界面上会直接闪出「你想做什么」 -->
-          <div v-if="ws.status === 'starting' && !ws.blocks.length" class="empty-thread">
-            <span class="mini-spinner" />
-            <p>正在连接 Pi…</p>
+          <div v-if="ws.status === 'starting' && !ws.blocks.length" class="empty-thread is-connecting">
+            <div class="empty-thread-mark pi-emblem is-sm" aria-hidden="true">
+              <span class="pi-emblem-glyph">π</span>
+            </div>
+            <p class="connecting-line"><span class="mini-spinner" />正在连接 Pi…</p>
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">

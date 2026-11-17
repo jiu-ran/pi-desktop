@@ -29,6 +29,8 @@ const stopQueueEditListener = bus.on("queue:edit", onQueueEditRequest);
 onBeforeUnmount(stopQueueEditListener);
 const ws = computed(() => workbench.active.value);
 const input = ref<HTMLTextAreaElement | null>(null);
+/** 发送按钮：发送成功后从这里放一颗光点飞向对话区 */
+const sendBtn = ref<HTMLButtonElement | null>(null);
 
 /**
  * 输入框的右键菜单：用应用自己的菜单（和文件树 / 会话列表同一种），
@@ -1127,6 +1129,37 @@ function focus(): void {
   input.value?.focus();
 }
 
+/**
+ * 发送成功后让一颗光点从按钮飞向对话区底部：把「消息已经送进会话」这件事
+ * 变成一个看得见的动作。只在支持 WAAPI 且没关动效时跑，不阻塞发送。
+ */
+function flyToConversation(originEl: HTMLElement | null): void {
+  if (!originEl || typeof originEl.animate !== "function") return;
+  if (document.documentElement.dataset.motion === "off") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const from = originEl.getBoundingClientRect();
+  const target =
+    document.querySelector(".timeline")?.getBoundingClientRect() ??
+    document.querySelector(".chat-body")?.getBoundingClientRect();
+  if (!target) return;
+  const dot = document.createElement("span");
+  dot.className = "send-fly";
+  dot.style.left = `${from.left + from.width / 2}px`;
+  dot.style.top = `${from.top + from.height / 2}px`;
+  document.body.appendChild(dot);
+  const toX = target.left + target.width / 2 - (from.left + from.width / 2);
+  const toY = target.bottom - (from.top + from.height / 2) - 28;
+  const anim = dot.animate(
+    [
+      { transform: "translate(-50%, -50%) scale(0.7)", opacity: 0 },
+      { transform: "translate(-50%, -50%) scale(1)", opacity: 1, offset: 0.18 },
+      { transform: `translate(calc(-50% + ${toX}px), calc(-50% + ${toY}px)) scale(0.35)`, opacity: 0 },
+    ],
+    { duration: 520, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" },
+  );
+  anim.finished.finally(() => dot.remove());
+}
+
 async function submit(): Promise<void> {
   const text = draft.value;
   if ((!text.trim() && !attachments.value.length) || busy.value) return;
@@ -1170,6 +1203,7 @@ async function submit(): Promise<void> {
   }
   draft.value = "";
   const sent = await workbench.send(text, { mode: mode.value });
+  if (sent) flyToConversation(sendBtn.value);
   // 发送失败（附件失效、Worker 未就绪等）时把正文放回输入框，避免用户白打一段字。
   if (!sent && !draft.value) draft.value = text;
   if (sent) {
@@ -1814,6 +1848,7 @@ async function abortBash(): Promise<void> {
               <span v-html="icons.stop" />停止
             </button>
             <button
+              ref="sendBtn"
               class="send-btn"
               :class="{ ready: (draft.trim() || attachments.length) && !busy }"
               :disabled="(!draft.trim() && !attachments.length) || busy"

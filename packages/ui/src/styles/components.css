@@ -1840,6 +1840,19 @@ html[data-density="compact"] .tool-card {
   animation: fade 0.12s ease-out;
 }
 
+/* 发送时那颗飞向对话区的光点（WAAPI 驱动，动画结束后自己移除） */
+.send-fly {
+  position: fixed;
+  z-index: 90;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, var(--accent) 55%, transparent 72%);
+  box-shadow: 0 0 12px 3px color-mix(in srgb, var(--accent) 55%, transparent);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
 /* 主题化 title 提示：替代原生系统白底 tooltip */
 .pi-tooltip {
   position: fixed;

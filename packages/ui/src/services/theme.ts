@@ -135,11 +135,57 @@ export function setupTheme(
 ) {
   let stopWatch: (() => void) | null = null;
 
-  function toggleTheme(): void {
-    workbench.setTheme(workbench.state.theme === "dark" ? "light" : "dark");
-    // 标题栏切换等同于「强制深色/浅色」：设置页里的主题模式要跟着走，
-    // 否则外观 watcher 会把用户刚切的主题又改回去
-    onThemePinned?.(workbench.state.theme === "dark" ? "dark" : "light");
+  /**
+   * 从点击位置把一个圆形「揭示」出下一套主题（View Transitions API）。
+   * 浏览器不支持或用户关了动效时，直接切换。
+   */
+  function revealAround(origin: { x: number; y: number } | undefined, apply: () => void): void {
+    const doc = document as Document & {
+      startViewTransition?: (cb: () => void) => { ready: Promise<void> };
+    };
+    const reduced =
+      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!doc?.startViewTransition || reduced || document.documentElement.dataset.motion === "off") {
+      apply();
+      return;
+    }
+    const x = origin?.x ?? window.innerWidth / 2;
+    const y = origin?.y ?? window.innerHeight / 2;
+    // 半径取到最远的角，圆一定盖满窗口
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    let transition: { ready: Promise<void> };
+    try {
+      transition = doc.startViewTransition(apply);
+    } catch {
+      // 上一次揭示还没结束就再点：直接切换，不排队
+      apply();
+      return;
+    }
+    transition.ready
+      .then(() => {
+        document.documentElement.animate(
+          {
+            clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`],
+          },
+          {
+            duration: 460,
+            easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+            pseudoElement: "::view-transition-new(root)",
+          },
+        );
+      })
+      .catch(() => {
+        /* 动画被打断（连续点）时忽略：主题已经切过去了 */
+      });
+  }
+
+  function toggleTheme(origin?: { x: number; y: number }): void {
+    revealAround(origin, () => {
+      workbench.setTheme(workbench.state.theme === "dark" ? "light" : "dark");
+      // 标题栏切换等同于「强制深色/浅色」：设置页里的主题模式要跟着走，
+      // 否则外观 watcher 会把用户刚切的主题又改回去
+      onThemePinned?.(workbench.state.theme === "dark" ? "dark" : "light");
+    });
   }
 
   function currentTheme(): ThemeSpec {
@@ -165,5 +211,5 @@ export function setupTheme(
     });
   }
 
-  return { themes: WASH_THEMES, toggleTheme, currentTheme, dispose: () => stopWatch?.() };
+  return { themes: WASH_THEMES, toggleTheme, revealAround, currentTheme, dispose: () => stopWatch?.() };
 }
