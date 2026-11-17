@@ -719,8 +719,9 @@ const contextPercent = computed<number | null>(() =>
 
 const contextLevel = computed<"low" | "mid" | "high">(() => {
   const pct = contextPercent.value ?? 0;
-  if (pct > 80) return "high";
-  if (pct > 50) return "mid";
+  // 56% 这种正常占用标成橙色会一直闪人眼，改成 70% 才提示、90% 才告警
+  if (pct >= 90) return "high";
+  if (pct > 70) return "mid";
   return "low";
 });
 
@@ -1932,6 +1933,7 @@ async function abortBash(): Promise<void> {
               <svg class="context-ring" viewBox="0 0 20 20" aria-hidden="true">
                 <circle class="context-ring-track" cx="10" cy="10" r="7.5" />
                 <circle
+                  v-if="contextPercent"
                   class="context-ring-fill"
                   cx="10"
                   cy="10"

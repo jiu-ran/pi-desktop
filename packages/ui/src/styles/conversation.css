@@ -1437,26 +1437,34 @@
 }
 .composer-left, .composer-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .composer-left { flex: 1 1 140px; overflow: visible; }
-.composer-right { flex: 1 1 auto; justify-content: flex-end; gap: 4px; }
+.composer-right { flex: 1 1 auto; justify-content: flex-end; gap: 6px; }
 .composer-context {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 7px;
+  height: 26px;
+  margin-right: 2px;
+  padding: 0 7px 0 6px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  /* 平时低调（不用橙色），但保持可读；只有上下文吃紧才换警示色 */
   color: var(--fg-2);
   font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
   cursor: pointer;
-  border: 0;
   background: none;
   transition: background 0.12s, color 0.12s;
 }
-.composer-context:hover {
-  background: var(--hover);
-  color: var(--fg);
+/* 位数变化（9% → 100%）时宽度不跳，右侧按钮不会跟着抖 */
+.composer-context-pct { min-width: 30px; text-align: right; }
+.composer-context:hover { background: var(--hover); color: var(--fg); }
+.composer-context:focus-visible,
+.send-btn:focus-visible,
+.picker-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 /* 会话用量弹层：数据全部来自 pi 的 getSessionStats */
@@ -1517,23 +1525,18 @@
   stroke-width: 2.5;
 }
 .context-ring-track {
-  stroke: var(--bg-3);
+  stroke: color-mix(in srgb, var(--fg) 13%, transparent);
 }
 .context-ring-fill {
-  stroke: var(--ok-fg);
+  stroke: currentColor;
   stroke-linecap: round;
   transition: stroke-dasharray 0.3s;
 }
-.composer-context[data-level="mid"] .composer-context-pct,
-.composer-context[data-level="mid"] .context-ring-fill {
-  color: var(--warn);
-  stroke: var(--warn);
-}
-.composer-context[data-level="high"] .composer-context-pct,
-.composer-context[data-level="high"] .context-ring-fill {
-  color: var(--err);
-  stroke: var(--err);
-}
+/* 70% 提示、90% 告警：正常占用就保持低调的灰 */
+.composer-context[data-level="mid"] { color: var(--warn); }
+.composer-context[data-level="mid"]:hover { color: color-mix(in srgb, var(--warn) 82%, var(--fg)); }
+.composer-context[data-level="high"] { color: var(--err); }
+.composer-context[data-level="high"]:hover { color: color-mix(in srgb, var(--err) 82%, var(--fg)); }
 .bar-btn {
   display: grid;
   flex: none;
@@ -1555,7 +1558,7 @@
   flex: none;
   align-items: center;
   gap: 5px;
-  height: 27px;
+  height: 26px;
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -1583,15 +1586,18 @@
 .send-btn svg { display: block; }
 .send-icon { display: grid; place-items: center; margin-right: -1px; }
 .send-btn.stop {
-  border-color: color-mix(in srgb, var(--err) 38%, var(--line-2));
-  background: color-mix(in srgb, var(--err) 10%, transparent);
+  /* 停止是「打断」不是「主操作」：去掉描边，只留淡淡的红底，别和发送抢镜 */
+  border-color: transparent;
+  background: color-mix(in srgb, var(--err) 9%, transparent);
   color: var(--del-fg);
 }
 .send-btn.stop:hover:not(:disabled) {
-  border-color: var(--err);
-  background: var(--del-bg);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--err) 16%, transparent);
   color: var(--del-fg);
 }
+.send-btn.stop svg { width: 12px; height: 12px; }
+.send-btn:active:not(:disabled) { transform: translateY(0.5px); }
 
 /* 底栏下拉（模型 / 思考 / 发送方式） */
 .picker { position: relative; min-width: 0; flex: 0 1 auto; }
@@ -1604,7 +1610,7 @@
   /* 模型名经常比 180px 长（「DeepSeek V4.1 Flash」就被截成「DeepSeek V4.1 Fl…」），
      给宽一点，同时保住窄舞台下的收缩能力 */
   max-width: min(280px, 52vw);
-  height: 24px;
+  height: 26px;
   padding: 0 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
