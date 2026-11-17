@@ -2318,13 +2318,18 @@ button.crumb.crumb-branch:hover {
 .project.current .project-name { color: var(--fg); }
 .project-branch { display: none; }
 .project-count {
-  min-width: 0;
-  height: auto;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
+  /* 项目名后面的会话数：做成小徽标，别让数字看起来像标题的一部分 */
+  min-width: 17px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
   color: var(--fg-3);
-  font: 500 11px/1.4 var(--font);
+  font: 500 10.5px/16px var(--font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-align: center;
 }
 .project-attention {
   margin-left: auto;
