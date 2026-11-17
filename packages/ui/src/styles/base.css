@@ -79,10 +79,17 @@
   --code-font-size: 12.5px;
   --font: "Inter", "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  /* 动效：时长与缓动集中在这里，组件只引用变量，调手感不用改各处的魔法数字 */
+  --motion-fast: 120ms;
+  --motion: 180ms;
+  --motion-slow: 260ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   color-scheme: light;
 }
 
-/* 外观设置里的「关闭界面动效」：弹层过渡、加载动画、平滑滚动一并停掉 */
+/* 外观设置里的「关闭界面动效」：弹层过渡、加载动画、平滑滚动一并停掉。
+   系统级「减少动态效果」也走同一套开关，不再需要每个组件各写一遍媒体查询。 */
 :root[data-motion="off"] *,
 :root[data-motion="off"] *::before,
 :root[data-motion="off"] *::after {
@@ -90,6 +97,16 @@
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
   scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root *,
+  :root *::before,
+  :root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 * { box-sizing: border-box; }

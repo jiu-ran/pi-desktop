@@ -925,6 +925,12 @@
   gap: 10px;
   margin: 3px 0 4px 12px;
   padding: 3px 0 2px 0;
+  /* 展开时才挂载，所以用入场动画而不是过渡：淡入 + 轻微下落，收起保持瞬时 */
+  animation: activity-body-in var(--motion) var(--ease-out);
+}
+@keyframes activity-body-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 /* 耗时不再做成一块底色芯片：和吸顶的组头叠在一起时，彩色小块太抢眼 */
 .activity-duration {

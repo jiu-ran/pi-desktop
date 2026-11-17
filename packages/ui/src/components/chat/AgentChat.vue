@@ -67,6 +67,57 @@ const messageLoadingThrottle = ref(0);
 const historyLoading = ref(false);
 const historyNotice = ref("");
 const historyEnterIds = ref<Set<string>>(new Set());
+
+// 新增内容的入场动效：只让「刚刚追加」的块 / 执行记录淡入上移，
+// 切换会话与回放历史时整体不参与，避免一屏元素同时乱动。
+const freshEnterIds = ref<Set<string>>(new Set());
+const sessionEntering = ref(false);
+let freshEnterTimer = 0;
+let sessionEnterTimer = 0;
+const seenBlockIds = new Set<string>();
+let seenThreadId = "";
+
+watch(
+  () => [ws.value?.activeThread?.sessionFile ?? "", ws.value?.activeThread?.blocks.length ?? 0] as const,
+  ([threadKey], previous) => {
+    const blocks = ws.value?.activeThread?.blocks ?? [];
+    if (threadKey !== seenThreadId) {
+      // 换会话：把当前内容全部记为「已存在」，只播一次整体淡入
+      seenThreadId = threadKey;
+      seenBlockIds.clear();
+      for (const block of blocks) seenBlockIds.add(block.id);
+      freshEnterIds.value = new Set();
+      sessionEntering.value = true;
+      if (sessionEnterTimer) window.clearTimeout(sessionEnterTimer);
+      sessionEnterTimer = window.setTimeout(() => {
+        sessionEntering.value = false;
+        sessionEnterTimer = 0;
+      }, 220);
+      return;
+    }
+
+    const previousLength = previous?.[1] ?? 0;
+    let firstAddedIndex = -1;
+    const added: string[] = [];
+    blocks.forEach((block, index) => {
+      if (seenBlockIds.has(block.id)) return;
+      seenBlockIds.add(block.id);
+      if (firstAddedIndex < 0) firstAddedIndex = index;
+      added.push(block.id);
+    });
+    if (!added.length) return;
+    // 只有追加在末尾的新内容才从下方浮上来；上滑补齐的历史交给 history-enter
+    if (firstAddedIndex < previousLength) return;
+    // 一次只动最新的一到两个块：批量追加时不会整屏乱动
+    freshEnterIds.value = new Set(added.slice(-2));
+    if (freshEnterTimer) window.clearTimeout(freshEnterTimer);
+    freshEnterTimer = window.setTimeout(() => {
+      freshEnterIds.value = new Set();
+      freshEnterTimer = 0;
+    }, 420);
+  },
+  { flush: "post" },
+);
 let historyNoticeTimer = 0;
 let historyEnterTimer = 0;
 let historyLoadToken = 0;
@@ -524,7 +575,9 @@ async function loadMoreMessages(options: { auto?: boolean } = {}): Promise<void>
       // 因此不会影响下面“保持滚动位置”的计算。
       historyEnterIds.value = new Set(addedIds);
       successNotice = `已加载 ${result.loaded} 条更早消息`;
-      if (historyEnterTimer) window.clearTimeout(historyEnterTimer);
+      if (freshEnterTimer) window.clearTimeout(freshEnterTimer);
+  if (sessionEnterTimer) window.clearTimeout(sessionEnterTimer);
+  if (historyEnterTimer) window.clearTimeout(historyEnterTimer);
       historyEnterTimer = window.setTimeout(() => {
         historyEnterIds.value = new Set();
         historyEnterTimer = 0;
@@ -953,7 +1006,10 @@ watch(searchMatches, () => {
         </div>
       </Transition>
       <div ref="scroller" class="timeline" @scroll="onScroll">
-        <div class="timeline-inner" :class="{ 'is-empty': !ws.blocks.length && ws.status !== 'starting' }">
+        <div
+          class="timeline-inner"
+          :class="{ 'is-empty': !ws.blocks.length && ws.status !== 'starting', 'session-entering': sessionEntering }"
+        >
           <!-- 加载错误提示 -->
           <div v-if="loadMoreError" class="load-error">
             <span>⚠️ {{ loadMoreError }}</span>
@@ -1011,7 +1067,11 @@ watch(searchMatches, () => {
               <div
                 v-if="item.kind === 'block'"
                 :data-block-id="item.block.id"
-                :class="{ 'search-hit': searchMatches[searchIndex]?.id === item.block.id, 'history-enter': historyEnterIds.has(item.block.id) }"
+                :class="{
+                  'search-hit': searchMatches[searchIndex]?.id === item.block.id,
+                  'history-enter': historyEnterIds.has(item.block.id),
+                  'fresh-enter': freshEnterIds.has(item.block.id),
+                }"
               >
                 <BlockView
                   :block="item.block"
@@ -1031,6 +1091,7 @@ watch(searchMatches, () => {
                 :expanded="activityOpen(item.group)"
                 :class="{
                   'history-enter': item.group.entries.some((entry) => historyEnterIds.has(entry.block.id)),
+                  'fresh-enter': item.group.entries.some((entry) => freshEnterIds.has(entry.block.id)),
                   'activity-compact': activityMode === 'compact',
                 }"
                 @toggle="toggleActivity(item.group)"
@@ -1269,6 +1330,7 @@ watch(searchMatches, () => {
 
 @media (prefers-reduced-motion: reduce) {
   .jump-fade-enter-active, .jump-fade-leave-active { transition: none; }
+  .fresh-enter, .timeline-inner.session-entering { animation: none; }
 }
 
 .history-enter {
@@ -1278,6 +1340,24 @@ watch(searchMatches, () => {
 @keyframes history-enter {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* 新增内容从下方轻轻浮上来；只用 opacity/transform，不影响滚动位置计算 */
+.fresh-enter {
+  animation: fresh-enter var(--motion) var(--ease-out) both;
+}
+@keyframes fresh-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 切换会话时整屏一次淡入，替代硬切换 */
+.timeline-inner.session-entering {
+  animation: session-enter var(--motion) var(--ease-out);
+}
+@keyframes session-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .history-notice {

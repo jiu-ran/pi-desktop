@@ -26,6 +26,8 @@ const ptySize = ref({ cols: 100, rows: 30 });
 interface PtyScreen { focus: () => void }
 const ptyScreens = new Map<string, PtyScreen>();
 const stick = ref(true);
+const opening = ref(false);
+let openingTimer = 0;
 const resizing = ref(false);
 const copied = ref(false);
 const wrap = ref(loadWrap());
@@ -575,6 +577,12 @@ watch(
   () => state.open,
   (open) => {
     if (!open) return;
+    opening.value = true;
+    if (openingTimer) window.clearTimeout(openingTimer);
+    openingTimer = window.setTimeout(() => {
+      opening.value = false;
+      openingTimer = 0;
+    }, 240);
     void terminal.refreshProfiles();
     focusTerminal();
     void nextTick(revealActiveTab);
@@ -587,6 +595,7 @@ let tabsObserver: ResizeObserver | null = null;
 // 回调里会改状态（= 可能改布局），推迟一帧避免 ResizeObserver loop 警告
 const tabsOverflowTick = createFrameScheduler(updateTabsOverflow);
 onBeforeUnmount(() => {
+  if (openingTimer) clearTimeout(openingTimer);
   stopResize();
   tabsOverflowTick.cancel();
   tabsObserver?.disconnect();
@@ -612,7 +621,7 @@ onMounted(() => {
   <section
     v-show="state.open && state.enabled"
     class="terminal-dock"
-    :class="{ 'is-compact': state.height <= 220 }"
+    :class="{ 'is-compact': state.height <= 220, 'is-opening': opening }"
     :style="{ height: `${state.height}px` }"
     aria-label="终端与后台任务"
   >

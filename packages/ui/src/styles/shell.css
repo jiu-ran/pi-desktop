@@ -425,6 +425,14 @@
   min-height: 0;
   overflow-y: auto;
 }
+/* 切换扩展工具时内容整体重挂载（component :key），给新面板一个短淡入 */
+.area-panel-body > * {
+  animation: area-panel-in var(--motion-fast) var(--ease-out);
+}
+@keyframes area-panel-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* 标题栏右侧状态项（statusbar 贡献点） */
 .status-item {

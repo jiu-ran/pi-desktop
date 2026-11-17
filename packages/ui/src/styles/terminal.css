@@ -15,6 +15,14 @@
   box-shadow: 0 0 0 1px var(--line);
   container: terminal / inline-size;
 }
+/* 每次展开时短促上滑：v-show 关闭时没有过渡，只在打开瞬间播放一次 */
+.terminal-dock.is-opening {
+  animation: terminal-dock-in var(--motion) var(--ease-out);
+}
+@keyframes terminal-dock-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 /* 浅色主题下栏带用 bg-2 形成清晰分层；深色主题由半透明混合得到。 */
 :root[data-theme="light"] .terminal-dock { --terminal-surface: var(--bg-2); }
 .terminal-dock button:focus-visible,
