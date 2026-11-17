@@ -747,6 +747,38 @@ async function toggleStats(): Promise<void> {
   if (statsOpen.value) await refreshStats();
 }
 
+function closeStats(): void {
+  statsOpen.value = false;
+}
+
+/**
+ * 点弹层外面就收起来。
+ *
+ * 弹层里的透明遮罩是 `position: fixed`，但输入框是玻璃质感（backdrop-filter），
+ * fixed 会相对输入框定位 —— 那块遮罩其实只盖住输入框自己，点聊天区关不掉。
+ * 所以这里补一个全局监听；同时监听窗口失焦（点到别的程序 / 桌面）。
+ */
+function onStatsOutside(event: Event): void {
+  const target = event.target as HTMLElement | null;
+  if (!target || typeof target.closest !== "function") return;
+  if (target.closest(".composer-stats-pop") || target.closest(".composer-context")) return;
+  closeStats();
+}
+
+function bindStatsDismiss(open: boolean): void {
+  if (typeof window === "undefined") return;
+  if (open) {
+    document.addEventListener("pointerdown", onStatsOutside, true);
+    window.addEventListener("blur", closeStats);
+  } else {
+    document.removeEventListener("pointerdown", onStatsOutside, true);
+    window.removeEventListener("blur", closeStats);
+  }
+}
+
+watch(statsOpen, bindStatsDismiss);
+onBeforeUnmount(() => bindStatsDismiss(false));
+
 const contextTooltip = computed(() => {
   const c = contextUsage.value;
   if (!c) return "";
