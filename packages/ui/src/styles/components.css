@@ -705,8 +705,11 @@
   opacity: 0;
 }
 .task-item:hover .task-actions { opacity: 1; }
+/* 悬停时右侧换成删除按钮：时间、状态徽标和末尾的状态点一起让位，
+   否则它们会压在删除图标底下（状态点在最右端，正好和图标重叠）。 */
 .task-item:hover .task-time,
-.task-item:hover .task-badge { visibility: hidden; }
+.task-item:hover .task-badge,
+.task-item:hover .task-state { visibility: hidden; }
 .task-actions .icon-btn:hover:not(:disabled) { background: var(--del-bg); color: var(--del-fg); }
 .task-row {
   position: relative;
