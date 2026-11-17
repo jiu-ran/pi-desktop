@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/jiu-ran/pi-desktop/internal/host"
@@ -65,6 +67,9 @@ func main() {
 			opts.Frameless = true
 		}
 		win := mygo.NewWindow(opts)
+		if mygo.IsDev() {
+			retryDevLoad(win.Page())
+		}
 		// 恢复上次的窗口状态后兜底：显示器换小了、或上次把窗口拖到屏幕外，
 		// 本来会恢复出「标题栏在屏幕上方看不见」的位置。
 		clampWindowToWorkArea(win)
@@ -82,6 +87,43 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// retryDevLoad 让开发窗口自己从「无法访问此页面」里恢复。
+//
+// 开发模式下界面来自 devUrl；改 Go 代码、重启 dev server 或 HMR 刷新的那几秒，
+// WebView 会停在 ERR_CONNECTION_REFUSED 上，以前必须手动点「刷新」。
+// 这里在加载失败后按 600ms 重试，成功一次就把计数清零；连续失败 60 次（约 36 秒）
+// 就停手，免得真的起不来时一直刷。
+func retryDevLoad(page *mygo.Page) {
+	if page == nil {
+		return
+	}
+	const maxAttempts = 60
+	const retryDelay = 600 * time.Millisecond
+	var mu sync.Mutex
+	var attempts int
+	var timer *time.Timer
+	page.OnDidFinishLoad(func() {
+		mu.Lock()
+		attempts = 0
+		mu.Unlock()
+	})
+	page.OnDidFailLoad(func(err *mygo.LoadError) {
+		mu.Lock()
+		defer mu.Unlock()
+		if attempts >= maxAttempts {
+			return
+		}
+		attempts++
+		log.Printf("开发窗口加载失败，%d 次，稍后重试：%s（%s）", attempts, err.URL, err.Description)
+		if timer != nil {
+			timer.Stop()
+		}
+		timer = time.AfterFunc(retryDelay, func() {
+			page.Reload()
+		})
+	})
 }
 
 // initialWindowGeometry 返回首次启动的窗口尺寸与最小尺寸（DIP）：
