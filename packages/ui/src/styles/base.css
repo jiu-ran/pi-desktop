@@ -87,14 +87,12 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   /* 浮层遮罩：跟着主题走 —— 浅色是雾白、深色是墨黑。
      以前写死 rgba(0,0,0,·)，浅色主题下点开大图就是一块灰墙。 */
-  --scrim: rgba(250, 246, 250, 0.62);
   --scrim-strong: rgba(250, 246, 250, 0.86);
   --scrim-blur: 26px;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --scrim: rgba(10, 9, 13, 0.56);
   --scrim-strong: rgba(10, 9, 13, 0.78);
 }
 

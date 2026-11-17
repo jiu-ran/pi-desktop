@@ -200,6 +200,10 @@ const queueEdit = ref<{
   blocks: PromptBlock[];
   /** 原来在队列里的位置（取消 / 保存时插回原处） */
   index: number;
+  /** 打开编辑时的会话与项目：切换会话 / 项目后要把它放回原来那条队列 */
+  cwd: string;
+  sessionFile: string;
+  thread: any;
 } | null>(null);
 const queueEditDraft = ref("");
 const queueEditBusy = ref(false);
@@ -222,8 +226,17 @@ async function startQueueEdit(mode: "steer" | "followUp", prompt: string): Promi
     if (!held.ok) return;
     // 预填只能取「用户写的话」：附件块单独列出来，否则 [文件: …] 标签会被写回提示词，
     // 保存后气泡上就多出一条重复的图片路径。
+    const activeWs = ws.value;
     const blocks = splitPromptBlocks(prompt).blocks;
-    queueEdit.value = { mode, prompt, blocks, index: held.index };
+    queueEdit.value = {
+      mode,
+      prompt,
+      blocks,
+      index: held.index,
+      cwd: activeWs?.cwd ?? "",
+      sessionFile: activeWs?.sessionFile ?? "",
+      thread: activeWs?.activeThread,
+    };
     queueEditDraft.value = queueDraftText(prompt);
     queueEditKept.value = blocks.map((block) => block.path);
     queueEditAdded.value = [];
@@ -256,7 +269,10 @@ async function closeQueueEdit(): Promise<void> {
   resetQueueEdit();
   if (!entry) return;
   try {
-    await workbench.cancelQueuedEdit({ mode: entry.mode, text: entry.prompt }, entry.index);
+    await workbench.cancelQueuedEdit({ mode: entry.mode, text: entry.prompt }, entry.index, {
+      thread: entry.thread,
+      cwd: entry.cwd,
+    });
   } catch (error) {
     notifyError(error);
   }
@@ -578,6 +594,15 @@ async function reloadDefaultModel(): Promise<void> {
 
 onMounted(() => { void reloadDefaultModel(); });
 watch(() => ws.value?.cwd, () => { void reloadDefaultModel(); });
+
+// 切换会话 / 项目时把排队编辑收起来：这条消息已经离开原来的队列，必须放回原会话，
+// 否则它既不在队列里、界面上也看不到，等于丢了。
+watch(
+  () => [ws.value?.cwd, ws.value?.sessionFile],
+  () => {
+    if (queueEdit.value) void closeQueueEdit();
+  },
+);
 
 async function onSelectModel(model: any): Promise<void> {
   if (!model) return;

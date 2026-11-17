@@ -2082,6 +2082,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       block.queueText = nextPrompt;
       block.imageItems = nextImages.length ? nextImages : undefined;
       block.images = nextImages.length;
+      // 显示用的附件列表也要跟着删：否则气泡上还能看到已经去掉的文件名
+      if (keepPaths && Array.isArray(block.attachments)) {
+        block.attachments = block.attachments.filter((item: any) => keepPaths.includes(String(item?.path ?? "")));
+      }
       block.held = false;
     }
     applyQueue(thread, planned);
@@ -2137,13 +2141,19 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   /** 取消编辑：把原来那条按原位置放回队列（图片一起带回去）。 */
-  async function cancelQueuedEdit(target: { mode: "steer" | "followUp"; text: string }, index = 0): Promise<boolean> {
+  async function cancelQueuedEdit(
+    target: { mode: "steer" | "followUp"; text: string },
+    index = 0,
+    /** 编辑是在哪个会话里打开的：切换会话 / 项目之后仍把消息放回原来那条队列 */
+    context?: { thread?: SessionThreadState; cwd?: string },
+  ): Promise<boolean> {
     const ws = active.value;
     if (!ws || !target?.text) return false;
-    const thread = ws.activeThread;
+    const thread = context?.thread ?? ws.activeThread;
+    const cwd = context?.cwd ?? ws.cwd;
     const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
     const wanted = normalize(target.text);
-    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const cleared = await rpc(cwd, "clearQueue", [], thread.sessionFile);
     const current = {
       steering: [...(cleared?.steering ?? [])],
       followUp: [...(cleared?.followUp ?? [])],
@@ -2160,10 +2170,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
     try {
       for (const text of planned.steering) {
-        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+        await rpc(cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
       }
       for (const text of planned.followUp) {
-        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+        await rpc(cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
       }
     } catch (error: any) {
       applyQueue(thread, current);

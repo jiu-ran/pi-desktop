@@ -27,7 +27,7 @@ let queueState: { steering: string[]; followUp: string[] } = {
   steering: [],
   followUp: [firstPrompt, otherPrompt],
 };
-const calls: Array<{ method: string; args: any[] }> = [];
+const calls: Array<{ method: string; args: any[]; file?: string }> = [];
 
 const snapshot = () => ({
   state: {
@@ -67,8 +67,8 @@ const host = {
       data: `BASE64:${item.split(/[\\/]/).pop()}`,
     })),
   }),
-  call: async (_cwd: string, method: string, args: any[] = []) => {
-    calls.push({ method, args });
+  call: async (_cwd: string, method: string, args: any[] = [], file?: string) => {
+    calls.push({ method, args, file });
     if (method === "clearQueue") return { steering: [...queueState.steering], followUp: [...queueState.followUp] };
     if (method === "steer" || method === "followUp") return null;
     return null;
@@ -186,3 +186,24 @@ assert.equal(
   false,
   "撤回后不能留下还标记着 held 的气泡",
 );
+
+// 7) 切换会话后取消编辑：消息要放回原来那条会话的队列（否则它既不在队列里也看不到）
+const otherSession = `${cwd}/other.jsonl`;
+const otherThread = {
+  sessionFile: otherSession,
+  blocks: [],
+  queue: { steering: [], followUp: [] },
+  transcript: { moveBlockToEnd: () => false },
+} as any;
+queueState = { steering: [], followUp: [] };
+calls.length = 0;
+const restoredOther = await workbench.cancelQueuedEdit(
+  { mode: "followUp", text: otherPrompt },
+  0,
+  { thread: otherThread, cwd },
+);
+assert.equal(restoredOther, true, "跨会话取消编辑应成功");
+const otherCall = calls.find((call) => call.method === "followUp")!;
+assert.ok(otherCall, "应重新入队");
+assert.equal(otherCall.file, otherSession, "要放回原来那条会话的队列");
+assert.deepEqual(otherThread.queue.followUp, [otherPrompt], "原会话的队列状态也要跟着更新");
