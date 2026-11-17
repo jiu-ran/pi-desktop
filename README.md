@@ -1,12 +1,12 @@
 # Pi Desktop
 
-基于本机 **Pi Agent CLI**（`@earendil-works/pi-coding-agent`）的跨平台桌面客户端，技术栈 **MyGo + Go 宿主 + Vue 3 / TypeScript**。界面参考 JetBrains Air 的布局与 Kero 的材质。
+基于本机 **Pi Agent CLI**（`@earendil-works/pi-coding-agent`）的跨平台桌面客户端，技术栈 **MyGo + Go 宿主 + Vue 3 / TypeScript**。
 
 桌面端不跑模型、不内置工具，只通过 JSON-RPC 驱动你已经装好的 `pi`；会话记录、Pi 的配置与资源（MCP、软件包、Skills、`settings.json`）由 Go 宿主读写（默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 覆盖）。所有文件操作限制在当前工作区目录内。
 
 ## 快速开始
 
-**用现成的**：到 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载 —— Windows `Pi.Desktop.exe`（便携）/ `pi-desktop-setup-*.exe`（安装包），macOS `.dmg`，Linux `.tar.gz` / `.deb` / `.rpm`。
+**用现成的**：到 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载 —— Windows `Pi.Desktop.exe`（便携）/ `pi-desktop-setup-*.exe`（安装包），macOS `.dmg`，Linux `.tar.gz` / `.deb` / `.rpm`。Windows 安装向导跟随系统显示语言（简体中文 / English）。
 
 **前置条件**只有一条：本机能跑 `pi`。桌面端跑的就是这份 `pi`，`pi update` 之后当场生效；没装 `pi` 时应用能打开但不会启动会话。
 

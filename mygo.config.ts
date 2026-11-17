@@ -19,6 +19,10 @@ export default defineConfig({
 
   main: "./cmd/pi-desktop",
   icon: "build/icon.png",
+
+  // 界面与文案都是中文，源语言就是 zh-Hans；同时带上 en，安装程序跟着系统
+  // 显示语言选中文或英文（MyGo 用 app 声明的语言生成 NSIS 的多语言界面）。
+  i18n: { dir: "locales", source: "zh-Hans" },
   macos: {
     minimumSystemVersion: "13.0",
   },

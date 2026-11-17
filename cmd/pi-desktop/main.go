@@ -12,6 +12,9 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/jiu-ran/pi-desktop/internal/host"
+	// 让 locales 目录里的语言目录（zh-Hans / en）成为 app 声明的语言：
+	// 安装程序、文件属性与 MyGo 自带控件都据此选语言。
+	_ "github.com/jiu-ran/pi-desktop/locales"
 )
 
 func main() {

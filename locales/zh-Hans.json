@@ -1,0 +1,6 @@
+{
+  "@@locale": "zh-Hans",
+  "mygo.appName": "Pi Desktop",
+  "mygo.appDescription": "基于本机 Pi Agent CLI 的跨平台桌面客户端",
+  "mygo.desktopShortcut": "创建桌面快捷方式"
+}

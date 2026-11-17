@@ -1,0 +1,6 @@
+{
+  "@@locale": "en",
+  "mygo.appName": "Pi Desktop",
+  "mygo.appDescription": "A cross-platform desktop client for the local Pi Agent CLI",
+  "mygo.desktopShortcut": "Create a desktop shortcut"
+}
