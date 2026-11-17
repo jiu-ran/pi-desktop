@@ -47,10 +47,11 @@ func main() {
 			Height:    height,
 			MinWidth:  minWidth,
 			MinHeight: minHeight,
-			// 换了自适应尺寸后，旧的状态文件里存的是「1400×900 被屏幕挤出来的」
-			// 尺寸与位置，继续沿用会让人以为窗口一开就贴满屏幕。换一个 key，
-			// 让大家这次按显示器工作区重新给一个默认尺寸。
-			StateKey:        "main-v2",
+			// 每次换默认尺寸都要换 key：旧状态文件存的是按旧默认值被屏幕
+			// 挤出来的尺寸（比如 1400×900 压出来的 1400×882），继续沿用就
+			// 会让升级后的首次启动还是旧的、贴满屏幕的样子。
+
+			StateKey:        "main-v3",
 			BackgroundColor: "#111214",
 			Page: mygo.PageOptions{
 				DevTools: mygo.DevToolsAuto,
@@ -84,10 +85,11 @@ func main() {
 }
 
 // initialWindowGeometry 返回首次启动的窗口尺寸与最小尺寸（DIP）：
-// 默认 1400×900，但不超过当前主显示器工作区的 86%；最小尺寸 980×640，
+// 默认 1030×730，但不超过当前主显示器工作区的 86%；最小尺寸 980×640，
 // 若工作区本身更小则跟着缩小，避免小屏或高缩放下窗口撑出屏幕。
 func initialWindowGeometry() (width, height, minWidth, minHeight int) {
-	const defaultWidth, defaultHeight = 1400, 900
+	// 默认尺寸 1030×730 DIP（125% 缩放下等于 1288×912 物理像素）。
+	const defaultWidth, defaultHeight = 1030, 730
 	minWidth, minHeight = 980, 640
 	width, height = defaultWidth, defaultHeight
 	area := mygo.Screen.PrimaryDisplay().WorkArea
