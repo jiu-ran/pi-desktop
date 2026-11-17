@@ -35,6 +35,8 @@ const ws = computed(() => workbench.active.value);
 const pi = computed(() => state.pi);
 const enabledPlugins = computed(() => plugins.sidebarPlugins.value);
 const hasOpenPanel = computed(() => Boolean(state.activePanelId && enabledPlugins.value.some((p) => p.id === state.activePanelId)));
+// 没打开项目时侧栏是空的（Shell 里也不渲染它），按钮跟着置灰，点击不会「按了没反应」。
+const sidebarVisible = computed(() => state.sidebarOpen && Boolean(state.activeCwd));
 
 const title = computed(() => {
   if (!ws.value) return "";
@@ -93,8 +95,9 @@ const piTitle = computed(() => {
       <span class="tb-brand" title="Pi Desktop">Pi</span>
       <button
         class="tb-btn"
-        :class="{ active: state.sidebarOpen }"
-        title="切换项目与会话栏 (Ctrl+B)"
+        :class="{ active: sidebarVisible }"
+        :disabled="!state.activeCwd"
+        :title="state.activeCwd ? '切换项目与会话栏 (Ctrl+B)' : '打开项目后可展开项目与会话栏'"
         @click="state.sidebarOpen = !state.sidebarOpen"
         v-html="icons.sidebar"
       />

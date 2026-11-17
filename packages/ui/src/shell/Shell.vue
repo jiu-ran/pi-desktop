@@ -36,6 +36,12 @@ const hasStage = computed(() => {
   return Boolean(owner?.enabled && owner?.stage);
 });
 
+/**
+ * 侧栏只在真的打开了项目时出现：没项目时它只有一个空搜索框，反而把对话区挤窄。
+ * 打开项目（state.activeCwd 有值）后自动回来，用户手动收起仍然算数。
+ */
+const sidebarVisible = computed(() => state.sidebarOpen && Boolean(state.activeCwd));
+
 const hasPanel = computed(() => {
   const id = state.activePanelId;
   if (!id) return false;
@@ -88,8 +94,8 @@ const panelsBudget = computed(() =>
 );
 
 const effectiveWidths = computed(() => {
-  const w1 = state.sidebarOpen ? clamp(state.sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) : 0;
-  const min1 = state.sidebarOpen ? SIDEBAR_MIN_WIDTH : 0;
+  const w1 = sidebarVisible.value ? clamp(state.sidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) : 0;
+  const min1 = sidebarVisible.value ? SIDEBAR_MIN_WIDTH : 0;
 
   const w3 = hasStage.value ? clamp(state.stageWidth, STAGE_VIEW_MIN_WIDTH, STAGE_VIEW_MAX_WIDTH) : 0;
   const min3 = hasStage.value ? STAGE_VIEW_MIN_WIDTH : 0;
@@ -109,7 +115,7 @@ const effectiveWidths = computed(() => {
   const extraBudget = Math.max(0, budget - totalMin);
   const ratio = extraWanted > 0 ? Math.min(1, extraBudget / extraWanted) : 0;
 
-  const sidebar = state.sidebarOpen ? Math.round(min1 + (w1 - min1) * ratio) : 0;
+  const sidebar = sidebarVisible.value ? Math.round(min1 + (w1 - min1) * ratio) : 0;
   const panel = hasPanel.value ? Math.round(min4 + (w4 - min4) * ratio) : 0;
   const stage = hasStage.value
     ? clamp(budget - sidebar - panel, STAGE_VIEW_MIN_WIDTH, Math.round(min3 + (w3 - min3) * ratio))
@@ -147,7 +153,7 @@ function onSidebarPointerMove(event: PointerEvent): void {
 }
 
 function commitWidths(): void {
-  if (state.sidebarOpen) workbench.setSidebarWidth(effectiveSidebarWidth.value);
+  if (sidebarVisible.value) workbench.setSidebarWidth(effectiveSidebarWidth.value);
   if (hasStage.value) workbench.setStageWidth(effectiveStageWidth.value);
   if (hasPanel.value) workbench.setPanelWidth(effectivePanelWidth.value);
 }
@@ -169,7 +175,7 @@ function onStagePointerMove(event: PointerEvent): void {
   const dx = event.clientX - resizeStartX;
   // 向左拖动 (dx < 0) 增大 3 区域宽度，向右拖动减小 3 区域宽度
   const desiredStage = clamp(resizeStartStage - dx, STAGE_VIEW_MIN_WIDTH, STAGE_VIEW_MAX_WIDTH);
-  const protectedSidebar = state.sidebarOpen ? Math.min(resizeStartSidebar, 272) : 0;
+  const protectedSidebar = sidebarVisible.value ? Math.min(resizeStartSidebar, 272) : 0;
   const protectedPanel = hasPanel.value ? Math.min(resizeStartPanel, 280) : 0;
   const hardMaxStage = Math.min(
     STAGE_VIEW_MAX_WIDTH,
@@ -179,7 +185,7 @@ function onStagePointerMove(event: PointerEvent): void {
   workbench.setStageWidth(nextStage, false);
 
   let remaining = panelsBudget.value - nextStage;
-  if (state.sidebarOpen) {
+  if (sidebarVisible.value) {
     const nextSidebar = clamp(resizeStartSidebar, protectedSidebar, remaining - protectedPanel);
     workbench.setSidebarWidth(nextSidebar, false);
     remaining -= nextSidebar;
@@ -207,7 +213,7 @@ function onPanelPointerMove(event: PointerEvent): void {
   const dx = event.clientX - resizeStartX;
   // 向左拖动 (dx < 0) 增大 4 区域宽度，向右拖动减小 4 区域宽度
   const desiredPanel = clamp(resizeStartPanel - dx, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH);
-  const protectedSidebar = state.sidebarOpen ? Math.min(resizeStartSidebar, 272) : 0;
+  const protectedSidebar = sidebarVisible.value ? Math.min(resizeStartSidebar, 272) : 0;
   const minStage = hasStage.value ? STAGE_VIEW_MIN_WIDTH : 0;
   const hardMaxPanel = Math.min(
     PANEL_MAX_WIDTH,
@@ -217,7 +223,7 @@ function onPanelPointerMove(event: PointerEvent): void {
   workbench.setPanelWidth(nextPanel, false);
 
   let remaining = panelsBudget.value - nextPanel;
-  if (state.sidebarOpen) {
+  if (sidebarVisible.value) {
     const nextSidebar = clamp(resizeStartSidebar, protectedSidebar, remaining - minStage);
     workbench.setSidebarWidth(nextSidebar, false);
     remaining -= nextSidebar;
@@ -265,7 +271,7 @@ function resizeByKeyboard(kind: "sidebar" | "stage" | "panel", event: KeyboardEv
 }
 
 function syncEffectiveWidthsToState(): void {
-  if (state.sidebarOpen) workbench.setSidebarWidth(effectiveSidebarWidth.value, false);
+  if (sidebarVisible.value) workbench.setSidebarWidth(effectiveSidebarWidth.value, false);
   if (hasStage.value) workbench.setStageWidth(effectiveStageWidth.value, false);
   if (hasPanel.value) workbench.setPanelWidth(effectivePanelWidth.value, false);
 }
@@ -361,11 +367,11 @@ onBeforeUnmount(() => {
 
     <div ref="workspaceEl" class="workspace">
       <!-- 项目与会话栏（LeftSidebar） -->
-      <aside v-if="state.sidebarOpen" class="island sidebar" :style="{ width: `${effectiveSidebarWidth}px` }">
+      <aside v-if="sidebarVisible" class="island sidebar" :style="{ width: `${effectiveSidebarWidth}px` }">
         <LeftSidebar />
       </aside>
       <div
-        v-if="state.sidebarOpen"
+        v-if="sidebarVisible"
         class="sidebar-resizer"
         :class="{ dragging: sidebarResizing }"
         role="separator"

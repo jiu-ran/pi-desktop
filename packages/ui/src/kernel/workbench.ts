@@ -220,7 +220,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     sidebarWidth: savedSidebarWidth(),
     panelWidth: savedWidth(PANEL_WIDTH_KEY, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, 320),
     stageWidth: savedWidth(EDITOR_WIDTH_KEY, EDITOR_MIN_WIDTH, EDITOR_MAX_WIDTH, 520),
-    activePanelId: "files",
+    // 启动时不主动展开右侧面板：留一个干净的对话窗口，面板由用户点图标打开。
+    activePanelId: "",
     paletteOpen: false,
   });
 
