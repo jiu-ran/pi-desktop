@@ -235,7 +235,7 @@ func withFileWrite(file string, fn func() error) error {
 	return fn()
 }
 
-// atomicWriteText 同目录临时文件 + 原子替换；与 Electron 版一致。
+// atomicWriteText 同目录临时文件 + 原子替换：写到一半崩溃也不会留下半个文件。
 func atomicWriteText(file, content string) error {
 	dir := filepath.Dir(file)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

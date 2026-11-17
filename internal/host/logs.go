@@ -346,7 +346,7 @@ func logRenderer(level, scope, message string) {
 }
 
 // ConfigureLogs 决定日志落盘位置：优先跟程序放在一起（安装目录 / 开发仓库根），
-// 不可写时回落到 userData/logs。与 Electron 版的行为一致。
+// 不可写时回落到 userData/logs（与界面「设置 → 运行日志」显示的一致）。
 func ConfigureLogs() {
 	preferred := ""
 	if exe, err := os.Executable(); err == nil {

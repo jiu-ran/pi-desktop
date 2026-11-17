@@ -2,12 +2,12 @@
  * 出网方式（代理）的选择。
  *
  * 桌面端有两条独立的网络路径，必须一起管：
- * 1. 应用自己：Electron 的 `net` / 渲染层请求（检查更新、下载安装包）；
+ * 1. 应用自己：Go 宿主的 HTTP 客户端（检查更新、下载安装包）；
  * 2. Pi 子进程：模型请求、MCP、`pi update` —— Pi 用 undici 的 `EnvHttpProxyAgent`，
  *    **只认 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量**，系统代理设置它看不见。
  *
  * 所以这里把「用户选哪种」和「最终用哪个代理」分开：先算出 `ProxyPlan`，
- * 再分别喂给 Electron 的 session 和子进程的 env。纯函数便于逐条核对。
+ * 再分别喂给宿主的 HTTP 客户端和子进程的 env。纯函数便于逐条核对。
  */
 
 export type NetworkMode = "auto" | "system" | "direct" | "custom";

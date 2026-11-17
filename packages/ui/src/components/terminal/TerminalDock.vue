@@ -340,7 +340,7 @@ function submit(): void {
   if (interactiveRunning.value) {
     const hidden = secret.value;
     if (hidden) {
-      // 先清空输入再走异步 IPC，避免密码在输入框里多停留一帧。
+      // 先清空输入再走异步宿主调用，避免密码在输入框里多停留一帧。
       state.input = "";
       secret.value = false;
     }

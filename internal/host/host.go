@@ -9,10 +9,10 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// PiEvent 是 Pi RPC 事件转发给界面的通道（与 Electron 时代的 pi:event 同名）。
+// PiEvent 是 Pi RPC 事件转发给界面的通道（沿用 pi:event 这个通道名）。
 var PiEvent = mygo.NewEvent[map[string]any]("pi:event")
 
-// WindowStateEvent 与 Electron 的 app:window-state 对应。
+// WindowStateEvent 把窗口最大化 / 全屏状态推给界面（通道名 app:window-state）。
 var WindowStateEvent = mygo.NewEvent[map[string]any]("app:window-state")
 
 // DiskChangeEvent 对应原来的 files:disk-change。
@@ -115,15 +115,15 @@ func (h *Host) attachWindow(win *mygo.Window) {
 			return nil
 		})
 		page.OnRenderProcessGone(func(reason string) {
-			logError("renderer", "渲染进程异常退出："+reason)
+			logError("renderer", "界面进程异常退出："+reason)
 			if h.recordCrashAndShouldReload() {
 				page.Reload()
 				return
 			}
 			go func() {
 				result, err := mygo.Dialog.Message(mygo.MessageOptions{
-					Parent: win, Type: mygo.MessageError, Title: "界面渲染进程多次异常退出",
-					Message:       "渲染进程在 60 秒内多次崩溃，是否尝试重新加载界面？",
+					Parent: win, Type: mygo.MessageError, Title: "界面进程多次异常退出",
+					Message:       "界面进程在 60 秒内多次崩溃，是否尝试重新加载界面？",
 					Buttons:       []string{"退出应用", "重新加载"},
 					DefaultButton: 1, CancelButton: 0,
 				})

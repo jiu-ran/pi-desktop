@@ -60,7 +60,7 @@ assert.equal(local("file://server/share/a.png").absolute, true);
 // 转义坏了也不能炸
 assert.equal(local("file:///C:/a%E0%A4%A.png").kind, "local");
 
-// 6) 相对路径：留给主进程按工作区解析，不能自己拼
+// 6) 相对路径：留给宿主按工作区解析，不能自己拼
 for (const src of ["images/a.png", "./a.png", "../shared/a.png"]) {
   const ref = imageRef(src);
   assert.equal(ref.kind, "local", `相对路径也是本地文件：${src}`);

@@ -90,7 +90,7 @@ export interface LogSummary {
   choicesMb?: number[];
 }
 
-/** @ 引用对话时，主进程回传的会话上下文条目 */
+/** @ 引用对话时，宿主回传的会话上下文条目 */
 export interface SessionAttachmentItem {
   /** 会话文件绝对路径 */
   path: string;
@@ -522,7 +522,7 @@ export interface TerminalTaskSnapshot extends TerminalTaskInfo {
   truncated: boolean;
 }
 
-/** 项目目录的磁盘变动（主进程 fs.watch 汇总后推给界面）。 */
+/** 项目目录的磁盘变动（宿主 fs.watch 汇总后推给界面）。 */
 export interface WorkspaceDiskChange {
   cwd: string;
   relativePaths: string[];
@@ -557,7 +557,7 @@ export interface PiDesktopBridge {
   checkAppUpdate: (options?: { manual?: boolean }) => Promise<AppUpdateCheck>;
   downloadAppUpdate: () => Promise<PreparedAppUpdate>;
   cancelAppUpdate: () => boolean;
-  /** 读取系统剪贴板文本（终端 Ctrl+V 粘贴用，主进程读取避免渲染进程权限差异）。 */
+  /** 读取系统剪贴板文本（终端 Ctrl+V 粘贴用，宿主读取避免界面权限差异）。 */
   readClipboard: () => Promise<string>;
   installAppUpdate: (version: string) => Promise<void>;
   openAppUpdate: (url: string) => Promise<boolean>;
@@ -573,7 +573,7 @@ export interface PiDesktopBridge {
   open: (cwd: string, options?: { resumeSessionFile?: string }) => Promise<any>;
   snapshot: (cwd: string, sessionFile?: string) => Promise<any>;
   prepareAttachments: (cwd: string, paths: string[], authorizePaths?: string[]) => Promise<any>;
-  /** 渲染进程卡顿上报（主进程记到 logs/perf.log） */
+  /** 界面卡顿上报（宿主记到 logs/perf.log） */
   reportLongTask?: (ms: number, label?: string) => void;
   /** 前端日志持久化（logs/renderer.log） */
   logEvent?: (level: "debug" | "info" | "warn" | "error", scope: string, message: string) => void;
@@ -584,7 +584,7 @@ export interface PiDesktopBridge {
   logsClear?: () => Promise<LogSummary>;
   logsOpen?: () => Promise<boolean>;
   logsReveal?: () => Promise<boolean>;
-  /** 告诉主进程当前项目：日志写在 <项目>/.pi-desktop/logs */
+  /** 告诉宿主当前项目：日志写在 <项目>/.pi-desktop/logs */
 
   /** 跨项目会话列表（@ 引用其它项目对话） */
   crossProjectSessions?: (limit?: number) => Promise<CrossProjectSessionSummary[]>;
@@ -688,7 +688,7 @@ export interface PiDesktopBridge {
   writeTerminal: (id: string, input: string) => Promise<boolean>;
   writeTerminalPty: (id: string, data: string, binary?: boolean) => Promise<boolean>;
   resizeTerminalPty: (id: string, cols: number, rows: number) => Promise<boolean>;
-  /** PTY 聚焦时禁止 Electron 菜单快捷键吞掉 Ctrl+W / Ctrl+R 等终端按键。 */
+  /** PTY 聚焦时禁止宿主菜单快捷键吞掉 Ctrl+W / Ctrl+R 等终端按键。 */
   setTerminalFocus: (focused: boolean) => Promise<boolean>;
   stopTerminal: (id: string) => Promise<boolean>;
   terminalTasks: () => Promise<TerminalTaskSnapshot[]>;

@@ -135,7 +135,7 @@ function scrollTabs(event: WheelEvent): void {
 function onStageKey(event: KeyboardEvent): void {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || (event.shiftKey && event.key !== "Tab")) return;
   const target = event.target;
-  // PTY 的 Ctrl+W 是 shell 的删除单词；Electron 菜单由终端聚焦桥禁用。
+  // PTY 的 Ctrl+W 是 shell 的删除单词；宿主菜单已由终端聚焦桥禁用。
   if (target instanceof HTMLElement && target.closest(".terminal-xterm")) return;
   const inStage = target instanceof HTMLElement && Boolean(target.closest(".area-stage"));
   if (event.key === "w" || event.key === "W") {

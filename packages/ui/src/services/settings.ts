@@ -431,7 +431,7 @@ export function setupSettings(workbench: Workbench, bus: EventBus) {
   ));
   void workbench.setAppZoom(appSettings.uiZoom);
 
-  // 日志总量上限：启动时同步一次，改动即时生效（主进程会顺手清一次超量文件）
+  // 日志总量上限：启动时同步一次，改动即时生效（宿主会顺手清一次超量文件）
   void workbench.setLogLimit(appSettings.logMaxBytes);
   disposers.push(watch(
     () => appSettings.logMaxBytes,

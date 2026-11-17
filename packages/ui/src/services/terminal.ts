@@ -5,7 +5,7 @@ import { pushToast } from "./extension-ui.ts";
 /**
  * 终端/后台任务控制器。
  *
- * 任务由 Electron 主进程托管，渲染层只保留展示所需的尾部输出；
+ * 任务由 Go 宿主托管，界面只保留展示所需的尾部输出；
  * 这样切换项目、关闭面板或重载页面都不会影响已经启动的命令。
  */
 
@@ -279,7 +279,7 @@ export function createTerminalService({
       const snapshot = Array.isArray(list) ? list.find((item) => item.id === id) : undefined;
       if (snapshot) upsert(snapshot, snapshot);
     } catch {
-      // 主进程暂时不可用时保留当前状态，等 exit 事件或下次刷新。
+      // 宿主暂时不可用时保留当前状态，等 exit 事件或下次刷新。
     }
   }
 
@@ -345,7 +345,7 @@ export function createTerminalService({
         if (!Array.isArray(list) || disposed) return;
         for (const snapshot of list) upsert(snapshot, snapshot);
         chooseActive();
-      } catch { /* 主进程刚启动时保留空态 */ }
+      } catch { /* 宿主刚启动时保留空态 */ }
     })();
   }
 
@@ -564,7 +564,7 @@ export function createTerminalService({
     }
   }
 
-  /** 新建真实 PTY 终端；成功后会由主进程持续推送原始终端输出。 */
+  /** 新建真实 PTY 终端；成功后会由宿主持续推送原始终端输出。 */
   async function startPty(cols = 100, rows = 30, profileId?: string): Promise<void> {
     if (!state.enabled || state.starting) return;
     if (!supportsPty) {
@@ -594,7 +594,7 @@ export function createTerminalService({
     }
   }
 
-  /** 把 xterm 的按键/粘贴数据原样写入 PTY；同一会话的 IPC 严格按输入顺序发送。 */
+  /** 把 xterm 的按键/粘贴数据原样写入 PTY；同一会话的宿主调用严格按输入顺序发送。 */
   async function writePty(id: string, data: string, binary = false): Promise<boolean> {
     const task = state.tasks.find((item) => item.id === id);
     if (disposed || !task?.pty || task.status !== "running") return false;
@@ -712,7 +712,7 @@ export function createTerminalService({
     try {
       const ok = await host.stopTerminal(id);
       if (!ok) {
-        // 主进程返回 false 表示进程已经结束，等待 exit 事件即可；
+        // 宿主返回 false 表示进程已经结束，等待 exit 事件即可；
         // 若事件丢失，用一次快照把状态纠正回来。
         await syncSnapshot(id);
         if (task.status === "stopping") task.status = "running";

@@ -12,7 +12,7 @@
 export type ImageRef =
   /** 浏览器自己加载：http(s) / data: / blob: / 锚点 / 协议相对地址 */
   | { kind: "remote" }
-  /** 本地文件：`path` 原样交给主进程（绝对路径会被当成工作区外的外部文件） */
+  /** 本地文件：`path` 原样交给宿主（绝对路径会被当成工作区外的外部文件） */
   | { kind: "local"; path: string; absolute: boolean };
 
 const REMOTE = /^(?:https?:|data:|blob:|about:|mailto:|javascript:|#)/i;

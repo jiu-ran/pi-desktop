@@ -535,7 +535,7 @@ func (h *Host) ReportLongTask(ms int64, label string) {
 	if ms < 1000 {
 		return
 	}
-	logPerf(fmt.Sprintf("渲染进程长任务 %dms%s", ms, func() string {
+	logPerf(fmt.Sprintf("界面长任务 %dms%s", ms, func() string {
 		if label != "" {
 			return "（" + label + "）"
 		}

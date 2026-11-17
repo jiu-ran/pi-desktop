@@ -8,7 +8,7 @@ import { filterCrossProjectSessions, recentHint, sessionHint } from "./summary.t
  * Pi 自带的 `@` 只做文件 / 文件夹补全（TUI 就是这样）。「把另一段对话作为上下文」
  * 是桌面端加的能力，所以这里做成可停用的插件，注册两个 `@` 候选来源：
  * - 当前项目的对话（除本会话外）
- * - 其它项目的对话（跨项目只读列举，主进程带缓存）
+ * - 其它项目的对话（跨项目只读列举，宿主带缓存）
  *
  * 停用后 `@` 只剩文件补全，其余功能完全不受影响。
  */
@@ -53,7 +53,7 @@ export default definePlugin({
       },
     });
 
-    // 其它项目的对话：主进程扫会话根目录（每项目最近 4 个、整体 40 条、3 秒缓存）
+    // 其它项目的对话：宿主扫会话根目录（每项目最近 4 个、整体 40 条、3 秒缓存）
     ctx.registerMentionSource({
       id: "session-quote.other-projects",
       title: "其它项目的对话",

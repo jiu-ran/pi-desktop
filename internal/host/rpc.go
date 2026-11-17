@@ -15,7 +15,7 @@ import (
 
 const rpcDefaultTimeout = 30 * time.Second
 
-// rpcParams 是允许的方法及其 wire 参数名；与 Electron 版的 COMMANDS 表一致。
+// rpcParams 是允许的方法及其 wire 参数名（camelCase 调用在这里映射成 Pi 的 snake_case）。
 var rpcParams = map[string][]string{
 	"prompt":                     {"message", "images", "streamingBehavior"},
 	"steer":                      {"message", "images"},

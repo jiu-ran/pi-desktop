@@ -460,8 +460,8 @@
 }
 .image-lightbox-close {
   position: absolute;
-  /* 让开 Electron 标题栏（Windows/Linux 的窗口按钮原生浮在页面之上），
-     否则右上角的预览关闭按钮会被窗口关闭按钮盖住。 */
+  /* 让开标题栏（Windows/Linux 是自绘的无边框窗口，最小化 / 最大化 / 关闭
+     仍浮在页面右上角），否则预览的关闭按钮会被窗口按钮盖住。 */
   top: calc(40px + 12px);
   right: 20px;
   z-index: 2;

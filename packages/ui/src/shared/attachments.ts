@@ -44,7 +44,7 @@ function unescapeXml(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** 会话块的显示名：主进程把会话名称写在 title 属性里 */
+/** 会话块的显示名：宿主把会话名称写在 title 属性里 */
 function sessionTitle(attrs: string): string {
   const match = /\btitle="([^"]*)"/.exec(attrs ?? "");
   return match ? unescapeXml(match[1]!) : "";

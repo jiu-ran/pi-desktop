@@ -118,8 +118,8 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
     id: "logs",
     label: "运行日志",
     icon: icons.text,
-    desc: "主进程 / 渲染进程 / Pi / 卡顿日志，总量上限 100MB，可打开目录或清理",
-    keywords: ["日志", "log", "主进程", "渲染", "卡顿", "清理", "上限"],
+    desc: "宿主 / 界面 / Pi / 卡顿日志，总量上限 100MB，可打开目录或清理",
+    keywords: ["日志", "log", "宿主", "渲染", "卡顿", "清理", "上限"],
   },
 ];
 

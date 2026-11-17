@@ -6,7 +6,7 @@ import { captionGlyphs } from "./caption-glyphs.ts";
  * 自绘窗口按钮（Windows / Linux）。
  *
  * 之前用的是 `titleBarOverlay` 的系统按钮：它由 DWM 画在网页之上，悬停没有高亮、
- * 按下没有反馈，颜色还得靠 IPC 通知主进程——永远是「慢一步」。
+ * 按下没有反馈，颜色还得靠绑定调用通知宿主——永远是「慢一步」。
  * 自己画之后悬停 / 按下 / 关闭变红全部由 CSS 控制，顺带也不再有配色同步问题。
  *
  * macOS 保留系统红绿灯，不渲染这里。

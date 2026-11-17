@@ -369,9 +369,9 @@ export const Host = {
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
 export const events = {
-  /** PiEvent 是 Pi RPC 事件转发给界面的通道（与 Electron 时代的 pi:event 同名）。 */
+  /** PiEvent 是 Pi RPC 事件转发给界面的通道（沿用 pi:event 这个通道名）。 */
   piEvent: event<Record<string, unknown>>("pi:event"),
-  /** WindowStateEvent 与 Electron 的 app:window-state 对应。 */
+  /** WindowStateEvent 把窗口最大化 / 全屏状态推给界面（通道名 app:window-state）。 */
   appWindowState: event<Record<string, unknown>>("app:window-state"),
   /** DiskChangeEvent 对应原来的 files:disk-change。 */
   filesDiskChange: event<Record<string, unknown>>("files:disk-change"),

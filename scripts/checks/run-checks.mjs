@@ -138,7 +138,7 @@ function staticTasks() {
   const tasks = [];
   const tsc = path.join(repoRoot, "node_modules/typescript/bin/tsc");
   if (existsSync(tsc)) {
-    tasks.push({ label: "tsc（主进程 / 共享）", command: process.execPath, args: [tsc, "--noEmit"] });
+    tasks.push({ label: "tsc（界面 .ts / 检查脚本）", command: process.execPath, args: [tsc, "--noEmit"] });
   }
   const vueTsc = path.join(repoRoot, "packages/ui/node_modules/vue-tsc/bin/vue-tsc.js");
   if (existsSync(vueTsc)) {

@@ -20,7 +20,7 @@ function createHarness(initial: FakeTask[] = []) {
   let seq = 0;
   const tasks = new Map(initial.map((task) => [task.id, { ...task }]));
   let listener: ((event: any) => void) | null = null;
-  // 真机上「进程退出」是主进程推事件过来的：假宿主也得推，否则状态会一直停在 stopping
+  // 真机上「进程退出」是宿主推事件过来的：假宿主也得推，否则状态会一直停在 stopping
   const emitExit = (id: string) =>
     listener?.({ type: "exit", id, status: "stopped", exitCode: 0, signal: null, endedAt: Date.now() });
   const host = {
@@ -29,7 +29,7 @@ function createHarness(initial: FakeTask[] = []) {
       calls.push(`start:${id}:${command}`);
       const info = { id, command, cwd, pid: 100 + seq, shell: "bash", startedAt: Date.now(), status: "running" };
       tasks.set(id, { id, command, cwd, status: "running" });
-      // 真主进程会先推 start 事件；这里同步推，用来抓「同一 id 进列表两次」的回归
+      // 真宿主会先推 start 事件；这里同步推，用来抓「同一 id 进列表两次」的回归
       listener?.({ type: "start", task: info });
       return info;
     },
@@ -139,7 +139,7 @@ function createHarness(initial: FakeTask[] = []) {
   dispose();
 }
 
-// 5. 停止：调用主进程的 stopTerminal，状态先进 stopping
+// 5. 停止：调用宿主的 stopTerminal，状态先进 stopping
 {
   const { service, calls, seed, dispose } = createHarness();
   seed({ id: "a", command: "npm test", cwd: "/repo/app", status: "running" });

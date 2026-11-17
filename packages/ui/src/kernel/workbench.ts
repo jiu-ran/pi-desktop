@@ -48,7 +48,7 @@ import type {
 
 const THEME_KEY = "pi-desktop.theme";
 
-/** 界面侧日志：走主进程落盘（logs/renderer.log）。日志失败绝不影响工作区。 */
+/** 界面侧日志：走宿主落盘（logs/renderer.log）。日志失败绝不影响工作区。 */
 function logUi(level: "debug" | "info" | "warn" | "error", message: string): void {
   try {
     (window as any).piDesktop?.logEvent?.(level, "workbench", message);
@@ -66,7 +66,7 @@ const INITIAL_PAGE_SIZE = 40;
 const INITIAL_MIN_TURNS = 3;
 /** 子代理会话弹窗一次读取的消息条数（只读快照，不做分页） */
 const AGENT_SESSION_LIMIT = 400;
-/** 与主进程 prepareAttachments 的上限保持一致 */
+/** 与宿主 prepareAttachments 的上限保持一致 */
 const MAX_ATTACHMENTS = 20;
 /** 引用对话的上限：每个都占掉一大段上下文，多了提示词会被撑爆 */
 const MAX_SESSION_ATTACHMENTS = 5;
@@ -155,7 +155,7 @@ function savedSidebarWidth(): number {
   return savedWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, 272);
 }
 
-/** 传给 IPC 的参数必须是纯数据，Vue 响应式 Proxy 无法被结构化克隆。 */
+/** 传给宿主绑定的参数必须是纯数据，Vue 响应式 Proxy 无法被结构化克隆。 */
 function plainArgs(args: any[]): any[] {
   return JSON.parse(JSON.stringify(args.map((arg) => (arg && typeof arg === "object" ? toRaw(arg) : arg)) ?? []));
 }
@@ -205,7 +205,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       /** 上次检查失败的原因（限流 / 断网）；有值时不能显示「已是最新」 */
       error: "",
     },
-    /** 出网方式的实际结果（主进程算的：最终代理 + 来源） */
+    /** 出网方式的实际结果（宿主算的：最终代理 + 来源） */
     network: { mode: "auto", custom: "", proxy: "", source: "none", systemProxy: "" } as {
       mode: string;
       custom: string;
@@ -248,7 +248,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   /** 防抖窗口内还没落盘的草稿（按 `cwd|sessionFile` 索引），卸载时补写。 */
   const pendingDrafts = new Map<string, { cwd: string; sessionFile: string; draft: ComposerDraft }>();
 
-  /** 附件只存路径与名称：恢复时重新向主进程校验，文件被删了就跳过。 */
+  /** 附件只存路径与名称：恢复时重新向宿主校验，文件被删了就跳过。 */
   function draftOf(thread: SessionThreadState): ComposerDraft {
     const attachments = (thread.attachments ?? [])
       .map((item: any) => ({ path: String(item?.path ?? ""), name: item?.name, kind: item?.kind }))
@@ -305,7 +305,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
   function restoreDraftAttachments(ws: WorkspaceState, thread: SessionThreadState, stored: ComposerDraft["attachments"]): void {
     if (!stored.length) return;
     void (async () => {
-      // 工作区还没就绪时主进程还没授权这个目录，附件校验会直接失败，
+      // 工作区还没就绪时宿主还没授权这个目录，附件校验会直接失败，
       // 草稿里的附件就被当成「已不可用」丢掉了（重载 / 重新打开项目时很容易撞上）。
       // 宁可等一会儿再恢复，也不要静默弄丢用户的附件。
       const readyDeadline = Date.now() + 15_000;
@@ -502,7 +502,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
 
   /**
    * 按规范化路径查找已打开的工作区。
-   * 主进程的 recent 可能返回反斜杠路径，而目录选择器返回正斜杠路径；
+   * 宿主的 recent 可能返回反斜杠路径，而目录选择器返回正斜杠路径；
    * 如果只用 Map 精确匹配，会为同一个项目创建第二个工作区，导致侧栏出现
    * 两组同名项目、活动任务高亮错位。
    */
@@ -740,7 +740,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
     ws.status = "starting";
     ws.error = "";
-    // 启动看门狗：open 有可能永不返回（IPC 丢了、渲染进程半挂），那样工作区会一直
+    // 启动看门狗：open 有可能永不返回（绑定调用一直没回来、界面半挂），那样工作区会一直
     // 停在「启动中」且日志里什么都没有。到点先记一条，再给一个可重试的错误。
     const startupTimers = [
       setTimeout(() => {
@@ -868,7 +868,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   /**
    * 克隆仓库到 target 目录并直接打开。
    *
-   * 目标路径由界面用 `cloneTargetPath` 推导（位置 + 地址里的仓库名），主进程再复核一次
+   * 目标路径由界面用 `cloneTargetPath` 推导（位置 + 地址里的仓库名），宿主再复核一次
    * 绝对路径 / 父目录 / 目标是否为空，所以这里不再重复校验。
    */
   async function cloneRepository(url: string, target: string): Promise<string> {
@@ -1018,7 +1018,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   /**
-   * @ 引用另一个对话：加一枚「会话」附件，发送时由主进程压成上下文块。
+   * @ 引用另一个对话：加一枚「会话」附件，发送时由宿主压成上下文块。
    * 会话可能来自任意项目，所以单独走 prepareSessionAttachments（不要求在项目目录内）。
    */
   async function addSessionAttachment(session: { path?: string; id?: string; title?: string } | null): Promise<void> {
@@ -1049,7 +1049,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
   }
 
-  /** 粘贴剪贴板图片：主进程落盘到临时目录后作为普通附件加入 */
+  /** 粘贴剪贴板图片：宿主落盘到临时目录后作为普通附件加入 */
   async function addPastedImage(payload: { name?: string; mimeType?: string; data: string }): Promise<void> {
     const ws = active.value;
     if (!ws) throw new Error("没有打开的工作区");
@@ -1087,7 +1087,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     // 2. 支持从操作系统文件管理器（Explorer / Finder）拖拽文件或文件夹
     if (dataTransfer.files?.length) {
       // MyGo / WebView 里 File 没有 path，路径由宿主的 onFileDrop 异步送来；
-      // Electron 的同步 getPathForFile 仅作为旧宿主的兜底。
+      // 若宿主没给路径，再退回浏览器 File 对象（拿不到绝对路径，只能当作无附件处理）。
       const dropped = (await host?.resolveDroppedPaths?.()) ?? [];
       if (dropped.length) {
         collected.push(...dropped);
@@ -1124,7 +1124,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   /**
    * 从「最近项目」里移除。
    *
-   * 主进程会同时撤销该目录的授权，所以这里必须把本地工作区一起丢掉：
+   * 宿主会同时撤销该目录的授权，所以这里必须把本地工作区一起丢掉：
    * 否则后续任何一次会话刷新都会报「项目目录尚未获得授权」，界面上刷出一片错误提示。
    */
   async function forget(cwd: string): Promise<void> {
@@ -1358,7 +1358,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   /**
    * 跨项目会话列表（只读，最多 40 条）。
-   * 「@ 引用其它项目对话」插件用它填候选；主进程侧有 3 秒缓存，反复查询不会扫盘。
+   * 「@ 引用其它项目对话」插件用它填候选；宿主侧有 3 秒缓存，反复查询不会扫盘。
    */
   async function crossProjectSessions(limit = 40): Promise<any[]> {
     if (!host?.crossProjectSessions) return [];
@@ -1446,7 +1446,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     try {
       // 会话引用和文件附件走不同的准备入口：会话在项目目录之外，且内容是压缩过的摘��。
       const filePaths = attachmentSnapshot.filter((item: any) => item.kind !== "session").map((item: any) => item.path);
-      // 用户改过上下文的会话引用不再重新生成，直接用它保存的文本（格式与主进程一致）。
+      // 用户改过上下文的会话引用不再重新生成，直接用它保存的文本（格式与宿主一致）。
       const sessionAttachments = attachmentSnapshot.filter((item: any) => item.kind === "session");
       const customSessions = sessionAttachments.filter((item: any) => typeof item.customText === "string" && item.customText.trim());
       const sessionPaths = sessionAttachments
@@ -1463,14 +1463,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         fileText: preparedFiles.text,
         text: [sessionText, preparedFiles.text].filter(Boolean).join("\n"),
         images: preparedFiles.images,
-        // 改过上下文的引用主进程不会再回传条目，这里用快照里的那份（保留名称与条数）
+        // 改过上下文的引用宿主不会再回传条目，这里用快照里的那份（保留名称与条数）
         items: [
           ...customSessions.map((item: any) => ({ ...item, image: false, inlined: true })),
           ...(preparedSessions.items ?? []),
           ...(preparedFiles.items ?? []),
         ],
       };
-      // 用主进程回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致。
+      // 用宿主回传的附件状态（大小 / 是否内联）做乐观渲染，保证并发送前看到的一致。
       // 引导（steering）与追加（followUp）也必须立即插入：它们同样会写进会话文件，
       // 之前只在非流式时渲染，导致「发出去看不到、重开会话才出现」。
       const items = prepared.items?.length ? prepared.items : attachmentSnapshot;
@@ -2132,7 +2132,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   /**
    * 应用界面缩放（Chromium zoom factor）。缩放完全由设置页的 uiZoom 控制，
-   * 不再绑定全局快捷键。返回主进程实际生效的值。
+   * 不再绑定全局快捷键。返回宿主实际生效的值。
    */
   async function setAppZoom(factor: number): Promise<number> {
     const next = Math.min(3, Math.max(0.5, Number(factor) || 1));
@@ -2300,7 +2300,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   /**
-   * 应用出网方式。主进程据此设置 Electron session 的代理，并把环境变量补丁
+   * 应用出网方式。宿主据此设置自己 HTTP 客户端的代理，并把环境变量补丁
    * 交给之后启动的 Pi 子进程（已在运行的会话要重启才换得到）。
    */
   let networkSeq = 0;
@@ -2364,7 +2364,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
-  // ---------- MCP 与 Pi 软件包管理（支持 Electron 宿主 IPC 与 Web 预览兜底） ----------
+  // ---------- MCP 与 Pi 软件包管理（MyGo 绑定优先，纯前端预览时用假数据兜底） ----------
   const mockMcpOverview = reactive<McpOverview>({
     agentDir: "~/.pi/agent",
     globalConfigPath: "~/.pi/agent/mcp.json",

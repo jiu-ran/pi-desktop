@@ -36,4 +36,4 @@ for (const [input, level, expected] of cases) {
 
 const generic = localizeNotification("spawn failed", "error");
 if (!generic.startsWith("操作失败：")) throw new Error(`未知错误应带中文前缀：${generic}`);
-if (/Error invoking remote method/.test(generic)) throw new Error("不应保留 Electron IPC 前缀");
+if (/Error invoking remote method/.test(generic)) throw new Error("不应保留宿主绑定的技术前缀");

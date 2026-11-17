@@ -1,4 +1,4 @@
-// Pi Desktop 的 MyGo 宿主：把原来的 Electron 主进程换成 Go。
+// Pi Desktop 的 MyGo 宿主：窗口、绑定、Pi 进程与终端都在 Go 里，界面上是 packages/ui 的 Vue 应用。
 //
 // 窗口里仍然是 packages/ui 的 Vue 界面，宿主通过绑定方法提供 Pi RPC、
 // 文件、Git、终端与设置等能力；界面侧由 src/mygo/host.ts 适配成原来的

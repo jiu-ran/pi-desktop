@@ -233,7 +233,7 @@ async function paste(): Promise<void> {
   if (props.task.status !== "running" || !props.active || restoring) return;
   const target = screen;
   try {
-    // 优先走主进程读取：渲染进程的剪贴板读权限在不同平台上不一致。
+    // 优先走宿主读取：界面的剪贴板读权限在不同平台上不一致。
     const text = window.piDesktop?.readClipboard
       ? await window.piDesktop.readClipboard()
       : await navigator.clipboard.readText();

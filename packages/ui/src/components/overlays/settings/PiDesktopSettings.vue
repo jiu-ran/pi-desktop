@@ -53,9 +53,9 @@ import { NETWORK_MODES, normalizeProxyUrl, proxyPlanLabel, type NetworkMode } fr
  * 出网方式（代理）。
  *
  * 桌面端有两条独立的网络路径，必须一起管：
- * - 应用自己（检查更新、下载安装包）走 Electron 的 session 代理；
+ * - 应用自己（检查更新、下载安装包）走 Go 宿主的 HTTP 客户端代理；
  * - Pi 子进程（模型请求、MCP、`pi update`）只认 `HTTP(S)_PROXY` 环境变量。
- * 这里选一次，主进程同时落到两处；已经在跑的会话要重启才会用上新代理。
+ * 这里选一次，宿主同时落到两处；已经在跑的会话要重启才会用上新代理。
  */
 const networkOptions = NETWORK_MODES;
 const currentPlan = computed(() =>

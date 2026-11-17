@@ -22,7 +22,7 @@ let toastSeq = 0;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export function pushToast(level: string, text: string): void {
-  // 所有通知从同一个入口中文化，避免 Electron IPC 前缀和 Node 英文错误直接弹给用户。
+  // 所有通知从同一个入口中文化，避免宿主绑定的技术前缀和系统英文错误直接弹给用户。
   const localized = localizeNotification(text, level);
   // 同一条消息在短时间内重复出现时只保留一条：以前一个失败会被多个路径各报一次，
   // 界面上就堆出三四张一模一样的提示。

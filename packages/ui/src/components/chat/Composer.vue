@@ -745,7 +745,7 @@ watch(
     }
     const request = ++pluginRequest;
     const query = pathToken.value?.query ?? "";
-    // 每个来源都要等（可能走 IPC），全部算完再一次性写入，避免界面闪
+    // 每个来源都要等（可能走宿主调用），全部算完再一次性写入，避免界面闪
     const groups = await Promise.all(
       sources.map(async (source) => {
         try {
@@ -1071,11 +1071,11 @@ async function onPaste(event: ClipboardEvent): Promise<void> {
   focus();
 }
 
-/** 开发模式下前端热更新而主进程未重启时，给出可操作的提示 */
+/** 开发模式下前端热更新而宿主未重启时，给出可操作的提示 */
 function pasteError(error: any): Error {
   const message = String(error?.message ?? error ?? "");
   if (message.includes("No handler registered")) {
-    return new Error("主进程还是旧版本：请完全退出并重新启动应用后再粘贴图片");
+    return new Error("宿主还是旧版本：请完全退出并重新启动应用后再粘贴图片");
   }
   return error instanceof Error ? error : new Error(message || "粘贴图片失败");
 }

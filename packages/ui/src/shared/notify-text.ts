@@ -1,9 +1,9 @@
 /**
  * 通知文本统一中文化。
  *
- * Electron IPC 抛出的错误会带有
- *   Error invoking remote method 'pi:read-workspace-file': Error: ...
- * 前缀；Node 文件系统错误又常常是 ENOENT / EACCES 等英文。
+ * 宿主绑定抛出的错误可能带技术前缀（例如浏览器桥的
+ *   Error invoking remote method 'pi:read-workspace-file': Error: ...），
+ * 文件系统错误又常常是 ENOENT / EACCES 等英文。
  * 这里只处理通知层，不改变错误对象本身，方便日志继续保留技术细节。
  */
 

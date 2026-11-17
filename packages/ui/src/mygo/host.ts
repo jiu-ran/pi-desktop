@@ -1,10 +1,10 @@
 /**
  * MyGo 宿主适配层。
  *
- * UI 的业务代码一直只认 `window.piDesktop`（原来的 preload 桥）。这里把同一个
- * 形状搭在 MyGo 的绑定方法上：原 Electron 的 99 个 IPC 通道在这里变成
+ * 业务代码只认 `window.piDesktop` 这个形状（从 Electron 的 preload 桥沿用下来）。
+ * 这里把它搭在 MyGo 的绑定方法上：原来的每个 IPC 通道在这里变成
  * `call("Host.<Method>")`，事件则订阅 Go 侧的 `pi:event` / `files:disk-change` /
- * `pi:terminal-event`。这样界面层不需要知道宿主已经从 Electron 换成了 Go。
+ * `pi:terminal-event`。这样业务代码不需要知道宿主是 Go 还是别的实现。
  */
 import { call, currentWindow, isMyGo, on, onFileDrop, runtime } from "mygo-runtime";
 

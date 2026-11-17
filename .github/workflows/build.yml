@@ -92,7 +92,6 @@ jobs:
             dist-mygo/**/*.tar.gz
             dist-mygo/**/*.deb
             dist-mygo/**/*.rpm
-            dist-mygo/**/*.pkg.tar.zst
 
   release:
     name: Publish release
@@ -145,7 +144,7 @@ jobs:
         shell: bash
         run: |
           cd artifacts
-          find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload to GitHub Release
@@ -159,7 +158,6 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.deb
             artifacts/*.rpm
-            artifacts/*.pkg.tar.zst
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           name: Pi Desktop ${{ inputs.release_tag || github.ref_name }}
           body_path: release-notes.md

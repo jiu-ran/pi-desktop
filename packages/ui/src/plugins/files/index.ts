@@ -20,7 +20,7 @@ export default definePlugin({
   },
   activate(ctx) {
     // 项目目录被应用之外的东西改（Agent 跑工具、git 切分支、别的编辑器保存）：
-    // 主进程推过来，文件树与已打开的编辑页跟着刷新。
+    // 宿主推过来，文件树与已打开的编辑页跟着刷新。
     ctx.onDispose(bindDiskWatch(ctx.emit));
 
     ctx.on("file:open", (targetPath: string) => {

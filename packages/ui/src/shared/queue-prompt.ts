@@ -77,7 +77,7 @@ export function joinPromptBlocks(blocks: PromptBlock[], message: string): string
 
 /**
  * 编辑后的完整提示词：保留原上下文（必要时按 keepPaths 过滤）+ 新粘贴附件的标记
- * + 新文字。`addedText` 是主进程 prepareAttachments 回传的标记文本（已含 `<file>` 块）。
+ * + 新文字。`addedText` 是宿主 prepareAttachments 回传的标记文本（已含 `<file>` 块）。
  *
  * 关键：用户写的文字只出现一次 —— 展示用的 `[文件: …]` 标签永远不进提示词。
  */

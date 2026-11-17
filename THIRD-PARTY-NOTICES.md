@@ -57,7 +57,7 @@
     `planView.ts` 的评审包结构；本项目改为 Vue 组件 + 纯函数，并限制为实时 Git diff 可评审。
   - `internal/host/worktree.go`、`packages/ui/src/plugins/git/GitPanel.vue`：`git worktree` 隔离工作区的分支命名、
     去重与「主工作区 / 外部工作区 / 托管工作区」边界，参考 `packages/server/src/workspaces/workspaces.ts`；
-    本项目按 Go 宿主 / 渲染进程边界重新实现，未复用其持久化与子 Agent 逻辑。
+    本项目按 Go 宿主 / 界面边界重新实现，未复用其持久化与子 Agent 逻辑。
 - 修改说明：上游为 React 19 + Zustand + Tailwind，本项目为 Vue 3 + TypeScript + 手写 CSS；
   移植时改写为 Vue 组合式 API，纯逻辑拆分为可测试函数（见 `scripts/checks/stats.check.ts`、`scripts/checks/git.check.ts`、
   `scripts/checks/transcript.check.ts`、`scripts/checks/review.check.ts`），并适配本项目既有的事件模型与安全边界。数据仍由 pi 的
