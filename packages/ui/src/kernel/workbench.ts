@@ -7,9 +7,12 @@ import { nextRefreshDelay, type RefreshBackoff } from "../shared/refresh-backoff
 import { composePrompt } from "../shared/prompt.ts";
 import {
     planQueueEdit,
+    planQueueInsert,
     planQueueMode,
     planQueueWithdraw,
     planQueuedFlush,
+    planQueuedImages,
+    queueAttachments,
     queueDraftText,
     queueFromOrder,
     queueImagesByPrompt,
@@ -18,6 +21,13 @@ import {
     type QueuedEntry,
   } from "../shared/queue-view.ts";
 import { rebuildPrompt } from "../shared/queue-prompt.ts";
+
+/** 排队消息带的附件（撤回后放回输入框用） */
+export interface QueueAttachment {
+  kind: "file" | "directory" | "session";
+  path: string;
+  name: string;
+}
 import { piUpdateFailureToast, piUpdateToast } from "../shared/pi-update.ts";
 import { buildCustomSessionBlocks, extractSessionBody } from "../shared/session-block.ts";
 import { createTranscript, type TranscriptBlock } from "./transcript.ts";
@@ -1800,9 +1810,9 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function withdrawQueued(target: {
     mode: "steer" | "followUp";
     text: string;
-  }): Promise<{ ok: boolean; draft: string }> {
+  }): Promise<{ ok: boolean; draft: string; attachments: QueueAttachment[] }> {
     const ws = active.value;
-    if (!ws || !target?.text) return { ok: false, draft: "" };
+    if (!ws || !target?.text) return { ok: false, draft: "", attachments: [] };
     const thread = ws.activeThread;
     const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
     const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
@@ -1826,12 +1836,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         level: "error",
         text: `撤回失败，其余排队消息已保留：${error?.message ?? String(error)}`,
       });
-      return { ok: false, draft: "" };
+      return { ok: false, draft: "", attachments: [] };
     }
     applyQueue(thread, planned);
     // 撤回 = 拿回来改：文字回填输入框（附件标记不进去，只回人写的那部分）
     removeQueuedBlocks(thread, [target.text]);
-    return { ok: true, draft: queueDraftText(target.text) };
+    // 图片 / 文件附件按提示词里的块重新列出来，输入框才能把它们放回去
+    return { ok: true, draft: queueDraftText(target.text), attachments: queueAttachments(target.text) };
   }
 
   /**
@@ -1954,12 +1965,18 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return true;
   }
 
-  async function recallQueued(): Promise<string> {
+  async function recallQueued(): Promise<{ draft: string; attachments: QueueAttachment[] }> {
     const ws = active.value;
-    if (!ws) return "";
+    if (!ws) return { draft: "", attachments: [] };
     const thread = ws.activeThread;
     const queued = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
     const texts: string[] = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])];
+    // 正在编辑框里改的那条已经不在 Pi 队列里了，但「全部撤回」一样要把它带回来
+    for (const block of thread.blocks) {
+      if (block.kind !== "user" || !block.held || !block.queueText) continue;
+      texts.push(String(block.queueText));
+      block.held = false;
+    }
     applyQueue(thread, { steering: [], followUp: [] });
     if (texts.length) {
       const wanted = new Set(texts.map((text) => String(text ?? "").replace(/\r\n/g, "\n").trim()));
@@ -1969,7 +1986,16 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         if (wanted.has(key)) thread.transcript.removeBlock(block.id);
       }
     }
-    return texts.map((text) => queueDraftText(text)).filter(Boolean).join("\n");
+    const attachments: QueueAttachment[] = [];
+    const seen = new Set<string>();
+    for (const text of texts) {
+      for (const item of queueAttachments(text)) {
+        if (!item.path || seen.has(item.path)) continue;
+        seen.add(item.path);
+        attachments.push(item);
+      }
+    }
+    return { draft: texts.map((text) => queueDraftText(text)).filter(Boolean).join("\n"), attachments };
   }
 
   /**
@@ -1988,12 +2014,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    */
   async function editQueued(
     target: { mode: "steer" | "followUp"; text: string },
-    next: string | { message: string; keepPaths?: string[]; addPaths?: string[] },
+    next: string | { message: string; keepPaths?: string[]; addPaths?: string[]; index?: number },
   ): Promise<boolean> {
     const ws = active.value;
     const request = typeof next === "string" ? { message: next } : (next ?? { message: "" });
     const message = String(request.message ?? "").replace(/\r\n/g, "\n").trim();
     const addPaths = (request.addPaths ?? []).filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+    // 给了 keepPaths 就按它过滤原有附件（编辑框里点 × 删掉的图片不会又带上）
+    const keepPaths = Array.isArray(request.keepPaths) ? request.keepPaths.filter((item): item is string => typeof item === "string") : undefined;
     if (!ws || !target?.text) return false;
     if (!message && !addPaths.length) return false;
     const thread = ws.activeThread;
@@ -2013,7 +2041,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         .filter((item: any) => item?.image && item?.data)
         .map((item: any) => ({ mimeType: String(item.mimeType ?? "image/png"), data: String(item.data) }));
     }
-    const nextPrompt = rebuildPrompt(target.text, message, request.keepPaths, addedText);
+    const nextPrompt = rebuildPrompt(target.text, message, keepPaths, addedText);
     if (!nextPrompt.trim()) return false;
 
     const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
@@ -2021,11 +2049,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       steering: [...(cleared?.steering ?? [])],
       followUp: [...(cleared?.followUp ?? [])],
     };
-    const planned = planQueueEdit(current, target, nextPrompt);
+    // 编辑前那条可能已经被暂时拿掉了（holdQueuedEdit），那就按原位置插回去
+    const inQueue = [...current.steering, ...current.followUp].some((item) => normalize(item) === wanted);
+    const planned = inQueue
+      ? planQueueEdit(current, target, nextPrompt)
+      : planQueueInsert(current, target.mode, nextPrompt, typeof request.index === "number" ? request.index : current[target.mode === "steer" ? "steering" : "followUp"].length);
     // 图片是单独一组数据（steer(message, images)），clearQueue 只回文本：
     // 重新入队时必须按提示词把各自的图片带回去，否则图片丢；也不能全塞同一组，否则会重复。
     const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
-    const keptImages = imagesByPrompt[normalize(target.text)] ?? [];
+    const keptImages = planQueuedImages(target.text, keepPaths, imagesByPrompt[wanted] ?? []);
     const nextImages = [...keptImages, ...addedImages];
     if (nextImages.length) imagesByPrompt[normalize(nextPrompt)] = nextImages;
     const images = block?.imageItems as Array<{ mimeType: string; data: string }> | undefined;
@@ -2048,11 +2080,98 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     if (block) {
       block.text = message;
       block.queueText = nextPrompt;
-      if (addedImages.length) block.imageItems = [...(block.imageItems ?? []), ...addedImages];
-      block.images = block.imageItems?.length ?? block.images;
+      block.imageItems = nextImages.length ? nextImages : undefined;
+      block.images = nextImages.length;
+      block.held = false;
     }
     applyQueue(thread, planned);
     saveDraftSoon(ws.cwd, thread.sessionFile, draftOf(thread));
+    return true;
+  }
+
+  /**
+   * 打开编辑框时先把这条从 Pi 的队列里拿走。
+   *
+   * 引导（steer）消息排队期间随时会被投递进当前回合：用户还在改，它可能已经发出去了，
+   * 之后保存也因为队列里找不到这条而静默失败。编辑期间先撤回（其余消息按原顺序重新入队），
+   * 保存 / 取消时再放回原位。
+   */
+  async function holdQueuedEdit(target: { mode: "steer" | "followUp"; text: string }): Promise<{ ok: boolean; index: number }> {
+    const ws = active.value;
+    if (!ws || !target?.text) return { ok: false, index: 0 };
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const wanted = normalize(target.text);
+    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    const column = target.mode === "steer" ? current.steering : current.followUp;
+    const held = column.findIndex((item) => normalize(item) === wanted);
+    const planned = planQueueWithdraw(current, target);
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
+    // 先打标记：applyQueue 才不会把「暂时拿掉」当成「刚发出去」把气泡挪到末尾
+    const block = thread.blocks.find((item) => item.kind === "user" && normalize(item.queueText ?? "") === wanted);
+    if (block) block.held = true;
+    // 队列里已经没有这条了（刚被 Pi 取走）：没什么可拿走的，别再去动其余消息
+    if (held < 0) {
+      applyQueue(thread, current);
+      return { ok: true, index: column.length };
+    }
+    try {
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+    } catch (error: any) {
+      if (block) block.held = false;
+      applyQueue(thread, current);
+      bus.emit("notify", { level: "error", text: `打开编辑失败，队列已还原：${error?.message ?? String(error)}` });
+      return { ok: false, index: 0 };
+    }
+    applyQueue(thread, planned);
+    return { ok: true, index: held < 0 ? column.length : held };
+  }
+
+  /** 取消编辑：把原来那条按原位置放回队列（图片一起带回去）。 */
+  async function cancelQueuedEdit(target: { mode: "steer" | "followUp"; text: string }, index = 0): Promise<boolean> {
+    const ws = active.value;
+    if (!ws || !target?.text) return false;
+    const thread = ws.activeThread;
+    const normalize = (value: string) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+    const wanted = normalize(target.text);
+    const cleared = await rpc(ws.cwd, "clearQueue", [], thread.sessionFile);
+    const current = {
+      steering: [...(cleared?.steering ?? [])],
+      followUp: [...(cleared?.followUp ?? [])],
+    };
+    const block = thread.blocks.find((item) => item.kind === "user" && normalize(item.queueText ?? "") === wanted);
+    // 已经回到队列里了（比如保存失败后又放回去）：只把标记清掉
+    if ([...current.steering, ...current.followUp].some((item) => normalize(item) === wanted)) {
+      if (block) block.held = false;
+      applyQueue(thread, current);
+      return true;
+    }
+    // clearQueue 已经把整队清空了：按 planned 的顺序原样重新入队（含这一条）
+    const planned = planQueueInsert(current, target.mode, target.text, index);
+    const imagesByPrompt = queueImagesByPrompt(thread.blocks as any[]);
+    try {
+      for (const text of planned.steering) {
+        await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+      for (const text of planned.followUp) {
+        await rpc(ws.cwd, "followUp", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
+      }
+    } catch (error: any) {
+      applyQueue(thread, current);
+      bus.emit("notify", { level: "error", text: `放回队列失败：${error?.message ?? String(error)}` });
+      return false;
+    }
+    if (block) block.held = false;
+    applyQueue(thread, planned);
     return true;
   }
 
@@ -2740,6 +2859,8 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     addSessionAttachment,
     recallQueued,
     withdrawQueued,
+    holdQueuedEdit,
+    cancelQueuedEdit,
     changeQueuedMode,
     reorderQueued,
     editQueued,

@@ -23,6 +23,12 @@ export default definePlugin({
   area: "conversation",
   core: false,
   activate(ctx) {
+    // 排队消息被撤回时，引用对话跟着放回输入框
+    ctx.on("session-quote:attach", (payload: { path?: string; title?: string } | undefined) => {
+      if (!payload?.path) return;
+      void ctx.workbench.addSessionAttachment({ path: payload.path, title: payload.title });
+    });
+
     // 当前项目的对话：数据来自工作区快照，不需要额外 IPC
     ctx.registerMentionSource({
       id: "session-quote.project",

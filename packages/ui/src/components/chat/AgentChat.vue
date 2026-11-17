@@ -812,7 +812,10 @@ const queuedBlockIds = computed(
   () => new Set(planQueueView((ws.value?.blocks ?? []) as any[], ws.value?.queue ?? null).hiddenIds),
 );
 /** 时间线要渲染的块：把还排在队列里的乐观气泡剔除。 */
-const visibleBlocks = computed(() => (ws.value?.blocks ?? []).filter((block) => !queuedBlockIds.value.has(block.id)));
+// 正在编辑框里改的那条也继续隐藏：它暂时不在 Pi 队列里，但不该突然出现在对话中。
+const visibleBlocks = computed(() =>
+  (ws.value?.blocks ?? []).filter((block) => !queuedBlockIds.value.has(block.id) && !block.held),
+);
 const copyTextByIndex = computed(() =>
   buildCopyTexts(visibleBlocks.value, Boolean(ws.value?.streaming)),
 );

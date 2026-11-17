@@ -43,6 +43,8 @@ export interface TranscriptBlock {
    * Pi 的排队列表里存的是它，用它判断「这条已经在界面上、不用再显示成待发送」。
    */
   queueText?: string;
+  /** 正在编辑框里修改、暂时从 Pi 队列拿掉的那条：对话里继续隐藏 */
+  held?: boolean;
   /** `/skill:name` 展开后的技能调用（正文折叠展示） */
   skill?: SkillInvocation;
   streaming?: boolean;

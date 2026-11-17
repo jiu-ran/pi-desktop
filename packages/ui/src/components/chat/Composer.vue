@@ -198,33 +198,68 @@ const queueEdit = ref<{
   mode: "steer" | "followUp";
   prompt: string;
   blocks: PromptBlock[];
+  /** 原来在队列里的位置（取消 / 保存时插回原处） */
+  index: number;
 } | null>(null);
 const queueEditDraft = ref("");
 const queueEditBusy = ref(false);
 /** 编辑期间新粘贴的附件（保存时由内核重新 prepare 成 <file> 标记） */
 const queueEditAdded = ref<Array<{ path: string; name: string }>>([]);
+/** 提示词里原有、这次保留下来的附件路径（点 × 从里面删掉就等于删掉这个附件） */
+const queueEditKept = ref<string[]>([]);
+/** 编辑框里还要显示的原有附件 */
+const queueEditBlocks = computed(() =>
+  (queueEdit.value?.blocks ?? []).filter((block) => queueEditKept.value.includes(block.path)),
+);
 
-function startQueueEdit(mode: "steer" | "followUp", prompt: string): void {
-  // 预填只能取「用户写的话」：附件块单独列出来，否则 [文件: …] 标签会被写回提示词，
-  // 保存后气泡上就多出一条重复的图片路径。
-  queueEdit.value = { mode, prompt, blocks: splitPromptBlocks(prompt).blocks };
-  queueEditDraft.value = queueDraftText(prompt);
-  queueEditAdded.value = [];
-  nextTick(() => {
-    const area = document.querySelector<HTMLTextAreaElement>(".queue-editor textarea");
-    area?.focus();
-    area?.setSelectionRange(area.value.length, area.value.length);
-  });
+async function startQueueEdit(mode: "steer" | "followUp", prompt: string): Promise<void> {
+  if (queueBusy.value || queueEdit.value) return;
+  queueBusy.value = true;
+  try {
+    // 先把这条从 Pi 的队列里拿走：引导消息排队期间随时会被投递进当前回合，
+    // 用户还在改它就已经发出去了，之后保存也因为队列里找不到而静默失败。
+    const held = await workbench.holdQueuedEdit({ mode, text: prompt });
+    if (!held.ok) return;
+    // 预填只能取「用户写的话」：附件块单独列出来，否则 [文件: …] 标签会被写回提示词，
+    // 保存后气泡上就多出一条重复的图片路径。
+    const blocks = splitPromptBlocks(prompt).blocks;
+    queueEdit.value = { mode, prompt, blocks, index: held.index };
+    queueEditDraft.value = queueDraftText(prompt);
+    queueEditKept.value = blocks.map((block) => block.path);
+    queueEditAdded.value = [];
+    nextTick(() => {
+      const area = document.querySelector<HTMLTextAreaElement>(".queue-editor textarea");
+      area?.focus();
+      area?.setSelectionRange(area.value.length, area.value.length);
+    });
+  } catch (error) {
+    notifyError(error);
+  } finally {
+    queueBusy.value = false;
+  }
 }
 
-function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string }): void {
-  startQueueEdit(entry.mode, entry.prompt);
+async function openQueueEdit(entry: { mode: "steer" | "followUp"; prompt: string }): Promise<void> {
+  await startQueueEdit(entry.mode, entry.prompt);
 }
 
-function closeQueueEdit(): void {
+function resetQueueEdit(): void {
   queueEdit.value = null;
   queueEditDraft.value = "";
   queueEditAdded.value = [];
+  queueEditKept.value = [];
+}
+
+/** 取消编辑：把原来那条按原位置放回队列（图片也一起带回去）。 */
+async function closeQueueEdit(): Promise<void> {
+  const entry = queueEdit.value;
+  resetQueueEdit();
+  if (!entry) return;
+  try {
+    await workbench.cancelQueuedEdit({ mode: entry.mode, text: entry.prompt }, entry.index);
+  } catch (error) {
+    notifyError(error);
+  }
 }
 
 /** 从队列里定位某条消息的模式（气泡只知道提示词文本）。 */
@@ -271,18 +306,31 @@ function removeQueueEditAdded(path: string): void {
   queueEditAdded.value = queueEditAdded.value.filter((item) => item.path !== path);
 }
 
+/** 删掉提示词里原有的附件（输入框带过来的图片以前删不掉，只能删编辑时新粘贴的）。 */
+function removeQueueEditBlock(path: string): void {
+  queueEditKept.value = queueEditKept.value.filter((item) => item !== path);
+}
+
 async function saveQueueEdit(): Promise<void> {
   const entry = queueEdit.value;
   const text = queueEditDraft.value.trim();
   if (!entry || queueEditBusy.value) return;
-  if (!text && !entry.blocks.length && !queueEditAdded.value.length) return;
+  const kept = queueEditKept.value;
+  if (!text && !kept.length && !queueEditAdded.value.length) return;
   queueEditBusy.value = true;
   try {
+    // 只有真的删掉过附件才传 keepPaths：没删就原样保留（老提示词里可能有认不出的块）
+    const removed = entry.blocks.some((block) => !kept.includes(block.path));
     const ok = await workbench.editQueued(
       { mode: entry.mode, text: entry.prompt },
-      { message: text, addPaths: queueEditAdded.value.map((item) => item.path) },
+      {
+        message: text,
+        keepPaths: removed ? kept : undefined,
+        addPaths: queueEditAdded.value.map((item) => item.path),
+        index: entry.index,
+      },
     );
-    if (ok) closeQueueEdit();
+    if (ok) resetQueueEdit();
   } catch (error) {
     notifyError(error);
   } finally {
@@ -349,9 +397,11 @@ async function withdrawQueued(item: { mode: "steer" | "followUp"; text: string }
         area?.setSelectionRange(area.value.length, area.value.length);
       });
     }
-    // 正在编辑这条的话，把编辑框一起收起
+    // 撤回把图片也带回来了：按提示词里的附件块放回输入框（以前只回文字，图片就丢了）
+    if (result.attachments?.length) await restoreAttachments(result.attachments);
+    // 正在编辑这条的话，把编辑框收起（内容已经撤回，不要再放回队列）
     if (queueEdit.value && normalizePrompt(queueEdit.value.prompt) === normalizePrompt(item.text)) {
-      closeQueueEdit();
+      resetQueueEdit();
     }
   } catch (error) {
     notifyError(error);
@@ -460,12 +510,34 @@ function normalizePrompt(value: string): string {
   return String(value ?? "").replace(/\r\n/g, "\n").trim();
 }
 
+/**
+ * 撤回回来的附件放回输入框：文件 / 目录走 addFiles，会话引用走 addSessionAttachment
+ * （会话可能来自别的项目，不能按普通附件校验）。
+ */
+async function restoreAttachments(
+  items: Array<{ kind: "file" | "directory" | "session"; path: string; name?: string }>,
+): Promise<void> {
+  const files = items.filter((item) => item.kind !== "session").map((item) => item.path);
+  if (files.length) {
+    try {
+      await workbench.addFiles(files);
+    } catch (error) {
+      notifyError(error);
+    }
+  }
+  // 会话引用属于 session-quote 插件的能力，核心只发事件（停用插件时自然没人接）
+  for (const item of items.filter((entry) => entry.kind === "session")) {
+    bus.emit("session-quote:attach", { path: item.path, title: item.name });
+  }
+}
+
 async function recallQueue(): Promise<void> {
   if (queueBusy.value) return;
   queueBusy.value = true;
   try {
-    const text = await workbench.recallQueued();
-    if (text) draft.value = [draft.value, text].filter(Boolean).join("\n");
+    const recalled = await workbench.recallQueued();
+    if (recalled.draft) draft.value = [draft.value, recalled.draft].filter(Boolean).join("\n");
+    if (recalled.attachments?.length) await restoreAttachments(recalled.attachments);
     nextTick(focus);
   } catch (error) {
     notifyError(error);
@@ -1450,15 +1522,21 @@ async function abortBash(): Promise<void> {
         </span>
         <div class="queue-editor">
           <!-- 附件单独列出来：提示词里已有的块不会被写进正文，避免重复出一份图片路径 -->
-          <div v-if="queueEdit.blocks.length || queueEditAdded.length" class="queue-editor-attachments">
+          <div v-if="queueEditBlocks.length || queueEditAdded.length" class="queue-editor-attachments">
             <span
-              v-for="block in queueEdit.blocks"
+              v-for="block in queueEditBlocks"
               :key="block.path"
               class="queue-attach-chip"
               :title="block.path"
             >
               <span class="queue-attach-icon" v-html="block.kind === 'session' ? icons.message : block.kind === 'directory' ? icons.folder : icons.file" />
               <span class="queue-attach-name">{{ block.name }}</span>
+              <button
+                type="button"
+                class="queue-attach-remove"
+                :aria-label="`移除附件：${block.name}`"
+                @click="removeQueueEditBlock(block.path)"
+              >×</button>
             </span>
             <span
               v-for="item in queueEditAdded"
@@ -1493,7 +1571,7 @@ async function abortBash(): Promise<void> {
             <button
               type="button"
               class="btn primary small"
-              :disabled="queueEditBusy || (!queueEditDraft.trim() && !queueEdit.blocks.length && !queueEditAdded.length)"
+              :disabled="queueEditBusy || (!queueEditDraft.trim() && !queueEditKept.length && !queueEditAdded.length)"
               @click="saveQueueEdit"
             >
               保存并重新排队

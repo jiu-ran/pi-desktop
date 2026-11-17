@@ -24,6 +24,8 @@ export interface QueueBlockLike {
   text?: string;
   /** 实际发给模型的完整提示词（含 <file> 等附件块）；Pi 的队列里存的是这个 */
   queueText?: string;
+  /** 正在编辑框里修改、暂时从 Pi 队列拿掉的那条：不算「刚发出去」 */
+  held?: boolean;
 }
 
 export type QueueMode = "steer" | "followUp";
@@ -239,6 +241,8 @@ export function planQueuedFlush(
   const ids: string[] = [];
   (blocks ?? []).forEach((block, index) => {
     if (block.kind !== undefined && block.kind !== "user") return;
+    // 编辑期间被暂时拿掉的那条不是「发出去了」，位置不能动
+    if (block.held) return;
     const key = normalize(block.queueText ?? "");
     if (!key || !sent.has(key)) return;
     if (index === lastIndex) return;
@@ -257,6 +261,8 @@ export interface QueueImageBlockLike {
   kind?: string;
   queueText?: string;
   imageItems?: QueuedImage[];
+  /** 正在输入框里编辑、暂时从 Pi 队列拿掉的那条：不算「刚发出去」 */
+  held?: boolean;
 }
 
 /**
@@ -381,4 +387,58 @@ export function sameQueue(left: QueueState, right: QueueState): boolean {
   const a = [...normalizeAll(left.steering), ...normalizeAll(left.followUp)];
   const b = [...normalizeAll(right.steering), ...normalizeAll(right.followUp)];
   return a.length === b.length && a.every((text, index) => text === b[index]);
+}
+
+/* ------------------------------------------------------------------ *
+ * 编辑 / 撤回排队消息：附件与图片
+ * ------------------------------------------------------------------ */
+
+/**
+ * 排队消息带的附件（图片 / 文件 / 目录 / 会话引用）。
+ *
+ * 撤回 / 全部撤回只回得来文本（Pi 的 clearQueue 不返回图片），附件要按提示词里的
+ * 块重新放回输入框，否则「撤回之后图片就没了」。
+ */
+export function queueAttachments(
+  prompt: string,
+): Array<{ kind: "file" | "directory" | "session"; path: string; name: string }> {
+  return splitPromptBlocks(prompt).blocks.map(({ kind, path, name }) => ({ kind, path, name }));
+}
+
+const IMAGE_PATH = /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i;
+
+/**
+ * 编辑时删掉某些附件后，图片数据也要跟着删。
+ *
+ * 宿主按附件顺序回传图片数组，提示词里的 `<file>` 块也是同一顺序，所以第 i 个
+ * 图片块对应第 i 张图片。对不上的（历史消息、数量比块多）保守保留：宁可多带
+ * 一张，也不要静默丢图。
+ */
+export function planQueuedImages(
+  prompt: string,
+  keepPaths: string[] | undefined,
+  images: QueuedImage[],
+): QueuedImage[] {
+  const all = images ?? [];
+  if (!keepPaths) return all;
+  const imagePaths = splitPromptBlocks(prompt)
+    .blocks.map((block) => block.path)
+    .filter((path) => IMAGE_PATH.test(path));
+  const kept = new Set(keepPaths);
+  const out: QueuedImage[] = [];
+  imagePaths.forEach((path, index) => {
+    const image = all[index];
+    if (image && kept.has(path)) out.push(image);
+  });
+  if (all.length > imagePaths.length) out.push(...all.slice(imagePaths.length));
+  return out;
+}
+
+/** 把一条提示词按原位置插回它所在的列（编辑期间被暂时拿掉的那条）。 */
+export function planQueueInsert(queue: QueueState, mode: QueueMode, prompt: string, index: number): QueueState {
+  const next = { steering: [...queue.steering], followUp: [...queue.followUp] };
+  const list = mode === "steer" ? next.steering : next.followUp;
+  const at = Math.max(0, Math.min(list.length, Number.isFinite(index) ? index : list.length));
+  list.splice(at, 0, prompt);
+  return next;
 }
