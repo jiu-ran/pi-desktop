@@ -9,8 +9,8 @@ import { clampThinkingLevel, supportedThinkingLevels } from "../../shared/thinki
  * 以前模型和思考分成两个下拉摆在底栏：不仅占地方、更容易把其中一个压成省略号，
  * 而且切了模型还得再点开另一个下拉调思考等级。合在一起之后：
  * 1. 先选模型（支持筛选，列表标出「默认」）；
- * 2. 紧挨着下面就是这个模型真正支持的思考档位，切换模型后即时刷新；
- * 3. 最底下一次把「当前模型 + 当前思考」写成新会话默认值。
+ * 2. 紧挨着下面就是这个模型真正支持的思考档位，切换模型后即时刷新。
+ * 新会话默认值统一在「设置 → 智能体 → Pi」里配置，这里只做当前会话切换。
  */
 
 const props = withDefaults(
@@ -36,7 +36,6 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "select-model", model: any): void | Promise<void>;
   (e: "select-thinking", level: string): void | Promise<void>;
-  (e: "set-default", payload: { model: any; thinkingLevel: string }): void | Promise<void>;
   (e: "opened"): void;
 }>();
 
@@ -78,21 +77,6 @@ const effectiveThinking = computed(() =>
 const effectiveThinkingLabel = computed(() => thinkingLabel(effectiveThinking.value));
 
 const showThinkingInButton = computed(() => modelLevels.value.length > 1);
-
-const alreadyDefault = computed(() => {
-  if (!currentModelRef.value) return false;
-  if (currentModelRef.value !== props.defaultModelRef) return false;
-  // 不支持调节思考的模型只比对模型本身；支持的模型同时比对思考档位
-  if (modelLevels.value.length <= 1) return true;
-  return effectiveThinking.value === props.defaultThinking;
-});
-
-const defaultActionLabel = computed(() => {
-  if (!currentModelRef.value) return "选择模型后可设为默认";
-  if (alreadyDefault.value) return "当前模型与思考已设为新会话默认";
-  if (modelLevels.value.length <= 1) return `将「${currentModelName.value}」设为新会话默认`;
-  return `将「${currentModelName.value} · ${effectiveThinkingLabel.value}」设为默认`;
-});
 
 const buttonTitle = computed(() => {
   const modelPart = currentModelRef.value ? `模型：${currentModelRef.value}` : "选择模型";
@@ -139,13 +123,6 @@ function pickModel(model: any): void {
 
 function pickThinking(level: string): void {
   emit("select-thinking", level);
-}
-
-function applyDefault(): void {
-  if (!props.currentModel || alreadyDefault.value) return;
-  emit("set-default", { model: props.currentModel, thinkingLevel: effectiveThinking.value });
-  // 点「设为默认」是一次明确的收尾动作：保存并顺手关掉面板，不用再多点一下空白处
-  open.value = false;
 }
 
 function outside(event: Event): void {
@@ -259,17 +236,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="currentModelRef" class="picker-actions">
-        <button
-          type="button"
-          class="picker-action"
-          :class="{ disabled: alreadyDefault }"
-          :disabled="alreadyDefault"
-          @click="applyDefault"
-        >
-          <span class="picker-item-label">{{ defaultActionLabel }}</span>
-        </button>
-      </div>
     </div>
   </div>
 </template>

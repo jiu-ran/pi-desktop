@@ -25,6 +25,7 @@ import AgentRuntimeSettings from "./settings/AgentRuntimeSettings.vue";
 import SkillSettings from "./settings/SkillSettings.vue";
 import AppearanceSettings from "./settings/AppearanceSettings.vue";
 import ConversationSettings from "./settings/ConversationSettings.vue";
+import EditorSettings from "./settings/EditorSettings.vue";
 import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
 import LogSettings from "./settings/LogSettings.vue";
 import McpSettings from "./settings/McpSettings.vue";
@@ -313,6 +314,7 @@ onBeforeUnmount(() => {
           <AppearanceSettings v-else-if="settingsModalState.tab === 'appearance'" />
 
           <TerminalSettings v-else-if="settingsModalState.tab === 'terminal'" />
+          <EditorSettings v-else-if="settingsModalState.tab === 'editor'" />
           <McpSettings v-else-if="settingsModalState.tab === 'mcp'" />
           <ToolSettings v-else-if="settingsModalState.tab === 'tools'" />
 
@@ -323,7 +325,7 @@ onBeforeUnmount(() => {
 
           <PluginSettings v-else-if="settingsModalState.tab === 'plugins'" />
 
-          <!-- 6. 环境与快捷键 -->
+          <!-- 快捷键 -->
           <EnvironmentSettings v-else-if="settingsModalState.tab === 'environment'" />
 
           <AgentRuntimeSettings v-else-if="settingsModalState.tab === 'agent-runtime'" />

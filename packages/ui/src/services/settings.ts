@@ -32,6 +32,7 @@ const SETTINGS_STORAGE_KEY = "pi-desktop.settings";
 export type SettingsTabId =
   | "conversation"
   | "appearance"
+  | "editor"
   | "terminal"
   | "mcp"
   | "tools"

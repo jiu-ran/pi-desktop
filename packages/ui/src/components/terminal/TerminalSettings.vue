@@ -1,28 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
-import { appSettings } from "../../services/settings.ts";
+import { appSettings, openSettingsModal } from "../../services/settings.ts";
 import { pushToast } from "../../services/extension-ui.ts";
 import { localizeNotification } from "../../shared/notify-text.ts";
 import { icons } from "../../shared/util.ts";
 import SelectMenu from "../shared/SelectMenu.vue";
 
-const { terminal, plugins, platform } = useKernel();
+const { terminal, platform } = useKernel();
 const selected = ref(appSettings.terminalProfile);
 const pathDraft = ref(appSettings.terminalCustomPath);
 const argsDraft = ref(JSON.stringify(appSettings.terminalCustomArgs));
 const saving = ref(false);
-const toggling = ref(false);
 const error = ref("");
 const selectedProfile = computed(() => terminal.state.profiles.find((profile) => profile.id === appSettings.terminalProfile));
 const unavailable = computed(() => appSettings.terminalProfile !== "custom" && !selectedProfile.value && !terminal.state.profilesLoading);
-
-async function togglePlugin(): Promise<void> {
-  if (toggling.value) return;
-  toggling.value = true;
-  try { await plugins.setEnabled("terminal", !terminal.state.enabled); }
-  finally { toggling.value = false; }
-}
 
 async function selectProfile(id: string): Promise<void> {
   selected.value = id;
@@ -88,18 +80,18 @@ onMounted(() => void terminal.refreshProfiles());
 
 <template>
   <div class="settings-group">
-    <div class="settings-group-title">可选终端插件</div>
+    <div class="settings-group-title">终端插件</div>
     <div class="settings-row">
       <div class="settings-row-info">
-        <strong>启用终端与后台任务</strong>
-        <span>默认关闭。启用后显示底部面板、标题栏入口与 Ctrl/Cmd + 反引号快捷键。</span>
+        <strong>{{ terminal.state.enabled ? "已启用" : "已停用" }}</strong>
+        <span>启用 / 停用统一在「扩展 → 插件」管理；停用只隐藏入口，已有后台任务继续运行。</span>
       </div>
-      <input class="settings-switch" type="checkbox" :checked="terminal.state.enabled" :disabled="toggling" @change="togglePlugin" />
+      <button type="button" class="btn ghost small" @click="openSettingsModal('plugins')">打开插件管理</button>
     </div>
     <div v-if="!terminal.state.enabled && terminal.runningCount.value" class="settings-row">
       <div class="settings-row-info">
         <strong>{{ terminal.runningCount.value }} 个任务仍在后台运行</strong>
-        <span>停用插件只隐藏界面，不会强制结束程序。重新启用可以接回会话。</span>
+        <span>重新启用插件可以接回会话；也可以在这里结束全部任务。</span>
       </div>
       <button type="button" class="btn ghost small" @click="stopAll">结束所有任务</button>
     </div>

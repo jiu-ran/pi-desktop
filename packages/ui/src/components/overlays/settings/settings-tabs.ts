@@ -32,10 +32,10 @@ export interface SettingsSectionMeta {
 export const SETTINGS_TABS: SettingsTabMeta[] = [
   {
     id: "conversation",
-    label: "对话与并发",
+    label: "对话与并行",
     icon: icons.chat,
-    desc: "多会话并行策略、发送方式、文件自动保存与 Agent 自动化配置",
-    keywords: ["发送", "回车", "enter", "换行", "排队", "引导", "steer", "follow-up", "自动保存", "冲突", "压缩", "重试", "通知", "思考", "worker", "并发", "键盘"],
+    desc: "发送方式、运行中的排队策略、温备 Worker 与对话自动化",
+    keywords: ["发送", "回车", "enter", "换行", "排队", "引导", "steer", "follow-up", "压缩", "重试", "通知", "worker", "并发", "键盘"],
   },
   {
     id: "appearance",
@@ -43,6 +43,13 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
     icon: icons.palette,
     desc: "配色模式、强调色、圆角、字号排版与各工作区面板宽度",
     keywords: ["主题", "深色", "浅色", "跟随系统", "颜色", "配色", "强调色", "高亮", "圆角", "字号", "字体", "列宽", "宽度", "密度", "紧凑", "动效", "动画", "布局", "侧边栏", "云樱", "晴空", "青岚", "琉璃", "素雪", "星夜", "星云", "极光", "霜夜", "曜石", "wash"],
+  },
+  {
+    id: "editor",
+    label: "编辑器",
+    icon: icons.file,
+    desc: "项目文件的自动保存策略与保存延迟",
+    keywords: ["编辑器", "文件", "保存", "自动保存", "延迟", "失焦", "窗口", "冲突"],
   },
   {
     id: "terminal",
@@ -95,10 +102,10 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
   },
   {
     id: "environment",
-    label: "环境与快捷键",
+    label: "快捷键",
     icon: icons.gear,
-    desc: "活动项目目录与键盘快捷键",
-    keywords: ["目录", "快捷键", "键盘"],
+    desc: "常用键盘快捷键速查",
+    keywords: ["快捷键", "键盘", "按键", "快捷方式"],
   },
   {
     id: "agent-runtime",
@@ -124,7 +131,7 @@ export const SETTINGS_TABS: SettingsTabMeta[] = [
 ];
 
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
-  { id: "chat", label: "对话", icon: icons.chat, desc: "怎么说、怎么排队", tabs: ["conversation", "agents"] },
+  { id: "chat", label: "对话", icon: icons.chat, desc: "怎么说、怎么排队", tabs: ["conversation"] },
   {
     id: "power",
     label: "扩展",
@@ -137,8 +144,8 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "agent-section",
     label: "智能体",
     icon: icons.brain,
-    desc: "本机 Agent 的默认选择、路径与登录",
-    tabs: ["agent-runtime"],
+    desc: "本机 Agent 的默认选择、路径、登录与 Pi 全局提示词",
+    tabs: ["agent-runtime", "agents"],
   },
   {
     id: "pi-desktop-section",
@@ -151,8 +158,8 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     id: "desktop",
     label: "系统",
     icon: icons.gear,
-    desc: "终端、工作区、快捷键与运行日志",
-    tabs: ["terminal", "environment", "logs"],
+    desc: "编辑器、终端、快捷键与运行日志",
+    tabs: ["terminal", "editor", "environment", "logs"],
   },
 ];
 

@@ -42,7 +42,7 @@ Antigravity 自带 `agy acp`：一个基于 stdio 的 [Agent Client Protocol](ht
 
 - 模型列表来自 `session/new` 的 `configOptions`（`model` / `thought_level` / `mode`）。
 - **默认模型兼容处理**：`agy 1.5.11` 的 `session/new` 默认给 `gemini-4-argon`，在本机实测 90 秒内没有任何 `session/update`（`agy -p` 也会卡住）；`gemini-4-hydrogen` / `gemini-3.8-flash` 十几秒内正常回复。所以新会话会优先落到氢 / Flash；默认值只由设置页写入 `agents.json` 的 `models`，会话里临时切换不会改默认值。
-- 「设置 → 智能体 → Antigravity」可以固定新会话的默认模型与思考档位，写入桌面端的 `agents.json`，不改 Antigravity 自己的配置。Pi 的默认模型仍在「对话与 Agent」页管理。
+- 「设置 → 智能体 → Pi / Antigravity」各自固定新会话的默认模型与思考档位：Pi 写自己的 `settings.json`，Antigravity 写桌面端的 `agents.json`，都不改对方的配置。
 
 ## 已知限制
 

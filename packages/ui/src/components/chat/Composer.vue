@@ -575,7 +575,7 @@ function previewAttachment(item: any): void {
 }
 const hasHistory = computed(() => (ws.value?.blocks.length ?? 0) > 0);
 
-/** 新会话默认模型：用来在列表里标「默认」，也用来「设为默认」 */
+/** 新会话默认模型：只用来在模型列表里标「默认」，配置入口在智能体设置 */
 const defaultModelRef = ref("");
 const defaultThinkingRef = ref("");
 const agentBusy = ref(false);
@@ -649,32 +649,6 @@ async function onSelectModel(model: any): Promise<void> {
 async function onSelectThinking(level: string): Promise<void> {
   try {
     await workbench.setThinking(level);
-  } catch (error: any) {
-    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
-  }
-}
-
-/** 一次把当前模型与思考等级写成新会话默认值 */
-async function onSetDefaultModelAndThinking(payload: { model: any; thinkingLevel: string }): Promise<void> {
-  const { model, thinkingLevel } = payload;
-  if (!model || !workbench.setModelDefaults) return;
-  if (ws.value?.agent === "antigravity") {
-    bus.emit("notify", { level: "info", text: "Antigravity 的默认模型由 CLI 的 settings.json 管理，桌面端不写入 Pi 的默认值" });
-    return;
-  }
-  try {
-    await workbench.setModelDefaults({
-      scope: "global",
-      provider: model.provider,
-      model: model.id,
-      thinkingLevel,
-    });
-    await reloadDefaultModel();
-    const modelName = model.name || model.id;
-    const text = thinkingLevel
-      ? `新会话默认：${modelName} · 思考 ${thinkingLabel(thinkingLevel)}`
-      : `新会话默认：${modelName}`;
-    bus.emit("notify", { level: "info", text });
   } catch (error: any) {
     bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
   }
@@ -1952,7 +1926,6 @@ async function abortBash(): Promise<void> {
               @opened="reloadDefaultModel"
               @select-model="onSelectModel"
               @select-thinking="onSelectThinking"
-              @set-default="onSetDefaultModelAndThinking"
             />
             <button
               v-if="ws"

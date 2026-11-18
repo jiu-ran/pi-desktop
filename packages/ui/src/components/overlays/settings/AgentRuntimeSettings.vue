@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useKernel } from "../../../kernel/use-kernel.ts";
-import { openSettingsModal } from "../../../services/settings.ts";
 import PiCliSettings from "./PiCliSettings.vue";
+import PiModelDefaults from "./PiModelDefaults.vue";
 import SelectMenu from "../../shared/SelectMenu.vue";
 import { icons } from "../../../shared/util.ts";
 
@@ -303,7 +303,7 @@ async function clearPath(): Promise<void> {
 
           <div class="agent-cell">
             <span class="agent-cell-main">{{ modelLabel(agent) }}</span>
-            <span class="agent-cell-sub">{{ agent.kind === "pi" ? "Pi 的模型按会话选择" : "新会话默认值" }}</span>
+            <span class="agent-cell-sub">{{ agent.kind === "pi" ? "默认值在 Pi 详情设置" : "新会话默认值" }}</span>
           </div>
           <div class="agent-cell">
             <span class="agent-cell-main">{{ accountLabel(agent) }}</span>
@@ -395,64 +395,48 @@ async function clearPath(): Promise<void> {
         <div class="agent-section-head">
           <div>
             <h4>模型与推理</h4>
-            <span>以下设置对之后新建的会话生效</span>
+            <span>{{ selected.kind === "pi" ? "模型、思考与写入位置" : "以下设置对之后新建的会话生效" }}</span>
           </div>
-          <button
-            v-if="selected.kind === 'pi'"
-            type="button"
-            class="settings-link-btn"
-            @click="openSettingsModal('conversation')"
-          >
-            管理模型 →
-          </button>
         </div>
-        <div class="agent-card">
-          <template v-if="selected.kind === 'antigravity'">
-            <div class="agent-setting-row">
-              <div class="agent-setting-copy">
-                <strong>默认模型</strong>
-                <span>新会话默认使用的型号；会话里仍可临时切换</span>
-              </div>
-              <SelectMenu
-                v-model="modelDraft"
-                size="sm"
-                align="right"
-                aria-label="Antigravity 默认模型"
-                :disabled="!selected.found || Boolean(busy)"
-                :options="modelOptions"
-                @change="applyModel"
-              />
+        <div v-if="selected.kind === 'antigravity'" class="agent-card">
+          <div class="agent-setting-row">
+            <div class="agent-setting-copy">
+              <strong>默认模型</strong>
+              <span>新会话默认使用的型号；会话里仍可临时切换</span>
             </div>
-            <div class="agent-setting-row">
-              <div class="agent-setting-copy">
-                <strong>推理强度</strong>
-                <span>思考档位越高，回答越深入，耗时也越长</span>
-              </div>
-              <SelectMenu
-                v-model="thinkingDraft"
-                size="sm"
-                align="right"
-                aria-label="Antigravity 默认思考档位"
-                :disabled="!selected.found || Boolean(busy)"
-                :options="thinkingOptions"
-                @change="applyThinking"
-              />
+            <SelectMenu
+              v-model="modelDraft"
+              size="sm"
+              align="right"
+              aria-label="Antigravity 默认模型"
+              :disabled="!selected.found || Boolean(busy)"
+              :options="modelOptions"
+              @change="applyModel"
+            />
+          </div>
+          <div class="agent-setting-row">
+            <div class="agent-setting-copy">
+              <strong>推理强度</strong>
+              <span>思考档位越高，回答越深入，耗时也越长</span>
             </div>
-          </template>
-          <template v-else>
-            <div class="agent-setting-row">
-              <div class="agent-setting-copy">
-                <strong>默认模型</strong>
-                <span>Pi 的默认 provider / model 在「对话与 Agent」页管理，切换后对新的会话生效</span>
-              </div>
+            <SelectMenu
+              v-model="thinkingDraft"
+              size="sm"
+              align="right"
+              aria-label="Antigravity 默认思考档位"
+              :disabled="!selected.found || Boolean(busy)"
+              :options="thinkingOptions"
+              @change="applyThinking"
+            />
+          </div>
+        </div>
+        <PiModelDefaults v-else-if="selected.kind === 'pi'" />
+        <div v-else class="agent-card">
+          <div class="agent-setting-row">
+            <div class="agent-setting-copy">
+              <span>这个 Agent 的模型与推理由它自己的配置管理。</span>
             </div>
-            <div class="agent-setting-row">
-              <div class="agent-setting-copy">
-                <strong>推理强度</strong>
-                <span>Pi 的思考档位随模型在会话里选择，不在这里固定</span>
-              </div>
-            </div>
-          </template>
+          </div>
         </div>
       </section>
 

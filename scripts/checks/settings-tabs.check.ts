@@ -74,10 +74,11 @@ assert.equal(findSettingsTab("tools").label, "工具开关");
 // 智能体是一个一级分区；Pi 的路径 / 更新收进 Pi 详情，不再单开 Pi CLI 页
 assert.equal(sectionOfTab("agent-runtime").id, "agent-section", "智能体管理属于一级分区");
 assert.equal(findSettingsTab("agent-runtime").label, "智能体");
-assert.deepEqual(sectionTabs(sectionOfTab("agent-runtime")).map((tab) => tab.id), ["agent-runtime"], "智能体分区只放一页");
+assert.deepEqual(sectionTabs(sectionOfTab("agent-runtime")).map((tab) => tab.id), ["agent-runtime", "agents"], "智能体分区放 Agent 管理和 Pi 全局提示词");
 assert.equal(sectionOfTab("pi-desktop").id, "pi-desktop-section", "Pi Desktop 自己是一个一级分区");
 assert.equal(findSettingsTab("pi-desktop").label, "Pi Desktop");
-assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conversation", "agents"], "分区内的页保持登记顺序");
+assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conversation"], "对话分区只放对话页");
+assert.deepEqual(sectionTabs(sectionOfTab("editor")).map((tab) => tab.id), ["terminal", "editor", "environment", "logs"], "编辑器在系统分区，顺序稳定");
 
 // 搜索：跨分区命中，并带上所属分区名
 const logHits = searchSettings("日志");
@@ -88,6 +89,8 @@ assert.equal(logHits[0]!.sectionLabel, "系统", "命中结果要标出所属分
 const darkHits = searchSettings("深色");
 assert.equal(darkHits[0]?.id, "appearance", `搜「深色」应命中外观页：${darkHits.map((hit) => hit.id).join("/")}`);
 assert.equal(darkHits[0]?.keyword, "深色", "命中关键字的结果要标出来，用户才知道为什么搜到这条");
+const autoSaveHits = searchSettings("自动保存");
+assert.equal(autoSaveHits[0]?.id, "editor", `自动保存应命中编辑器页：${autoSaveHits.map((hit) => hit.id).join("/")}`);
 const fontHits = searchSettings("字体");
 assert.ok(fontHits.some((hit) => hit.id === "appearance"), "字号/字体属于外观页");
 assert.ok(fontHits.some((hit) => hit.id === "terminal"), "终端也能调字体");

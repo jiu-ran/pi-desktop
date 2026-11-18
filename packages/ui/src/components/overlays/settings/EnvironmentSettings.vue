@@ -1,49 +1,13 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useKernel } from "../../../kernel/use-kernel.ts";
-
 /**
- * 环境与快捷键：只保留「当前工作区」与快捷键速查。
+ * 快捷键：只做速查。
  *
- * 本机 Agent 的路径 / 更新在「智能体」页统一管理，Pi Desktop 更新在
- * 「Pi Desktop」页；这里不再重复它们的状态与按钮。
+ * 这里不放「重启当前会话进程」之类的操作，也不重复终端 / 编辑器 / 外观页的配置；
+ * 设置页只保留用户会主动查找的静态快捷键说明。
  */
-const { workbench, bus } = useKernel();
-const ws = computed(() => workbench.active.value);
-
-/** 重启当前会话的 Agent 进程（改完路径 / 更新后让新进程生效） */
-async function restartActiveProcess(): Promise<void> {
-  if (!ws.value) return;
-  await workbench.restart(ws.value);
-  bus.emit("notify", { level: "info", text: "已重启当前会话的 Agent 进程" });
-}
 </script>
 
 <template>
-  <div class="settings-group">
-    <div class="settings-group-title">当前工作区</div>
-    <div v-if="ws" class="settings-row">
-      <div class="settings-row-info">
-        <strong>当前活动项目目录</strong>
-        <span>{{ ws.cwd }}（当前活跃会话线程 {{ Object.keys(ws.threads).length }} 个，运行中 {{ ws.runningSessionCount }} 个）</span>
-      </div>
-      <button
-        type="button"
-        class="btn ghost small"
-        :disabled="ws.streaming"
-        @click="restartActiveProcess"
-      >
-        重启当前会话进程
-      </button>
-    </div>
-    <div v-else class="settings-row">
-      <div class="settings-row-info">
-        <strong>当前活动项目目录</strong>
-        <span>还没有打开项目</span>
-      </div>
-    </div>
-  </div>
-
   <div class="settings-group">
     <div class="settings-group-title">全局快捷键速查</div>
     <div class="settings-shortcuts-grid">
