@@ -81,16 +81,6 @@
   gap: 10px;
   padding: 0 8px;
 }
-.settings-brand-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
 .settings-brand-text {
   min-width: 0;
 }
@@ -100,12 +90,6 @@
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.2;
-}
-.settings-brand-sub {
-  color: var(--fg-3);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  line-height: 1.4;
 }
 
 .settings-search {
@@ -232,9 +216,6 @@
 .settings-nav-icon svg {
   display: block;
 }
-.settings-nav-item.active .settings-nav-icon {
-  color: var(--accent);
-}
 .settings-nav-label {
   flex: 1;
   min-width: 0;
@@ -356,6 +337,12 @@
 }
 .settings-head-text {
   min-width: 0;
+}
+.settings-head > .icon-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
 }
 .settings-title {
   margin: 0;
@@ -1917,6 +1904,9 @@
     width: 100%;
     height: 100%;
     border-radius: 12px;
+  }
+  .settings-nav-sep {
+    display: none;
   }
   .settings-nav {
     flex-direction: row;

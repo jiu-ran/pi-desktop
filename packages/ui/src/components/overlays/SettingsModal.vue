@@ -205,10 +205,8 @@ onBeforeUnmount(() => {
       <!-- 左侧导航栏 -->
       <aside class="settings-nav">
         <div class="settings-brand">
-          <span class="settings-brand-icon" v-html="icons.sliders" />
           <div class="settings-brand-text">
             <div class="settings-brand-title">设置</div>
-            <div class="settings-brand-sub">Pi Desktop</div>
           </div>
         </div>
         <label class="settings-search">
