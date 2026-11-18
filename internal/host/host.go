@@ -46,6 +46,10 @@ type Host struct {
 	piCmd          *PiCommand
 	piVersion      string
 
+	// 非 Pi 的 Agent（目前是 Antigravity）按项目各跑一个 ACP 进程。
+	acpPools     map[string]*antigravityWorkspace
+	agentStartMu sync.Mutex
+
 	terminals     *terminalManager
 	networkMode   string
 	networkCustom string
@@ -62,6 +66,7 @@ func New() *Host {
 		attachments:    map[string]string{},
 		maxIdleWorkers: 3,
 		startGen:       map[string]int{},
+		acpPools:       map[string]*antigravityWorkspace{},
 	}
 	h.terminals = newTerminalManager(h)
 	h.updates = newAppUpdater(func() string { _, proxy, _ := h.planProxy(); return proxy })

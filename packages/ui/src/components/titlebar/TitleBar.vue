@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { extState } from "../../services/extension-ui.ts";
 import { openSettingsModal, settingsModalState, updateSettingsTab } from "../../services/settings.ts";
@@ -24,7 +24,7 @@ function onTitlebarDoubleClick(event: MouseEvent): void {
   if ((event.target as HTMLElement | null)?.closest("button")) return;
   void windowControls.toggleMaximize();
 }
-const { workbench, plugins, theme, terminal } = useKernel();
+const { workbench, plugins, theme, terminal, bus } = useKernel();
 const state = workbench.state;
 const terminalRunning = terminal.runningCount;
 const terminalTitle = computed(() => {
@@ -33,6 +33,54 @@ const terminalTitle = computed(() => {
 });
 const ws = computed(() => workbench.active.value);
 const pi = computed(() => state.pi);
+
+// ---------- Agent 切换 ----------
+const agentsOpen = ref(false);
+const agentPicker = ref<HTMLElement | null>(null);
+const agents = computed<any[]>(() => state.agents?.agents ?? []);
+const activeAgent = computed(() => ws.value?.agent || "");
+const activeAgentInfo = computed<any>(() => agents.value.find((item: any) => item?.kind === activeAgent.value) ?? ws.value?.agentInfo ?? null);
+const agentLabel = computed(() => activeAgent.value === "antigravity" ? "Antigravity" : activeAgent.value === "pi" ? "Pi" : "选择 Agent");
+const agentDot = computed(() => {
+  if (!activeAgent.value) return "idle";
+  if (ws.value?.status === "error") return "error";
+  if (!activeAgentInfo.value?.found && ws.value?.agent === "antigravity") return "error";
+  if (ws.value?.streaming || ws.value?.compacting || ws.value?.status === "starting") return "running";
+  return "ready";
+});
+const agentTitle = computed(() => {
+  if (!activeAgent.value) return ws.value ? "这个项目还没有选择 Agent · 点击选择" : "打开项目后选择 Agent";
+  const info = activeAgentInfo.value;
+  const version = info?.version ? ` ${info.version}` : "";
+  return `${agentLabel.value}${version}${info?.path ? ` · ${info.path}` : ""}`;
+});
+
+async function toggleAgentMenu(): Promise<void> {
+  agentsOpen.value = !agentsOpen.value;
+  if (agentsOpen.value) void workbench.refreshAgents(state.activeCwd || "");
+}
+
+async function pickAgent(kind: string): Promise<void> {
+  if (!ws.value) {
+    agentsOpen.value = false;
+    bus.emit("notify", { level: "info", text: "先打开项目，再为这个项目选择 Agent" });
+    return;
+  }
+  agentsOpen.value = false;
+  try {
+    await workbench.switchAgent(kind);
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  }
+}
+
+function closeAgentMenu(event: MouseEvent): void {
+  if (!agentsOpen.value) return;
+  if (agentPicker.value?.contains(event.target as Node)) return;
+  agentsOpen.value = false;
+}
+onMounted(() => document.addEventListener("mousedown", closeAgentMenu));
+onBeforeUnmount(() => document.removeEventListener("mousedown", closeAgentMenu));
 const enabledPlugins = computed(() => plugins.sidebarPlugins.value);
 const hasOpenPanel = computed(() => Boolean(state.activePanelId && enabledPlugins.value.some((p) => p.id === state.activePanelId)));
 // 没打开项目时侧栏是空的（Shell 里也不渲染它），按钮跟着置灰，点击不会「按了没反应」。
@@ -65,9 +113,22 @@ const extEntries = computed(() => Object.entries(extState.statuses[state.activeC
 
 // 连接状态
 const connLabel = computed(() => {
+  if (!ws.value) {
+    const found = agents.value.filter((item: any) => item?.found);
+    if (!state.agents.agents.length && !pi.value.checked) return "检测 Agent…";
+    return found.length ? "未选择 Agent" : "未找到 Agent";
+  }
+  if (ws.value.agent === "antigravity") {
+    if (ws.value.status === "starting") return "启动中";
+    if (ws.value.status === "error") return "进程出错";
+    if (ws.value.compacting) return "压缩上下文";
+    if (ws.value.hasAnyRunning || ws.value.streaming) return "运行中";
+    const version = ws.value.agentInfo?.version;
+    return version ? `Antigravity ${version}` : "Antigravity";
+  }
+  if (!ws.value.agent) return "未选择 Agent";
   if (!pi.value.checked) return "检测 Pi…";
   if (!pi.value.found) return "未找到 Pi CLI";
-  if (!ws.value) return `Pi ${pi.value.version}`;
   if (ws.value.status === "starting") return "启动中";
   if (ws.value.status === "error") return "进程出错";
   if ((ws.value.runningSessionCount ?? 0) > 1) return `${ws.value.runningSessionCount} 任务并行中`;
@@ -77,13 +138,24 @@ const connLabel = computed(() => {
 });
 
 const connTone = computed(() => {
+  if (!ws.value) {
+    return agents.value.some((item: any) => item?.found) ? "idle" : "error";
+  }
+  if (ws.value.agent === "antigravity") {
+    if (ws.value.status === "error") return "error";
+    if (ws.value.hasAnyRunning || ws.value.streaming || ws.value.compacting || ws.value.status === "starting") return "running";
+    return "ready";
+  }
+  if (!ws.value.agent) return "idle";
   if (pi.value.checked && !pi.value.found) return "error";
-  if (ws.value?.status === "error") return "error";
-  if (ws.value?.hasAnyRunning || ws.value?.streaming || ws.value?.compacting || ws.value?.status === "starting") return "running";
+  if (ws.value.status === "error") return "error";
+  if (ws.value.hasAnyRunning || ws.value.streaming || ws.value.compacting || ws.value.status === "starting") return "running";
   return "ready";
 });
 
 const piTitle = computed(() => {
+  if (!ws.value) return "打开项目后选择这个项目使用的 Agent";
+  if (ws.value.agent === "antigravity" || !ws.value.agent) return agentTitle.value;
   const current = pi.value.version ? `本机 Pi CLI ${pi.value.version}` : "本机 Pi CLI";
   return pi.value.updateAvailable ? `${current}，可更新到 ${pi.value.latest}` : current;
 });
@@ -93,6 +165,40 @@ const piTitle = computed(() => {
   <header class="titlebar" @dblclick="onTitlebarDoubleClick">
     <div class="tb-left">
       <span class="tb-brand" title="Pi Desktop">Pi</span>
+      <div ref="agentPicker" class="agent-picker">
+        <button
+          class="agent-btn"
+          :data-state="agentDot"
+          :title="agentTitle + ' · 点击切换 Agent'"
+          @click="toggleAgentMenu"
+        >
+          <span class="agent-dot" :data-state="agentDot" />
+          <span class="agent-name">{{ agentLabel }}</span>
+          <span class="agent-caret" :class="{ open: agentsOpen }" v-html="icons.chevronDown" />
+        </button>
+        <div v-if="agentsOpen" class="agent-menu">
+          <button
+            v-for="agent in agents"
+            :key="agent.kind"
+            class="agent-item"
+            :class="{ active: agent.kind === activeAgent }"
+            :disabled="!agent.found"
+            :title="agent.error || agent.path"
+            @click="pickAgent(agent.kind)"
+          >
+            <span class="agent-item-main">
+              <strong>{{ agent.label }}</strong>
+              <span v-if="agent.found" class="agent-item-meta">v{{ agent.version }}</span>
+              <span v-else class="agent-item-meta error">未安装</span>
+            </span>
+            <span v-if="agent.kind === activeAgent" class="agent-item-tag">当前</span>
+            <span v-else-if="agent.error" class="agent-item-hint">{{ agent.error }}</span>
+          </button>
+          <p class="agent-menu-hint">
+            Antigravity 使用本机 <code>agy acp</code>，首次使用先在终端运行 <code>agy acp --login</code>。
+          </p>
+        </div>
+      </div>
       <button
         class="tb-btn"
         :class="{ active: sidebarVisible }"

@@ -62,6 +62,7 @@ export function handleRequest(
     case "confirm":
     case "input":
     case "editor":
+    case "acp_permission":
       extState.dialogs.push({ cwd, sessionFile, ...request, receivedAt: Date.now() });
       break;
     case "notify":
@@ -100,6 +101,18 @@ export function closeDialog(id: string): void {
 export function setupExtensionUi(bus: EventBus, host?: any): () => void {
   const disposers: Array<() => void> = [];
   disposers.push(bus.on("pi:event", ({ cwd, sessionFile, event }: { cwd: string; sessionFile?: string; event: any }) => {
+    if (event.type === "acp_permission_request") {
+      handleRequest(cwd, {
+        id: event.id,
+        method: "acp_permission",
+        title: event.title ?? "Antigravity 请求权限",
+        message: event.message ?? "",
+        options: event.options ?? [],
+        toolCall: event.toolCall ?? null,
+        agent: event.agent ?? "antigravity",
+      }, { sessionFile });
+      return;
+    }
     if (event.type !== "extension_ui_request") return;
     handleRequest(cwd, event, {
       sessionFile,
@@ -117,6 +130,15 @@ export function setupExtensionUi(bus: EventBus, host?: any): () => void {
     ({ cwd, sessionFile, response }: { cwd: string; sessionFile?: string; response: Record<string, any> }) => {
       host
         ?.respondExtensionUi(cwd, JSON.parse(JSON.stringify(response)), sessionFile)
+        ?.catch((error: any) => pushToast("error", error?.message ?? String(error)));
+    },
+  ));
+
+  disposers.push(bus.on(
+    "acp:permission-respond",
+    ({ cwd, sessionFile, id, optionId }: { cwd: string; sessionFile?: string; id: string; optionId: string }) => {
+      host
+        ?.respondAcpPermission?.(cwd, sessionFile ?? "", id, optionId ?? "")
         ?.catch((error: any) => pushToast("error", error?.message ?? String(error)));
     },
   ));

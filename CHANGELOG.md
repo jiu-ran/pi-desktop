@@ -5,6 +5,18 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **多 Agent：接入 Antigravity CLI（ACP）**：标题栏左侧可以在 Pi / Antigravity 之间切换，选择按项目记住。Antigravity 走本机 `agy acp` 的 Agent Client Protocol v1：流式正文与思考、工具卡片、模型 / 思考档位、上下文用量、权限确认、会话列表与 `session/load` 历史回放都复用现有对话界面。桌面端不注入提示词，登录 / MCP / 技能沿用 CLI 自己的配置。详见 [多 Agent 接入](docs/agents.md)。
+- **打开项目时先选 Agent**：项目第一次打开（还没有 `agents.json` 记录）时弹出选择器并显示两个 Agent 的版本 / 路径，选完才启动进程。
+
+### 变更
+
+- **启动不再默认连接 Pi**：没有显式选过 Agent 的项目不会在启动时被自动打开，应用停在欢迎页；只有已经记过选择的项目才会恢复。旧版本没有 `agents.json` 的项目升级后会先问一次。
+- **切换 Agent 会重启该项目的进程**：正在运行的任务需要先停止；切换后新的 Agent 会接管同一个项目目录。
+
 ## [0.9.5] - 2026-11-17
 
 ### 新增

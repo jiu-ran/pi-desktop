@@ -55,6 +55,19 @@ export interface ShellProfile {
  * window.piDesktop 一一对应（首字母大写后由 MyGo 生成 lowerCamel）。
  */
 export const Host = {
+  acpRespondPermission(cwd: string, sessionFile: string, permissionID: string, optionID: string): Promise<void> {
+    return call("Host.AcpRespondPermission", cwd, sessionFile, permissionID, optionID);
+  },
+  /**
+   * AgentFor 只读项目已保存的 Agent 选择，不启动任何进程。
+   * 返回空字符串表示还没选过；界面据此先弹出选择器，而不是默认连 Pi。
+   */
+  agentFor(cwd: string): Promise<string> {
+    return call("Host.AgentFor", cwd);
+  },
+  agents(cwd: string): Promise<Record<string, unknown>> {
+    return call("Host.Agents", cwd);
+  },
   call(cwd: string, method: string, args: unknown[], sessionFile: string): Promise<unknown> {
     return call("Host.Call", cwd, method, args, sessionFile);
   },
@@ -153,6 +166,9 @@ export const Host = {
   },
   locate(customPath: string): Promise<PiLocation> {
     return call("Host.Locate", customPath);
+  },
+  locateAgent(kind: string, customPath: string): Promise<Record<string, unknown>> {
+    return call("Host.LocateAgent", kind, customPath);
   },
   logEvent(level: string, scope: string, message: string): Promise<void> {
     return call("Host.LogEvent", level, scope, message);
@@ -286,6 +302,9 @@ export const Host = {
   },
   sessions(cwd: string): Promise<SessionSummary[]> {
     return call("Host.Sessions", cwd);
+  },
+  setAgent(cwd: string, kind: string): Promise<Record<string, unknown>> {
+    return call("Host.SetAgent", cwd, kind);
   },
   /** SetDirty 由界面同步「有未保存草稿」，关闭窗口时据此弹出原生确认。 */
   setDirty(dirty: boolean): Promise<void> {

@@ -580,6 +580,12 @@ const defaultModelRef = ref("");
 const defaultThinkingRef = ref("");
 
 async function reloadDefaultModel(): Promise<void> {
+  // Antigravity 的默认模型由 CLI 自己管理，把 Pi 的默认值显示在这里会误导用户。
+  if (ws.value?.agent === "antigravity") {
+    defaultModelRef.value = "";
+    defaultThinkingRef.value = "";
+    return;
+  }
   if (!workbench.modelDefaults) return;
   try {
     const data = await workbench.modelDefaults();
@@ -625,6 +631,10 @@ async function onSelectThinking(level: string): Promise<void> {
 async function onSetDefaultModelAndThinking(payload: { model: any; thinkingLevel: string }): Promise<void> {
   const { model, thinkingLevel } = payload;
   if (!model || !workbench.setModelDefaults) return;
+  if (ws.value?.agent === "antigravity") {
+    bus.emit("notify", { level: "info", text: "Antigravity 的默认模型由 CLI 的 settings.json 管理，桌面端不写入 Pi 的默认值" });
+    return;
+  }
   try {
     await workbench.setModelDefaults({
       scope: "global",

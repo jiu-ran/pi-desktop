@@ -219,6 +219,14 @@ func (h *Host) open(cwd string, options map[string]any) (map[string]any, error) 
 	}
 	cwd = authorized
 
+	kind := agentKindFor(cwd)
+	if kind == "" {
+		return nil, errors.New("还没有为这个项目选择 Agent，请先选择 Pi 或 Antigravity")
+	}
+	if kind == agentAntigravity {
+		return h.openAntigravity(cwd, options)
+	}
+
 	h.mu.Lock()
 	if h.closing {
 		h.mu.Unlock()
@@ -522,6 +530,12 @@ func (h *Host) pruneIdleWorkers(pool *workspacePool) {
 
 func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	cwd = h.resolvePoolKey(cwd)
+	switch agentKindFor(cwd) {
+	case agentAntigravity:
+		return h.snapshotAntigravity(cwd, sessionFile)
+	case "":
+		return nil, errors.New("还没有为这个项目选择 Agent")
+	}
 	slot, err := h.resolveSlot(cwd, sessionFile)
 	if err != nil {
 		return nil, err
@@ -596,6 +610,15 @@ var allowedRpcMethods = map[string]bool{
 
 func (h *Host) call(cwd, method string, args []any, sessionFile string) (any, error) {
 	cwd = h.resolvePoolKey(cwd)
+	if agentKindFor(cwd) == "" {
+		return nil, errors.New("还没有为这个项目选择 Agent")
+	}
+	if agentKindFor(cwd) == agentAntigravity {
+		if !allowedRpcMethods[method] && method != "setMode" {
+			return nil, errors.New("不允许的 RPC 方法：" + method)
+		}
+		return h.callAntigravity(cwd, method, args, sessionFile)
+	}
 	if !allowedRpcMethods[method] {
 		return nil, errors.New("不允许的 RPC 方法：" + method)
 	}
@@ -912,6 +935,12 @@ func (h *Host) compact(client *PiRpcClient, args []any) (any, error) {
 
 func (h *Host) sessions(cwd string) []sessionSummary {
 	cwd = h.resolvePoolKey(cwd)
+	if agentKindFor(cwd) == "" {
+		return []sessionSummary{}
+	}
+	if agentKindFor(cwd) == agentAntigravity {
+		return h.sessionsAntigravity(cwd)
+	}
 	pool := h.requirePool(cwd)
 	if pool == nil {
 		return listSessions(cwd)
@@ -927,6 +956,9 @@ func (h *Host) sessions(cwd string) []sessionSummary {
 }
 
 func (h *Host) messagePage(cwd, file string, endIndex, limit, minTurns, minBlocks int) (map[string]any, error) {
+	if isAntigravityFile(file) {
+		return h.messagePageAntigravity(cwd, file, endIndex, limit)
+	}
 	if _, err := assertReadableSessionFile(cwd, file); err != nil {
 		return nil, errors.New("读取会话历史失败: " + err.Error())
 	}
@@ -934,6 +966,9 @@ func (h *Host) messagePage(cwd, file string, endIndex, limit, minTurns, minBlock
 }
 
 func (h *Host) deleteSession(cwd, file string) ([]sessionSummary, error) {
+	if isAntigravityFile(file) {
+		return nil, errors.New("Antigravity 的会话由 CLI 管理，桌面端暂不支持删除")
+	}
 	cwd = h.resolvePoolKey(cwd)
 	target, err := assertSessionFile(cwd, file)
 	if err != nil {
@@ -1014,6 +1049,9 @@ func trashFile(file string) error {
 
 func (h *Host) deleteAllSessions(cwd string) (map[string]any, error) {
 	cwd = h.resolvePoolKey(cwd)
+	if agentKindFor(cwd) == agentAntigravity {
+		return nil, errors.New("Antigravity 的会话由 CLI 管理，桌面端暂不支持批量删除")
+	}
 	if h.requirePool(cwd) != nil {
 		return nil, errors.New("请先关闭该项目的 Pi 进程")
 	}
@@ -1032,6 +1070,13 @@ func (h *Host) deleteAllSessions(cwd string) (map[string]any, error) {
 
 func (h *Host) restart(cwd, sessionFile string) (map[string]any, error) {
 	cwd = h.resolvePoolKey(cwd)
+	if agentKindFor(cwd) == "" {
+		return nil, errors.New("还没有为这个项目选择 Agent")
+	}
+	if agentKindFor(cwd) == agentAntigravity {
+		h.closeAntigravity(cwd)
+		return h.openAntigravity(cwd, map[string]any{"resumeSessionFile": sessionFile})
+	}
 	pool := h.requirePool(cwd)
 	target := sessionFile
 	if target == "" && pool != nil {
@@ -1068,6 +1113,10 @@ func (h *Host) restart(cwd, sessionFile string) (map[string]any, error) {
 
 func (h *Host) closeWorkspace(cwd string) bool {
 	cwd = h.resolvePoolKey(cwd)
+	if h.acpWorkspace(cwd) != nil {
+		h.closeAntigravity(cwd)
+		return true
+	}
 	h.mu.Lock()
 	_, exists := h.pools[cwd]
 	h.mu.Unlock()
@@ -1083,7 +1132,18 @@ func (h *Host) stopAll() {
 	h.closing = true
 	pools := h.pools
 	h.pools = map[string]*workspacePool{}
+	acpPools := h.acpPools
+	h.acpPools = map[string]*antigravityWorkspace{}
 	h.mu.Unlock()
+	for _, workspace := range acpPools {
+		workspace.mu.Lock()
+		workspace.closed = true
+		client := workspace.client
+		workspace.mu.Unlock()
+		if client != nil {
+			client.Stop()
+		}
+	}
 	var stopping sync.WaitGroup
 	for _, pool := range pools {
 		pool.mu.Lock()

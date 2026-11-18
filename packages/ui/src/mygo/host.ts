@@ -87,6 +87,12 @@ const bridge = {
   },
 
   locate: (customPath = "") => invoke("Locate", customPath),
+  locateAgent: (kind: string, customPath = "") => invoke("LocateAgent", kind, customPath),
+  agents: (cwd = "") => invoke("Agents", cwd),
+  agentFor: (cwd: string) => invoke("AgentFor", cwd),
+  setAgent: (cwd: string, kind: string) => invoke("SetAgent", cwd, kind),
+  respondAcpPermission: (cwd: string, sessionFile: string, permissionId: string, optionId: string) =>
+    invoke("AcpRespondPermission", cwd, sessionFile, permissionId, optionId),
   setZoomFactor: (factor: number) => invoke("SetZoomFactor", factor),
   checkPiUpdate: (customPath = "") => invoke("CheckPiUpdate", customPath),
   networkApply: (mode = "", custom = "") => invoke("NetworkApply", mode, custom),
@@ -106,7 +112,7 @@ const bridge = {
   savePastedImage: (payload: { name?: string; mimeType?: string; data: string }) =>
     invoke("SavePastedImage", payload),
   chooseFolder: () => invoke("ChooseFolder"),
-  open: (cwd: string, options?: { resumeSessionFile?: string }) => invoke("Open", cwd, options ?? {}),
+  open: (cwd: string, options?: { resumeSessionFile?: string; targetSessionFile?: string }) => invoke("Open", cwd, options ?? {}),
   snapshot: (cwd: string, sessionFile?: string) => invoke("Snapshot", cwd, sessionFile ?? ""),
   prepareAttachments: (cwd: string, paths: string[], authorizePaths: string[] = []) =>
     invoke("PrepareAttachments", cwd, paths, authorizePaths),

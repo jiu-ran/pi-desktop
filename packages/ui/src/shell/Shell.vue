@@ -15,6 +15,7 @@ import CloneDialog from "../components/overlays/CloneDialog.vue";
 import WorktreeDialog from "../components/overlays/WorktreeDialog.vue";
 import SettingsModal from "../components/overlays/SettingsModal.vue";
 import ExtensionDialog from "../components/overlays/ExtensionDialog.vue";
+import AgentChooser from "../components/overlays/AgentChooser.vue";
 import Toasts from "../components/overlays/Toasts.vue";
 import TooltipLayer from "../components/overlays/TooltipLayer.vue";
 
@@ -451,6 +452,7 @@ onBeforeUnmount(() => {
     <WorktreeDialog />
     <SettingsModal />
     <ExtensionDialog />
+    <AgentChooser />
     <Toasts />
     <TooltipLayer />
   </div>

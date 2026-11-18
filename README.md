@@ -2,13 +2,13 @@
 
 基于本机 **Pi Agent CLI**（`@earendil-works/pi-coding-agent`）的跨平台桌面客户端，技术栈 **MyGo + Go 宿主 + Vue 3 / TypeScript**。
 
-桌面端不跑模型、不内置工具，只通过 JSON-RPC 驱动你已经装好的 `pi`；会话记录、Pi 的配置与资源（MCP、软件包、Skills、`settings.json`）由 Go 宿主读写（默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 覆盖）。所有文件操作限制在当前工作区目录内。
+桌面端不跑模型、不内置工具：默认通过 JSON-RPC 驱动你已经装好的 `pi`；也可以按项目切换到本机安装的 **Antigravity CLI**（`agy acp`，Agent Client Protocol v1）。会话记录、Pi 的配置与资源（MCP、软件包、Skills、`settings.json`）由 Go 宿主读写（默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 覆盖）。所有文件操作限制在当前工作区目录内。
 
 ## 快速开始
 
 **用现成的**：到 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载 —— Windows `Pi.Desktop.exe`（便携）/ `pi-desktop-setup-*.exe`（安装包），macOS `.dmg`，Linux `.tar.gz` / `.deb` / `.rpm`。Windows 安装向导跟随系统显示语言（简体中文 / English）。
 
-**前置条件**只有一条：本机能跑 `pi`。桌面端跑的就是这份 `pi`，`pi update` 之后当场生效；没装 `pi` 时应用能打开但不会启动会话。
+**前置条件**：本机能跑 `pi` 或 `agy`（至少一个）。桌面端跑的就是各自本机安装的 CLI：`pi update` / `agy update` 之后新会话生效；没装的那一个在 Agent 选择器里不可选，另一个仍可用。想用 Antigravity，安装 [Antigravity CLI](https://antigravity.google/docs/cli/overview) 并在终端运行一次 `agy acp --login`，再在打开项目时选择它（之后可在标题栏左侧切换）。
 
 **从源码构建**（Go 1.27.3+、Node.js 22.18+、`git`）：
 
@@ -22,7 +22,8 @@ npm run check    # 57 个检查 + 3 个静态分析 + go test ./...
 
 ## 核心功能
 
-- **多项目工作台**：每个项目一个 Pi RPC 工作区，可并行跑任务；打开文件夹或从 Git 克隆即新任务。
+- **多项目工作台**：每个项目一个 Agent 工作区（Pi RPC 或 Antigravity ACP），可并行跑任务；打开文件夹或从 Git 克隆即新任务。
+- **多 Agent**：标题栏左侧切换 Pi / Antigravity，选择按项目记住；Antigravity 复用同一套对话、工具卡片、模型 / 思考档位与上下文用量，不注入提示词。详见 [多 Agent 接入](docs/agents.md)。
 - **对话**：流式文本 / 思考 / 工具调用，历史按页回溯，`!` 直接在对话里跑命令，`@` 引用文件和其它会话，`/` 斜杠命令，排队消息可编辑。
 - **上下文友好**：附件只传路径不传内容，长会话按页加载，活动组自动折叠，会话用量与费用一览。
 - **项目文件与编辑器**：文件树（标注 Git 状态、就地新建）、多标签编辑器、Markdown 预览与高亮、冲突检测与原子写入。
@@ -46,7 +47,7 @@ main.ts                 组合根：创建内核、注册内置插件
 ```
 
 - `cmd/pi-desktop/main.go` 创建窗口并把 `Host` 绑定给前端；Windows / Linux 无边框，macOS 保留系统标题栏与红绿灯。
-- `internal/host/pool.go` 为每个工作区维护 Pi Worker 池，启动 `pi --mode rpc`，白名单之外的方法直接拒绝。
+- `internal/host/pool.go` 为每个工作区维护 Pi Worker 池，启动 `pi --mode rpc`，白名单之外的方法直接拒绝；`internal/host/{acp,antigravity}.go` 用 ACP v1 驱动本机 `agy acp`，把 update 翻成同一套事件。
 - `internal/host/{files,git,worktree,terminal,settings,resources,mcp}.go` 负责受控文件操作、Git、隔离工作区、PTY、配置与资源；路径都经过工作区边界与真实路径校验。
 - `internal/host/bindings.go` 导出 `Host.*`，前端桥 `packages/ui/src/mygo/host.ts` 适配成 `window.piDesktop`，业务代码不感知宿主实现。
 

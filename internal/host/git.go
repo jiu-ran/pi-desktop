@@ -746,6 +746,8 @@ func (h *Host) gitClone(url, target string) (map[string]any, error) {
 	if err != nil {
 		canonical = dest
 	}
+	// 克隆目标由用户在选择器里确认；先授权，打开项目时才能直接进入 Agent 选择。
+	_, _ = h.authorizeWorkspace(canonical)
 	return map[string]any{"ok": true, "path": canonical, "message": "已克隆 " + source}, nil
 }
 

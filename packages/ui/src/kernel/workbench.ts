@@ -123,6 +123,9 @@ export interface WorkspaceState {
   branch: string;
   sessions: any[];
   commands: any[];
+  /** 当前项目用哪个 Agent（pi / antigravity），来自宿主快照 */
+  agent: string;
+  agentInfo: any;
   sessionFile: string;
   threads: Record<string, SessionThreadState>;
   activeThread: SessionThreadState;
@@ -225,6 +228,10 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     },
     recent: [] as string[],
     activeCwd: "",
+    /** 本机可用的 Agent 列表（标题栏切换器用） */
+    agents: { active: "", agents: [] as any[], loaded: false },
+    /** 打开项目但还没选 Agent 时，弹出选择器；此时不启动任何 Agent 进程 */
+    agentChoice: null as null | { cwd: string; name: string; agents: any[] },
     theme: readStorage(THEME_KEY) === "dark" ? "dark" : "light",
     sidebarOpen: true,
     sidebarWidth: savedSidebarWidth(),
@@ -409,6 +416,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       branch: "",
       sessions: [] as any[],
       commands: [] as any[],
+      agent: "pi",
+      agentInfo: null,
       sessionFile: "",
       threads,
       get activeThread(): SessionThreadState {
@@ -539,6 +548,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     ws.sessions = snap.sessions ?? [];
     ws.commands = snap.commands ?? [];
     ws.branch = snap.branch ?? "";
+    ws.agent = snap.agent ?? "pi";
+    ws.agentInfo = snap.agentInfo ?? null;
 
     const workerFiles = new Set<string>();
     if (Array.isArray(snap.workerStates)) {
@@ -630,6 +641,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     initPromise = (async () => {
       if (!host || disposed) {
         state.pi = { ...state.pi, found: false, version: "", path: "", checked: true };
+        state.agents = { active: "", agents: [], loaded: true };
         bus.emit("pi:located", { ...state.pi });
         return;
       }
@@ -657,7 +669,21 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       };
       bus.emit("pi:located", { ...state.pi });
       state.recent = recent;
-      if (pi.found && recent[0]) await open(recent[0]);
+      // 启动时只恢复「已经显式选过 Agent」的项目；都没选过就留在欢迎页，
+      // 不因为历史默认值去拉起 Pi。
+      await refreshAgents("");
+      for (const cwd of recent.slice(0, 5)) {
+        let kind = "";
+        try {
+          kind = String((await host.agentFor?.(cwd)) ?? "");
+        } catch {
+          kind = "";
+        }
+        if (kind) {
+          await open(cwd);
+          break;
+        }
+      }
     })();
     try {
       await initPromise;
@@ -731,6 +757,17 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         updateSessionTitle(ws, thread);
         scheduleSessionsRefresh(ws);
         break;
+      case "commands_changed":
+        ws.commands = Array.isArray(event.commands) ? event.commands : [];
+        break;
+      case "config_option_changed": {
+        if (event.thinkingLevel) thread.thinking = event.thinkingLevel;
+        if (event.model) {
+          const match = (ws.models ?? []).find((item: any) => item?.id === event.model);
+          if (match) thread.model = match;
+        }
+        break;
+      }
       default:
         break;
     }
@@ -739,6 +776,32 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function open(cwd: string): Promise<WorkspaceState> {
     let ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
+    // 先看这个项目有没有显式选过 Agent。没有就弹选择器，绝不默认拉起 Pi。
+    // 目录授权在 ChooseDirectory / GitClone / WorktreeCreate / Recent 时已经完成。
+    if (host?.agentFor) {
+      let chosen = "";
+      try {
+        chosen = String((await host.agentFor(target)) ?? "");
+      } catch {
+        // 老宿主没有这个方法：退回原来的 Pi 行为，避免项目完全打不开。
+        chosen = "pi";
+      }
+      if (!chosen) {
+        if (!ws) {
+          ws = makeWorkspace(target);
+          workspaces.set(target, ws);
+        }
+        ws.status = "idle";
+        ws.error = "";
+        const info = host.agents ? await host.agents(target).catch(() => null) : null;
+        state.agentChoice = {
+          cwd: target,
+          name: ws.name,
+          agents: Array.isArray((info as any)?.agents) ? (info as any).agents : [],
+        };
+        return ws;
+      }
+    }
     const switched = projectPathKey(state.activeCwd) !== projectPathKey(target);
     state.activeCwd = target;
     if (switched) bus.emit("workspace:switched", { cwd: target });
@@ -762,7 +825,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
         if (disposed || ws!.status !== "starting") return;
         logUi("error", `工作区 ${target} 启动超时，已重置为可重试状态`);
         ws!.status = "error";
-        ws!.error = "启动超时：Pi 进程没有在一分钟内就绪，点一下这个项目可重新启动";
+        ws!.error = "启动超时：Agent 进程没有在一分钟内就绪，点一下这个项目可重新启动";
       }, 90_000),
     ] as const;
     const task = (async () => {
@@ -1222,6 +1285,70 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       ws.status = "error";
       ws.error = error?.message ?? String(error);
     }
+  }
+
+  /**
+   * 读取本机可用的 Agent 列表（标题栏切换器）。
+   * 宿主会探测 `pi` 与 `agy` 的版本；带缓存，不会每次点开都跑一遍 CLI。
+   */
+  async function refreshAgents(cwd = state.activeCwd): Promise<{ active: string; agents: any[] }> {
+    if (!host?.agents) {
+      state.agents = { ...state.agents, loaded: true };
+      return state.agents;
+    }
+    try {
+      const result = await host.agents(cwd || "");
+      state.agents = {
+        active: String(result?.active ?? ""),
+        agents: Array.isArray(result?.agents) ? result.agents : [],
+        loaded: true,
+      };
+    } catch {
+      // 探测失败保留上一次结果；真正的原因会在切换时提示。
+      state.agents = { ...state.agents, loaded: true };
+    }
+    return state.agents;
+  }
+
+  /**
+   * 打开项目后第一次选 Agent：记到该项目并继续启动；选完就不再弹这个面板。
+   */
+  async function chooseAgent(kind: string): Promise<void> {
+    const choice = state.agentChoice;
+    if (!choice || !kind) return;
+    await host.setAgent(choice.cwd, kind);
+    state.agentChoice = null;
+    const ws = findWorkspace(choice.cwd);
+    if (ws) {
+      ws.status = "idle";
+      ws.error = "";
+    }
+    await refreshAgents(choice.cwd);
+    await open(choice.cwd);
+  }
+
+  function cancelAgentChoice(): void {
+    const choice = state.agentChoice;
+    state.agentChoice = null;
+    if (!choice) return;
+    const ws = findWorkspace(choice.cwd);
+    if (ws && ws.status !== "ready") workspaces.delete(ws.cwd);
+    if (projectPathKey(state.activeCwd) === projectPathKey(choice.cwd)) state.activeCwd = "";
+  }
+
+  /**
+   * 切换当前项目的 Agent。宿主会关掉旧进程、记住选择，再重新打开项目；
+   * 运行中的任务必须先停，否则会把半截输出留在后台进程里。
+   */
+  async function switchAgent(kind: string): Promise<void> {
+    const ws = active.value;
+    if (!ws || !kind || ws.agent === kind) return;
+    if (ws.hasAnyRunning) throw new Error("这个项目还有任务在运行，请先停止再切换 Agent");
+    await host.setAgent(ws.cwd, kind);
+    await refreshAgents(ws.cwd);
+    ws.status = "idle";
+    ws.error = "";
+    await open(ws.cwd);
   }
 
   /**
@@ -2888,6 +3015,10 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     reveal,
     reload,
     restart,
+    refreshAgents,
+    switchAgent,
+    chooseAgent,
+    cancelAgentChoice,
     restartIdleWorkspaces,
     renameSession,
     notice,
