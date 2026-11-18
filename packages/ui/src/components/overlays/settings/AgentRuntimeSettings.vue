@@ -246,8 +246,7 @@ async function clearPath(): Promise<void> {
     <template v-if="!selectedKind">
       <header class="agent-page-head">
         <div class="agent-page-head-copy">
-          <h3>智能体 <span class="agent-count">{{ agents.length }} 个</span></h3>
-          <p>选择桌面端用来启动会话的本机 Agent；每个项目会记住自己的选择。</p>
+          <p class="agent-page-count">{{ agents.length }} 个已检测 · 选择后按项目记住</p>
         </div>
         <button type="button" class="btn ghost small agent-redetect" :disabled="busy === 'detect'" @click="redetect">
           <span v-if="busy === 'detect'" class="mini-spinner" />

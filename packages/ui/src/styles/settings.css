@@ -6,92 +6,55 @@
    ========================================================================== */
 
 /* ---------- 遮罩与容器 ---------- */
-/* 设置是「可拖动的浮动窗口」而不是全屏拦截层：
-   遮罩很淡（浅色主题几乎透明），调外观时能直接看见后面的界面变化。
-   遮罩从标题栏下方开始（.overlay 的 inset），因此原生窗口按钮区不需要跟着压暗，
-   也就不存在「渲染慢一步」的问题。 */
+/* 设置是固定居中的工作区，不跟随鼠标、不能拖动：
+   参考 VS Code / Zed / Obsidian 的设置面板，遮罩只负责聚焦，面板本身用实体表面。
+   左侧是稳定的目录，右侧是标题 + 分组卡片；搜索始终在左侧第一屏。 */
 .overlay.settings-overlay {
-  --scrim-alpha: 0.12;
+  --scrim-alpha: 0.46;
+  --settings-pad: clamp(12px, 2.4vw, 28px);
   place-items: center;
-  padding-top: 0;
+  padding: var(--settings-pad);
   z-index: 115;
   animation: none;
   background: transparent;
   opacity: 0;
-  /* 只淡入透明度：底色一跳到位，原生按钮区才能和网页遮罩同帧变化 */
-  transition: opacity 0.14s ease;
+  transition: opacity 0.16s ease, background 0.16s ease;
 }
 .overlay.settings-overlay.open {
-  background: rgba(0, 0, 0, var(--scrim-alpha));
+  background: rgba(9, 11, 18, var(--scrim-alpha));
   opacity: 1;
 }
 :root[data-theme="light"] .overlay.settings-overlay {
-  --scrim-alpha: 0.06;
+  --scrim-alpha: 0.30;
 }
 .overlay.settings-overlay.leaving {
   background: transparent;
   opacity: 0;
 }
 
-.settings-modal-position {
-  padding: 8px;
-  border-radius: calc(var(--radius) + 6px);
-  cursor: move;
-  transform: translate(var(--settings-x, 0px), var(--settings-y, 0px));
-}
-
 .settings-modal {
   position: relative;
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-  width: min(1040px, calc(95vw - 16px));
-  height: min(736px, calc(88vh - 16px));
+  grid-template-columns: 236px minmax(0, 1fr);
+  width: min(1120px, 100%);
+  height: min(820px, 100%);
   overflow: hidden;
-  border: 1px solid var(--card-border, var(--line-2));
-  border-radius: calc(var(--radius) + 4px);
-  background:
-    var(--wash-glow, transparent),
-    color-mix(in srgb, var(--bg) 82%, transparent);
-  -webkit-backdrop-filter: blur(36px) saturate(165%);
-  backdrop-filter: blur(36px) saturate(165%);
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--bg);
   box-shadow:
-    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.2)),
-    var(--shadow);
+    0 30px 90px rgba(0, 0, 0, 0.42),
+    0 8px 24px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.12));
   cursor: auto;
   opacity: 0;
-  transform: translateY(16px) scale(0.985);
+  transform: translateY(10px) scale(0.992);
   transition: transform 0.18s ease, opacity 0.18s ease;
 }
-.settings-modal::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 6;
-  padding: 1px;
-  border-radius: inherit;
-  opacity: 0.45;
-  background: conic-gradient(
-    from 210deg,
-    rgba(255, 255, 255, 0.04),
-    var(--glass-highlight, rgba(255, 255, 255, 0.55)) 52deg,
-    rgba(255, 255, 255, 0.08) 110deg,
-    rgba(255, 255, 255, 0.04) 180deg,
-    rgba(255, 255, 255, 0.32) 245deg,
-    rgba(255, 255, 255, 0.04) 320deg
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box exclude,
-    linear-gradient(#000 0 0);
-  pointer-events: none;
-}
 :root[data-theme="light"] .settings-modal {
-  background:
-    var(--wash-glow, transparent),
-    color-mix(in srgb, var(--bg) 84%, transparent);
+  box-shadow:
+    0 26px 70px rgba(20, 28, 45, 0.22),
+    0 6px 18px rgba(20, 28, 45, 0.10);
 }
 .overlay.settings-overlay.open .settings-modal {
   opacity: 1;
@@ -99,33 +62,33 @@
 }
 .overlay.settings-overlay.leaving .settings-modal {
   opacity: 0;
-  transform: translateY(10px) scale(0.985);
+  transform: translateY(6px) scale(0.994);
 }
 
 /* ---------- 左栏 ---------- */
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-height: 0;
-  padding: 14px 10px 10px;
+  padding: 16px 12px 12px;
   border-right: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-2) 52%, transparent);
+  background: var(--bg-2);
 }
 .settings-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 6px;
+  gap: 10px;
+  padding: 0 8px;
 }
 .settings-brand-icon {
   display: grid;
   flex: none;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 .settings-brand-text {
@@ -133,7 +96,7 @@
 }
 .settings-brand-title {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   line-height: 1.2;
 }
@@ -147,22 +110,23 @@
 .settings-search {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   flex: none;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
   color: var(--fg-3);
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .settings-search:hover {
   background: var(--bg);
 }
 .settings-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
   background: var(--bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .settings-search input {
   width: 100%;
@@ -212,29 +176,32 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-height: 0;
+  margin: 0 -4px;
+  padding: 0 4px;
   overflow-y: auto;
 }
 .settings-nav-group {
-  padding: 8px 8px 3px;
+  padding: 12px 10px 4px;
   color: var(--fg-3);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 650;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .settings-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
-  height: 34px;
-  padding: 0 8px;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--fg-2);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
@@ -245,11 +212,21 @@
   color: var(--fg);
 }
 .settings-nav-item.active {
-  border-color: var(--line-2);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: var(--line);
+  background: var(--bg);
   color: var(--fg);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.settings-nav-item.active::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: -5px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 .settings-nav-icon {
   display: grid;
@@ -271,7 +248,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.settings-nav-count,
+.settings-nav-count {
+  display: none;
+}
 .settings-nav-hint {
   flex: none;
   color: var(--fg-3);
@@ -319,11 +298,12 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 4px;
-  padding: 9px 8px 2px;
+  gap: 5px;
+  padding: 12px 8px 2px;
   border-top: 1px solid var(--line);
   color: var(--fg-3);
   font-size: 10.5px;
+  line-height: 1.5;
 }
 .settings-nav-foot kbd {
   margin-right: 3px;
@@ -351,9 +331,10 @@
   flex: none;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 2px 12px;
-  padding: 18px 24px 0;
+  gap: 2px 16px;
+  padding: 24px 30px 0;
   border-bottom: 1px solid var(--line);
+  background: var(--bg);
 }
 .settings-head-text {
   min-width: 0;
@@ -361,24 +342,26 @@
 .settings-title {
   margin: 0;
   color: var(--fg);
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 .settings-desc {
-  margin: 4px 0 0;
+  max-width: 72ch;
+  margin: 5px 0 0;
   color: var(--fg-3);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .settings-subtabs {
   display: flex;
   grid-column: 1 / -1;
   gap: 2px;
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 3px;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
   background: var(--bg-2);
   justify-self: start;
 }
@@ -412,9 +395,9 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-height: 0;
-  padding: 16px 24px 28px;
+  padding: 24px 30px 36px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
@@ -431,6 +414,11 @@
 .settings-body::-webkit-scrollbar-thumb:hover {
   background-color: var(--fg-3);
 }
+.settings-body > * {
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
+}
 
 /* ---------- 卡片 ---------- */
 .settings-group {
@@ -438,9 +426,8 @@
   flex-direction: column;
   padding: 2px 14px 4px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-1) 62%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-highlight, #fff) 35%, transparent);
+  border-radius: 12px;
+  background: var(--bg-1);
 }
 .settings-group.fill {
   flex: 1;
@@ -456,12 +443,12 @@
   margin: 0;
   flex: 1;
   min-width: 0;
-  padding: 12px 0 10px;
+  padding: 14px 0 11px;
   border-bottom: 1px solid var(--line);
   color: var(--fg-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 .settings-group-head .settings-group-title {
   border-bottom: 0;
@@ -1539,9 +1526,9 @@
   flex: none;
   align-items: center;
   gap: 8px;
-  padding: 10px 24px;
+  padding: 12px 30px;
   border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
+  background: var(--bg);
 }
 .settings-footer-hint {
   flex: 1;
@@ -1923,10 +1910,15 @@
 
 /* ---------- 窄窗口：左栏变成顶部横条 ---------- */
 @media (max-width: 820px) {
+  .overlay.settings-overlay {
+    --settings-pad: 8px;
+  }
   .settings-modal {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
-    height: min(736px, calc(90vh - 16px));
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
   }
   .settings-nav {
     flex-direction: row;
