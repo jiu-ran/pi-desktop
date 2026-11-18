@@ -552,6 +552,17 @@ export interface PiDesktopBridge {
   };
   /** customPath 为空时只从 PATH 自动识别；传入则直接校验该路径 */
   locate: (customPath?: string) => Promise<PiLocation>;
+  agents: (cwd?: string) => Promise<{ active: string; default: string; agents: Array<Record<string, any>> }>;
+  agentFor: (cwd: string) => Promise<string>;
+  agentExplicitFor: (cwd: string) => Promise<string>;
+  setAgent: (cwd: string, kind: string) => Promise<Record<string, any>>;
+  setAgentDefault: (kind: string) => Promise<void>;
+  locateAgent: (kind: string, customPath?: string) => Promise<{ found: boolean; path: string; version: string; error?: string }>;
+  agentModels: (kind: string) => Promise<Array<{ id: string; name: string }>>;
+  setAgentModel: (kind: string, model: string) => Promise<void>;
+  setAgentThinking: (kind: string, level: string) => Promise<void>;
+  agentLogin: (kind: string) => Promise<Record<string, any>>;
+  chooseAgentExecutable: () => Promise<string>;
   setZoomFactor: (factor: number) => Promise<number>;
   checkPiUpdate: (customPath?: string) => Promise<PiUpdateCheck>;
   checkAppUpdate: (options?: { manual?: boolean }) => Promise<AppUpdateCheck>;

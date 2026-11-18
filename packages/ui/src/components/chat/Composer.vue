@@ -578,6 +578,30 @@ const hasHistory = computed(() => (ws.value?.blocks.length ?? 0) > 0);
 /** 新会话默认模型：用来在列表里标「默认」，也用来「设为默认」 */
 const defaultModelRef = ref("");
 const defaultThinkingRef = ref("");
+const agentBusy = ref(false);
+
+/** 输入框里的 Agent 选择：与标题栏共用同一份探测结果，按项目记住选择。 */
+const agentOptions = computed(() =>
+  (workbench.state.agents?.agents ?? []).map((agent: any) => ({
+    value: String(agent.kind ?? ""),
+    label: String(agent.label ?? agent.kind ?? ""),
+    hint: agent.found ? `v${agent.version}` : "未找到",
+    disabled: !agent.found || Boolean(agentBusy.value) || Boolean(ws.value?.streaming) || Boolean(ws.value?.hasAnyRunning),
+  })),
+);
+
+async function onSelectAgent(kind: string | number | boolean): Promise<void> {
+  const value = String(kind ?? "");
+  if (!value || agentBusy.value) return;
+  agentBusy.value = true;
+  try {
+    await workbench.selectAgentForSession(value);
+  } catch (error: any) {
+    bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
+  } finally {
+    agentBusy.value = false;
+  }
+}
 
 async function reloadDefaultModel(): Promise<void> {
   // Antigravity 的默认模型由 CLI 自己管理，把 Pi 的默认值显示在这里会误导用户。
@@ -598,7 +622,10 @@ async function reloadDefaultModel(): Promise<void> {
   }
 }
 
-onMounted(() => { void reloadDefaultModel(); });
+onMounted(() => {
+  void reloadDefaultModel();
+  if (!workbench.state.agents?.loaded) void workbench.refreshAgents();
+});
 watch(() => ws.value?.cwd, () => { void reloadDefaultModel(); });
 
 // 切换会话 / 项目时把排队编辑收起来：这条消息已经离开原来的队列，必须放回原会话，
@@ -1901,6 +1928,19 @@ async function abortBash(): Promise<void> {
                 <button @click="addFolder(); attachMenu = false"><span v-html="icons.folder" />添加文件夹</button>
               </div>
             </div>
+            <SelectMenu
+              v-if="ws"
+              class="composer-agent-menu"
+              :model-value="ws.agent || ''"
+              size="sm"
+              align="left"
+              placeholder="选择 Agent"
+              aria-label="选择新会话的 Agent"
+              title="选择新会话使用的 Agent；切换会按项目记住，并开启一个新会话"
+              :disabled="agentBusy || Boolean(ws.streaming) || Boolean(ws.hasAnyRunning)"
+              :options="agentOptions"
+              @change="onSelectAgent"
+            />
             <ModelThinkingPicker
               v-if="ws?.models?.length"
               :models="ws.models"
@@ -1997,8 +2037,8 @@ async function abortBash(): Promise<void> {
             <button
               ref="sendBtn"
               class="send-btn"
-              :class="{ ready: (draft.trim() || attachments.length) && !busy }"
-              :disabled="(!draft.trim() && !attachments.length) || busy"
+              :class="{ ready: (draft.trim() || attachments.length) && !busy && Boolean(ws?.agent) }"
+              :disabled="(!draft.trim() && !attachments.length) || busy || !ws?.agent"
               :title="appSettings.sendShortcut === 'ctrl-enter' ? 'Ctrl+Enter 发送 · Enter 换行' : 'Enter 发送 · Shift+Enter 换行'"
               @click="submit"
             >

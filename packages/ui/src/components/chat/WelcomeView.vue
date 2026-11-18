@@ -88,8 +88,8 @@ function openAntigravityDocs(): void {
             没有检测到可用的 Agent。安装 Pi 或 Antigravity CLI 后重开窗口即可。
           </p>
           <div class="welcome-actions welcome-install-actions">
-            <button type="button" class="btn welcome-btn" @click="openSettingsModal('pi-cli')">
-              <span v-html="icons.sliders" />配置 Pi 路径
+            <button type="button" class="btn welcome-btn" @click="openSettingsModal('agent-runtime')">
+              <span v-html="icons.sliders" />配置 Agent 路径
             </button>
             <button type="button" class="btn welcome-btn" @click="openAntigravityDocs">
               <span v-html="icons.download" />安装 Antigravity

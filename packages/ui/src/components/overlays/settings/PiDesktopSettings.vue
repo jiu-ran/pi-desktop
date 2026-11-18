@@ -6,8 +6,8 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
 /**
  * Pi Desktop：这个桌面应用自己的版本与安装包。
  *
- * 从「环境与快捷键」里独立出来，与「Pi CLI」平级——两者更新的是完全不同的东西，
- * 以前挤在一页里，用户分不清「检查更新」更新的是命令行工具还是这个应用。
+ * 本机 CLI 的路径 / 更新在「智能体 → Pi」详情里；这一页只负责桌面应用本身，
+ * 避免用户分不清「检查更新」更新的是命令行工具还是这个应用。
  */
 const { workbench, bus } = useKernel();
 const state = workbench.state;

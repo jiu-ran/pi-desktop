@@ -71,16 +71,12 @@ assert.equal(sectionOfTab("logs").id, "desktop", "运行日志属于「桌面」
 assert.equal(sectionOfTab("mcp").id, "power", "MCP 属于「扩展」分区");
 assert.equal(sectionOfTab("tools").id, "power", "工具开关属于「扩展」分区");
 assert.equal(findSettingsTab("tools").label, "工具开关");
-// Pi CLI 与 Pi Desktop 是平级的一级分区（各自只有一页）
-assert.equal(sectionOfTab("pi-cli").id, "pi-cli-section", "Pi CLI 自己是一个一级分区");
+// 智能体是一个一级分区；Pi 的路径 / 更新收进 Pi 详情，不再单开 Pi CLI 页
+assert.equal(sectionOfTab("agent-runtime").id, "agent-section", "智能体管理属于一级分区");
+assert.equal(findSettingsTab("agent-runtime").label, "智能体");
+assert.deepEqual(sectionTabs(sectionOfTab("agent-runtime")).map((tab) => tab.id), ["agent-runtime"], "智能体分区只放一页");
 assert.equal(sectionOfTab("pi-desktop").id, "pi-desktop-section", "Pi Desktop 自己是一个一级分区");
-assert.equal(findSettingsTab("pi-cli").label, "Pi CLI");
 assert.equal(findSettingsTab("pi-desktop").label, "Pi Desktop");
-assert.deepEqual(
-  SETTINGS_SECTIONS.filter((section) => ["pi-cli-section", "pi-desktop-section"].includes(section.id)).map((section) => section.tabs.length),
-  [1, 1],
-  "两个 Pi 分区各自只放一页，不要塞别的",
-);
 assert.deepEqual(sectionTabs(SETTINGS_SECTIONS[0]!).map((tab) => tab.id), ["conversation", "agents"], "分区内的页保持登记顺序");
 
 // 搜索：跨分区命中，并带上所属分区名
@@ -138,4 +134,4 @@ assert.deepEqual(misdirected, [], `打开了不存在的设置页：${misdirecte
 
 // ---- 7. 「有新版本」徽标要跳到对应的更新页（以前写死 environment，点了跟更新无关）----
 assert.equal(updateSettingsTab("app"), "pi-desktop", "桌面应用有新版本时应该打开 Pi Desktop 页");
-assert.equal(updateSettingsTab("pi"), "pi-cli", "Pi CLI 有新版本时应该打开 Pi CLI 页");
+assert.equal(updateSettingsTab("pi"), "agent-runtime", "Pi CLI 有新版本时应该打开智能体页");

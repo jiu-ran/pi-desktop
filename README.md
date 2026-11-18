@@ -8,7 +8,7 @@
 
 **用现成的**：到 [GitHub Releases](https://github.com/jiu-ran/pi-desktop/releases) 下载 —— Windows `Pi.Desktop.exe`（便携）/ `pi-desktop-setup-*.exe`（安装包），macOS `.dmg`，Linux `.tar.gz` / `.deb` / `.rpm`。Windows 安装向导跟随系统显示语言（简体中文 / English）。
 
-**前置条件**：本机能跑 `pi` 或 `agy`（至少一个）。桌面端跑的就是各自本机安装的 CLI：`pi update` / `agy update` 之后新会话生效；没装的那一个在 Agent 选择器里不可选，另一个仍可用。想用 Antigravity，安装 [Antigravity CLI](https://antigravity.google/docs/cli/overview) 并在终端运行一次 `agy acp --login`，再在打开项目时选择它（之后可在标题栏左侧切换）。
+**前置条件**：本机能跑 `pi` 或 `agy`（至少一个）。桌面端跑的就是各自本机安装的 CLI：`pi update` / `agy update` 之后新会话生效；没装的那一个在输入框 / 标题栏的 Agent 菜单里不可选，另一个仍可用。想用 Antigravity，安装 [Antigravity CLI](https://antigravity.google/docs/cli/overview) 并在终端运行一次 `agy acp --login`，再在打开项目后的输入框左侧选择它（之后可在标题栏或输入框切换）。
 
 **从源码构建**（Go 1.27.3+、Node.js 22.18+、`git`）：
 
@@ -22,8 +22,8 @@ npm run check    # 57 个检查 + 3 个静态分析 + go test ./...
 
 ## 核心功能
 
-- **多项目工作台**：每个项目一个 Agent 工作区（Pi RPC 或 Antigravity ACP），可并行跑任务；打开文件夹或从 Git 克隆即新任务。
-- **多 Agent**：标题栏左侧切换 Pi / Antigravity，选择按项目记住；Antigravity 复用同一套对话、工具卡片、模型 / 思考档位与上下文用量，不注入提示词。详见 [多 Agent 接入](docs/agents.md)。
+- **多项目工作台**：每个项目一个 Agent 工作区（Pi RPC 或 Antigravity ACP），可并行跑任务；打开文件夹或从 Git 克隆后，在输入框里选 Agent 开始新会话。
+- **多 Agent**：标题栏或输入框左侧切换 Pi / Antigravity，选择按项目记住；「设置 → 智能体」集中管理默认 Agent、路径、登录与 Antigravity 的默认模型 / 思考档位。Antigravity 复用同一套对话、工具卡片、模型 / 思考档位与上下文用量，不注入提示词。详见 [多 Agent 接入](docs/agents.md)。
 - **对话**：流式文本 / 思考 / 工具调用，历史按页回溯，`!` 直接在对话里跑命令，`@` 引用文件和其它会话，`/` 斜杠命令，排队消息可编辑。
 - **上下文友好**：附件只传路径不传内容，长会话按页加载，活动组自动折叠，会话用量与费用一览。
 - **项目文件与编辑器**：文件树（标注 Git 状态、就地新建）、多标签编辑器、Markdown 预览与高亮、冲突检测与原子写入。

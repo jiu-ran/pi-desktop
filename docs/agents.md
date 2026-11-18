@@ -14,8 +14,10 @@ Antigravity 自带 `agy acp`：一个基于 stdio 的 [Agent Client Protocol](ht
 
 ## 选择与进程模型
 
-- **没有隐式默认值**：项目第一次打开、`agents.json` 里没有记录时，只弹出 Agent 选择器，**不启动任何 Agent**（也不会默认连接 Pi）；选择后记在**项目目录**下，之后启动只恢复已经选过 Agent 的项目。
-- 选择器在「打开项目 / 从 Git 克隆 / 点最近项目」之后出现；标题栏左侧的 Agent 胶囊随时可以切换，菜单里显示两个 Agent 的版本与路径。
+- **打开目录不启动 Agent**：目录第一次打开、`agents.json` 里没有记录时，只创建空闲工作区，**不启动任何 Agent**（也不会默认连接 Pi），更不会弹选择器。输入框左侧的 Agent 菜单用来为新会话选 Agent；选完才开始新会话。
+- **默认仍是「每次询问」**：可以在「设置 → 智能体」里为新项目指定默认值；项目自己的选择优先，选过之后记在**项目目录**下，后续新会话沿用。
+- 标题栏左侧的 Agent 胶囊随时可以切换当前项目的 Agent，输入框里的 Agent 菜单用于当前 / 新会话；两个入口共用同一份选择。
+- 「设置 → 智能体」提供智能体列表和详情：查看版本 / 路径、重新检测、设置新项目默认值、修改启动命令、打开登录；Antigravity 还能设置新会话的默认模型与思考档位。Pi 的路径 / 版本 / 更新在 Pi 详情里，不再单开「Pi CLI」页。
 - 每个启用了 Antigravity 的项目各跑一个 `agy acp` 进程；项目关闭 / 应用退出时一起结束（Windows 放进 Job，Unix 用进程组）。
 - 切换 Agent 会先关掉旧进程；有任务在跑时必须先停止。
 
@@ -39,8 +41,8 @@ Antigravity 自带 `agy acp`：一个基于 stdio 的 [Agent Client Protocol](ht
 ## 模型与默认值
 
 - 模型列表来自 `session/new` 的 `configOptions`（`model` / `thought_level` / `mode`）。
-- **默认模型兼容处理**：`agy 1.5.11` 的 `session/new` 默认给 `gemini-4-argon`，在本机实测 90 秒内没有任何 `session/update`（`agy -p` 也会卡住）；`gemini-4-hydrogen` / `gemini-3.8-flash` 十几秒内正常回复。所以新会话会优先落到氢 / Flash，并把选择记进 `agents.json`。用户在模型菜单里改过之后，后续会话沿用用户的选择。
-- 「设为默认」按钮对 Antigravity 不写 Pi 的 `settings.json`，只提示默认模型由 CLI 管理。
+- **默认模型兼容处理**：`agy 1.5.11` 的 `session/new` 默认给 `gemini-4-argon`，在本机实测 90 秒内没有任何 `session/update`（`agy -p` 也会卡住）；`gemini-4-hydrogen` / `gemini-3.8-flash` 十几秒内正常回复。所以新会话会优先落到氢 / Flash；默认值只由设置页写入 `agents.json` 的 `models`，会话里临时切换不会改默认值。
+- 「设置 → 智能体 → Antigravity」可以固定新会话的默认模型与思考档位，写入桌面端的 `agents.json`，不改 Antigravity 自己的配置。Pi 的默认模型仍在「对话与 Agent」页管理。
 
 ## 已知限制
 

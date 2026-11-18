@@ -59,11 +59,26 @@ export const Host = {
     return call("Host.AcpRespondPermission", cwd, sessionFile, permissionID, optionID);
   },
   /**
-   * AgentFor 只读项目已保存的 Agent 选择，不启动任何进程。
-   * 返回空字符串表示还没选过；界面据此先弹出选择器，而不是默认连 Pi。
+   * AgentExplicit 只返回项目自己保存的选择，不落默认值。
+   * 启动恢复用它：用户只设了「新项目默认」但没打开过某个项目时，不该自动拉起进程。
    */
+  agentExplicit(cwd: string): Promise<string> {
+    return call("Host.AgentExplicit", cwd);
+  },
+  /** AgentFor 返回项目最终会使用的 Agent（项目选择优先，其次新项目默认值）。 */
   agentFor(cwd: string): Promise<string> {
     return call("Host.AgentFor", cwd);
+  },
+  /** AgentLogin 打开 Antigravity 的 Google 登录流程（agy acp --login）。 */
+  agentLogin(kind: string): Promise<Record<string, unknown>> {
+    return call("Host.AgentLogin", kind);
+  },
+  /**
+   * AgentModels 返回某个 Agent 可以选择的模型。Pi 的模型是会话级能力，
+   * 不在这里枚举；Antigravity 的 `agy models` 可以离线列出。
+   */
+  agentModels(kind: string): Promise<Record<string, unknown>[]> {
+    return call("Host.AgentModels", kind);
   },
   agents(cwd: string): Promise<Record<string, unknown>> {
     return call("Host.Agents", cwd);
@@ -79,6 +94,10 @@ export const Host = {
   },
   checkPiUpdate(customPath: string): Promise<Record<string, unknown>> {
     return call("Host.CheckPiUpdate", customPath);
+  },
+  /** ChooseAgentExecutable 选择 Pi / Antigravity 的可执行文件；不执行、不保存，由调用方探活后决定。 */
+  chooseAgentExecutable(): Promise<string> {
+    return call("Host.ChooseAgentExecutable");
   },
   chooseDirectory(): Promise<string> {
     return call("Host.ChooseDirectory");
@@ -305,6 +324,18 @@ export const Host = {
   },
   setAgent(cwd: string, kind: string): Promise<Record<string, unknown>> {
     return call("Host.SetAgent", cwd, kind);
+  },
+  /** SetAgentDefault 设置「新项目默认 Agent」，空字符串表示每次询问。 */
+  setAgentDefault(kind: string): Promise<void> {
+    return call("Host.SetAgentDefault", kind);
+  },
+  /** SetAgentModel 记住 Antigravity 的默认模型（基础型号，思考档位仍由会话选择）。 */
+  setAgentModel(kind: string, model: string): Promise<void> {
+    return call("Host.SetAgentModel", kind, model);
+  },
+  /** SetAgentThinking 记住 Antigravity 新会话的默认思考档位。 */
+  setAgentThinking(kind: string, level: string): Promise<void> {
+    return call("Host.SetAgentThinking", kind, level);
   },
   /** SetDirty 由界面同步「有未保存草稿」，关闭窗口时据此弹出原生确认。 */
   setDirty(dirty: boolean): Promise<void> {

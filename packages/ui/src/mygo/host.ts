@@ -90,6 +90,13 @@ const bridge = {
   locateAgent: (kind: string, customPath = "") => invoke("LocateAgent", kind, customPath),
   agents: (cwd = "") => invoke("Agents", cwd),
   agentFor: (cwd: string) => invoke("AgentFor", cwd),
+  agentExplicitFor: (cwd: string) => invoke("AgentExplicit", cwd),
+  setAgentDefault: (kind: string) => invoke("SetAgentDefault", kind),
+  agentModels: (kind: string) => invoke("AgentModels", kind),
+  setAgentModel: (kind: string, model: string) => invoke("SetAgentModel", kind, model),
+  setAgentThinking: (kind: string, level: string) => invoke("SetAgentThinking", kind, level),
+  agentLogin: (kind: string) => invoke("AgentLogin", kind),
+  chooseAgentExecutable: () => invoke("ChooseAgentExecutable"),
   setAgent: (cwd: string, kind: string) => invoke("SetAgent", cwd, kind),
   respondAcpPermission: (cwd: string, sessionFile: string, permissionId: string, optionId: string) =>
     invoke("AcpRespondPermission", cwd, sessionFile, permissionId, optionId),

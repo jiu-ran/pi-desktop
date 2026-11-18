@@ -5,17 +5,17 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
 /**
  * 环境与快捷键：只保留「当前工作区」与快捷键速查。
  *
- * 本机 Pi CLI、Pi Desktop 更新各自独立成一页一级分区（pi-cli / pi-desktop），
- * 这里不再重复它们的状态与按钮。
+ * 本机 Agent 的路径 / 更新在「智能体」页统一管理，Pi Desktop 更新在
+ * 「Pi Desktop」页；这里不再重复它们的状态与按钮。
  */
 const { workbench, bus } = useKernel();
 const ws = computed(() => workbench.active.value);
 
-/** 重启当前会话的 Pi 进程（改完路径 / 更新后让新进程生效） */
+/** 重启当前会话的 Agent 进程（改完路径 / 更新后让新进程生效） */
 async function restartActiveProcess(): Promise<void> {
   if (!ws.value) return;
   await workbench.restart(ws.value);
-  bus.emit("notify", { level: "info", text: "已重启当前会话的 Pi 进程" });
+  bus.emit("notify", { level: "info", text: "已重启当前会话的 Agent 进程" });
 }
 </script>
 

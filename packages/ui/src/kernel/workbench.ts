@@ -229,9 +229,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     recent: [] as string[],
     activeCwd: "",
     /** 本机可用的 Agent 列表（标题栏切换器用） */
-    agents: { active: "", agents: [] as any[], loaded: false },
-    /** 打开项目但还没选 Agent 时，弹出选择器；此时不启动任何 Agent 进程 */
-    agentChoice: null as null | { cwd: string; name: string; agents: any[] },
+    agents: { active: "", default: "", agents: [] as any[], loaded: false },
     theme: readStorage(THEME_KEY) === "dark" ? "dark" : "light",
     sidebarOpen: true,
     sidebarWidth: savedSidebarWidth(),
@@ -416,7 +414,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       branch: "",
       sessions: [] as any[],
       commands: [] as any[],
-      agent: "pi",
+      agent: "",
       agentInfo: null,
       sessionFile: "",
       threads,
@@ -548,7 +546,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     ws.sessions = snap.sessions ?? [];
     ws.commands = snap.commands ?? [];
     ws.branch = snap.branch ?? "";
-    ws.agent = snap.agent ?? "pi";
+    ws.agent = snap.agent ?? ws.agent ?? "";
     ws.agentInfo = snap.agentInfo ?? null;
 
     const workerFiles = new Set<string>();
@@ -641,7 +639,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     initPromise = (async () => {
       if (!host || disposed) {
         state.pi = { ...state.pi, found: false, version: "", path: "", checked: true };
-        state.agents = { active: "", agents: [], loaded: true };
+        state.agents = { active: "", default: "", agents: [], loaded: true };
         bus.emit("pi:located", { ...state.pi });
         return;
       }
@@ -675,7 +673,10 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       for (const cwd of recent.slice(0, 5)) {
         let kind = "";
         try {
-          kind = String((await host.agentFor?.(cwd)) ?? "");
+          // 启动恢复只看项目自己的选择；新项目默认值留给用户打开目录后再生效。
+          kind = host.agentExplicitFor
+            ? String((await host.agentExplicitFor(cwd)) ?? "")
+            : String((await host.agentFor?.(cwd)) ?? "");
         } catch {
           kind = "";
         }
@@ -776,29 +777,34 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   async function open(cwd: string): Promise<WorkspaceState> {
     let ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
-    // 先看这个项目有没有显式选过 Agent。没有就弹选择器，绝不默认拉起 Pi。
-    // 目录授权在 ChooseDirectory / GitClone / WorktreeCreate / Recent 时已经完成。
+    // 打开目录本身不启动 Agent：只有项目自己选过（显式）才恢复进程。
+    // 只配了「新项目默认值」的项目先空闲打开，把默认值显示在输入框里，
+    // 等用户开始新会话或发出第一条消息时再启动。
     if (host?.agentFor) {
-      let chosen = "";
+      let explicit = "";
+      let fallback = "";
       try {
-        chosen = String((await host.agentFor(target)) ?? "");
+        explicit = host.agentExplicitFor
+          ? String((await host.agentExplicitFor(target)) ?? "")
+          : String((await host.agentFor(target)) ?? "");
+        fallback = String((await host.agentFor(target)) ?? "");
       } catch {
-        // 老宿主没有这个方法：退回原来的 Pi 行为，避免项目完全打不开。
-        chosen = "pi";
+        // 老宿主没有这些方法：退回原来的 Pi 行为，避免项目完全打不开。
+        explicit = "pi";
+        fallback = "pi";
       }
-      if (!chosen) {
+      if (!explicit) {
         if (!ws) {
           ws = makeWorkspace(target);
           workspaces.set(target, ws);
         }
+        const switched = projectPathKey(state.activeCwd) !== projectPathKey(target);
+        state.activeCwd = target;
+        if (switched) bus.emit("workspace:switched", { cwd: target });
         ws.status = "idle";
         ws.error = "";
-        const info = host.agents ? await host.agents(target).catch(() => null) : null;
-        state.agentChoice = {
-          cwd: target,
-          name: ws.name,
-          agents: Array.isArray((info as any)?.agents) ? (info as any).agents : [],
-        };
+        ws.agent = fallback;
+        bus.emit("workspace:opened", ws);
         return ws;
       }
     }
@@ -1291,7 +1297,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
    * 读取本机可用的 Agent 列表（标题栏切换器）。
    * 宿主会探测 `pi` 与 `agy` 的版本；带缓存，不会每次点开都跑一遍 CLI。
    */
-  async function refreshAgents(cwd = state.activeCwd): Promise<{ active: string; agents: any[] }> {
+  async function refreshAgents(cwd = state.activeCwd): Promise<{ active: string; default: string; agents: any[] }> {
     if (!host?.agents) {
       state.agents = { ...state.agents, loaded: true };
       return state.agents;
@@ -1300,6 +1306,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       const result = await host.agents(cwd || "");
       state.agents = {
         active: String(result?.active ?? ""),
+        default: String(result?.default ?? ""),
         agents: Array.isArray(result?.agents) ? result.agents : [],
         loaded: true,
       };
@@ -1311,44 +1318,63 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
   }
 
   /**
-   * 打开项目后第一次选 Agent：记到该项目并继续启动；选完就不再弹这个面板。
+   * 空闲工作区在用户开始新会话 / 发送时才会真正拉起 Agent。
+   * 这里把输入框里已经预选好的 Agent 显式写进项目记录，再启动进程。
    */
-  async function chooseAgent(kind: string): Promise<void> {
-    const choice = state.agentChoice;
-    if (!choice || !kind) return;
-    await host.setAgent(choice.cwd, kind);
-    state.agentChoice = null;
-    const ws = findWorkspace(choice.cwd);
-    if (ws) {
-      ws.status = "idle";
-      ws.error = "";
-    }
-    await refreshAgents(choice.cwd);
-    await open(choice.cwd);
-  }
-
-  function cancelAgentChoice(): void {
-    const choice = state.agentChoice;
-    state.agentChoice = null;
-    if (!choice) return;
-    const ws = findWorkspace(choice.cwd);
-    if (ws && ws.status !== "ready") workspaces.delete(ws.cwd);
-    if (projectPathKey(state.activeCwd) === projectPathKey(choice.cwd)) state.activeCwd = "";
+  async function startSelectedAgent(ws: WorkspaceState): Promise<void> {
+    if (!ws.agent || ws.status === "ready") return;
+    // 启动会换到真实会话文件；把当前空白线程里的草稿与附件带过去，
+    // 用户「先写内容再点发送」时不会在启动瞬间丢附件。
+    const savedText = ws.activeThread.draft;
+    const savedAttachments = [...ws.activeThread.attachments];
+    await host.setAgent(ws.cwd, ws.agent);
+    await refreshAgents(ws.cwd);
+    await open(ws.cwd);
+    if ((ws.status as string) !== "ready") return;
+    const nextThread = ws.activeThread;
+    if (savedText) nextThread.draft = savedText;
+    if (savedAttachments.length) nextThread.attachments = savedAttachments;
+    if (savedText || savedAttachments.length) saveDraftSoon(ws.cwd, nextThread.sessionFile, draftOf(nextThread));
   }
 
   /**
-   * 切换当前项目的 Agent。宿主会关掉旧进程、记住选择，再重新打开项目；
-   * 运行中的任务必须先停，否则会把半截输出留在后台进程里。
+   * 在输入框里为新会话选择 Agent：换 Agent 会关闭旧进程、按项目记住选择，
+   * 然后开一个空的新会话（旧会话仍保存在另一个 Agent 里，切回去还能看到）。
    */
-  async function switchAgent(kind: string): Promise<void> {
+  async function selectAgentForSession(kind: string): Promise<void> {
     const ws = active.value;
-    if (!ws || !kind || ws.agent === kind) return;
+    if (!ws || !kind) return;
+    const info = state.agents.agents.find((agent: any) => agent?.kind === kind);
+    if (!info?.found) throw new Error("这个 Agent 还没有安装或不可用");
     if (ws.hasAnyRunning) throw new Error("这个项目还有任务在运行，请先停止再切换 Agent");
+    if (ws.agent === kind) {
+      if (ws.status !== "ready") await startSelectedAgent(ws);
+      return;
+    }
+    // 换 Agent 会换掉当前会话文件；先把输入框里的草稿与附件带上，
+    // 否则用户刚写了一半的内容会在“选 Agent”这个动作里静默消失。
+    const savedText = ws.activeThread.draft;
+    const savedAttachments = [...ws.activeThread.attachments];
     await host.setAgent(ws.cwd, kind);
     await refreshAgents(ws.cwd);
     ws.status = "idle";
     ws.error = "";
     await open(ws.cwd);
+    if ((ws.status as string) === "ready" && ws.agent === kind) {
+      await newSession();
+      const nextThread = ws.activeThread;
+      if (savedText) nextThread.draft = savedText;
+      if (savedAttachments.length) nextThread.attachments = savedAttachments;
+      if (savedText || savedAttachments.length) saveDraftSoon(ws.cwd, nextThread.sessionFile, draftOf(nextThread));
+    }
+  }
+
+  /**
+   * 切换当前项目的 Agent。标题栏和输入框共用同一条路径：记住选择、关掉旧进程，
+   * 再开一个新的空会话；运行中的任务必须先停。
+   */
+  async function switchAgent(kind: string): Promise<void> {
+    await selectAgentForSession(kind);
   }
 
   /**
@@ -1573,6 +1599,14 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const ws = active.value;
     const message = text.trim();
     if (!ws || (!message && !ws.attachments.length)) return false;
+    if (!ws.agent) {
+      bus.emit("notify", { level: "info", text: "先在输入框左侧选择一个 Agent，再发送消息" });
+      return false;
+    }
+    if (ws.status !== "ready") {
+      await startSelectedAgent(ws);
+      if ((ws.status as string) !== "ready") return false;
+    }
     const pending = pendingNewSessions.get(ws.cwd);
     if (pending) await pending.catch(() => {});
     const targetSessionFile = ws.sessionFile;
@@ -1761,7 +1795,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
 
   async function newSession(): Promise<void> {
     const ws = active.value;
-    if (!ws || ws.status !== "ready") return;
+    if (!ws) return;
+    if (!ws.agent) {
+      bus.emit("notify", { level: "info", text: "先在输入框左侧选择一个 Agent，再开始新会话" });
+      return;
+    }
+    if (ws.status !== "ready") {
+      await startSelectedAgent(ws);
+      if ((ws.status as string) !== "ready") return;
+    }
     const existingPending = pendingNewSessions.get(ws.cwd);
     if (existingPending) return existingPending;
 
@@ -3017,8 +3059,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     restart,
     refreshAgents,
     switchAgent,
-    chooseAgent,
-    cancelAgentChoice,
+    selectAgentForSession,
     restartIdleWorkspaces,
     renameSession,
     notice,

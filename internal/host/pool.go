@@ -585,6 +585,7 @@ func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	}
 	branch := gitBranch(cwd)
 	return map[string]any{
+		"agent":        agentPi,
 		"state":        state,
 		"models":       models,
 		"levels":       levels,

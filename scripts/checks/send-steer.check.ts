@@ -27,6 +27,7 @@ const snapshot = () => ({
   models: [],
   sessions: [{ id: sessionFile, path: sessionFile, title: "测试会话", empty: false, timestamp: Date.now() }],
   commands: [],
+  agent: "pi",
   branch: "main",
   levels: [],
   messages: [],

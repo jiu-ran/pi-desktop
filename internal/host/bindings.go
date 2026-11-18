@@ -232,6 +232,23 @@ func (h *Host) ChooseTerminalExecutable() (string, error) {
 	return paths[0], nil
 }
 
+// ChooseAgentExecutable 选择 Pi / Antigravity 的可执行文件；不执行、不保存，由调用方探活后决定。
+func (h *Host) ChooseAgentExecutable() (string, error) {
+	win := h.currentWindow()
+	filters := []mygo.FileFilter{}
+	if isWindows() {
+		filters = append(filters, mygo.FileFilter{Name: "可执行程序", Extensions: []string{"exe", "cmd", "bat"}})
+	}
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: win, Title: "选择 Agent 可执行文件", Filters: filters})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
 // ---------- 会话 ----------
 
 func (h *Host) Open(cwd string, options map[string]any) (map[string]any, error) {

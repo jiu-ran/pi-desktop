@@ -44,6 +44,8 @@ const agentLabel = computed(() => activeAgent.value === "antigravity" ? "Antigra
 const agentDot = computed(() => {
   if (!activeAgent.value) return "idle";
   if (ws.value?.status === "error") return "error";
+  // 打开目录不启动进程：默认 Agent 只是预选，别把圆点画成已连接。
+  if (ws.value?.status === "idle") return "idle";
   if (!activeAgentInfo.value?.found && ws.value?.agent === "antigravity") return "error";
   if (ws.value?.streaming || ws.value?.compacting || ws.value?.status === "starting") return "running";
   return "ready";

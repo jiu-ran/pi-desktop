@@ -21,13 +21,13 @@ import {
 } from "../../shared/appearance.ts";
 import { icons, shortPath, thinkingLabel } from "../../shared/util.ts";
 import AgentSettings from "./settings/AgentSettings.vue";
+import AgentRuntimeSettings from "./settings/AgentRuntimeSettings.vue";
 import SkillSettings from "./settings/SkillSettings.vue";
 import AppearanceSettings from "./settings/AppearanceSettings.vue";
 import ConversationSettings from "./settings/ConversationSettings.vue";
 import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
 import LogSettings from "./settings/LogSettings.vue";
 import McpSettings from "./settings/McpSettings.vue";
-import PiCliSettings from "./settings/PiCliSettings.vue";
 import PiDesktopSettings from "./settings/PiDesktopSettings.vue";
 import PackageSettings from "./settings/PackageSettings.vue";
 import PluginSettings from "./settings/PluginSettings.vue";
@@ -318,10 +318,11 @@ onBeforeUnmount(() => {
       <!-- 右侧内容区 -->
       <section class="settings-main">
         <header class="settings-head" :class="{ scrolled: bodyScrolled }">
-          <div class="settings-head-text">
+          <div v-if="settingsModalState.tab !== 'agent-runtime'" class="settings-head-text">
             <h2 class="settings-title">{{ currentTabMeta.label }}</h2>
             <p class="settings-desc">{{ currentTabMeta.desc }}</p>
           </div>
+          <div v-else />
           <button type="button" class="icon-btn" title="关闭设置" @click="requestCloseSettings" v-html="icons.close" />
           <div
             v-if="currentSectionTabs.length > 1"
@@ -368,7 +369,7 @@ onBeforeUnmount(() => {
           <!-- 6. 环境与快捷键 -->
           <EnvironmentSettings v-else-if="settingsModalState.tab === 'environment'" />
 
-          <PiCliSettings v-else-if="settingsModalState.tab === 'pi-cli'" />
+          <AgentRuntimeSettings v-else-if="settingsModalState.tab === 'agent-runtime'" />
 
           <PiDesktopSettings v-else-if="settingsModalState.tab === 'pi-desktop'" />
 

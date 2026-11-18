@@ -8,9 +8,10 @@ import SelectMenu from "../../shared/SelectMenu.vue";
 /**
  * Pi CLI：本机 pi 命令的路径、版本与更新。
  *
- * 单独做成一页（一级分区），因为它和「Pi Desktop 更新」是两件平级、独立的事：
- * 一个更新命令行工具，一个更新这个桌面应用，混在「环境与快捷键」里既难找也容易混。
+ * 作为「智能体 → Pi」详情里的「运行与更新」区块嵌入；路径 / 版本 / 更新只在这里
+ * 配置，不再单开「Pi CLI」页，也就不会有第二处可以改同一个值。
  */
+const props = defineProps<{ embedded?: boolean }>();
 const { workbench, bus } = useKernel();
 const state = workbench.state;
 
@@ -112,8 +113,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-group">
-    <div class="settings-group-title">本机 Pi CLI</div>
+  <div class="settings-group pi-cli-settings" :class="{ 'is-embedded': props.embedded }">
+    <div v-if="!props.embedded" class="settings-group-title">本机 Pi CLI</div>
 
     <!-- 状态与版本合成一行：以前「已连接 · 版本」和「当前 · 最新」分在两张卡里，说的是同一件事 -->
     <div class="settings-row">

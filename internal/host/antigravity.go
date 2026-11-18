@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,9 +47,14 @@ func antigravityID(file string) string {
 type agentSettingsStore struct {
 	Projects    map[string]string `json:"projects,omitempty"`
 	CustomPaths map[string]string `json:"customPaths,omitempty"`
+	// Default 是新项目的默认 Agent。空字符串表示「每次询问」——这也是默认值，
+	// 所以启动时没有显式选择的项目不会自动拉起任何一个 Agent。
+	Default string `json:"default,omitempty"`
 	// Models 记住每个 Agent 上次选中的模型：Antigravity 的 session/new 默认模型
 	// 在某些账号上不会产出任何流（agy 1.5.11 实测），重启后不能再退回它。
 	Models map[string]string `json:"models,omitempty"`
+	// Thinking 记住 Antigravity 新会话的默认思考档位（low / medium / high）。
+	Thinking map[string]string `json:"thinking,omitempty"`
 }
 
 var agentSettingsMu sync.Mutex
@@ -56,7 +62,7 @@ var agentSettingsMu sync.Mutex
 func agentSettingsPath() string { return filepath.Join(userDataDir(), "agents.json") }
 
 func readAgentSettings() agentSettingsStore {
-	store := agentSettingsStore{Projects: map[string]string{}, CustomPaths: map[string]string{}, Models: map[string]string{}}
+	store := agentSettingsStore{Projects: map[string]string{}, CustomPaths: map[string]string{}, Models: map[string]string{}, Thinking: map[string]string{}}
 	data, err := os.ReadFile(agentSettingsPath())
 	if err != nil {
 		return store
@@ -70,6 +76,9 @@ func readAgentSettings() agentSettingsStore {
 	}
 	if store.Models == nil {
 		store.Models = map[string]string{}
+	}
+	if store.Thinking == nil {
+		store.Thinking = map[string]string{}
 	}
 	return store
 }
@@ -87,12 +96,36 @@ func writeAgentSettings(store agentSettingsStore) error {
 
 func agentKindFor(cwd string) string {
 	settings := readAgentSettings()
-	kind := settings.Projects[normPathKey(cwd)]
+	if kind := settings.Projects[normPathKey(cwd)]; kind == agentAntigravity || kind == agentPi {
+		return kind
+	}
+	// 项目没有单独选择时，才落到「新项目默认 Agent」；默认值本身默认是空，
+	// 所以全新安装启动不会连接任何 Agent。
+	if kind := settings.Default; kind == agentAntigravity || kind == agentPi {
+		return kind
+	}
+	return ""
+}
+
+func agentDefault() string {
+	agentSettingsMu.Lock()
+	defer agentSettingsMu.Unlock()
+	kind := readAgentSettings().Default
 	if kind == agentAntigravity || kind == agentPi {
 		return kind
 	}
-	// 没有显式选择时返回空：不再默认连接 Pi，由界面先让用户选 Agent。
 	return ""
+}
+
+func setAgentDefault(kind string) error {
+	if kind != "" && kind != agentPi && kind != agentAntigravity {
+		return errors.New("未知的 Agent：" + kind)
+	}
+	agentSettingsMu.Lock()
+	defer agentSettingsMu.Unlock()
+	store := readAgentSettings()
+	store.Default = kind
+	return writeAgentSettings(store)
 }
 
 func setAgentKindFor(cwd, kind string) error {
@@ -132,19 +165,30 @@ func agentModel(kind string) string {
 	return readAgentSettings().Models[kind]
 }
 
-func rememberAgentModel(kind, model string) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return
+func agentThinking(kind string) string {
+	agentSettingsMu.Lock()
+	defer agentSettingsMu.Unlock()
+	level := readAgentSettings().Thinking[kind]
+	if level == "low" || level == "medium" || level == "high" {
+		return level
+	}
+	return ""
+}
+
+func setAgentThinking(kind, level string) error {
+	level = strings.TrimSpace(level)
+	if level != "" && level != "low" && level != "medium" && level != "high" {
+		return errors.New("未知的思考档位：" + level)
 	}
 	agentSettingsMu.Lock()
 	defer agentSettingsMu.Unlock()
 	store := readAgentSettings()
-	if store.Models[kind] == model {
-		return
+	if level == "" {
+		delete(store.Thinking, kind)
+	} else {
+		store.Thinking[kind] = level
 	}
-	store.Models[kind] = model
-	_ = writeAgentSettings(store)
+	return writeAgentSettings(store)
 }
 
 // ---------- 位置探测 ----------
@@ -1063,6 +1107,9 @@ func (w *antigravityWorkspace) ensurePreferredModel(session *agSession) {
 		return
 	}
 	choice := agentModel(agentAntigravity)
+	if base, _ := acpModelBase(choice); base != "" {
+		choice = base
+	}
 	available := false
 	if choice != "" {
 		for _, item := range models {
@@ -1075,11 +1122,39 @@ func (w *antigravityWorkspace) ensurePreferredModel(session *agSession) {
 	if !available {
 		choice = antigravityDefaultModel(models)
 	}
-	if choice == "" || choice == current {
+	if choice == "" {
 		return
 	}
-	if _, err := w.setModel(session, choice); err != nil {
-		logWarn("antigravity", "无法切换默认模型："+err.Error())
+	if choice != current {
+		if _, err := w.setModel(session, choice); err != nil {
+			logWarn("antigravity", "无法切换默认模型："+err.Error())
+		}
+	}
+	w.ensurePreferredThinking(session)
+}
+
+// ensurePreferredThinking 只作用于新建会话：历史会话的思考档位属于那次对话，
+// 不应在 load 时被设置页的默认值覆盖。
+func (w *antigravityWorkspace) ensurePreferredThinking(session *agSession) {
+	level := agentThinking(agentAntigravity)
+	if level == "" {
+		return
+	}
+	w.mu.Lock()
+	current := session.thinking
+	available := false
+	for _, item := range session.levels {
+		if item == level {
+			available = true
+			break
+		}
+	}
+	w.mu.Unlock()
+	if !available || level == current {
+		return
+	}
+	if _, err := w.setThinking(session, level); err != nil {
+		logWarn("antigravity", "无法应用默认思考档位："+err.Error())
 	}
 }
 
@@ -1809,7 +1884,6 @@ func (w *antigravityWorkspace) setModel(session *agSession, id string) (any, err
 	w.applyConfigOptionsLocked(session, asSlice(result["configOptions"]))
 	state := w.sessionStateLocked(session)
 	w.mu.Unlock()
-	rememberAgentModel(agentAntigravity, id)
 	return state, nil
 }
 
@@ -1861,13 +1935,25 @@ func (h *Host) AcpRespondPermission(cwd, sessionFile, permissionID, optionID str
 	return workspace.client.Respond(permission.requestID, map[string]any{"outcome": outcome})
 }
 
-// AgentFor 只读项目已保存的 Agent 选择，不启动任何进程。
-// 返回空字符串表示还没选过；界面据此先弹出选择器，而不是默认连 Pi。
+// AgentFor 返回项目最终会使用的 Agent（项目选择优先，其次新项目默认值）。
 func (h *Host) AgentFor(cwd string) string {
 	if strings.TrimSpace(cwd) == "" {
 		return ""
 	}
 	return agentKindFor(cwd)
+}
+
+// AgentExplicit 只返回项目自己保存的选择，不落默认值。
+// 启动恢复用它：用户只设了「新项目默认」但没打开过某个项目时，不该自动拉起进程。
+func (h *Host) AgentExplicit(cwd string) string {
+	if strings.TrimSpace(cwd) == "" {
+		return ""
+	}
+	kind := readAgentSettings().Projects[normPathKey(cwd)]
+	if kind == agentPi || kind == agentAntigravity {
+		return kind
+	}
+	return ""
 }
 
 func (h *Host) Agents(cwd string) map[string]any {
@@ -1877,8 +1963,9 @@ func (h *Host) Agents(cwd string) map[string]any {
 	if h.piCmd != nil {
 		piInfo.Path = h.piCmd.String()
 	}
+	customPi := h.piCustomPath
 	h.mu.Unlock()
-	if located := locatePi(h.piCustomPath); located.Found {
+	if located := locatePi(customPi); located.Found {
 		piInfo.Found = true
 		piInfo.Version = located.Version
 		piInfo.Path = located.Path
@@ -1891,18 +1978,125 @@ func (h *Host) Agents(cwd string) map[string]any {
 		active = agentKindFor(cwd)
 	}
 	return map[string]any{
-		"active": active,
+		"active":  active,
+		"default": agentDefault(),
 		"agents": []any{
 			map[string]any{
 				"kind": agentPi, "label": "Pi", "found": piInfo.Found,
 				"version": piInfo.Version, "path": piInfo.Path, "error": piInfo.Error,
+				"model": agentModel(agentPi),
 			},
 			map[string]any{
 				"kind": agentAntigravity, "label": antigravityDefault, "found": antigravity.Found,
 				"version": antigravity.Version, "path": antigravity.Path, "error": antigravity.Error,
+				"model": agentModel(agentAntigravity), "thinking": agentThinking(agentAntigravity),
 			},
 		},
 	}
+}
+
+// SetAgentDefault 设置「新项目默认 Agent」，空字符串表示每次询问。
+func (h *Host) SetAgentDefault(kind string) error {
+	return setAgentDefault(strings.TrimSpace(kind))
+}
+
+// AgentModels 返回某个 Agent 可以选择的模型。Pi 的模型是会话级能力，
+// 不在这里枚举；Antigravity 的 `agy models` 可以离线列出。
+func (h *Host) AgentModels(kind string) ([]map[string]any, error) {
+	if kind != agentAntigravity {
+		return []map[string]any{}, nil
+	}
+	exe, _, err := antigravityCommand()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "models")
+	cmd.Env = envListFromMap(h.childEnv())
+	hideWindow(cmd)
+	prepareProcessGroup(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, friendlyAgentError(err)
+	}
+	seen := map[string]bool{}
+	models := []map[string]any{}
+	for _, line := range strings.Split(string(out), string(rune(10))) {
+		line = strings.TrimSpace(line)
+		parts := strings.SplitN(line, string(rune(9)), 2)
+		if len(parts) != 2 {
+			continue
+		}
+		id := strings.TrimSpace(parts[0])
+		name := strings.TrimSpace(parts[1])
+		if id == "" {
+			continue
+		}
+		base, _ := acpModelBase(id)
+		if base == "" || seen[base] {
+			continue
+		}
+		seen[base] = true
+		models = append(models, map[string]any{"id": base, "name": antigravityModelName(name)})
+	}
+	if len(models) == 0 {
+		return nil, errors.New("没有从 `agy models` 读到模型列表")
+	}
+	return models, nil
+}
+
+func antigravityModelName(name string) string {
+	for _, suffix := range []string{" (Low)", " (Medium)", " (High)", " (XHigh)"} {
+		name = strings.TrimSuffix(name, suffix)
+	}
+	return name
+}
+
+// SetAgentModel 记住 Antigravity 的默认模型（基础型号，思考档位仍由会话选择）。
+func (h *Host) SetAgentModel(kind, model string) error {
+	if kind != agentAntigravity {
+		return errors.New("Pi 的模型在会话里选择")
+	}
+	model = strings.TrimSpace(model)
+	agentSettingsMu.Lock()
+	defer agentSettingsMu.Unlock()
+	store := readAgentSettings()
+	if model == "" {
+		delete(store.Models, kind)
+	} else {
+		base, _ := acpModelBase(model)
+		store.Models[kind] = base
+	}
+	return writeAgentSettings(store)
+}
+
+// SetAgentThinking 记住 Antigravity 新会话的默认思考档位。
+func (h *Host) SetAgentThinking(kind, level string) error {
+	if kind != agentAntigravity {
+		return errors.New("Pi 的思考档位在会话里选择")
+	}
+	return setAgentThinking(kind, level)
+}
+
+// AgentLogin 打开 Antigravity 的 Google 登录流程（agy acp --login）。
+func (h *Host) AgentLogin(kind string) (map[string]any, error) {
+	if kind != agentAntigravity {
+		return nil, errors.New("Pi 的登录请用 pi 的 /login")
+	}
+	exe, _, err := antigravityCommand()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe, "acp", "--login")
+	cmd.Env = envListFromMap(h.childEnv())
+	hideWindow(cmd)
+	prepareProcessGroup(cmd)
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	go func() { _ = cmd.Wait() }()
+	return map[string]any{"started": true}, nil
 }
 
 func (h *Host) SetAgent(cwd, kind string) (map[string]any, error) {

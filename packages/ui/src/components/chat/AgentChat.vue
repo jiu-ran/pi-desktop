@@ -24,6 +24,7 @@ import WelcomeView from "./WelcomeView.vue";
 const { workbench, bus } = useKernel();
 let stopHeightChange: (() => void) | null = null;
 const ws = computed(() => workbench.active.value);
+const agentGlyph = computed(() => (ws.value?.agent === "antigravity" ? "A" : ws.value?.agent === "pi" ? "π" : "+"));
 const scroller = ref<HTMLElement | null>(null);
 const stick = ref(true);
 const searchOpen = ref(false);
@@ -1031,18 +1032,27 @@ watch(searchMatches, () => {
                ws.loading，这块提示永远不出现，界面上会直接闪出「你想做什么」 -->
           <div v-if="ws.status === 'starting' && !ws.blocks.length" class="empty-thread is-connecting">
             <div class="empty-thread-mark pi-emblem is-sm" aria-hidden="true">
-              <span class="pi-emblem-glyph">π</span>
+              <span class="pi-emblem-glyph">{{ agentGlyph }}</span>
             </div>
-            <p class="connecting-line"><span class="mini-spinner" />正在连接 Pi…</p>
+            <p class="connecting-line"><span class="mini-spinner" />正在连接 Agent…</p>
+          </div>
+
+          <div v-else-if="!ws.agent" class="empty-thread">
+            <div class="empty-thread-mark pi-emblem is-sm" aria-hidden="true">
+              <span class="pi-emblem-glyph">+</span>
+            </div>
+            <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
+            <h2>先选择一个 Agent</h2>
+            <p class="empty-intro">打开目录不会启动任何 Agent。在下方输入框左侧选择 Pi 或 Antigravity，选择后开始新会话。</p>
           </div>
 
           <div v-else-if="!ws.blocks.length" class="empty-thread">
             <div class="empty-thread-mark pi-emblem is-sm" aria-hidden="true">
-              <span class="pi-emblem-glyph">π</span>
+              <span class="pi-emblem-glyph">{{ agentGlyph }}</span>
             </div>
             <p class="empty-kicker"><span v-html="icons.folder" />{{ displayProjectName(ws.cwd) }}</p>
             <h2>你想在这个项目里做什么？</h2>
-            <p class="empty-intro">选一个起点，或直接在下方描述任务。Pi 会读代码、改文件，并运行命令。</p>
+            <p class="empty-intro">选一个起点，或直接在下方描述任务。Agent 会读代码、改文件，并运行命令。</p>
             <div class="empty-wt-bar">
               <button
                 type="button"

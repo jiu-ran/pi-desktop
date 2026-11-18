@@ -40,7 +40,7 @@ export type SettingsTabId =
   | "skills"
   | "plugins"
   | "environment"
-  | "pi-cli"
+  | "agent-runtime"
   | "pi-desktop"
   | "logs";
 
@@ -247,11 +247,11 @@ export const settingsModalState = reactive({
 /**
  * 「有新版本」徽标该跳到哪一页。
  *
- * 桌面应用和 Pi CLI 各有自己的更新页：以前徽标写死 `environment`（系统分区的
- * 环境与快捷键），点了跟更新毫无关系。放成纯函数，检查脚本能直接盯住。
+ * 桌面应用更新在 Pi Desktop；Pi CLI 的更新已经收进「智能体 → Pi」详情，
+ * 不再单开一页，避免路径 / 版本在两处配置。
  */
 export function updateSettingsTab(kind: "app" | "pi"): SettingsTabId {
-  return kind === "app" ? "pi-desktop" : "pi-cli";
+  return kind === "app" ? "pi-desktop" : "agent-runtime";
 }
 
 export function openSettingsModal(tab?: SettingsTabId): void {

@@ -4,7 +4,7 @@ import { useKernel } from "../../../kernel/use-kernel.ts";
 import SettingGroup from "./SettingGroup.vue";
 
 /**
- * 全局提示词：~/.pi/agent/AGENTS.md 的可视化编辑。
+ * Pi 全局提示词：~/.pi/agent/AGENTS.md 的可视化编辑（只影响 Pi）。
  *
  * 打开时拉一次，切项目后重拉（不同项目可能挂不同的 AGENTS.md），保存会提示结果。
  */
@@ -37,7 +37,7 @@ async function save(): Promise<void> {
   try {
     const result = await window.piDesktop!.saveGlobalAgents(content.value);
     saved.value = result.content;
-    bus.emit("notify", { level: "info", text: "全局提示词已保存" });
+    bus.emit("notify", { level: "info", text: "Pi 全局提示词已保存" });
   } catch (error: any) {
     bus.emit("notify", { level: "error", text: error?.message ?? String(error) });
   } finally {
@@ -50,7 +50,7 @@ watch(() => state.activeCwd, load);
 </script>
 
 <template>
-  <SettingGroup title="全局提示词">
+  <SettingGroup title="Pi 全局提示词">
     <template #head>
       <div class="settings-toolbar-actions">
         <button type="button" class="btn ghost small" :disabled="loading" @click="load">刷新</button>
