@@ -35,7 +35,7 @@
 .settings-modal {
   position: relative;
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 212px minmax(0, 1fr);
   width: min(1120px, 100%);
   height: min(820px, 100%);
   overflow: hidden;
@@ -69,9 +69,9 @@
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-height: 0;
-  padding: 16px 12px 12px;
+  padding: 12px;
   border-right: 1px solid var(--line);
   background: var(--bg-2);
 }
@@ -96,8 +96,9 @@
 }
 .settings-brand-title {
   color: var(--fg);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 650;
+  letter-spacing: -0.01em;
   line-height: 1.2;
 }
 .settings-brand-sub {
@@ -194,8 +195,8 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 38px;
+  gap: 9px;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -212,21 +213,14 @@
   color: var(--fg);
 }
 .settings-nav-item.active {
-  border-color: var(--line);
-  background: var(--bg);
-  color: var(--fg);
+  border-color: transparent;
+  background: var(--fg);
+  color: var(--bg);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
-.settings-nav-item.active::before {
-  content: "";
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: -5px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
+.settings-nav-item.active .settings-nav-icon {
+  color: var(--bg);
+  opacity: 0.72;
 }
 .settings-nav-icon {
   display: grid;
@@ -294,16 +288,40 @@
   font-weight: 500;
   opacity: 0.75;
 }
+.settings-nav-sep {
+  height: 1px;
+  margin: 6px 8px;
+  background: var(--line);
+}
 .settings-nav-foot {
   display: flex;
   flex: none;
   flex-direction: column;
   gap: 5px;
-  padding: 12px 8px 2px;
+  padding: 10px 4px 0;
   border-top: 1px solid var(--line);
   color: var(--fg-3);
   font-size: 10.5px;
   line-height: 1.5;
+}
+.settings-nav-reset {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-2);
+  font: 11px var(--font);
+  cursor: pointer;
+}
+.settings-nav-reset:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+.settings-nav-reset:disabled {
+  color: var(--fg-3);
+  opacity: 0.5;
+  cursor: default;
 }
 .settings-nav-foot kbd {
   margin-right: 3px;
@@ -332,7 +350,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 2px 16px;
-  padding: 24px 30px 0;
+  padding: 28px 36px 0;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
@@ -397,7 +415,7 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
-  padding: 24px 30px 36px;
+  padding: 28px 36px 64px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
@@ -1518,26 +1536,6 @@
   background: var(--bg);
   color: var(--fg-2);
   font: 11px var(--mono);
-}
-
-/* ---------- 底部操作栏 ---------- */
-.settings-footer {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 30px;
-  border-top: 1px solid var(--line);
-  background: var(--bg);
-}
-.settings-footer-hint {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-3);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ==========================================================================

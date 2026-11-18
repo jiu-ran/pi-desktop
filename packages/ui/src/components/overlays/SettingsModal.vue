@@ -251,25 +251,27 @@ onBeforeUnmount(() => {
             <div v-else class="settings-nav-group settings-nav-keyhint">↑↓ 选择 · Enter 打开</div>
           </template>
           <template v-else>
-            <button
-              v-for="section in SECTIONS"
-              :key="section.id"
-              type="button"
-              class="settings-nav-item"
-              :class="{ active: currentSection.id === section.id }"
-              :data-settings-section="section.id"
-              :aria-current="currentSection.id === section.id ? 'page' : undefined"
-              :title="`${section.label} · ${section.desc}`"
-              @click="openSection(section)"
-            >
-              <span class="settings-nav-icon" v-html="section.icon" />
-              <span class="settings-nav-label">{{ section.label }}</span>
-              <span class="settings-nav-count">{{ section.tabs.length }}</span>
-            </button>
+            <template v-for="(section, index) in SECTIONS" :key="section.id">
+              <div v-if="index === 3 || index === 5" class="settings-nav-sep" aria-hidden="true" />
+              <button
+                type="button"
+                class="settings-nav-item"
+                :class="{ active: currentSection.id === section.id }"
+                :data-settings-section="section.id"
+                :aria-current="currentSection.id === section.id ? 'page' : undefined"
+                :title="`${section.label} · ${section.desc}`"
+                @click="openSection(section)"
+              >
+                <span class="settings-nav-icon" v-html="section.icon" />
+                <span class="settings-nav-label">{{ section.label }}</span>
+                <span class="settings-nav-count">{{ section.tabs.length }}</span>
+              </button>
+            </template>
           </template>
         </nav>
 
         <div class="settings-nav-foot">
+          <button type="button" class="settings-nav-reset" :disabled="!changedCount" @click="handleResetAll">恢复默认</button>
           <span><kbd>Esc</kbd> 关闭</span>
         </div>
       </aside>
@@ -334,14 +336,6 @@ onBeforeUnmount(() => {
 
           <LogSettings v-else-if="settingsModalState.tab === 'logs'" />
         </div>
-        <footer class="settings-footer">
-          <span class="settings-footer-hint">
-            改动会立即生效并保存
-            <template v-if="changedCount"> · 已改动 {{ changedCount }} 项</template>
-          </span>
-          <button type="button" class="btn ghost small" :disabled="!changedCount" @click="handleResetAll">恢复默认</button>
-          <button type="button" class="btn primary small" @click="requestCloseSettings">完成</button>
-        </footer>
       </section>
     </div>
   </div>
