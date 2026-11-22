@@ -120,7 +120,7 @@ onMounted(() => {
       <div class="settings-row-info">
         <strong>Pi Coding Agent CLI</strong>
         <span v-if="state.pi.found">已连接 · 当前 {{ state.pi.version || "未知" }}{{ state.pi.latest ? ` · 最新 ${state.pi.latest}` : "" }}</span>
-        <span v-else>未检测到本机 pi 命令，请检查 PATH，或在下方手动指定路径</span>
+        <span v-else>未检测到本机 pi（已查 PATH 与官方安装器、npm / pnpm / bun、Nix 的默认目录），请安装或在下方手动指定路径</span>
       </div>
       <span class="settings-status-pill" :class="piUpdateStatus.tone">
         {{ piUpdateStatus.label }}
@@ -130,7 +130,10 @@ onMounted(() => {
     <div class="settings-row">
       <div class="settings-row-info">
         <strong>Pi 路径</strong>
-        <span v-if="!piPathEditing">{{ state.pi.path || "未在 PATH 中识别到 pi，可手动指定" }}</span>
+        <span v-if="!piPathEditing">
+          {{ state.pi.path || "未在 PATH 中识别到 pi，可手动指定" }}
+          <template v-if="state.pi.path && state.pi.source">（{{ state.pi.source }}）</template>
+        </span>
         <span v-else>{{ appSettings.piCustomPath ? "正在使用手动路径，探活成功后替换" : "默认使用 PATH 自动识别，探活成功后才会保存" }}</span>
       </div>
       <span v-if="!piPathEditing" class="settings-status-pill" :class="appSettings.piCustomPath ? 'warn' : 'ok'">

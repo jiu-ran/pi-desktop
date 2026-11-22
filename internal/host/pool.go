@@ -199,7 +199,7 @@ func (h *Host) piCommand() (PiCommand, error) {
 		logPi("error", "pi", "无法启动 Pi："+err.Error())
 		return PiCommand{}, err
 	}
-	logPi("info", "pi", "Pi 启动命令："+command.String()+"（"+located.Path+"）")
+	logPi("info", "pi", "Pi 启动命令："+command.String()+"（来源："+firstNonEmpty(located.Source, "PATH")+"，路径："+located.Path+"）")
 	h.mu.Lock()
 	h.piCmd = &command
 	h.piVersion = located.Version

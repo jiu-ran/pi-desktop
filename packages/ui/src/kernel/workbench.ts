@@ -197,6 +197,8 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       version: "",
       checked: false,
       path: "",
+      // 这条 pi 是怎么找到的：PATH / 官方安装器 / npm 全局 / 手动指定 …
+      source: "",
       latest: "",
       updateAvailable: false,
       checking: false,
@@ -629,7 +631,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
     if (initPromise) return initPromise;
     initPromise = (async () => {
       if (!host || disposed) {
-        state.pi = { ...state.pi, found: false, version: "", path: "", checked: true };
+        state.pi = { ...state.pi, found: false, version: "", path: "", source: "", checked: true };
         bus.emit("pi:located", { ...state.pi });
         return;
       }
@@ -653,6 +655,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
         found: Boolean(pi.found),
         version: pi.version ?? "",
         path: pi.path ?? "",
+        source: (pi as any).source ?? "",
         checked: true,
       };
       bus.emit("pi:located", { ...state.pi });
@@ -2288,6 +2291,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       found: Boolean(pi.found),
       version: pi.version ?? "",
       path: pi.path ?? customPath,
+      source: (pi as any).source ?? "",
       checked: true,
     };
     bus.emit("pi:located", { ...state.pi });

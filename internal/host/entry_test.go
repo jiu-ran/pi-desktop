@@ -105,3 +105,86 @@ func TestPiCliEntryAcceptsJavaScriptPath(t *testing.T) {
 		t.Fatalf("应原样返回 .js 路径，得到 %q", got)
 	}
 }
+
+// 新版 npm 包的 bin 指向 dist/bundle/cli.js；相对路径（../install/...）也要能解析。
+func TestPiCliEntryFromBundleRelativePath(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "agent", "bin")
+	pkg := filepath.Join(root, "agent", "install", "releases", "1.6.0", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "bundle")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cliJS := filepath.Join(pkg, "cli.js")
+	if err := os.WriteFile(cliJS, []byte("// bundled\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(bin, "pi.cmd")
+	shimText := "\"%node%\" \"%~dp0..\\install\\releases\\1.6.0\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js\" %*\\r\\n"
+	if err := os.WriteFile(shim, []byte(shimText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := piCliEntryFromExecutable(shim); got != cliJS {
+		t.Fatalf("应解析到 bundle/cli.js，得到 %q，期望 %q", got, cliJS)
+	}
+}
+
+// 官方安装器的 bin 目录必须排在候选列表最前，且跟随 PI_CODING_AGENT_DIR。
+func TestPiKnownCandidatesStartsWithInstallerBin(t *testing.T) {
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	bin := filepath.Join(agent, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "pi"
+	if isWindows() {
+		name = "pi.cmd"
+	}
+	exe := filepath.Join(bin, name)
+	if err := os.WriteFile(exe, []byte("@echo off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := piKnownCandidates("")
+	if len(candidates) == 0 {
+		t.Fatal("应至少列出官方安装器的 bin 目录")
+	}
+	if candidates[0].Path != exe || candidates[0].Source != "官方安装器" {
+		t.Fatalf("第一个候选应是官方安装器 %q，得到 %+v", exe, candidates[0])
+	}
+	for _, candidate := range candidates[1:] {
+		if normPathKey(candidate.Path) == normPathKey(exe) {
+			t.Fatalf("候选列表出现重复项：%s", candidate.Path)
+		}
+	}
+}
+
+// PATH 里没有 pi 时，应能退回官方安装器的 <agentDir>/bin。
+func TestLocatePiFallsBackToInstallerBin(t *testing.T) {
+	if !isWindows() {
+		t.Skip("用 .cmd 造桩，只在 Windows 上验证")
+	}
+	agent := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agent)
+	bin := filepath.Join(agent, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "pi.cmd"), []byte("@echo 1.6.0\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+	t.Setenv("PATHEXT", ".CMD")
+
+	located := locatePi("")
+	if !located.Found {
+		t.Fatalf("应回退找到官方安装器里的 pi，得到 %+v", located)
+	}
+	if located.Version != "1.6.0" || located.Source != "官方安装器" {
+		t.Fatalf("版本/来源不对：%+v", located)
+	}
+}

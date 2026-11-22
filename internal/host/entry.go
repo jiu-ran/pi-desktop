@@ -17,7 +17,10 @@ type PiLocation struct {
 	Found   bool   `json:"found"`
 	Version string `json:"version"`
 	Path    string `json:"path"`
-	Error   string `json:"error,omitempty"`
+	// Source 说明这条 pi 是怎么找到的（PATH / 官方安装器 / npm 全局 / Nix …），
+	// 排查「设置里能识别、工作区起不来」时先看它。
+	Source string `json:"source,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 func isFile(target string) bool {
@@ -29,15 +32,18 @@ func piEntryFromNodeModulesDir(dir string) string {
 	if dir == "" {
 		return ""
 	}
-	entry := filepath.Join(dir, filepath.FromSlash(piRuntimePackage), "dist", "cli.js")
-	if isFile(entry) {
-		abs, _ := filepath.Abs(entry)
-		return abs
+	// 新版包的 bin 指向 dist/bundle/cli.js，老一点的是 dist/cli.js，两个都认。
+	for _, rel := range []string{"dist/cli.js", "dist/bundle/cli.js"} {
+		entry := filepath.Join(dir, filepath.FromSlash(piRuntimePackage), filepath.FromSlash(rel))
+		if isFile(entry) {
+			abs, _ := filepath.Abs(entry)
+			return abs
+		}
 	}
 	return ""
 }
 
-var shimEntryRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-coding-agent[/\\]dist[/\\]cli\.js`)
+var shimEntryRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-coding-agent[/\\]dist[/\\](?:bundle[/\\])?cli\.js`)
 
 // 官方安装器（pi.dev）装的 pi 不是 npm 布局：shim 里写的是同目录的 pi-launcher.js，
 // 真正的入口、agentDir 等环境都由这个 launcher 决定。绕过它直接跑 dist/cli.js
@@ -297,6 +303,96 @@ func probePiVersion(bin string) string {
 	return ""
 }
 
+// piCandidate 是一个「可能装着 pi」的位置，Source 用来在界面和日志里说明来源。
+type piCandidate struct {
+	Path   string
+	Source string
+}
+
+// piKnownCandidates 列出各安装方式的落盘位置，按可信度排序。
+//
+// Pi 官方支持五种装法（pi.dev 的安装脚本、npm、pnpm、bun、Nix），落点各不相同：
+//   - 官方安装器：<agentDir>/bin/pi(.cmd)，Windows 下真正入口是同目录 pi-launcher.js
+//   - npm / pnpm：<prefix>/pi.cmd（Windows）或 <prefix>/bin/pi（Unix）
+//   - bun：~/.bun/bin/pi
+//   - Nix：~/.nix-profile/bin/pi
+//
+// PATH 里没有时逐个探活，避免「装好了但桌面端看不到」——Windows 的 PATH 是
+// 登录时继承的，装完 pi 不注销就不会出现在已运行的资源管理器里。
+func piKnownCandidates(skip string) []piCandidate {
+	type dirCandidate struct {
+		Dir    string
+		Source string
+	}
+	dirs := []dirCandidate{{Dir: filepath.Join(agentDirPath(), "bin"), Source: "官方安装器"}}
+	home, _ := os.UserHomeDir()
+	if isWindows() {
+		if dir := os.Getenv("APPDATA"); dir != "" {
+			dirs = append(dirs, dirCandidate{Dir: filepath.Join(dir, "npm"), Source: "npm 全局"})
+		}
+		if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+			dirs = append(dirs,
+				dirCandidate{Dir: filepath.Join(dir, "pnpm"), Source: "pnpm 全局"},
+				dirCandidate{Dir: filepath.Join(dir, "Programs", "pi"), Source: "独立安装"},
+			)
+		}
+		dirs = append(dirs,
+			dirCandidate{Dir: filepath.Join(home, ".bun", "bin"), Source: "bun 全局"},
+			dirCandidate{Dir: filepath.Join(home, ".local", "bin"), Source: "用户 bin"},
+		)
+	} else {
+		dirs = append(dirs,
+			dirCandidate{Dir: filepath.Join(home, ".local", "bin"), Source: "用户 bin"},
+			dirCandidate{Dir: filepath.Join(home, "bin"), Source: "用户 bin"},
+			dirCandidate{Dir: filepath.Join(home, ".bin"), Source: "用户 bin"},
+			dirCandidate{Dir: filepath.Join(home, ".bun", "bin"), Source: "bun 全局"},
+			dirCandidate{Dir: filepath.Join(home, ".nix-profile", "bin"), Source: "Nix"},
+			dirCandidate{Dir: "/opt/homebrew/bin", Source: "Homebrew"},
+			dirCandidate{Dir: "/usr/local/bin", Source: "系统 bin"},
+		)
+	}
+	names := []string{"pi"}
+	if isWindows() {
+		names = []string{"pi.cmd", "pi.exe", "pi.bat"}
+	}
+	skipKey := normPathKey(skip)
+	seen := map[string]bool{}
+	out := []piCandidate{}
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir.Dir) == "" {
+			continue
+		}
+		for _, name := range names {
+			full := filepath.Join(dir.Dir, name)
+			key := normPathKey(full)
+			if seen[key] || key == skipKey {
+				continue
+			}
+			seen[key] = true
+			if isFile(full) {
+				out = append(out, piCandidate{Path: full, Source: dir.Source})
+			}
+		}
+	}
+	return out
+}
+
+func piCandidateDirsLabel() string {
+	labels := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range piKnownCandidates("") {
+		if seen[candidate.Source] {
+			continue
+		}
+		seen[candidate.Source] = true
+		labels = append(labels, candidate.Source)
+	}
+	if len(labels) == 0 {
+		return "官方安装器、npm / pnpm / bun 全局目录、Nix"
+	}
+	return strings.Join(labels, "、")
+}
+
 func locatePi(customPath string) PiLocation {
 	manual := strings.Trim(strings.TrimSpace(customPath), `"`)
 	if manual != "" {
@@ -307,17 +403,23 @@ func locatePi(customPath string) PiLocation {
 		if version == "" {
 			return PiLocation{Path: manual, Error: "该路径无法运行 pi --version，请确认是 Pi 可执行文件"}
 		}
-		return PiLocation{Found: true, Version: version, Path: manual}
+		return PiLocation{Found: true, Version: version, Path: manual, Source: "手动指定"}
 	}
 	auto := findPiOnPath()
-	if auto == "" {
-		return PiLocation{Error: "未在系统 PATH 中检测到 pi 命令，请先安装 Pi CLI，或在下方手动指定 Pi 可执行文件路径"}
+	if auto != "" {
+		if version := probePiVersion(auto); version != "" {
+			return PiLocation{Found: true, Version: version, Path: auto, Source: "PATH"}
+		}
 	}
-	version := probePiVersion(auto)
-	if version == "" {
+	for _, candidate := range piKnownCandidates(auto) {
+		if version := probePiVersion(candidate.Path); version != "" {
+			return PiLocation{Found: true, Version: version, Path: candidate.Path, Source: candidate.Source}
+		}
+	}
+	if auto != "" {
 		return PiLocation{Path: auto, Error: "PATH 中的 pi 无法运行（pi --version 失败），请检查安装或手动指定路径"}
 	}
-	return PiLocation{Found: true, Version: version, Path: auto}
+	return PiLocation{Error: "未检测到 pi：PATH 里没有，也找过 " + piCandidateDirsLabel() + "。请安装 Pi CLI（https://pi.dev），或在下方手动指定路径"}
 }
 
 // resolvePiCommand 把「pi 可执行文件」变成真正能启动 RPC 的命令。

@@ -16,6 +16,7 @@
 |---|---|---|---|
 | 使用 RPC 而非进程内 SDK 会话 | `internal/host/pool.go 等 Go 宿主` | 保持桌面端与 Pi 进程隔离 | Pi 提供受支持的嵌入式主机 API 且产品决定改变运行方式 |
 | 会话跑本机 pi，不用依赖里的副本 | `internal/host/entry.go` | 产品边界要求不内置 Pi 的推理与工具执行；用户 `pi update` 后桌面端要立刻用上新版本 | Pi 官方提供「指定 CLI 入口」的正规 API |
+| 自己解析安装方式（PATH 与常见目录） | `internal/host/entry.go（locatePi / piKnownCandidates / resolvePiCommand）` | Pi 有五种官方装法，落点各不相同（见下节），且 Windows 的 PATH 是登录时继承的，装完 pi 不注销就对已运行的桌面端不可见 | Pi 提供「查询安装位置」的 CLI 子命令 |
 | 自己实现 RPC 客户端 | `internal/host/rpc.go` | 不想把整个 Pi 包拖进安装包；也不想因上游写死 `spawn("node")` 而要求用户装 Node | Pi 官方提供无依赖的 RPC 客户端 |
 | 自己读写设置 / 软件包 / 技能 | `internal/host/resources.go` | 同上；只依赖 Pi 的磁盘约定（settings.json / `pi` 字段 / 目录布局） | Pi 把这些能力全部做成带 `--json` 的 CLI |
 | 附件在发送前转换为文件和图片内容 | `internal/host/pool.go 等 Go 宿主` | 当前 RPC 提示接口接收文本和图片，不接收桌面端附件对象 | Pi 提示接口原生支持受控文件附件 |
@@ -26,6 +27,27 @@
 | 会话导入 / JSONL 导出自己实现 | `internal/host/pool.go 等 Go 宿主`（`importSession` / `exportSessionJsonl`） | RPC 只有 `export_html`，没有 import / jsonl 导出 | Pi 的 RPC 补齐这两条命令 |
 | 对话里的 `!` / `!!` 走 RPC `bash` | `internal/host/rpc.go`、`packages/ui/src/shared/bash-input.ts` | 命令输出要在对话里边跑边看；RPC 的最终结果与流式增量靠桌面端生成的 `id` 关联 | Pi 的 RPC 取消 `bash` / `abort_bash` 或改为其它协议 |
 | 工具开关写入 `defaultTools`，启动时用 `--tools` 校正 | `internal/host/settings.go`、`packages/ui/src/components/overlays/settings/ToolSettings.vue` | RPC 没有运行时启停工具的接口；`defaultTools` 只在启动时读取，已有会话还会从记录里恢复自己的工具 | Pi 的 RPC 提供工具清单与运行时启停 |
+
+## 安装方式与识别顺序
+
+Pi 官方（pi.dev）目前给五种装法，桌面端按下面的顺序认：
+
+1. **设置里的手动路径**（`piCustomPath`）——最高优先级，填 `.cmd` / 可执行文件 / `.js` 都行，`.js` 会用 node 拉起
+2. **PATH** 上的 `pi` / `pi.cmd` / `pi.exe`
+3. **PATH 没有时扫已知目录**：`<agentDir>/bin`（官方安装器）、`%APPDATA%\npm`、`%LOCALAPPDATA%\pnpm`、`%LOCALAPPDATA%\Programs\pi`、`~/.bun/bin`、`~/.local/bin`、`~/bin`、`~/.bin`、`~/.nix-profile/bin`、`/opt/homebrew/bin`、`/usr/local/bin`
+
+认出来之后，启动命令按来源决定：
+
+| 安装方式 | 入口 | 桌面端怎么起 |
+|---|---|---|
+| 官方安装器（Windows） | `<agentDir>\bin\pi.cmd` → `pi-launcher.js` | `node <agentDir>\bin\pi-launcher.js --mode rpc`（launcher 自己读 `install/current-version`、设 `PI_MANAGED_INSTALL_ROOT`） |
+| 官方安装器（macOS / Linux） | `<agentDir>/bin/pi`（sh launcher），常以 `~/.local/bin/pi` 软链暴露 | 直接执行 launcher（它自己设置随包 Node 的 PATH） |
+| npm / pnpm 全局 | `<prefix>/pi.cmd`（Windows）、`<prefix>/bin/pi`（Unix） | 解析 shim 里的入口后 `node <…>/dist/cli.js`（老包）或 `dist/bundle/cli.js`（新包） |
+| bun 全局 | `~/.bun/bin/pi` | 相对路径能解析就 `node` 跑，解析不到就直接执行（shebang 指向 bun） |
+| Nix | `~/.nix-profile/bin/pi` 包装脚本 | 直接执行 |
+| 源码 / 自定义 | 手动填 `dist/cli.js` 或 `pi-launcher.js` | `node <该 js> --mode rpc` |
+
+`locatePi` 的结果带 `source`（PATH / 官方安装器 / npm 全局 / …），设置页会显示，`pi.log` 里的「Pi 启动命令」也会记下来源与实际路径 —— 「设置里能识别、工作区却进程出错」时先看这一行。
 
 ## 自己实现部分的已知差异
 
