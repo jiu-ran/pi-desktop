@@ -76,6 +76,42 @@ assert.equal(lightSky.vars["--frame"], "#d6e6fd");
 assert.equal(lightSky.vars["--bg"], "#fafcff");
 assert.equal(darkMidnight.scheme, "dark");
 assert.equal(darkMidnight.wash, "midnight");
-assert.equal(darkMidnight.vars["--frame"], "#090e1c");
-assert.equal(darkMidnight.vars["--bg"], "#11192e");
-assert.equal(darkMidnight.vars["--fg"], "#edf2ff");
+assert.equal(darkMidnight.vars["--frame"], "#0a1122");
+assert.equal(darkMidnight.vars["--bg"], "#121b33");
+assert.equal(darkMidnight.vars["--fg"], "#eef3ff");
+// wash 光晕必须叠三段：顶部镜面高光 + 两个对象光，否则深色窗口看起来是一块死平色
+assert.equal(darkMidnight.vars["--wash-glow"].split("gradient(").length - 1, 3);
+
+// 深色配色守门：正文 / 次要 / 三级文字的对比度，以及表面色阶的层次差
+const luminance = (color: string): number => {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color);
+  const rgba = /rgba?(([^)]+))/.exec(color);
+  const [r, g, b] = hex
+    ? [1, 3, 5].map((i) => parseInt(hex[1]!.slice(i - 1, i + 1), 16))
+    : rgba![1]!.split(",").slice(0, 3).map((part) => Number(part.trim()));
+  const channel = (value: number) => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r!) + 0.7152 * channel(g!) + 0.0722 * channel(b!);
+};
+const contrast = (fg: string, bg: string): number => {
+  const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+
+for (const theme of [...LIGHT_WASH_THEMES, ...DARK_WASH_THEMES]) {
+  const { palette, label } = theme;
+  assert.ok(contrast(palette.fg, palette.bg) >= 10, `${label} 正文对比度偏低`);
+  assert.ok(contrast(palette.fg2, palette.bg1) >= 4.6, `${label} 次要文字对比度偏低`);
+  assert.ok(contrast(palette.fg3, palette.bg2) >= 2.2, `${label} 三级文字对比度偏低`);
+  // 表面色阶必须一级比一级亮（深色）/ 一级比一级暗（浅色），且相邻两档差得出来
+  const steps = [palette.bg, palette.bg1, palette.bg2, palette.bg3];
+  for (let index = 1; index < steps.length; index += 1) {
+    const [prev, next] = [steps[index - 1]!, steps[index]!];
+    const gap = contrast(prev, next);
+    const rising = luminance(next) > luminance(prev);
+    assert.equal(rising, theme.scheme === "dark", `${label} 的表面色阶方向不对：bg${index} → bg${index + 1}`);
+    assert.ok(gap >= 1.05, `${label} 的表面色阶 bg${index} 与 bg${index + 1} 层次不清`);
+  }
+}
