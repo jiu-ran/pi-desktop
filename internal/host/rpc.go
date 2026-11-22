@@ -127,6 +127,7 @@ type PiRpcClient struct {
 	requestID int64
 	stderr    strings.Builder
 	exitErr   error
+	readErr   error
 	buffer    strings.Builder
 	stopping  bool
 	started   bool
@@ -166,6 +167,7 @@ func (c *PiRpcClient) Start() error {
 	}
 	c.started = true
 	c.exitErr = nil
+	c.readErr = nil
 	c.stopping = false
 	c.buffer.Reset()
 	c.stderr.Reset()
@@ -212,7 +214,7 @@ func (c *PiRpcClient) Start() error {
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+			scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 		for scanner.Scan() {
 			c.mu.Lock()
 			if c.stderr.Len() < 64*1024 {
@@ -222,7 +224,11 @@ func (c *PiRpcClient) Start() error {
 			c.mu.Unlock()
 		}
 	}()
-	go c.readStdout(stdout)
+	go func() {
+		if err := c.readStdout(stdout); err != nil {
+			c.setReadError(err)
+		}
+	}()
 	go func() {
 		err := cmd.Wait()
 		close(exited)
@@ -256,11 +262,30 @@ func (c *PiRpcClient) Start() error {
 	return nil
 }
 
-func (c *PiRpcClient) readStdout(reader io.Reader) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		c.handleLine(strings.TrimSpace(scanner.Text()))
+// readStdout 逐行读 JSON。这里不能用 bufio.Scanner：它的 token 上限（16 MB）
+// 装不下 4K 图片的 base64，超限时 Scan 直接返回 false，事件流静默中断、
+// 请求永远等不到回应（表现为会话打不开）。用 ReadLine 分片拼接就没有上限。
+func (c *PiRpcClient) readStdout(reader io.Reader) error {
+	buf := bufio.NewReaderSize(reader, 64*1024)
+	var acc []byte
+	for {
+		chunk, isPrefix, err := buf.ReadLine()
+		if len(chunk) > 0 {
+			acc = append(acc, chunk...)
+		}
+		if !isPrefix {
+			if len(acc) > 0 {
+				line := string(acc)
+				acc = acc[:0]
+				c.handleLine(strings.TrimSpace(line))
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
 	}
 }
 
@@ -329,6 +354,11 @@ func (c *PiRpcClient) Send(method string, args []any, timeout time.Duration, req
 		return nil, fmt.Errorf("不支持的 RPC 方法：%s", method)
 	}
 	c.mu.Lock()
+	if c.readErr != nil {
+		err := c.readErr
+		c.mu.Unlock()
+		return nil, err
+	}
 	if c.exitErr != nil {
 		err := c.exitErr
 		c.mu.Unlock()
@@ -550,6 +580,17 @@ func waitClosed(ch <-chan struct{}, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
+}
+
+// setReadError 记录读流中断：流断了以后所有请求都等不到回应，直接让它们失败，
+// 别让界面卡在「启动中」。
+func (c *PiRpcClient) setReadError(err error) {
+	c.mu.Lock()
+	if c.readErr == nil {
+		c.readErr = err
+	}
+	c.mu.Unlock()
+	c.rejectAll(err)
 }
 
 func (c *PiRpcClient) rejectAll(err error) {
