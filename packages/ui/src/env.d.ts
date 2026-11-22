@@ -448,6 +448,8 @@ export interface PiLocation {
   version: string;
   /** 本机 pi 可执行文件的解析路径，找不到为空 */
   path: string;
+  /** 这条 pi 是怎么找到的：PATH / 官方安装器 / npm 全局 / 手动指定 */
+  source?: string;
 }
 
 export interface AppUpdateCheck {

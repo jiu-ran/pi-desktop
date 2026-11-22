@@ -655,7 +655,7 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
         found: Boolean(pi.found),
         version: pi.version ?? "",
         path: pi.path ?? "",
-        source: (pi as any).source ?? "",
+        source: pi.source ?? "",
         checked: true,
       };
       bus.emit("pi:located", { ...state.pi });
@@ -2291,7 +2291,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
       found: Boolean(pi.found),
       version: pi.version ?? "",
       path: pi.path ?? customPath,
-      source: (pi as any).source ?? "",
+      source: pi.source ?? "",
       checked: true,
     };
     bus.emit("pi:located", { ...state.pi });

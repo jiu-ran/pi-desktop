@@ -5,6 +5,33 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.9.6] - 2026-11-22
+
+### 修复
+
+- **官方安装器装的 pi 起不来工作区**：设置里「Pi CLI」明明识别到了（能跑 `pi --version`），打开项目却一直是标题栏红点「进程出错」。原因是 pi.dev 安装器把真正入口放在 `<agentDir>\bin\pi-launcher.js`，`pi.cmd` 只是转发；桌面端只认 npm 布局的 `node_modules/…/dist/cli.js`，解析不到就报错。现在 shim 指向 launcher 时优先用 launcher（入口和 `PI_MANAGED_INSTALL_ROOT` 都由它决定），npm 布局的两个入口（`dist/cli.js` 与新版 `dist/bundle/cli.js`）也都认。
+- **「装好了却认不出」**：PATH 里没有 pi 时不再直接判未安装，而是按顺序扫官方安装器、npm / pnpm / bun 全局目录、`~/.local/bin`、Homebrew、Nix 等落点并逐个探活。Windows 的 PATH 是登录时继承的，装完 pi 不注销就对已在运行的桌面端不可见 —— 这类情况现在也能认出来。
+- **错误看不到原因**：标题栏状态胶囊在「进程出错」时，悬停提示直接显示错误原文（以前只有侧栏悬停里有）；`pi.log` 里补上「Pi 启动命令 / 来源 / 路径」，解析失败也记一条，不再只有一个红点。
+
+### 新增
+
+- **Pi 来源展示**：设置 → Pi CLI 的路径后面会标出这条 pi 是怎么找到的（PATH / 官方安装器 / npm 全局 / 手动指定），排查「哪个 pi 在跑」时不用猜。
+- **手动路径支持 `.js`**：可以直接填 `pi-launcher.js` 或 `dist/cli.js`，探测与启动都会用 node 拉起。
+
+### 界面
+
+- **项目名后的会话数**：改成 10.5px 等宽数字的圆角小徽标（原来是无背景的灰数字，紧贴项目名读起来像标题的一部分），`99+` 自动撑开，深色主题跟随 token。
+- **输入框右下控件对齐**：会话用量、发送方式、停止、发送统一 26px 高 / 7px 圆角，间距 6px；上下文占比不再 50% 就变橙（改为 70% 提示、90% 告警），低占比用中性色且百分比定宽，位数变化时右侧按钮不抖；0% 不再画出一个圆点；「停止」去掉红色描边只留淡红底，不再和「发送」抢视线；四个控件补 `focus-visible` 描边。
+
+### 校验
+
+```bash
+npm run check                # 61 项前端检查 + go test ./...
+npm audit && npm audit --prefix packages/ui
+npx mygo build
+PI_DESKTOP_SMOKE=1 PI_DESKTOP_SMOKE_PTY=1 PI_DESKTOP_SMOKE_BASH=1 PI_DESKTOP_SMOKE_PROMPT=1 PI_DESKTOP_SMOKE_UI=1 PI_DESKTOP_SMOKE_SETTINGS=1 PI_DESKTOP_SMOKE_REPO=1 npx mygo dev
+```
+
 ## [0.9.5] - 2026-11-17
 
 ### 新增

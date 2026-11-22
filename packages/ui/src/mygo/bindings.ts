@@ -25,6 +25,11 @@ export interface PiLocation {
   found: boolean;
   version: string;
   path: string;
+  /**
+   * Source 说明这条 pi 是怎么找到的（PATH / 官方安装器 / npm 全局 / Nix …），
+   * 排查「设置里能识别、工作区起不来」时先看它。
+   */
+  source?: string;
   error?: string;
 }
 
