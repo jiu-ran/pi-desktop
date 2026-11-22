@@ -260,7 +260,8 @@ export interface QueuedImage {
 export interface QueueImageBlockLike {
   kind?: string;
   queueText?: string;
-  imageItems?: QueuedImage[];
+  /** 实时消息里的图片是内联的；历史分页的 ref 不会被排队逻辑用到 */
+  imageItems?: Array<{ mimeType: string; data?: string; ref?: string; bytes?: number }>;
   /** 正在输入框里编辑、暂时从 Pi 队列拿掉的那条：不算「刚发出去」 */
   held?: boolean;
 }
@@ -279,9 +280,9 @@ export function queueImagesByPrompt(blocks: QueueImageBlockLike[]): Record<strin
     if (block.kind !== undefined && block.kind !== "user") continue;
     const key = normalize(block.queueText ?? "");
     if (!key || map[key]) continue;
-    const images = block.imageItems ?? [];
+    const images = (block.imageItems ?? []).filter((item) => typeof item.data === "string" && item.data);
     if (!images.length) continue;
-    map[key] = images.map((item) => ({ mimeType: item.mimeType, data: item.data }));
+    map[key] = images.map((item) => ({ mimeType: item.mimeType, data: item.data as string }));
   }
   return map;
 }

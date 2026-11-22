@@ -289,6 +289,10 @@ export const Host = {
   savePastedImage(payload: Record<string, unknown>): Promise<string> {
     return call("Host.SavePastedImage", payload);
   },
+  /** SessionImage 按 ref 取回历史分页里被替换成大图引用的图片（界面渲染时按需调用）。 */
+  sessionImage(cwd: string, ref: string): Promise<Record<string, unknown>> {
+    return call("Host.SessionImage", cwd, ref);
+  },
   sessions(cwd: string): Promise<SessionSummary[]> {
     return call("Host.Sessions", cwd);
   },

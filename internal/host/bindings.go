@@ -259,6 +259,11 @@ func (h *Host) Restart(cwd, sessionFile string) (map[string]any, error) {
 
 func (h *Host) Sessions(cwd string) []sessionSummary { return h.sessions(cwd) }
 
+// SessionImage 按 ref 取回历史分页里被替换成大图引用的图片（界面渲染时按需调用）。
+func (h *Host) SessionImage(cwd, ref string) (map[string]any, error) {
+	return h.sessionImage(cwd, ref)
+}
+
 func (h *Host) MessagePage(cwd, file string, endIndex, limit, minTurns, minBlocks int) (map[string]any, error) {
 	return h.messagePage(cwd, file, endIndex, limit, minTurns, minBlocks)
 }

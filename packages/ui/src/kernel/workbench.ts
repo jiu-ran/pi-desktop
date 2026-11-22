@@ -739,6 +739,15 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     }
   }
 
+  /**
+   * 按需取回历史分页里被折叠成大图引用的图片（ref 由宿主 messagePage 生成）。
+   * 带 4K 截图的会话一条消息就有几十 MB，分页里只传引用，缩略图滚动到可见时才来取。
+   */
+  async function sessionImage(ref: string): Promise<{ mimeType: string; data: string; bytes?: number }> {
+    if (!host?.sessionImage) throw new Error("当前宿主不支持按需加载图片");
+    return host.sessionImage(state.activeCwd, ref);
+  }
+
   async function open(cwd: string): Promise<WorkspaceState> {
     let ws = findWorkspace(cwd);
     const target = ws?.cwd ?? cwd;
@@ -2063,7 +2072,6 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     const keptImages = planQueuedImages(target.text, keepPaths, imagesByPrompt[wanted] ?? []);
     const nextImages = [...keptImages, ...addedImages];
     if (nextImages.length) imagesByPrompt[normalize(nextPrompt)] = nextImages;
-    const images = block?.imageItems as Array<{ mimeType: string; data: string }> | undefined;
     try {
       for (const text of planned.steering) {
         await rpc(ws.cwd, "steer", [text, imagesByPrompt[normalize(text)]], thread.sessionFile);
@@ -2898,6 +2906,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     refreshSessions,
     listSessions,
     openSession,
+    sessionImage,
     readAgentSession,
     crossProjectSessions,
     loadMoreMessages,

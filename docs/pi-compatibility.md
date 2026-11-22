@@ -20,7 +20,7 @@
 | 自己实现 RPC 客户端 | `internal/host/rpc.go` | 不想把整个 Pi 包拖进安装包；也不想因上游写死 `spawn("node")` 而要求用户装 Node | Pi 官方提供无依赖的 RPC 客户端 |
 | 自己读写设置 / 软件包 / 技能 | `internal/host/resources.go` | 同上；只依赖 Pi 的磁盘约定（settings.json / `pi` 字段 / 目录布局） | Pi 把这些能力全部做成带 `--json` 的 CLI |
 | 附件在发送前转换为文件和图片内容 | `internal/host/pool.go 等 Go 宿主` | 当前 RPC 提示接口接收文本和图片，不接收桌面端附件对象 | Pi 提示接口原生支持受控文件附件 |
-| 界面缓存派生自 RPC 快照和事件 | `packages/ui/src/kernel` | 界面需要立即响应，但不能变成第二份会话记录；打开会话的首屏历史直接读会话文件分页（`messagePage`），快照里的 messages 只在空会话时向 Pi 要 —— 否则带大图的会话要整份往返一次 | 界面能直接订阅 Pi 的完整只读状态并仍满足响应要求 |
+| 界面缓存派生自 RPC 快照和事件 | `packages/ui/src/kernel` | 界面需要立即响应，但不能变成第二份会话记录；打开会话的首屏历史直接读会话文件分页（`messagePage`），快照里的 messages 只在空会话时向 Pi 要 —— 否则带大图的会话要整份往返一次；分页里超过 32 KB 的图片只传 ref，缩略图滚动到可见时再按需取回（`SessionImage`） | 界面能直接订阅 Pi 的完整只读状态并仍满足响应要求 |
 
 | `/` 命令由桌面端自己实现一遍 | `packages/ui/src/shared/pi-commands.ts`、`services/slash-commands.ts` | RPC 的 `get_commands` 只返回扩展 / 提示模板 / 技能三类，Pi 的 24 条内置命令都得自己接 | Pi 的 RPC 直接提供内置命令的枚举与执行 |
 | 项目信任自己读写 `trust.json` | `internal/host/settings.go` | Pi 在 RPC 模式下拿不到「信不信任这个目录」的回答，默认按不信任处理，项目级扩展 / 技能 / MCP 会静默不加载 | Pi 的 RPC 提供 trust 查询与设置 |

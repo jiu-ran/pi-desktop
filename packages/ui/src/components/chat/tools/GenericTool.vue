@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { TranscriptBlock } from "../../../kernel/transcript.ts";
+import type { TranscriptBlock, TranscriptImage } from "../../../kernel/transcript.ts";
 import { mcpBadge, mcpCallsInCode, mcpChipLabel, parseMcpTool } from "../../../shared/mcp-tool.ts";
 import ToolCard from "./ToolCard.vue";
 import ToolImages from "./ToolImages.vue";
@@ -49,7 +49,10 @@ const output = computed(() => {
   return text.length > 8000 ? `${text.slice(0, 8000)}\n… 已截断，共 ${text.length} 字符` : text;
 });
 
-const images = computed(() => props.block.imageItems ?? []);
+// 工具结果里的图片一直是内联的；历史分页的 ref 只出现在用户消息上
+const images = computed(() =>
+  (props.block.imageItems ?? []).filter((item): item is TranscriptImage & { data: string } => typeof item.data === "string" && item.data.length > 0),
+);
 </script>
 
 <template>

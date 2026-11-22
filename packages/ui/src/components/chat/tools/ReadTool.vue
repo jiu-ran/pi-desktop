@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { TranscriptBlock } from "../../../kernel/transcript.ts";
+import type { TranscriptBlock, TranscriptImage } from "../../../kernel/transcript.ts";
 import { useKernel } from "../../../kernel/use-kernel.ts";
 import { baseName } from "../../../shared/util.ts";
 import ToolCard from "./ToolCard.vue";
@@ -23,7 +23,10 @@ const range = computed(() => {
 });
 const READ_IMAGE_NOTE = /^Read image file \[[^\]]+\]$/;
 
-const images = computed(() => props.block.imageItems ?? []);
+// 工具结果里的图片一直是内联的；历史分页的 ref 只出现在用户消息上
+const images = computed(() =>
+  (props.block.imageItems ?? []).filter((item): item is TranscriptImage & { data: string } => typeof item.data === "string" && item.data.length > 0),
+);
 
 const preview = computed(() => {
   const hasImages = images.value.length > 0;

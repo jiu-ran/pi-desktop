@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -729,7 +730,80 @@ func lastIndexByte(data []byte, b byte) int {
 }
 
 func readSessionHistoryPage(file string, endIndex, limit, minTurns, minBlocks int) map[string]any {
-	return sliceHistoryPage(readSessionHistory(file), endIndex, limit, minTurns, minBlocks)
+	return sliceHistoryPage(historyForPage(readSessionHistory(file), file), endIndex, limit, minTurns, minBlocks)
+}
+
+// historyInlineImageLimit 是历史分页里图片可以直接内联的上限（base64 长度）。
+// 超过就只传引用，界面渲染时再按需向后端要：带 4K 截图的会话一条消息就能有几十 MB，
+// 整页塞给 WebView 会让打开会话卡好几秒。
+const historyInlineImageLimit = 32 * 1024
+
+// historyForPage 复制一份历史，把大图替换成 {mimeType, bytes, ref}，不修改缓存里的原数据。
+func historyForPage(history []map[string]any, file string) []map[string]any {
+	out := make([]map[string]any, len(history))
+	copy(out, history)
+	for index, message := range out {
+		parts, ok := message["content"].([]any)
+		if !ok || !hasLargeInlineImage(parts) {
+			continue
+		}
+		clone := make(map[string]any, len(message))
+		for key, value := range message {
+			clone[key] = value
+		}
+		next := make([]any, len(parts))
+		for partIndex, part := range parts {
+			partMap := asMap(part)
+			data := asString(partMap["data"])
+			if asString(partMap["type"]) != "image" || len(data) <= historyInlineImageLimit {
+				next[partIndex] = part
+				continue
+			}
+			next[partIndex] = map[string]any{
+				"type":     "image",
+				"mimeType": asString(partMap["mimeType"]),
+				"bytes":    len(data) * 3 / 4,
+				"ref":      imageRef(file, index, partIndex),
+			}
+		}
+		clone["content"] = next
+		out[index] = clone
+	}
+	return out
+}
+
+func hasLargeInlineImage(parts []any) bool {
+	for _, part := range parts {
+		partMap := asMap(part)
+		if asString(partMap["type"]) == "image" && len(asString(partMap["data"])) > historyInlineImageLimit {
+			return true
+		}
+	}
+	return false
+}
+
+// imageRef 编码「哪份会话的哪条消息的第几张图」：file|messageIndex:partIndex
+func imageRef(file string, messageIndex, partIndex int) string {
+	return file + "|" + strconv.Itoa(messageIndex) + ":" + strconv.Itoa(partIndex)
+}
+
+func parseImageRef(ref string) (file string, messageIndex, partIndex int, ok bool) {
+	bar := strings.LastIndex(ref, "|")
+	if bar <= 0 {
+		return "", 0, 0, false
+	}
+	file = ref[:bar]
+	rest := ref[bar+1:]
+	colon := strings.Index(rest, ":")
+	if colon <= 0 {
+		return "", 0, 0, false
+	}
+	messageIndex, err1 := strconv.Atoi(rest[:colon])
+	partIndex, err2 := strconv.Atoi(rest[colon+1:])
+	if err1 != nil || err2 != nil || messageIndex < 0 || partIndex < 0 {
+		return "", 0, 0, false
+	}
+	return file, messageIndex, partIndex, true
 }
 
 func clearSessionHistoryCache(file string) {

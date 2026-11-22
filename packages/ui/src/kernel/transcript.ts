@@ -35,7 +35,7 @@ export interface TranscriptBlock {
   text?: string;
   images?: number;
   /** 用户消息里的图片（用于缩略图展示） */
-  imageItems?: Array<{ mimeType: string; data: string }>;
+  imageItems?: TranscriptImage[];
   /** 用户消息里被抽离出来的附件标记 */
   attachments?: MessageAttachment[];
   /**
@@ -205,14 +205,30 @@ function textOf(content: any): string {
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 /** 单张图片缩略图的数据上限，超出的只显示张数，避免长会话占用过多内存 */
 const IMAGE_PREVIEW_MAX = 8 * 1024 * 1024;
+
+/**
+ * 气泡里的图片。历史分页里超过 32 KB 的图片只带 ref（宿主按需取回），
+ * 实时消息（刚发出去 / 流式）仍带 data。
+ */
+export interface TranscriptImage {
+  mimeType: string;
+  data?: string;
+  ref?: string;
+  /** 原图字节数，ref 未加载时用来显示大小 */
+  bytes?: number;
+}
 function userBlock(content: any): Omit<TranscriptBlock, "id"> {
   const { text, attachments } = splitAttachmentMarkers(textOf(content));
   // 技能调用：卡片展示技能名，正文收进折叠区，只保留调用者追加的问题。
   const skill = parseSkillInvocation(text) ?? undefined;
   const imageParts = (Array.isArray(content) ? content : []).filter((part: any) => part?.type === "image");
-  const imageItems = imageParts
-    .filter((part: any) => typeof part.data === "string" && part.data.length <= IMAGE_PREVIEW_MAX)
-    .map((part: any) => ({ mimeType: String(part.mimeType ?? "image/png"), data: part.data as string }));
+  const imageItems = imageParts.flatMap((part: any): TranscriptImage[] => {
+    const mimeType = String(part.mimeType ?? "image/png");
+    if (typeof part.data === "string" && part.data.length <= IMAGE_PREVIEW_MAX) return [{ mimeType, data: part.data }];
+    // 历史分页把大图换成了引用：保留引用，界面滚动到可见时再向后端取
+    if (typeof part.ref === "string" && part.ref) return [{ mimeType, ref: part.ref, bytes: Number(part.bytes) || 0 }];
+    return [];
+  });
   // 有图片时不再重复展示同名的图片文件徽标
   const files = imageParts.length
     ? attachments.filter((item) => item.kind === "folder" || !IMAGE_EXT.test(item.path))

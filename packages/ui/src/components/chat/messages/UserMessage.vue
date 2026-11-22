@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { KERNEL_KEY } from "../../../kernel/index.ts";
-import type { TranscriptBlock } from "../../../kernel/transcript.ts";
+import type { TranscriptBlock, TranscriptImage } from "../../../kernel/transcript.ts";
 import { formatBytes, imageDataUrl } from "../../../shared/attachments.ts";
 import { shouldCollapseUserText } from "../../../shared/chat-text.ts";
 import { icons } from "../../../shared/util.ts";
@@ -30,11 +30,95 @@ watch(
   },
 );
 const files = computed(() => props.block.attachments ?? []);
-const images = computed(() =>
-  (props.block.imageItems ?? []).map((item) => ({ src: imageDataUrl(item.mimeType, item.data) })),
-);
+const images = computed<TranscriptImage[]>(() => props.block.imageItems ?? []);
 const fallbackCount = computed(() => (props.block.imageItems?.length ? 0 : props.block.images ?? 0));
 const empty = computed(() => !text.value && !files.value.length && !images.value.length && !fallbackCount.value);
+
+// ---------- 图片懒加载 ----------
+// 历史分页里超过 32 KB 的图片只带 ref：分子气泡渲染时先占位，缩略图滚进视口才向后端取原图。
+// 带 4K 截图的会话一条消息就能有几十 MB，不这样的话打开会话要卡好几秒。
+const sources = ref<Record<number, string>>({});
+const loading = ref<Record<number, boolean>>({});
+const failed = ref<Record<number, boolean>>({});
+const thumbs = new Map<number, HTMLElement>();
+let observer: IntersectionObserver | null = null;
+
+function applyInlineSources(): void {
+  images.value.forEach((item, index) => {
+    if (item.data && !sources.value[index]) sources.value[index] = imageDataUrl(item.mimeType, item.data);
+  });
+}
+
+async function ensureSource(index: number): Promise<string> {
+  const item = images.value[index];
+  if (!item) return "";
+  const ready = sources.value[index];
+  if (ready) return ready;
+  if (item.data) {
+    sources.value[index] = imageDataUrl(item.mimeType, item.data);
+    return sources.value[index] ?? "";
+  }
+  if (!item.ref || loading.value[index]) return "";
+  loading.value[index] = true;
+  failed.value[index] = false;
+  try {
+    const result = await kernel?.workbench?.sessionImage?.(item.ref);
+    if (!result?.data) throw new Error("空图片");
+    sources.value[index] = imageDataUrl(result.mimeType ?? item.mimeType, result.data);
+    return sources.value[index] ?? "";
+  } catch {
+    failed.value[index] = true;
+    return "";
+  } finally {
+    loading.value[index] = false;
+  }
+}
+
+function observeThumb(el: Element | null, index: number): void {
+  if (!(el instanceof HTMLElement)) return;
+  thumbs.set(index, el);
+  if (observer) observer.observe(el);
+}
+
+onMounted(() => {
+  applyInlineSources();
+  if (typeof IntersectionObserver === "undefined") {
+    images.value.forEach((_item, index) => void ensureSource(index));
+    return;
+  }
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target as HTMLElement;
+        const index = Number(el.dataset.imageIndex ?? "-1");
+        if (index >= 0) void ensureSource(index);
+        observer?.unobserve(el);
+      }
+    },
+    { rootMargin: "240px" },
+  );
+  thumbs.forEach((el) => observer?.observe(el));
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  observer = null;
+});
+
+watch(
+  () => props.block.imageItems,
+  () => {
+    applyInlineSources();
+    void nextTick(() => thumbs.forEach((el) => observer?.observe(el)));
+  },
+  { deep: false },
+);
+
+function pendingLabel(item: TranscriptImage): string {
+  if (item.bytes && item.bytes > 0) return formatBytes(item.bytes);
+  return "图片";
+}
 
 // 排队中的消息可以就地编辑：气泡在这里，编辑框在输入框上方，所以通过内核事件传上去。
 const kernel = inject(KERNEL_KEY, null);
@@ -48,7 +132,9 @@ function editQueued(): void {
 
 // 点击缩略图放大
 const previewIndex = ref<number | null>(null);
-function openPreview(index: number): void {
+const previewItems = computed(() => images.value.map((item, index) => ({ src: sources.value[index] ?? "", name: `图片 ${index + 1}` })));
+async function openPreview(index: number): Promise<void> {
+  await ensureSource(index);
   previewIndex.value = index;
 }
 </script>
@@ -87,12 +173,18 @@ function openPreview(index: number): void {
         <button
           v-for="(item, index) in images"
           :key="index"
+          :ref="(el) => observeThumb(el as Element | null, index)"
           type="button"
           class="msg-user-thumb"
-          :title="`查看图片 ${index + 1}/${images.length}`"
+          :class="{ pending: !sources[index] }"
+          :data-image-index="index"
+          :title="sources[index] ? `查看图片 ${index + 1}/${images.length}` : '点一下加载这张图片'"
           @click="openPreview(index)"
         >
-          <img :src="item.src" :alt="`图片 ${index + 1}`" loading="lazy" />
+          <img v-if="sources[index]" :src="sources[index]" :alt="`图片 ${index + 1}`" loading="lazy" />
+          <span v-else class="msg-user-thumb-pending">
+            {{ failed[index] ? "加载失败" : loading[index] ? "加载中…" : pendingLabel(item) }}
+          </span>
         </button>
       </div>
 
@@ -133,6 +225,6 @@ function openPreview(index: number): void {
       <div v-if="empty" class="msg-user-text msg-user-empty">（空消息）</div>
     </div>
 
-    <ImageLightbox v-model:index="previewIndex" :items="images" />
+    <ImageLightbox v-model:index="previewIndex" :items="previewItems" />
   </div>
 </template>

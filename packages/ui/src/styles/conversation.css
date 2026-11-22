@@ -2774,3 +2774,17 @@
 .cursor-diagram-fullscreen .cursor-diagram-view.dragging { cursor: grabbing; user-select: none; }
 .cursor-diagram-error { display: flex; flex-direction: column; gap: 8px; padding: 14px; color: var(--err); }
 .cursor-diagram-error pre { color: var(--fg-2); white-space: pre-wrap; }
+
+/* 历史里的大图只带引用：缩略图位置先占位，滚到可见再取原图 */
+.msg-user-thumb.pending { cursor: progress; }
+.msg-user-thumb-pending {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 6px;
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}

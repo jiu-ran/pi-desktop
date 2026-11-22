@@ -152,6 +152,8 @@ const bridge = {
   sessions: (cwd: string) => invoke("Sessions", cwd),
   messagePage: (cwd: string, file: string, endIndex = 0, limit = 8, minTurns = 0, minBlocks = 0) =>
     invoke("MessagePage", cwd, file, endIndex, limit, minTurns, minBlocks),
+  // 历史分页里的大图只带引用，渲染到这里按需取回原图
+  sessionImage: (cwd: string, ref: string) => invoke("SessionImage", cwd, ref),
   deleteSession: (cwd: string, file: string) => invoke("DeleteSession", cwd, file),
   projectTrust: (cwd: string) => invoke("ProjectTrust", cwd),
   setProjectTrust: (cwd: string, action: "trust" | "trust-parent" | "distrust") =>

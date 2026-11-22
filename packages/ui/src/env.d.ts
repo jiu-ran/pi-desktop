@@ -625,6 +625,8 @@ export interface PiDesktopBridge {
     minTurns?: number,
     minBlocks?: number,
   ) => Promise<{ messages: any[]; startIndex: number; endIndex: number; total: number }>;
+  /** 历史分页里的大图只带 ref，渲染时按需取回 base64（ref 由 messagePage 生成） */
+  sessionImage: (cwd: string, ref: string) => Promise<{ mimeType: string; data: string; bytes?: number }>;
   deleteSession: (cwd: string, file: string) => Promise<any[]>;
   /** 项目信任状态（Pi 在 RPC 模式下拿不到回答，默认按不信任处理） */
   projectTrust: (cwd: string) => Promise<{
