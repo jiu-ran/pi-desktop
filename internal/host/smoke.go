@@ -124,10 +124,14 @@ func RunSmoke(win *mygo.Window) {
 					const call = await h.call(cwd, "prompt", ["Reply with exactly: OK"], "");
 					const result = await wait;
 					const snap = await h.snapshot(cwd, "");
-					const assistant = (snap.messages || []).filter((m) => m.role === "assistant");
+					// 快照里的 messages 只在「会话文件还空」时才向 Pi 要，回复落盘后要从文件分页读
+					const file = String(snap?.state?.sessionFile || "");
+					const page = file ? await h.messagePage(cwd, file, 0, 60, 0, 0) : { messages: [] };
+					const messages = (snap.messages || []).length ? snap.messages : (page.messages || []);
+					const assistant = messages.filter((m) => m.role === "assistant");
 					const last = assistant.length ? assistant[assistant.length - 1] : null;
 					const text = Array.isArray(last?.content) ? last.content.filter((p) => p.type === "text").map((p) => p.text).join(" ") : String(last?.content || "");
-					return JSON.stringify({ call, result, settled, messages: snap.messages?.length, text: text.slice(0, 200) });
+					return JSON.stringify({ call, result, settled, messages: messages.length, text: text.slice(0, 200) });
 				})()`
 				if result, err := page.Eval(strings.ReplaceAll(script, "__CWD__", cwdLiteral)); err == nil {
 					log.Printf("smoke: prompt=%v", result)
