@@ -83,6 +83,12 @@ const connTone = computed(() => {
   return "ready";
 });
 
+// 进程出错时把详细原因挂到状态胶囊上：以前只有侧栏悬停提示里有，用户找不到。
+const connTitle = computed(() => {
+  const err = ws.value?.error;
+  return ws.value?.status === "error" && err ? err : piTitle.value;
+});
+
 const piTitle = computed(() => {
   const current = pi.value.version ? `本机 Pi CLI ${pi.value.version}` : "本机 Pi CLI";
   return pi.value.updateAvailable ? `${current}，可更新到 ${pi.value.latest}` : current;
@@ -136,7 +142,7 @@ const piTitle = computed(() => {
     <div class="tb-right">
       <span v-for="[key, text] in extEntries" :key="key" class="status-item" :title="key">◆ {{ text }}</span>
 
-      <span class="status-item" :data-tone="connTone" :title="piTitle">
+      <span class="status-item" :data-tone="connTone" :title="connTitle">
         <span class="status-dot" :data-state="connTone" />
         {{ connLabel }}
       </span>

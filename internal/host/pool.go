@@ -195,8 +195,11 @@ func (h *Host) piCommand() (PiCommand, error) {
 	h.mu.Unlock()
 	command, located, err := resolvePiCommand(custom)
 	if err != nil {
+		// 这条以前只往界面里抛，pi.log 里什么都没有，用户只能看到一个红点。
+		logPi("error", "pi", "无法启动 Pi："+err.Error())
 		return PiCommand{}, err
 	}
+	logPi("info", "pi", "Pi 启动命令："+command.String()+"（"+located.Path+"）")
 	h.mu.Lock()
 	h.piCmd = &command
 	h.piVersion = located.Version

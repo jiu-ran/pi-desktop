@@ -39,6 +39,37 @@ func piEntryFromNodeModulesDir(dir string) string {
 
 var shimEntryRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-coding-agent[/\\]dist[/\\]cli\.js`)
 
+// 官方安装器（pi.dev）装的 pi 不是 npm 布局：shim 里写的是同目录的 pi-launcher.js，
+// 真正的入口、agentDir 等环境都由这个 launcher 决定。绕过它直接跑 dist/cli.js
+// 会遇到「设置里能识别、工作区起不来」，所以 shim 指向 launcher 时优先用 launcher。
+var shimLauncherRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-launcher\.js`)
+
+// shimTargetPath 把 shim 文本里的一小段路径解析成真实文件：
+// cmd 里的 %~dp0 就是 shim 所在目录，其余相对路径同样按 shim 目录 / 上两级来试。
+func shimTargetPath(token, shimDir string) string {
+	cleaned := strings.TrimSpace(strings.TrimLeft(token, ")+"))
+	cleaned = strings.TrimSpace(strings.TrimRight(cleaned, "),;"))
+	if cleaned == "" {
+		return ""
+	}
+	if len(cleaned) >= 5 && strings.EqualFold(cleaned[:5], `%~dp0`) {
+		cleaned = strings.TrimLeft(cleaned[5:], `\/`)
+	}
+	candidates := []string{}
+	if filepath.IsAbs(cleaned) {
+		candidates = append(candidates, cleaned)
+	} else {
+		candidates = append(candidates, filepath.Join(shimDir, cleaned), filepath.Join(filepath.Dir(shimDir), cleaned))
+	}
+	for _, candidate := range candidates {
+		if isFile(candidate) {
+			abs, _ := filepath.Abs(candidate)
+			return abs
+		}
+	}
+	return ""
+}
+
 func entryFromShimText(shim string) string {
 	text := readSmallFile(shim, 256*1024)
 	if text == "" {
@@ -46,23 +77,23 @@ func entryFromShimText(shim string) string {
 	}
 	shimDir := filepath.Dir(shim)
 	for _, match := range shimEntryRe.FindAllString(text, -1) {
-		cleaned := strings.TrimLeft(match, ")+")
-		cleaned = strings.TrimRight(cleaned, "),;")
-		cleaned = strings.TrimSpace(cleaned)
-		if cleaned == "" {
-			continue
+		if target := shimTargetPath(match, shimDir); target != "" {
+			return target
 		}
-		candidates := []string{}
-		if filepath.IsAbs(cleaned) {
-			candidates = append(candidates, cleaned)
-		} else {
-			candidates = append(candidates, filepath.Join(shimDir, cleaned), filepath.Join(filepath.Dir(shimDir), cleaned))
-		}
-		for _, candidate := range candidates {
-			if isFile(candidate) {
-				abs, _ := filepath.Abs(candidate)
-				return abs
-			}
+	}
+	return ""
+}
+
+// launcherFromShimText 找官方安装器写在 shim 里的 pi-launcher.js。
+func launcherFromShimText(shim string) string {
+	text := readSmallFile(shim, 256*1024)
+	if text == "" {
+		return ""
+	}
+	shimDir := filepath.Dir(shim)
+	for _, match := range shimLauncherRe.FindAllString(text, -1) {
+		if target := shimTargetPath(match, shimDir); target != "" {
+			return target
 		}
 	}
 	return ""
@@ -79,6 +110,10 @@ func piCliEntryFromExecutable(executable string) string {
 	}
 	if !isFile(target) {
 		return ""
+	}
+	// 官方安装器的 launcher 最可信：入口和环境都由它决定，先看它。
+	if launcher := launcherFromShimText(target); launcher != "" {
+		return launcher
 	}
 	dir := filepath.Dir(target)
 	layouts := []string{
@@ -240,7 +275,17 @@ func quoteShellPath(value string) string {
 }
 
 func probePiVersion(bin string) string {
-	code, output := runShell(quoteShellPath(bin)+" --version", nil, 10*time.Second)
+	commandLine := quoteShellPath(bin) + " --version"
+	// 允许直接指定 JS 入口（dist/cli.js 或官方安装器的 pi-launcher.js）：
+	// 这类路径自己不能执行，得用 node 拉起来。
+	if strings.HasSuffix(strings.ToLower(bin), ".js") {
+		node := findExecutableOnPath("node")
+		if node == "" {
+			return ""
+		}
+		commandLine = quoteShellPath(node) + " " + quoteShellPath(bin) + " --version"
+	}
+	code, output := runShell(commandLine, nil, 10*time.Second)
 	if code != 0 {
 		return ""
 	}
@@ -291,7 +336,7 @@ func resolvePiCommand(customPath string) (PiCommand, PiLocation, error) {
 		return PiCommand{Exe: node, Prefix: []string{entry}}, located, nil
 	}
 	if isWindows() && (strings.HasSuffix(strings.ToLower(located.Path), ".cmd") || strings.HasSuffix(strings.ToLower(located.Path), ".bat")) {
-		return PiCommand{}, located, errString("已找到 pi（" + located.Path + "），但没能定位到它的 dist/cli.js。请用 npm 安装 Pi，或在「设置 → Pi CLI」直接指定 node_modules/@earendil-works/pi-coding-agent/dist/cli.js")
+		return PiCommand{}, located, errString("已找到 pi（" + located.Path + "），但没能定位到它的启动脚本（同目录的 pi-launcher.js 或 node_modules 里的 dist/cli.js）。请在「设置 → Pi CLI」把路径改成那个 .js 文件的完整路径")
 	}
 	// 官方安装器的独立二进制可以直接执行。
 	return PiCommand{Exe: located.Path}, located, nil
