@@ -523,6 +523,19 @@ func (h *Host) pruneIdleWorkers(pool *workspacePool) {
 
 // ---------- 快照 ----------
 
+// rpcMessagesNeeded 判断快照要不要向 pi 要整份消息：只有当会话文件不存在或为空
+// （刚新建、还没落盘）时才需要，其余情况界面会从文件分页读。
+func rpcMessagesNeeded(file string) bool {
+	if strings.TrimSpace(file) == "" {
+		return true
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.IsDir() {
+		return true
+	}
+	return info.Size() == 0
+}
+
 func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	cwd = h.resolvePoolKey(cwd)
 	slot, err := h.resolveSlot(cwd, sessionFile)
@@ -564,9 +577,14 @@ func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	if levelsErr != nil {
 		levels = []any{}
 	}
-	messages, messagesErr := client.GetMessages()
-	if messagesErr != nil {
-		messages = []any{}
+	// 快照里的 messages 只在首屏用一次：界面拿到快照后立刻用 messagePage 从会话文件
+	// 分页补齐（applySnapshot → hydrateHistory）。所以文件里已有历史时，不必再让 pi
+	// 把整份消息（含图片 base64）序列化一遍再传回来 —— 128 MB 的会话光这一趟就十几秒。
+	messages := []any{}
+	if rpcMessagesNeeded(currentFile) {
+		if value, messagesErr := client.GetMessages(); messagesErr == nil {
+			messages = value
+		}
 	}
 	commands, commandsErr := client.GetCommands()
 	if commandsErr != nil {
