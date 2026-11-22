@@ -61,6 +61,8 @@ func shimTargetPath(token, shimDir string) string {
 	if len(cleaned) >= 5 && strings.EqualFold(cleaned[:5], `%~dp0`) {
 		cleaned = strings.TrimLeft(cleaned[5:], `\/`)
 	}
+	// shim 文本天生是 Windows 分隔符，统一成 / 之后在三种平台都能 join。
+	cleaned = strings.ReplaceAll(cleaned, `\\`, "/")
 	candidates := []string{}
 	if filepath.IsAbs(cleaned) {
 		candidates = append(candidates, cleaned)
