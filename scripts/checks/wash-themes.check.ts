@@ -26,11 +26,11 @@ assert.deepEqual(
 );
 assert.deepEqual(
   DARK_WASH_THEMES.map((item) => item.id),
-  ["obsidian", "frost", "ember", "abyss", "moss"],
+  ["obsidian", "ink", "graphite", "abyss", "amethyst"],
 );
 assert.deepEqual(
   DARK_WASH_THEMES.map((item) => item.label),
-  ["曜石", "霜夜", "余烬", "极光", "苔原"],
+  ["曜石", "墨玉", "石墨", "极光", "紫檀"],
 );
 
 const unique = (values: string[]) => new Set(values).size === values.length;
@@ -54,21 +54,27 @@ assert.equal(normalizeLightWashTheme("petal"), "sakura");
 assert.equal(normalizeLightWashTheme("nope"), "sakura");
 assert.equal(normalizeLightWashTheme(undefined), "sakura");
 
-assert.equal(normalizeDarkWashTheme("abyss"), "abyss");
+assert.equal(normalizeDarkWashTheme("amethyst"), "amethyst");
 assert.equal(normalizeDarkWashTheme("tide"), "abyss");
-assert.equal(normalizeDarkWashTheme("mist"), "frost");
+assert.equal(normalizeDarkWashTheme("mist"), "abyss");
 assert.equal(normalizeDarkWashTheme("nope"), "obsidian");
 assert.equal(normalizeDarkWashTheme(undefined), "obsidian");
 // 改名前的旧值要能迁到新主题，不能掉回默认
 assert.equal(normalizeDarkWashTheme("midnight"), "obsidian");
-assert.equal(normalizeDarkWashTheme("nebula"), "frost");
+assert.equal(normalizeDarkWashTheme("nebula"), "amethyst");
+// 中间几版用过的 id / 名字也要能迁移
+assert.equal(normalizeDarkWashTheme("frost"), "ink");
+assert.equal(normalizeDarkWashTheme("moss"), "ink");
+assert.equal(normalizeDarkWashTheme("ember"), "graphite");
+assert.equal(normalizeDarkWashTheme("slate"), "graphite");
+assert.equal(normalizeDarkWashTheme("ash"), "graphite");
 
 assert.equal(washEntry("unknown", "light").id, "sakura");
 assert.equal(washEntry("unknown", "dark").id, "obsidian");
 
 // 渐变与缩略图
 assert.match(washGradient("sakura", "light"), /^linear-gradient\(165deg, /);
-assert.ok(washBackground("abyss", "dark").endsWith(washGradient("abyss", "dark")));
+assert.ok(washBackground("amethyst", "dark").endsWith(washGradient("amethyst", "dark")));
 
 // buildTheme：输出完整色板，深色主题不应再退化成中性死灰 #232328
 const lightSky = buildTheme("light", "sky");
@@ -79,9 +85,9 @@ assert.equal(lightSky.vars["--frame"], "#d3e3fc");
 assert.equal(lightSky.vars["--bg"], "#fafcff");
 assert.equal(darkObsidian.scheme, "dark");
 assert.equal(darkObsidian.wash, "obsidian");
-assert.equal(darkObsidian.vars["--frame"], "#07080a");
-assert.equal(darkObsidian.vars["--bg"], "#0f1115");
-assert.equal(darkObsidian.vars["--fg"], "#f1f4f8");
+assert.equal(darkObsidian.vars["--frame"], "#000000");
+assert.equal(darkObsidian.vars["--bg"], "#0a0a0b");
+assert.equal(darkObsidian.vars["--fg"], "#f4f4f5");
 // wash 光晕必须叠三段：顶部镜面高光 + 两个对象光，否则深色窗口看起来是一块死平色
 assert.equal(darkObsidian.vars["--wash-glow"].split("gradient(").length - 1, 3);
 assert.equal(lightSky.vars["--wash-glow"].split("gradient(").length - 1, 3);
