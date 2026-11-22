@@ -923,7 +923,7 @@ func TestQuotedMessageTitlePrefersUserText(t *testing.T) {
 		return string(entry)
 	}
 
-	title, quotedName := firstUserTitleWithQuote([]string{messageLine(header + "\n你是否能调用内置工具")})
+	title, quotedName := firstUserTitleWithQuote([]string{messageLine(header + "\n你是否能调用内置工具")}, false)
 	if title != "你是否能调用内置工具" {
 		t.Fatalf("有正文时标题应是正文，实际 %q", title)
 	}
@@ -931,7 +931,7 @@ func TestQuotedMessageTitlePrefersUserText(t *testing.T) {
 		t.Fatalf("引用的会话名应为 Pi Desktop，实际 %q", quotedName)
 	}
 
-	title, quotedName = firstUserTitleWithQuote([]string{messageLine(header)})
+	title, quotedName = firstUserTitleWithQuote([]string{messageLine(header)}, false)
 	if title != "Pi Desktop（引用）" {
 		t.Fatalf("只有引用块时标题应是「Pi Desktop（引用）」，实际 %q", title)
 	}
@@ -940,7 +940,7 @@ func TestQuotedMessageTitlePrefersUserText(t *testing.T) {
 	}
 
 	// 普通消息不受影响
-	title, quotedName = firstUserTitleWithQuote([]string{messageLine("普通消息")})
+	title, quotedName = firstUserTitleWithQuote([]string{messageLine("普通消息")}, false)
 	if title != "普通消息" || quotedName != "" {
 		t.Fatalf("普通消息应为 (普通消息, 空)，实际 (%q, %q)", title, quotedName)
 	}

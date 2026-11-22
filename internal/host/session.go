@@ -183,20 +183,27 @@ func unescapeXML(value string) string {
 }
 
 // firstUserTitle 只取标题，给不需要「引用」信息的调用方用。
-func firstUserTitle(lines []string) string {
-	title, _ := firstUserTitleWithQuote(lines)
+func firstUserTitle(lines []string, truncated bool) string {
+	title, _ := firstUserTitleWithQuote(lines, truncated)
 	return title
 }
 
 // firstUserTitleWithQuote 返回首条用户消息的标题，以及它引用的是哪个会话（没有引用时为空）。
 // 引用消息里用户自己写的内容优先；只有引用块没有正文时才退成「原会话名（引用）」。
-func firstUserTitleWithQuote(lines []string) (string, string) {
-	for _, line := range lines {
+func firstUserTitleWithQuote(lines []string, truncated bool) (string, string) {
+	for index, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		var entry map[string]any
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			// 只有最后一行可能是「被截断的半条 JSON」；里面恰好是首条用户消息时，
+			// 用容错方式把文本块捞出来，否则这条会话会被当成空会话藏起来。
+			if truncated && index == len(lines)-1 {
+				if title, quoted, ok := titleFromPartialUserLine(line); ok {
+					return title, quoted
+				}
+			}
 			continue
 		}
 		message := asMap(entry["message"])
@@ -239,6 +246,46 @@ func firstUserTitleWithQuote(lines []string) (string, string) {
 	}
 	return "", ""
 }
+
+var (
+	partialUserRoleRe      = regexp.MustCompile(`"role"\s*:\s*"user"`)
+	partialAssistantRoleRe = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
+	partialTextRe          = regexp.MustCompile(`"text"\s*:\s*("(?:[^"\\]|\\.)*")`)
+)
+
+// titleFromPartialUserLine 从「被截断的半条用户消息」里捞标题。
+//
+// readHeadText 只读文件开头，而首条用户消息可能整行带图片 base64（实测 137 KB），
+// 这一行被截断后不是合法 JSON：直接跳过的话，会话会被当成空会话从列表里消失。
+// 这里按字段退一步抽取：先取文本块（附件标记由 sessionTitleFromText 处理），
+// 再退到「图片消息」。role 字段也可能被截断在长图片之后，此时只要没有明确的
+// assistant 标记、又带着 content 数组，就按用户消息处理。
+func titleFromPartialUserLine(line string) (string, string, bool) {
+	if !strings.Contains(line, `"content"`) {
+		return "", "", false
+	}
+	if !partialUserRoleRe.MatchString(line) && partialAssistantRoleRe.MatchString(line) {
+		return "", "", false
+	}
+	for _, match := range partialTextRe.FindAllStringSubmatch(line, -1) {
+		var text string
+		if json.Unmarshal([]byte(match[1]), &text) != nil || text == "" {
+			continue
+		}
+		if title, quoted, ok := resolveQuotedMessage(text); ok {
+			return title, quoted, true
+		}
+		if title := sessionTitleFromText(text); title != "" {
+			return title, "", true
+		}
+	}
+	if strings.Contains(line, `"image"`) {
+		return "图片消息", "", true
+	}
+	return "", "", false
+}
+
+
 
 func firstUserTitleFromMessages(messages []map[string]any) string {
 	for _, message := range messages {
@@ -743,7 +790,7 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 	cached, hasCache := sessionMetaCache[key]
 	sessionMetaMu.Unlock()
 
-	head := readHeadText(file, info.Size(), 128*1024)
+	head, truncated := readHeadText(file, info.Size(), sessionHeadLimit)
 	lines := strings.Split(head, "\n")
 	header := map[string]any{}
 	if len(lines) > 0 {
@@ -760,7 +807,7 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 		summary.Project = project
 		return summary, true
 	}
-	title, quoted := firstUserTitleWithQuote(lines)
+	title, quoted := firstUserTitleWithQuote(lines, truncated)
 	customTitle := readSessionName(file, info.Size(), header["name"])
 	summary := sessionSummary{
 		ID:        file,
@@ -780,19 +827,25 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 	return summary, true
 }
 
-func readHeadText(file string, size, maxBytes int64) string {
+// sessionHeadLimit 是摘要时读多少字节。第一条用户消息可能带整张图片的 base64
+// （实测有 137 KB 的一行），窗口太小会把那一行截断、JSON 解析失败，会话就被当成
+// 「新会话」隐藏掉。
+const sessionHeadLimit = 512 * 1024
+
+// readHeadText 读文件开头，并告知是否被截断（截断时最后一行可能不完整）。
+func readHeadText(file string, size, maxBytes int64) (string, bool) {
 	if size <= maxBytes {
 		data, _ := os.ReadFile(file)
-		return string(data)
+		return string(data), false
 	}
 	f, err := os.Open(file)
 	if err != nil {
-		return ""
+		return "", true
 	}
 	defer f.Close()
 	buf := make([]byte, maxBytes)
 	n, _ := f.Read(buf)
-	return string(buf[:n])
+	return string(buf[:n]), true
 }
 
 func listSessions(cwd string, keep ...string) []sessionSummary {
