@@ -26,11 +26,11 @@ assert.deepEqual(
 );
 assert.deepEqual(
   DARK_WASH_THEMES.map((item) => item.id),
-  ["midnight", "nebula", "abyss", "frost", "obsidian"],
+  ["obsidian", "frost", "ember", "abyss", "moss"],
 );
 assert.deepEqual(
   DARK_WASH_THEMES.map((item) => item.label),
-  ["星夜", "星云", "极光", "霜夜", "曜石"],
+  ["曜石", "霜夜", "余烬", "极光", "苔原"],
 );
 
 const unique = (values: string[]) => new Set(values).size === values.length;
@@ -56,31 +56,34 @@ assert.equal(normalizeLightWashTheme(undefined), "sakura");
 
 assert.equal(normalizeDarkWashTheme("abyss"), "abyss");
 assert.equal(normalizeDarkWashTheme("tide"), "abyss");
-assert.equal(normalizeDarkWashTheme("mist"), "midnight");
-assert.equal(normalizeDarkWashTheme("nope"), "midnight");
-assert.equal(normalizeDarkWashTheme(undefined), "midnight");
+assert.equal(normalizeDarkWashTheme("mist"), "frost");
+assert.equal(normalizeDarkWashTheme("nope"), "obsidian");
+assert.equal(normalizeDarkWashTheme(undefined), "obsidian");
+// 改名前的旧值要能迁到新主题，不能掉回默认
+assert.equal(normalizeDarkWashTheme("midnight"), "obsidian");
+assert.equal(normalizeDarkWashTheme("nebula"), "frost");
 
 assert.equal(washEntry("unknown", "light").id, "sakura");
-assert.equal(washEntry("unknown", "dark").id, "midnight");
+assert.equal(washEntry("unknown", "dark").id, "obsidian");
 
 // 渐变与缩略图
 assert.match(washGradient("sakura", "light"), /^linear-gradient\(165deg, /);
-assert.ok(washBackground("midnight", "dark").endsWith(washGradient("midnight", "dark")));
+assert.ok(washBackground("abyss", "dark").endsWith(washGradient("abyss", "dark")));
 
 // buildTheme：输出完整色板，深色主题不应再退化成中性死灰 #232328
 const lightSky = buildTheme("light", "sky");
-const darkMidnight = buildTheme("dark", "midnight");
+const darkObsidian = buildTheme("dark", "obsidian");
 assert.equal(lightSky.scheme, "light");
 assert.equal(lightSky.wash, "sky");
 assert.equal(lightSky.vars["--frame"], "#d3e3fc");
 assert.equal(lightSky.vars["--bg"], "#fafcff");
-assert.equal(darkMidnight.scheme, "dark");
-assert.equal(darkMidnight.wash, "midnight");
-assert.equal(darkMidnight.vars["--frame"], "#0a1122");
-assert.equal(darkMidnight.vars["--bg"], "#121b33");
-assert.equal(darkMidnight.vars["--fg"], "#eef3ff");
+assert.equal(darkObsidian.scheme, "dark");
+assert.equal(darkObsidian.wash, "obsidian");
+assert.equal(darkObsidian.vars["--frame"], "#07080a");
+assert.equal(darkObsidian.vars["--bg"], "#0f1115");
+assert.equal(darkObsidian.vars["--fg"], "#f1f4f8");
 // wash 光晕必须叠三段：顶部镜面高光 + 两个对象光，否则深色窗口看起来是一块死平色
-assert.equal(darkMidnight.vars["--wash-glow"].split("gradient(").length - 1, 3);
+assert.equal(darkObsidian.vars["--wash-glow"].split("gradient(").length - 1, 3);
 assert.equal(lightSky.vars["--wash-glow"].split("gradient(").length - 1, 3);
 
 // 深色配色守门：正文 / 次要 / 三级文字的对比度，以及表面色阶的层次差
@@ -96,6 +99,13 @@ const luminance = (color: string): number => {
   };
   return 0.2126 * channel(r!) + 0.7152 * channel(g!) + 0.0722 * channel(b!);
 };
+/** CIE Lab 亮度（0 全黑 → 100 全白）：近黑/近白底上比对比比值更能反映层次差 */
+const lightness = (color: string): number => {
+  const y = luminance(color);
+  const f = y > 216 / 24389 ? Math.cbrt(y) : (841 / 108) * y + 4 / 29;
+  return 116 * f - 16;
+};
+
 const contrast = (fg: string, bg: string): number => {
   const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
   return (hi! + 0.05) / (lo! + 0.05);
@@ -106,13 +116,13 @@ for (const theme of [...LIGHT_WASH_THEMES, ...DARK_WASH_THEMES]) {
   assert.ok(contrast(palette.fg, palette.bg) >= 10, `${label} 正文对比度偏低`);
   assert.ok(contrast(palette.fg2, palette.bg1) >= 4.6, `${label} 次要文字对比度偏低`);
   assert.ok(contrast(palette.fg3, palette.bg2) >= 2.2, `${label} 三级文字对比度偏低`);
-  // 表面色阶必须一级比一级亮（深色）/ 一级比一级暗（浅色），且相邻两档差得出来
+  // 表面色阶必须一级比一级亮（深色）/ 一级比一级暗（浅色），相邻两档在 L* 上至少差 1.5。
+  // 近黑底用对比比值量不出层次（#0f1115 与 #14161b 的比值只有 1.03，肉眼看得出），所以按 L* 算。
   const steps = [palette.bg, palette.bg1, palette.bg2, palette.bg3];
   for (let index = 1; index < steps.length; index += 1) {
     const [prev, next] = [steps[index - 1]!, steps[index]!];
-    const gap = contrast(prev, next);
-    const rising = luminance(next) > luminance(prev);
-    assert.equal(rising, theme.scheme === "dark", `${label} 的表面色阶方向不对：bg${index} → bg${index + 1}`);
-    assert.ok(gap >= 1.05, `${label} 的表面色阶 bg${index} 与 bg${index + 1} 层次不清`);
+    const gap = lightness(next) - lightness(prev);
+    assert.equal(gap > 0, theme.scheme === "dark", `${label} 的表面色阶方向不对：bg${index} → bg${index + 1}`);
+    assert.ok(Math.abs(gap) >= 1.5, `${label} 的表面色阶 bg${index} 与 bg${index + 1} 层次不清（ΔL* ${gap.toFixed(1)}）`);
   }
 }

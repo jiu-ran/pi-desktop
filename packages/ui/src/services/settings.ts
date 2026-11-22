@@ -153,10 +153,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activityMerge: true,
   uiZoom: 1,
   logMaxBytes: 8 * 1024 * 1024,
-  // 默认用云樱浅色 / 星夜深色；想跟系统走由用户自己选「跟随系统」
+  // 默认用云樱浅色 / 曜石深色；想跟系统走由用户自己选「跟随系统」
   themeMode: "light",
   lightTheme: "sakura",
-  darkTheme: "midnight",
+  darkTheme: "obsidian",
   accent: "default",
   accentCustom: "#5b8def",
   emphasis: "follow",
