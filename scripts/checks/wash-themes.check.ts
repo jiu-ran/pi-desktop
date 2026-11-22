@@ -72,7 +72,7 @@ const lightSky = buildTheme("light", "sky");
 const darkMidnight = buildTheme("dark", "midnight");
 assert.equal(lightSky.scheme, "light");
 assert.equal(lightSky.wash, "sky");
-assert.equal(lightSky.vars["--frame"], "#d6e6fd");
+assert.equal(lightSky.vars["--frame"], "#d3e3fc");
 assert.equal(lightSky.vars["--bg"], "#fafcff");
 assert.equal(darkMidnight.scheme, "dark");
 assert.equal(darkMidnight.wash, "midnight");
@@ -81,6 +81,7 @@ assert.equal(darkMidnight.vars["--bg"], "#121b33");
 assert.equal(darkMidnight.vars["--fg"], "#eef3ff");
 // wash 光晕必须叠三段：顶部镜面高光 + 两个对象光，否则深色窗口看起来是一块死平色
 assert.equal(darkMidnight.vars["--wash-glow"].split("gradient(").length - 1, 3);
+assert.equal(lightSky.vars["--wash-glow"].split("gradient(").length - 1, 3);
 
 // 深色配色守门：正文 / 次要 / 三级文字的对比度，以及表面色阶的层次差
 const luminance = (color: string): number => {
