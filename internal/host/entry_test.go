@@ -2,6 +2,7 @@ package host
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 )
@@ -186,5 +187,28 @@ func TestLocatePiFallsBackToInstallerBin(t *testing.T) {
 	}
 	if located.Version != "1.6.0" || located.Source != "官方安装器" {
 		t.Fatalf("版本/来源不对：%+v", located)
+	}
+}
+
+// shim 里的分隔符是反斜杠，必须归一化后才能在各平台 filepath.Join。
+// 这条专门盯「把 `\` 写成两个反斜杠」那类手误（在 Windows 上会被掩盖）。
+func TestNormalizeShimPath(t *testing.T) {
+	bs := string(rune(92))
+	if got := normalizeShimPath("..\\install\\releases\\1.6.0"); got != "../install/releases/1.6.0" {
+		t.Fatalf("分隔符没归一化：%q", got)
+	}
+	if got := normalizeShimPath("a" + bs + bs + "b"); got != "a//b" {
+		t.Fatalf("不应折叠连续分隔符：%q", got)
+	}
+	if got := normalizeShimPath("/already/unix/path"); got != "/already/unix/path" {
+		t.Fatalf("unix 路径不应被改动：%q", got)
+	}
+}
+
+// 归一化后的结果必须在 POSIX 上也能 join 成真实路径（CI 的 linux / macos 就在跑这条语义）。
+func TestNormalizedShimPathJoinsOnPosix(t *testing.T) {
+	token := normalizeShimPath("..\\install\\cli.js")
+	if got := path.Join("/tmp/agent/bin", token); got != "/tmp/agent/install/cli.js" {
+		t.Fatalf("POSIX join 失败：%q", got)
 	}
 }

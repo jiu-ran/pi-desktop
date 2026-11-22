@@ -50,6 +50,12 @@ var shimEntryRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-coding-agent[/\\]dist[/\
 // 会遇到「设置里能识别、工作区起不来」，所以 shim 指向 launcher 时优先用 launcher。
 var shimLauncherRe = regexp.MustCompile(`[^\s"'\x60=<>]*pi-launcher\.js`)
 
+// normalizeShimPath 把 shim 文本里的 Windows 分隔符统一成 /：
+// shim 是 cmd / 批处理产物，路径天生用反斜杠；统一之后三种平台都能 filepath.Join。
+func normalizeShimPath(value string) string {
+	return strings.ReplaceAll(value, "\\", "/")
+}
+
 // shimTargetPath 把 shim 文本里的一小段路径解析成真实文件：
 // cmd 里的 %~dp0 就是 shim 所在目录，其余相对路径同样按 shim 目录 / 上两级来试。
 func shimTargetPath(token, shimDir string) string {
@@ -62,7 +68,7 @@ func shimTargetPath(token, shimDir string) string {
 		cleaned = strings.TrimLeft(cleaned[5:], `\/`)
 	}
 	// shim 文本天生是 Windows 分隔符，统一成 / 之后在三种平台都能 join。
-	cleaned = strings.ReplaceAll(cleaned, `\\`, "/")
+	cleaned = normalizeShimPath(cleaned)
 	candidates := []string{}
 	if filepath.IsAbs(cleaned) {
 		candidates = append(candidates, cleaned)

@@ -49,8 +49,10 @@ func RunSmoke(win *mygo.Window) {
 				const recent = await h.recent();
 				const profiles = await h.terminalProfiles();
 				const wb = window.__piDesktop?.workbench;
-				let cwd = wb?.state?.activeCwd || "";
-				if (!cwd) { cwd = __CWD__; await h.open(cwd); }
+				// 界面恢复上次项目时 activeCwd 已经有了，但进程可能还在启动中；
+				// 直接 snapshot 会撞上「这个工作区还没有启动 Pi」，所以先等 open 完成。
+				let cwd = wb?.state?.activeCwd || __CWD__;
+				await h.open(cwd);
 				const snap = await h.snapshot(cwd, "");
 				return JSON.stringify({ located, recentCount: recent.length, profiles: profiles.map(p => p.id), cwd, state: snap?.state?.sessionFile ?? null, models: snap?.models?.length ?? null, messages: snap?.messages?.length ?? null, sessions: snap?.sessions?.length ?? null });
 			})()`
