@@ -157,39 +157,7 @@ function handleResetAll(): void {
 
 const settingsVisible = ref(false);
 const settingsLeaving = ref(false);
-const settingsOffset = ref({ x: 0, y: 0 });
 let settingsLeaveTimer = 0;
-let settingsDrag: { x: number; y: number; originX: number; originY: number } | null = null;
-
-function startSettingsDrag(event: PointerEvent): void {
-  const modal = event.currentTarget as HTMLElement;
-  const bounds = modal.getBoundingClientRect();
-  const edge = 8;
-  const onEdge = event.clientX <= bounds.left + edge
-    || event.clientX >= bounds.right - edge
-    || event.clientY <= bounds.top + edge
-    || event.clientY >= bounds.bottom - edge;
-  if (!onEdge) return;
-  settingsDrag = {
-    x: event.clientX,
-    y: event.clientY,
-    originX: settingsOffset.value.x,
-    originY: settingsOffset.value.y,
-  };
-  modal.setPointerCapture(event.pointerId);
-}
-
-function moveSettingsDrag(event: PointerEvent): void {
-  if (!settingsDrag) return;
-  settingsOffset.value = {
-    x: settingsDrag.originX + event.clientX - settingsDrag.x,
-    y: settingsDrag.originY + event.clientY - settingsDrag.y,
-  };
-}
-
-function stopSettingsDrag(): void {
-  settingsDrag = null;
-}
 
 function requestCloseSettings(): void {
   if (!settingsModalState.open || settingsLeaving.value) return;
@@ -209,7 +177,6 @@ watch(
       return;
     }
     settingsLeaving.value = false;
-    settingsOffset.value = { x: 0, y: 0 };
     settingsQuery.value = "";
     searchIndex.value = 0;
     settingsVisible.value = false;
@@ -233,14 +200,7 @@ onBeforeUnmount(() => {
     class="overlay settings-overlay"
     :class="{ open: settingsVisible && !settingsLeaving, leaving: settingsLeaving }"
   >
-    <div
-      class="settings-modal-position"
-      :style="{ '--settings-x': `${settingsOffset.x}px`, '--settings-y': `${settingsOffset.y}px` }"
-      @pointerdown="startSettingsDrag"
-      @pointermove="moveSettingsDrag"
-      @pointerup="stopSettingsDrag"
-      @pointercancel="stopSettingsDrag"
-    >
+    <div class="settings-modal-position">
     <div class="settings-modal" role="dialog" aria-modal="true" aria-label="偏好设置">
       <!-- 左侧导航栏 -->
       <aside class="settings-nav">
@@ -311,7 +271,6 @@ onBeforeUnmount(() => {
 
         <div class="settings-nav-foot">
           <span><kbd>Esc</kbd> 关闭</span>
-          <span>拖动边缘可移动</span>
         </div>
       </aside>
 

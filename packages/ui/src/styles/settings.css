@@ -36,8 +36,6 @@
 .settings-modal-position {
   padding: 8px;
   border-radius: calc(var(--radius) + 6px);
-  cursor: move;
-  transform: translate(var(--settings-x, 0px), var(--settings-y, 0px));
 }
 
 .settings-modal {
