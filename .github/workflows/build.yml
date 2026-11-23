@@ -41,13 +41,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: 'npm'
@@ -56,7 +56,7 @@ jobs:
             packages/ui/package-lock.json
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -75,11 +75,28 @@ jobs:
       - name: Run regression checks
         run: npm run check
 
+      # 只有 Linux 上 cgo / gcc 一定可用，-race 在这里跑才有意义
+      - name: Race tests (host)
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/host
+
+      # 更新包签名公钥：没有 secret 时照样能构建，但客户端只允许「到发布页手动下载」。
+      - name: Inject update signing public key
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::没有配置 UPDATE_SIGNING_KEY，本次构建不会内置更新签名公钥，客户端只能手动下载更新"
+          else
+            node scripts/gen-update-key.mjs emit-go internal/host/update_key_generated.go
+          fi
+
       - name: Build and package
         run: npx mygo build -platform ${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.platform }}-artifacts
           if-no-files-found: error
@@ -102,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release notes
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release_tag || github.ref }}
 
@@ -115,7 +132,7 @@ jobs:
           node scripts/release-notes.mjs "$version" release-notes.md
 
       - name: Download artifacts
-        uses: actions/download-artifact@v8.0.2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           merge-multiple: true
@@ -147,11 +164,24 @@ jobs:
           find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # 用 ed25519 给校验清单签名：客户端只信任验过签的包（见 internal/host/update_key.go）。
+      - name: Sign checksums
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::没有配置 UPDATE_SIGNING_KEY，发布件将不带 SHA256SUMS.txt.sig（客户端不会自动安装）"
+          else
+            node scripts/gen-update-key.mjs sign artifacts/SHA256SUMS.txt
+          fi
+
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             artifacts/SHA256SUMS.txt
+            artifacts/SHA256SUMS.txt.sig
             artifacts/*.exe
             artifacts/*.zip
             artifacts/*.dmg

@@ -466,6 +466,15 @@ export interface PreparedAppUpdate {
   url: string;
   assetName: string;
   filePath: string;
+  /** 下载包已经过 ed25519 签名校验（只有这种才能自动安装） */
+  signed?: boolean;
+  /**
+   * true 表示这次更新不能自动安装：没内置签名公钥 / 发布件没有签名 / 验签失败。
+   * 界面只提供「到发布页手动下载」。
+   */
+  manualOnly?: boolean;
+  /** manualOnly 时的原因说明 */
+  message?: string;
 }
 
 export interface PiUpdateCheck {

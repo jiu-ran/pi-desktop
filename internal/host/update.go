@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -46,6 +47,26 @@ type preparedUpdate struct {
 	AssetName string `json:"assetName"`
 	FilePath  string `json:"filePath"`
 	SHA256    string `json:"sha256,omitempty"`
+	// Signed 表示这份安装包过了「内置公钥验过的 SHA256SUMS.txt」校验；
+	// 只有它才能自动安装。
+	Signed bool `json:"signed,omitempty"`
+}
+
+// manualUpdateError 表示这个更新不能自动安装，只能去发布页手动下载。
+type manualUpdateError struct {
+	reason string
+	url    string
+}
+
+func (e *manualUpdateError) Error() string { return e.reason }
+
+// asManualUpdateError 把错误还原成「只能手动下载」，其它错误返回 nil。
+func asManualUpdateError(err error) *manualUpdateError {
+	var target *manualUpdateError
+	if errors.As(err, &target) {
+		return target
+	}
+	return nil
 }
 
 type updateCacheState struct {
@@ -82,14 +103,24 @@ type appUpdater struct {
 }
 
 func newAppUpdater(proxy func() string) *appUpdater {
-	transport := &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
-		raw := proxy()
-		if raw == "" {
-			return nil, nil
-		}
-		return url.Parse(raw)
-	}}
-	return &appUpdater{prepared: map[string]preparedUpdate{}, client: &http.Client{Timeout: 60 * time.Second, Transport: transport}}
+	transport := &http.Transport{
+		Proxy: func(*http.Request) (*url.URL, error) {
+			if proxy == nil {
+				return nil, nil
+			}
+			raw := proxy()
+			if raw == "" {
+				return nil, nil
+			}
+			return url.Parse(raw)
+		},
+		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	// 不设 Client.Timeout：它把读响应体的时间也算进去，慢网下几十 MB 的安装包
+	// 60 秒后一定失败。整体时限交给调用方的 ctx，连接阶段由 Transport 的超时兜住。
+	return &appUpdater{prepared: map[string]preparedUpdate{}, client: &http.Client{Transport: transport}}
 }
 
 func appVersion() string {
@@ -227,7 +258,9 @@ func (u *appUpdater) check(manual bool) appUpdateCheck {
 	if state.At > 0 && state.Current == current && now-state.At < ttl {
 		return state.Result.withCurrent(current).cachedResult()
 	}
-	request, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+updateOwner+"/"+updateRepo+"/releases?per_page=20", nil)
+	requestCtx, cancelRequest := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelRequest()
+	request, _ := http.NewRequestWithContext(requestCtx, http.MethodGet, "https://api.github.com/repos/"+updateOwner+"/"+updateRepo+"/releases?per_page=20", nil)
 	request.Header.Set("Accept", "application/vnd.github+json")
 	if state.ETag != "" {
 		request.Header.Set("If-None-Match", state.ETag)
@@ -309,6 +342,49 @@ func findReleaseAsset(assets []githubAsset) githubAsset {
 	return findReleaseAssetFor(runtime.GOOS, runtime.GOARCH, assets)
 }
 
+// findSignedSums 找出签名清单和它的签名文件（发布时由 CI 生成）。
+func findSignedSums(assets []githubAsset) (sums, signature githubAsset) {
+	for _, item := range assets {
+		switch strings.ToLower(strings.TrimSpace(item.Name)) {
+		case "sha256sums.txt":
+			sums = item
+		case "sha256sums.txt.sig":
+			signature = item
+		}
+	}
+	return sums, signature
+}
+
+// hashFromSums 从验过签名的清单里取某个文件的 SHA-256。
+func hashFromSums(text []byte, assetName string) string {
+	for _, line := range strings.Split(string(text), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == assetName {
+			return strings.ToLower(fields[0])
+		}
+	}
+	return ""
+}
+
+// fetchAsset 取一个小体积的发布附件（签名、清单），单独限时，避免挂住整个下载。
+func (u *appUpdater) fetchAsset(ctx context.Context, asset githubAsset, limit int64) ([]byte, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, asset.BrowserDownloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := u.httpClient().Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(response.Body, limit))
+}
+
 func findReleaseAssetFor(goos, goarch string, assets []githubAsset) githubAsset {
 	patterns := []string{}
 	switch goos {
@@ -354,8 +430,8 @@ func findReleaseAssetFor(goos, goarch string, assets []githubAsset) githubAsset 
 	return githubAsset{}
 }
 
-func (u *appUpdater) fetchReleases() ([]githubRelease, error) {
-	request, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+updateOwner+"/"+updateRepo+"/releases?per_page=20", nil)
+func (u *appUpdater) fetchReleases(ctx context.Context) ([]githubRelease, error) {
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+updateOwner+"/"+updateRepo+"/releases?per_page=20", nil)
 	request.Header.Set("Accept", "application/vnd.github+json")
 	response, err := u.httpClient().Do(request)
 	if err != nil {
@@ -388,7 +464,7 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 		cancel()
 	}()
 
-	releases, err := u.fetchReleases()
+	releases, err := u.fetchReleases(ctx)
 	if err != nil {
 		return preparedUpdate{}, err
 	}
@@ -420,31 +496,30 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 	if asset.Name == "" || asset.BrowserDownloadURL == "" {
 		return preparedUpdate{}, errors.New("该版本没有适用于当前系统的安装包")
 	}
-	sha := shaFromDigest(asset.Digest)
-	if sha == "" {
-		for _, candidate := range stable.Assets {
-			if candidate.Name != "SHA256SUMS.txt" && !strings.HasSuffix(strings.ToLower(candidate.Name), "sha256sums.txt") {
-				continue
-			}
-			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, candidate.BrowserDownloadURL, nil)
-			response, err := u.httpClient().Do(request)
-			if err != nil {
-				continue
-			}
-			text, _ := io.ReadAll(io.LimitReader(response.Body, 64*1024))
-			response.Body.Close()
-			for _, line := range strings.Split(string(text), "\n") {
-				fields := strings.Fields(strings.TrimSpace(line))
-				if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == asset.Name {
-					sha = strings.ToLower(fields[0])
-					break
-				}
-			}
-			break
-		}
+	// 签名校验：只认「用内置公钥验过的 SHA256SUMS.txt」。公钥缺失、签名缺失、
+	// 校验失败都不允许自动安装——发布附件可能被换掉，只有签名能把它们钉死。
+	publicKey, keyErr := updateSigningKey()
+	if keyErr != nil {
+		return preparedUpdate{}, &manualUpdateError{reason: keyErr.Error(), url: stable.HTMLURL}
 	}
+	sumsAsset, sigAsset := findSignedSums(stable.Assets)
+	if sumsAsset.BrowserDownloadURL == "" || sigAsset.BrowserDownloadURL == "" {
+		return preparedUpdate{}, &manualUpdateError{reason: "这个版本没有提供签名文件（SHA256SUMS.txt / SHA256SUMS.txt.sig）", url: stable.HTMLURL}
+	}
+	sums, sumsErr := u.fetchAsset(ctx, sumsAsset, 256*1024)
+	if sumsErr != nil {
+		return preparedUpdate{}, errors.New("读取 SHA256SUMS.txt 失败：" + sumsErr.Error())
+	}
+	signature, sigErr := u.fetchAsset(ctx, sigAsset, 8*1024)
+	if sigErr != nil {
+		return preparedUpdate{}, errors.New("读取 SHA256SUMS.txt.sig 失败：" + sigErr.Error())
+	}
+	if err := verifyUpdateSignature(publicKey, sums, signature); err != nil {
+		return preparedUpdate{}, &manualUpdateError{reason: err.Error(), url: stable.HTMLURL}
+	}
+	sha := hashFromSums(sums, asset.Name)
 	if sha == "" {
-		return preparedUpdate{}, errors.New("安装包缺少 SHA-256 校验值，请从发布页手动下载")
+		return preparedUpdate{}, &manualUpdateError{reason: "签名清单里没有找到安装包的 SHA-256", url: stable.HTMLURL}
 	}
 	updateDir := u.updatesDir()
 	if err := os.MkdirAll(updateDir, 0o755); err != nil {
@@ -492,7 +567,7 @@ func (u *appUpdater) download() (preparedUpdate, error) {
 		_ = os.Remove(tmp)
 		return preparedUpdate{}, err
 	}
-	prepared := preparedUpdate{Version: latest, URL: stable.HTMLURL, AssetName: asset.Name, FilePath: filePath, SHA256: sha}
+	prepared := preparedUpdate{Version: latest, URL: stable.HTMLURL, AssetName: asset.Name, FilePath: filePath, SHA256: sha, Signed: true}
 	u.mu.Lock()
 	u.prepared[latest] = prepared
 	u.mu.Unlock()
@@ -555,6 +630,9 @@ func (u *appUpdater) install(version string) error {
 	}
 	if installing {
 		return errors.New("更新安装程序已经启动")
+	}
+	if !prepared.Signed {
+		return errors.New("这个安装包没有通过签名校验，不能自动安装，请到发布页手动下载")
 	}
 	data, err := os.ReadFile(prepared.FilePath)
 	if err != nil {
@@ -619,11 +697,15 @@ func (h *Host) checkAppUpdate(manual bool) map[string]any {
 func (h *Host) downloadAppUpdate() (map[string]any, error) {
 	prepared, err := h.updates.download()
 	if err != nil {
+		if manual := asManualUpdateError(err); manual != nil {
+			// 不报错：让界面拿到 manualOnly，只给「打开发布页手动下载」。
+			return map[string]any{"manualOnly": true, "message": manual.Error(), "url": manual.url}, nil
+		}
 		return nil, err
 	}
 	return map[string]any{
 		"version": prepared.Version, "url": prepared.URL, "assetName": prepared.AssetName,
-		"filePath": prepared.FilePath, "sha256": prepared.SHA256,
+		"filePath": prepared.FilePath, "sha256": prepared.SHA256, "signed": prepared.Signed,
 	}, nil
 }
 

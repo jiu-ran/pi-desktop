@@ -216,6 +216,10 @@ export function createWorkbench({ host, bus, beforeRemoveWorkspace = async () =>
       checkedAt: 0,
       /** 上次检查失败的原因（限流 / 断网）；有值时不能显示「已是最新」 */
       error: "",
+      /** 不能自动安装（没内置签名公钥 / 验签失败）：只让用户去发布页手动下载 */
+      manualOnly: false,
+      /** 不能自动安装的原因 */
+      manualReason: "",
     },
     /** 出网方式的实际结果（宿主算的：最终代理 + 来源） */
     network: { mode: "auto", custom: "", proxy: "", source: "none", systemProxy: "" } as {
@@ -2403,6 +2407,20 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     state.appUpdate.phase = "downloading";
     try {
       const prepared = await host.downloadAppUpdate();
+      if (prepared?.manualOnly) {
+        // 签名校验过不去：不提供「安装并重启」，只留「查看发布」
+        state.appUpdate.phase = state.appUpdate.updateAvailable ? "available" : "idle";
+        state.appUpdate.manualOnly = true;
+        state.appUpdate.manualReason = String(prepared.message || "");
+        if (prepared.url) state.appUpdate.url = prepared.url;
+        bus.emit("notify", {
+          level: options.background ? "warning" : "error",
+          text: `${prepared.message || "这个更新没有通过签名校验，不能自动安装"}；请到发布页手动下载`,
+        });
+        return false;
+      }
+      state.appUpdate.manualOnly = false;
+      state.appUpdate.manualReason = "";
       state.appUpdate.latest = prepared.version;
       state.appUpdate.assetName = prepared.assetName;
       state.appUpdate.url = prepared.url;

@@ -4,8 +4,11 @@ packages/ui/dist
 dist
 *.tsbuildinfo
 
-# 开发时日志目录（打包版写在安装目录下）
+# 开发时日志目录（打包版统一写在用户数据目录的 logs/ 下）
 logs/
+
+# CI 构建时写入的更新签名公钥（见 scripts/gen-update-key.mjs）
+internal/host/update_key_generated.go
 
 # MyGo 开发构建与产物
 .mygo/

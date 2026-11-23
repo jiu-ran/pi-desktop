@@ -102,14 +102,15 @@ async function restartForNetwork(): Promise<void> {
     <div class="settings-row">
       <div class="settings-row-info">
         <strong>检查软件更新</strong>
-        <span>检查后可下载并校验安装包；只有点击“安装并重启”才会打开安装程序</span>
+        <span v-if="state.appUpdate.manualOnly">这个更新不能自动安装：{{ state.appUpdate.manualReason || "没有通过签名校验" }}。请到发布页手动下载。</span>
+        <span v-else>检查后可下载并校验安装包；只有点击“安装并重启”才会打开安装程序</span>
       </div>
       <div style="display: flex; gap: 6px; flex: none;">
         <button type="button" class="btn ghost small" :disabled="state.appUpdate.checking || state.appUpdate.phase === 'downloading'" @click="checkAppUpdateNow">
           <span v-if="state.appUpdate.checking" class="mini-spinner" />检查更新
         </button>
         <button v-if="state.appUpdate.phase === 'downloading'" type="button" class="btn ghost small" @click="workbench.cancelAppUpdate()">取消下载</button>
-        <button v-if="state.appUpdate.updateAvailable && state.appUpdate.phase !== 'ready'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'downloading'" @click="downloadAppUpdateNow">
+        <button v-if="state.appUpdate.updateAvailable && state.appUpdate.phase !== 'ready' && !state.appUpdate.manualOnly" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'downloading'" @click="downloadAppUpdateNow">
           <span v-if="state.appUpdate.phase === 'downloading'" class="mini-spinner" />下载更新
         </button>
         <button v-if="state.appUpdate.phase === 'ready' || state.appUpdate.phase === 'installing'" type="button" class="btn ghost small" :disabled="state.appUpdate.phase === 'installing'" @click="installAppUpdateNow">安装并重启</button>
