@@ -5,7 +5,7 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.9.11] - 2026-11-23
+## [0.9.12] - 2026-11-23
 
 > 这一版开始校验更新包签名，**需要手动升级一次**：≤0.9.10 的客户端不验签，从 0.9.11 起才会在下载后校验 `SHA256SUMS.txt.sig`。
 
@@ -24,6 +24,7 @@
 - **会话历史缓存**：同时按 24 条与 256 MB 限制，淘汰按最近使用时间（不再随机删）；增量读取改 `io.ReadFull`，大块追加时不再漏掉后半截。
 - **写文件**：非 Windows 覆盖时保留原文件权限；Windows 改成「原文件先改名 `.bak` 再替换、失败就恢复」，不再先删原文件导致两头落空。
 - **文件监听**：`unwatch` 真的 `Remove` 句柄；新建子目录的监听登记到所属 root，不再刚加上就被移除。
+- **隔离工作区在 macOS / Windows 上认不出属于本仓库**：`git worktree list` 给的是真实路径（macOS 的 `/private/var`、Windows 的 8.3 长名），界面上传的是用户选的原路径，只做 `filepath.Abs` 就判不相等 —— 移除 / 合并时报「该目录不是当前仓库的 worktree」。现在两边都先解析真实路径再比。
 - **终端 / worktree / 子进程**：终端启动全程持锁避免并发超限；worktree 合并记下原分支并在结束后切回；`git clone` 失败只删本次新建的目录；子进程设 `WaitDelay`，Windows 先 `taskkill /T /F`；网络类 git 命令超时放宽到 30 分钟。
 - **代理**：保留用户原有的 `NO_PROXY` 并并入 localhost / 127.0.0.1 / ::1；系统代理查询加缓存。
 
