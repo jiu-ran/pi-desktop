@@ -36,6 +36,15 @@ const read = (file: string) => readFileSync(path.join(root, file), "utf8");
   assert.equal(renderInlineMarkdown("![a](data:image/png;base64,AA)"), "![a](data:image/png;base64,AA)");
   // 工作区里的相对路径不受影响：由宿主按工作区读盘
   assert.match(renderInlineMarkdown("![a](./a.png)"), /<img alt="a" src="\.\/a\.png">/);
+
+  // 明文 http 一律不输出 <img>，即使打开了「自动加载远程图片」也一样（CSP 会拦成破图）
+  for (const options of [undefined, { allowRemoteImages: true } as const]) {
+    const plain = renderInlineMarkdown("![shot](http://img.example.com/a.png)", options);
+    assert.ok(!plain.includes("<img"), `明文 http 不该输出 <img>：${plain}`);
+    assert.match(plain, /data-remote-blocked="http"/, plain);
+    assert.match(plain, /明文 http 图片已阻止 \(img\.example\.com\)/, plain);
+    assert.ok(!plain.includes("data-remote-url"), `明文 http 不该给可点击占位：${plain}`);
+  }
 }
 
 // 2) CSP：img-src 保留 https: / data: / blob:，但不给 http:
