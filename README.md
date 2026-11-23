@@ -17,7 +17,7 @@ npm install && npm ci --prefix packages/ui
 
 npm run dev      # mygo dev：编译 Go 宿主并打开窗口（改 Go 自动重启）
 npm run build    # 构建前端 + 编译当前平台可执行文件，产物在 dist-mygo/
-npm run check    # 57 个检查 + 3 个静态分析 + go test ./...
+npm run check    # 59 个检查 + 3 个静态分析 + go vet / go test ./...
 ```
 
 ## 核心功能

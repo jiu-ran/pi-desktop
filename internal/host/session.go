@@ -694,7 +694,8 @@ func readSessionHistory(file string) []map[string]any {
 			if err == nil {
 				_, _ = f.Seek(hit.offset, 0)
 				buf := make([]byte, size-hit.offset)
-				n, _ := f.Read(buf)
+				// 单次 Read 不保证读满（大块追加时尤其），读不满会漏掉后半截新消息
+				n, _ := io.ReadFull(f, buf)
 				_ = f.Close()
 				chunk := buf[:n]
 				if lastBreak := lastIndexByte(chunk, '\n'); lastBreak >= 0 {
@@ -720,16 +721,41 @@ func readSessionHistory(file string) []map[string]any {
 	history := messagesFromEntries(entries)
 	historyCacheMu.Lock()
 	historyCaches[key] = &historyCache{mtimeMs: mtime, size: size, offset: size, entries: entries, history: history}
-	if len(historyCaches) > 24 {
-		for old := range historyCaches {
-			if old != key {
-				delete(historyCaches, old)
-				break
-			}
-		}
-	}
+	evictHistoryCachesLocked(key)
 	historyCacheMu.Unlock()
 	return cloneHistorySlice(history)
+}
+
+// 会话历史缓存同时按条数和总字节数（会话文件大小，近似内存占用）限制。
+// 带 4K 截图的会话单个就上百 MB，只按 24 条限制最坏会占掉几个 GB。
+const (
+	historyCacheMaxEntries = 24
+	historyCacheMaxBytes   = 256 * 1024 * 1024
+)
+
+// evictHistoryCachesLocked 淘汰缓存直到两项限制都满足，keep（刚读的这条）始终保留。
+// 调用方需持有 historyCacheMu（加锁顺序：historyCacheMu → historyCache.mu）。
+func evictHistoryCachesLocked(keep string) {
+	total := int64(0)
+	for _, item := range historyCaches {
+		total += item.cachedBytes()
+	}
+	for key, item := range historyCaches {
+		if len(historyCaches) <= historyCacheMaxEntries && total <= historyCacheMaxBytes {
+			return
+		}
+		if key == keep {
+			continue
+		}
+		total -= item.cachedBytes()
+		delete(historyCaches, key)
+	}
+}
+
+func (c *historyCache) cachedBytes() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.size
 }
 
 func lastIndexByte(data []byte, b byte) int {
@@ -876,6 +902,10 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 	cached, hasCache := sessionMetaCache[key]
 	sessionMetaMu.Unlock()
 
+	// 先看缓存再读盘：以前命中之前也会读 512 KB，会话一多列表就明显变慢。
+	if hasCache && cached.mtimeMs == info.ModTime().UnixMilli() && cached.size == info.Size() {
+		return cached.summary, true
+	}
 	head, truncated := readHeadText(file, info.Size(), sessionHeadLimit)
 	lines := strings.Split(head, "\n")
 	header := map[string]any{}
@@ -886,12 +916,6 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 	project := ""
 	if cwd != "" {
 		project = filepath.Base(cwd)
-	}
-	if hasCache && cached.mtimeMs == info.ModTime().UnixMilli() && cached.size == info.Size() {
-		summary := cached.summary
-		summary.Cwd = cwd
-		summary.Project = project
-		return summary, true
 	}
 	title, quoted := firstUserTitleWithQuote(lines, truncated)
 	customTitle := readSessionName(file, info.Size(), header["name"])
@@ -906,9 +930,8 @@ func summarizeSessionFile(file string) (sessionSummary, bool) {
 		Project:   project,
 	}
 	sessionMetaMu.Lock()
-	sessionMetaCache[key] = sessionMetaCached{mtimeMs: info.ModTime().UnixMilli(), size: info.Size(), summary: sessionSummary{
-		ID: summary.ID, Path: summary.Path, Title: summary.Title, Quoted: summary.Quoted, Empty: summary.Empty, Timestamp: summary.Timestamp,
-	}}
+	// Cwd / Project 也一起缓存：命中时要能直接返回，不必再读一遍文件头。
+	sessionMetaCache[key] = sessionMetaCached{mtimeMs: info.ModTime().UnixMilli(), size: info.Size(), summary: summary}
 	sessionMetaMu.Unlock()
 	return summary, true
 }
@@ -930,7 +953,8 @@ func readHeadText(file string, size, maxBytes int64) (string, bool) {
 	}
 	defer f.Close()
 	buf := make([]byte, maxBytes)
-	n, _ := f.Read(buf)
+	// 单次 Read 不保证读满（大文件尤其），读不满会让首条消息少半截
+	n, _ := io.ReadFull(f, buf)
 	return string(buf[:n]), true
 }
 

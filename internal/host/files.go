@@ -669,6 +669,7 @@ func (h *Host) savePastedImage(payload map[string]any) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+	go cleanupPastedImages(dir, 30*24*time.Hour)
 	stem := regexpNonWord.ReplaceAllString(strings.TrimSuffix(asString(payload["name"]), filepath.Ext(asString(payload["name"]))), "-")
 	if stem == "" {
 		stem = "pasted"
@@ -682,6 +683,24 @@ func (h *Host) savePastedImage(payload map[string]any) (string, error) {
 	}
 	h.authorizedAttachmentPaths([]string{file})
 	return file, nil
+}
+
+// cleanupPastedImages 清掉很久以前粘贴的临时图片，免得系统临时目录越积越多。
+// 图片发送时已经按 base64 写进会话，这里的文件只是给 Pi 的路径提示，30 天足够宽松。
+func cleanupPastedImages(dir string, maxAge time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if info, err := entry.Info(); err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		}
+	}
 }
 
 var regexpNonWord = mustRegexp(`[^\w.-]+`)
@@ -700,7 +719,14 @@ func gitBranch(cwd string) string {
 		if info, err := os.Stat(dotGit); err == nil && info.Mode().IsRegular() {
 			data, _ := os.ReadFile(dotGit)
 			if match := regexpGitdir.FindStringSubmatch(string(data)); len(match) > 1 {
-				gitDir = filepath.Join(dir, strings.TrimSpace(match[1]))
+				// git worktree 写的是绝对路径（submodule 才是相对路径），直接 Join 会拼出无效地址，
+				// 隔离工作区的标题栏分支名因此一直是空的。
+				target := filepath.FromSlash(strings.TrimSpace(match[1]))
+				if filepath.IsAbs(target) {
+					gitDir = filepath.Clean(target)
+				} else {
+					gitDir = filepath.Join(dir, target)
+				}
 			} else {
 				return ""
 			}

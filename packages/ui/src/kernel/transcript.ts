@@ -6,6 +6,11 @@ import { formatTokens } from "../shared/util.ts";
 import { localizeNotification } from "../shared/notify-text.ts";
 import { networkFailureNotice, retryNoticeText, retryResultText } from "../shared/retry-notice.ts";
 
+/** bash 卡片在界面里最多保留的输出字符数（超出后只留最后一段）。 */
+const BASH_OUTPUT_MAX = 1024 * 1024;
+/** toolcall_delta 累积的流式参数上限：再长就不需要给界面看了。 */
+const STREAMED_ARGS_MAX = 256 * 1024;
+
 export interface RetryNotice {
   attempt: number;
   maxAttempts: number;
@@ -92,8 +97,7 @@ export interface TranscriptBlock {
   excludeFromContext?: boolean;
 }
 
-/** 网络类英文报错压成短中文：重试提示里只留一句，不再整段英文堆着。 */
-function noticeErrorText(value: unknown): string {
+/** 网络类英文报错压成短中文：重试提示里只留一句，不再整段英文堆着。 */function noticeErrorText(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   if (/^connection (error|reset|closed|refused).?$/i.test(raw) || /socket hang up/i.test(raw)) return "网络连接失败";
@@ -443,8 +447,17 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           if (update.type === "toolcall_delta") {
             const raw = update.delta ?? update.argumentsDelta ?? "";
             if (raw) {
-              const current = typeof block.details?.streamedArgs === "string" ? block.details.streamedArgs : "";
-              block.details = { ...(block.details ?? {}), streamedArgs: `${current}${raw}` };
+              // 原地追加：以前每帧都 `{...details}` 复制一次，参数一大就是 O(n²)。
+              if (!block.details || typeof block.details !== "object") block.details = {};
+              const details = block.details;
+              const current = typeof details.streamedArgs === "string" ? details.streamedArgs : "";
+              if (current.length >= STREAMED_ARGS_MAX) {
+                details.streamedArgsTruncated = true;
+              } else {
+                const next = current + raw;
+                details.streamedArgs = next.length > STREAMED_ARGS_MAX ? next.slice(0, STREAMED_ARGS_MAX) : next;
+                if (next.length > STREAMED_ARGS_MAX) details.streamedArgsTruncated = true;
+              }
             }
           }
         } else if (update.type === "toolcall_end" && update.toolCall) {
@@ -506,7 +519,16 @@ export function createTranscript(wrap: <T extends any[]>(arr: T) => T = (arr) =>
           (item) => item.kind === "bash" && item.requestId === event.id && item.status === "running",
         );
         if (!block) return false;
-        block.output = (block.output ?? "") + String(event.delta ?? "");
+        const delta = String(event.delta ?? "");
+        const next = (block.output ?? "") + delta;
+        // 只留最后 1MB：一个死循环命令的输出能敲到几百 MB，界面上一条块全存下来
+        // 就是整页卡死；截掉的前半段标 truncated 提示用户去看日志文件。
+        if (next.length > BASH_OUTPUT_MAX) {
+          block.output = next.slice(next.length - BASH_OUTPUT_MAX);
+          block.truncated = true;
+        } else {
+          block.output = next;
+        }
         return true;
       }
       case "auto_retry_start": {

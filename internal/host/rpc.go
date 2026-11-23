@@ -231,26 +231,29 @@ func (c *PiRpcClient) Start() error {
 	}()
 	go func() {
 		err := cmd.Wait()
-		close(exited)
+		// exited 要在 exitErr 写好之后再关：Start 靠它判断「启动即退出」并读出原因。
+		defer close(exited)
 		c.mu.Lock()
-		if c.cmd != cmd {
-			c.mu.Unlock()
+		current := c.cmd == cmd
+		c.mu.Unlock()
+		if !current {
 			return
 		}
+		// exitErrOf 自己会加 c.mu，不能持锁调用。以前在这里重入加锁，
+		// Pi 一旦自己退出（崩溃、启动即失败），整个客户端连同 Stop 都会永久卡死。
 		exitErr := c.exitErrOf(err)
-		c.exitErr = exitErr
+		c.mu.Lock()
+		if c.cmd == cmd {
+			c.exitErr = exitErr
+		}
 		c.mu.Unlock()
 		c.rejectAll(exitErr)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
-	c.mu.Lock()
-	started := c.started
-	c.mu.Unlock()
-	if !started {
-		return errors.New("Pi 进程未能启动")
-	}
-	if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+	// 给 Pi 一点时间：启动即退出（参数错、入口找不到）时直接把原因报出来，而不是等到
+	// 第一次请求超时。用 exited 判断，不读 cmd.ProcessState（它由 Wait 写入，跨 goroutine 读有竞争）。
+	select {
+	case <-exited:
 		c.mu.Lock()
 		err := c.exitErr
 		c.mu.Unlock()
@@ -258,6 +261,7 @@ func (c *PiRpcClient) Start() error {
 			return err
 		}
 		return errors.New("Pi 进程启动后立即退出")
+	case <-time.After(100 * time.Millisecond):
 	}
 	return nil
 }
@@ -306,6 +310,9 @@ func (c *PiRpcClient) handleLine(line string) {
 		}
 		c.mu.Unlock()
 		if ok {
+			if pending.timer != nil {
+				pending.timer.Stop()
+			}
 			if success, exists := data["success"]; exists && success == false {
 				message := "Pi 返回失败"
 				if text, ok := data["error"].(string); ok && text != "" {
@@ -383,16 +390,22 @@ func (c *PiRpcClient) Send(method string, args []any, timeout time.Duration, req
 	payload["id"] = id
 	pending := &rpcPending{resolve: make(chan any, 1), reject: make(chan error, 1)}
 	c.pending[id] = pending
-	c.mu.Unlock()
-
 	if timeout > 0 {
+		// 定时器在持锁时建好：handleLine / rejectAll 读 timer 时它一定已经赋值。
+		// 回调只在请求仍挂起时才报超时；已被应答或被 rejectAll 处理过的请求再写 reject 会让回调永远阻塞。
 		pending.timer = time.AfterFunc(timeout, func() {
 			c.mu.Lock()
-			delete(c.pending, id)
+			still := c.pending[id] == pending
+			if still {
+				delete(c.pending, id)
+			}
 			c.mu.Unlock()
-			pending.reject <- &RpcTimeoutError{Method: method, TimeoutMs: timeout.Milliseconds(), Stderr: c.Stderr()}
+			if still {
+				pending.reject <- &RpcTimeoutError{Method: method, TimeoutMs: timeout.Milliseconds(), Stderr: c.Stderr()}
+			}
 		})
 	}
+	c.mu.Unlock()
 
 	data, err := json.Marshal(payload)
 	if err != nil {

@@ -1007,6 +1007,12 @@
   color: var(--fg-3);
   font-size: 11px;
 }
+/* 表单字段下的一行说明（比如「留空表示保留原值」） */
+.settings-field > .settings-field-hint {
+  color: var(--fg-3);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
 .settings-field :is(.settings-input, .settings-textarea) {
   width: 100%;
   max-width: none;

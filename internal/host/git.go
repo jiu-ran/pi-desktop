@@ -113,6 +113,7 @@ func runGitEnv(cwd string, env map[string]string, args ...string) (string, error
 	cmd.Env = envSlice(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	hideWindow(cmd)
 	prepareProcessGroup(cmd)
+	cmd.WaitDelay = processWaitDelay
 	type result struct {
 		output []byte
 		err    error
@@ -135,13 +136,25 @@ func runGitEnv(cwd string, env map[string]string, args ...string) (string, error
 			return string(res.output[:gitMaxOutput]), nil
 		}
 		return string(res.output), nil
-	case <-time.After(120 * time.Second):
+	case <-time.After(gitTimeout(args)):
 		killProcess(cmd)
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
 		return "", errors.New("git 命令超时")
 	}
+}
+
+// gitTimeout 给网络操作单独放宽时限：大仓库或慢网络下 clone / fetch / pull / push
+// 远超 2 分钟，统一 120s 会在半路把它们杀掉。
+func gitTimeout(args []string) time.Duration {
+	if len(args) > 0 {
+		switch args[0] {
+		case "clone", "fetch", "pull", "push":
+			return 30 * time.Minute
+		}
+	}
+	return 120 * time.Second
 }
 
 func gitProbe(cwd string, args ...string) string {
@@ -800,7 +813,9 @@ func (h *Host) gitClone(url, target string) (map[string]any, error) {
 	if err != nil || !parentInfo.IsDir() {
 		return nil, errors.New("位置不存在或不是目录")
 	}
+	existed := false
 	if info, err := os.Stat(dest); err == nil {
+		existed = true
 		if !info.IsDir() {
 			return nil, errors.New("目标位置已存在同名文件")
 		}
@@ -809,6 +824,11 @@ func (h *Host) gitClone(url, target string) (map[string]any, error) {
 		}
 	}
 	if _, err := h.runGit(parent, "clone", "--", source, dest); err != nil {
+		// 超时或被杀时 git 来不及自己清理，留下半个仓库会让重试报「目录不为空」。
+		// 只删这次新建出来的目录，原本就存在的目录不动。
+		if !existed {
+			_ = os.RemoveAll(dest)
+		}
 		return nil, err
 	}
 	canonical, err := realPath(dest)

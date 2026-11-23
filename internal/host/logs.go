@@ -353,17 +353,16 @@ func logRenderer(level, scope, message string) {
 // ConfigureLogs 决定日志落盘位置：优先跟程序放在一起（安装目录 / 开发仓库根），
 // 不可写时回落到 userData/logs（与界面「设置 → 运行日志」显示的一致）。
 func ConfigureLogs() {
-	preferred := ""
-	if exe, err := os.Executable(); err == nil {
-		preferred = filepath.Join(filepath.Dir(exe), "logs")
-	}
+	// 生产环境统一写 userDataDir()/logs：装在 Program Files / /Applications 时
+	// exe 旁边通常不可写，以前会「有时能写、有时回退」，用户找不到日志到底在哪。
+	preferred := filepath.Join(userDataDir(), "logs")
 	if mygo.IsDev() {
 		if cwd, err := os.Getwd(); err == nil {
-			preferred = filepath.Join(cwd, "logs")
+			devDir := filepath.Join(cwd, "logs")
+			if isWriteableDir(devDir) {
+				preferred = devDir
+			}
 		}
-	}
-	if preferred == "" || !isWriteableDir(preferred) {
-		preferred = filepath.Join(userDataDir(), "logs")
 	}
 	logs.configure(preferred)
 	logInfo("logs", "日志目录已切换："+preferred)

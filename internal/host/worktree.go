@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -103,7 +104,23 @@ func (h *Host) gitWorktrees(cwd string) ([]map[string]any, error) {
 	return result, nil
 }
 
+// worktreeLockFile 与 gitAction 用同一个锁文件：worktree 的创建/合并/删除
+// 也是分支级别的改写，不能和分支操作（gitAction）并行跑。
+func worktreeLockFile(cwd string) string {
+	return filepath.Join(cwd, ".git-pi-operation")
+}
+
 func (h *Host) gitWorktreeCreate(cwd, name string, options map[string]any) (map[string]any, error) {
+	var result map[string]any
+	err := withFileWrite(worktreeLockFile(cwd), func() error {
+		value, err := h.doWorktreeCreate(cwd, name, options)
+		result = value
+		return err
+	})
+	return result, err
+}
+
+func (h *Host) doWorktreeCreate(cwd, name string, options map[string]any) (map[string]any, error) {
 	workspace, err := realPath(cwd)
 	if err != nil {
 		return nil, errors.New("项目目录无效")
@@ -469,6 +486,16 @@ func (h *Host) gitWorktreeCreate(cwd, name string, options map[string]any) (map[
 }
 
 func (h *Host) gitWorktreeRemove(cwd, target string, options map[string]any) (map[string]any, error) {
+	var result map[string]any
+	err := withFileWrite(worktreeLockFile(cwd), func() error {
+		value, err := h.doWorktreeRemove(cwd, target, options)
+		result = value
+		return err
+	})
+	return result, err
+}
+
+func (h *Host) doWorktreeRemove(cwd, target string, options map[string]any) (map[string]any, error) {
 	workspace, err := realPath(cwd)
 	if err != nil {
 		return nil, errors.New("项目目录无效")
@@ -573,6 +600,16 @@ func (h *Host) gitWorktreeRemove(cwd, target string, options map[string]any) (ma
 }
 
 func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]any, error) {
+	var result map[string]any
+	err := withFileWrite(worktreeLockFile(cwd), func() error {
+		value, err := h.doWorktreeMerge(cwd, options)
+		result = value
+		return err
+	})
+	return result, err
+}
+
+func (h *Host) doWorktreeMerge(cwd string, options map[string]any) (result map[string]any, retErr error) {
 	workspace, err := realPath(cwd)
 	if err != nil {
 		return nil, errors.New("项目目录无效")
@@ -645,12 +682,20 @@ func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]
 	counts := strings.Fields(strings.TrimSpace(gitProbe(primaryRoot, "rev-list", "--left-right", "--count", targetRef+"...refs/heads/"+entryBranch)))
 	ahead := 0
 	if len(counts) >= 2 {
-		ahead = int(asFloat(counts[1]))
+		// rev-list 输出的是字符串："0	1"；以前用 asFloat 转换，字符串一律变 0，
+		// 于是「工作区分支领先提交数」永远是 0，合并永远报「没有领先的新提交」。
+		if parsed, convErr := strconv.Atoi(strings.TrimSpace(counts[1])); convErr == nil {
+			ahead = parsed
+		}
 	}
 	if ahead <= 0 {
 		return nil, fmt.Errorf("分支 %s 没有领先于 %s 的新提交，无需合并", entryBranch, targetBranch)
 	}
 	currentBranch := strings.TrimSpace(gitProbe(primaryRoot, "symbolic-ref", "--quiet", "--short", "HEAD"))
+	// 合并前记下主工作区在哪个分支：成功或失败（含冲突）都要切回去，
+	// 否则用户的仓库会莫名其妙停在一个只为合并临时切换的分支上。
+	originalBranch := currentBranch
+	switched := false
 	if currentBranch != targetBranch {
 		for _, item := range all {
 			if !asBool(item["primary"]) && asString(item["branch"]) == targetBranch {
@@ -660,6 +705,23 @@ func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]
 		if _, err := runGit(primaryRoot, "switch", "--no-guess", "--", targetBranch); err != nil {
 			return nil, err
 		}
+		switched = true
+	}
+	if switched && originalBranch != "" {
+		defer func() {
+			if _, err := runGit(primaryRoot, "switch", "--no-guess", "--", originalBranch); err != nil {
+				note := "；但主工作区没能切回 " + originalBranch + "，请手动切回（" + strings.TrimSpace(err.Error()) + "）"
+				if result != nil {
+					result["message"] = asString(result["message"]) + note
+				} else if retErr != nil {
+					retErr = errors.New(retErr.Error() + note)
+				}
+			}
+		}()
+	}
+	restoreSuffix := ""
+	if switched && originalBranch != "" {
+		restoreSuffix = "，并把主工作区切回 " + originalBranch
 	}
 	message := strings.TrimSpace(asString(options["message"]))
 	if len([]rune(message)) > 5000 {
@@ -695,7 +757,7 @@ func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]
 	failure := func(conflicts []string, action string) map[string]any {
 		return map[string]any{
 			"ok": false, "conflict": true, "conflicts": conflicts,
-			"message":     fmt.Sprintf("合并 %s 到 %s 时发生冲突（共 %d 个文件），已自动中止合并并恢复主工作区", entryBranch, targetBranch, len(conflicts)),
+			"message":     fmt.Sprintf("合并 %s 到 %s 时发生冲突（共 %d 个文件），已自动中止合并并恢复主工作区%s", entryBranch, targetBranch, len(conflicts), restoreSuffix),
 			"primaryPath": primaryRoot, "worktreePath": asString(entry["path"]),
 			"worktreeBranch": entryBranch, "targetBranch": targetBranch, "strategy": strategy,
 		}
@@ -734,8 +796,8 @@ func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]
 			_ = gitProbe(asString(entry["path"]), "rebase", "--abort")
 			_ = gitProbe(asString(entry["path"]), "reset", "--hard", "HEAD")
 			if len(conflicts) > 0 {
-				result := failure(conflicts, "rebase")
-				result["message"] = fmt.Sprintf("将 %s 变基到 %s 时发生冲突（共 %d 个文件），已中止变基并恢复工作区干净", entryBranch, targetBranch, len(conflicts))
+				result = failure(conflicts, "rebase")
+				result["message"] = fmt.Sprintf("将 %s 变基到 %s 时发生冲突（共 %d 个文件），已中止变基并恢复工作区干净%s", entryBranch, targetBranch, len(conflicts), restoreSuffix)
 				return result, nil
 			}
 			return nil, err
@@ -751,6 +813,7 @@ func (h *Host) gitWorktreeMerge(cwd string, options map[string]any) (map[string]
 	if commit != "" {
 		message += "（" + commit + "）"
 	}
+	message += restoreSuffix
 	return map[string]any{
 		"ok": true, "message": message, "primaryPath": primaryRoot, "worktreePath": asString(entry["path"]),
 		"worktreeBranch": entryBranch, "targetBranch": targetBranch, "strategy": strategy, "commit": commit,

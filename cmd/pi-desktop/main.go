@@ -79,7 +79,9 @@ func main() {
 			}
 		})
 		host.AttachWindow(h, win)
-		if os.Getenv("PI_DESKTOP_SMOKE") == "1" {
+		// 冒烟测试会在窗口里自动跑一遍并自行退出：只允许开发时显式触发，
+		// 否则发布版一旦读到同名环境变量就会「自己点了自己」。
+		if mygo.IsDev() && os.Getenv("PI_DESKTOP_SMOKE") == "1" {
 			host.RunSmoke(win)
 		}
 	})

@@ -567,6 +567,7 @@ func (h *Host) runPiCommand(args []string, cwd string, timeout time.Duration) (i
 	cmd.Env = envSlice(baseEnv, "FORCE_COLOR=0", "GIT_TERMINAL_PROMPT=0")
 	hideWindow(cmd)
 	prepareProcessGroup(cmd)
+	cmd.WaitDelay = processWaitDelay
 	done := make(chan struct{})
 	var output []byte
 	var runErr error

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,38 @@ type workerSlot struct {
 	compacting  bool
 	bashRunning bool
 	lastState   map[string]any
+	lastUsed    time.Time
+	// inflight 是「正在进行中的请求数」：淘汰空闲 Worker 与请求之间有窗口期，
+	// streaming 这类标志在请求刚发出时还没置位，只能靠计数保证不误删。
+	inflight int
+}
+
+// acquire / release 标记一次请求占用这个 slot，必须成对调用。
+func (s *workerSlot) acquire() {
+	s.mu.Lock()
+	s.inflight++
+	s.mu.Unlock()
+}
+
+func (s *workerSlot) release() {
+	s.mu.Lock()
+	if s.inflight > 0 {
+		s.inflight--
+	}
+	s.mu.Unlock()
+}
+
+// touch 记录这个 Worker 最近一次被使用的时间；淘汰空闲 Worker 时先淘汰最久没用的。
+func (s *workerSlot) touch() {
+	s.mu.Lock()
+	s.lastUsed = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *workerSlot) lastUsedAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastUsed
 }
 
 func (s *workerSlot) setStreaming(value bool) {
@@ -75,7 +108,7 @@ func (s *workerSlot) snapshotInfo() (string, map[string]any) {
 func (s *workerSlot) busy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.streaming || s.compacting || s.bashRunning
+	return s.streaming || s.compacting || s.bashRunning || s.inflight > 0
 }
 
 func (s *workerSlot) stateFields() (string, bool, bool) {
@@ -94,6 +127,28 @@ type workspacePool struct {
 
 func newPool() *workspacePool {
 	return &workspacePool{workers: map[string]*workerSlot{}}
+}
+
+// collectClientsLocked 收集池里所有 Pi 客户端（去重），调用方需持有 p.mu。
+// pool.client 可能指向一个还没有会话文件、因而不在 workers 里的 Worker，关池时也要一并停掉，
+// 否则会留下孤儿 Pi 进程。
+func (p *workspacePool) collectClientsLocked() []*PiRpcClient {
+	seen := map[*PiRpcClient]bool{}
+	out := []*PiRpcClient{}
+	add := func(client *PiRpcClient) {
+		if client != nil && !seen[client] {
+			seen[client] = true
+			out = append(out, client)
+		}
+	}
+	for _, slot := range p.workers {
+		add(slot.client)
+	}
+	if p.standby != nil {
+		add(p.standby.client)
+	}
+	add(p.client)
+	return out
 }
 
 func (p *workspacePool) workerStates() []map[string]any {
@@ -222,6 +277,12 @@ func (h *Host) open(cwd string, options map[string]any) (map[string]any, error) 
 	}
 	cwd = authorized
 
+	// 恢复指定会话：只认本项目会话目录下的文件，情况不对（不是本项目的、损坏的）就开新会话。
+	spawnOptions := map[string]any{}
+	if resume := resumeSessionTarget(cwd, options); resume != "" {
+		spawnOptions["targetSessionFile"] = resume
+	}
+
 	h.mu.Lock()
 	if h.closing {
 		h.mu.Unlock()
@@ -235,7 +296,7 @@ func (h *Host) open(cwd string, options map[string]any) (map[string]any, error) 
 		h.starting[cwd] = attempt
 		h.mu.Unlock()
 		go func() {
-			err := h.startWorkspace(cwd, gen)
+			err := h.startWorkspace(cwd, gen, spawnOptions)
 			attempt.err = err
 			close(attempt.done)
 			h.mu.Lock()
@@ -287,9 +348,23 @@ func (h *Host) snapshotWithTimeout(cwd, sessionFile string) (map[string]any, err
 	}
 }
 
-func (h *Host) startWorkspace(cwd string, gen int) error {
+// resumeSessionTarget 校验 options 里的 resumeSessionFile：只有属于本项目会话目录的
+// .jsonl 才拿来恢复，否则（换了目录、手写过路径、文件不在这）安静地开新会话。
+func resumeSessionTarget(cwd string, options map[string]any) string {
+	resume := strings.TrimSpace(asString(options["resumeSessionFile"]))
+	if resume == "" {
+		return ""
+	}
+	verified, err := assertSessionFile(cwd, resume)
+	if err != nil {
+		return ""
+	}
+	return verified
+}
+
+func (h *Host) startWorkspace(cwd string, gen int, options map[string]any) error {
 	pool := newPool()
-	if _, err := h.spawnWorker(cwd, pool, nil); err != nil {
+	if _, err := h.spawnWorker(cwd, pool, options); err != nil {
 		return err
 	}
 	h.mu.Lock()
@@ -300,10 +375,7 @@ func (h *Host) startWorkspace(cwd string, gen int) error {
 	h.mu.Unlock()
 	if stale {
 		pool.mu.Lock()
-		clients := make([]*PiRpcClient, 0, len(pool.workers))
-		for _, slot := range pool.workers {
-			clients = append(clients, slot.client)
-		}
+		clients := pool.collectClientsLocked()
 		pool.workers = map[string]*workerSlot{}
 		pool.mu.Unlock()
 		for _, client := range clients {
@@ -320,7 +392,7 @@ func (h *Host) spawnWorker(cwd string, pool *workspacePool, options map[string]a
 		return nil, err
 	}
 	client := NewPiRpcClient(command, cwd, h.childEnv(), toolArgs(cwd))
-	slot := &workerSlot{client: client}
+	slot := &workerSlot{client: client, lastUsed: time.Now()}
 	client.OnEvent(func(event map[string]any) {
 		switch asString(event["type"]) {
 		case "agent_start":
@@ -406,15 +478,9 @@ func (h *Host) discardWorkspace(cwd string) {
 		return
 	}
 	pool.mu.Lock()
-	clients := []*PiRpcClient{}
-	for _, slot := range pool.workers {
-		clients = append(clients, slot.client)
-	}
+	clients := pool.collectClientsLocked()
 	pool.workers = map[string]*workerSlot{}
-	if pool.standby != nil {
-		clients = append(clients, pool.standby.client)
-		pool.standby = nil
-	}
+	pool.standby = nil
 	pool.mu.Unlock()
 	for _, client := range clients {
 		_ = client.Stop()
@@ -478,10 +544,12 @@ func (h *Host) findIdleSlot(pool *workspacePool) *workerSlot {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	if slot := pool.workers[normPathKey(pool.activeSessionFile)]; slot != nil && !slot.busy() {
+		slot.touch()
 		return slot
 	}
 	for _, slot := range pool.workers {
 		if !slot.busy() {
+			slot.touch()
 			return slot
 		}
 	}
@@ -507,6 +575,10 @@ func (h *Host) pruneIdleWorkers(pool *workspacePool) {
 			}{key, slot})
 		}
 	}
+	// 按最近使用时间从旧到新淘汰。以前直接取 map 的遍历顺序，是随机的，常把刚用过的会话踢掉。
+	sort.Slice(idle, func(i, j int) bool {
+		return idle[i].slot.lastUsedAt().Before(idle[j].slot.lastUsedAt())
+	})
 	for len(idle) > maxIdle {
 		oldest := idle[0]
 		idle = idle[1:]
@@ -542,6 +614,8 @@ func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	slot.acquire()
+	defer slot.release()
 	client := slot.client
 	state, err := client.GetState()
 	if err != nil {
@@ -660,7 +734,11 @@ func (h *Host) call(cwd, method string, args []any, sessionFile string) (any, er
 	if err != nil {
 		return nil, err
 	}
+	// 请求期间占用这个 slot：pruneIdleWorkers 只淘汰 inflight==0 的 Worker。
+	slot.acquire()
+	defer slot.release()
 	client := slot.client
+	slot.touch()
 
 	switch method {
 	case "prompt":
@@ -770,6 +848,7 @@ func (h *Host) switchSession(cwd string, pool *workspacePool, targetFile string)
 	existing := pool.workers[normPathKey(targetFile)]
 	pool.mu.Unlock()
 	if existing != nil {
+		existing.touch()
 		existingFile := existing.sessionPath()
 		pool.mu.Lock()
 		pool.client = existing.client
@@ -1108,13 +1187,7 @@ func (h *Host) stopAll() {
 	var stopping sync.WaitGroup
 	for _, pool := range pools {
 		pool.mu.Lock()
-		clients := []*PiRpcClient{}
-		for _, slot := range pool.workers {
-			clients = append(clients, slot.client)
-		}
-		if pool.standby != nil {
-			clients = append(clients, pool.standby.client)
-		}
+		clients := pool.collectClientsLocked()
 		pool.workers = map[string]*workerSlot{}
 		pool.standby = nil
 		pool.mu.Unlock()

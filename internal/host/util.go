@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -218,6 +219,10 @@ func stringList(value any) []string {
 	return out
 }
 
+// processWaitDelay 限制「进程已经死了、但管道还被孙进程握着」时的等待时间。
+// npm / node / ssh 这类孙进程继承了 stdout/stderr，只用 CombinedOutput 时会一直读不完。
+const processWaitDelay = 5 * time.Second
+
 // ---------- 原子写入 / 文件锁 ----------
 
 var fileLocks sync.Map
@@ -241,6 +246,12 @@ func atomicWriteText(file, content string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	// CreateTemp 建出来是 0600：覆盖已有文件时沿用它原来的权限，否则脚本会丢掉可执行位。
+	// 新文件保持 0600（这里也写 Pi 的配置，里面可能有令牌）。
+	var keepMode os.FileMode
+	if info, err := os.Stat(file); err == nil && info.Mode().IsRegular() {
+		keepMode = info.Mode().Perm()
+	}
 	tmp, err := os.CreateTemp(dir, ".pi-desktop-*.tmp")
 	if err != nil {
 		return err
@@ -254,6 +265,12 @@ func atomicWriteText(file, content string) error {
 		cleanup()
 		return err
 	}
+	if keepMode != 0 && !isWindows() {
+		if err := tmp.Chmod(keepMode); err != nil {
+			cleanup()
+			return err
+		}
+	}
 	if err := tmp.Sync(); err != nil {
 		cleanup()
 		return err
@@ -263,14 +280,26 @@ func atomicWriteText(file, content string) error {
 		return err
 	}
 	if err := os.Rename(name, file); err != nil {
-		// Windows 上目标被占用时 rename 会失败：先删目标再重试一次。
-		if removeErr := os.Remove(file); removeErr == nil {
-			if retry := os.Rename(name, file); retry == nil {
-				return nil
-			}
+		if !isWindows() {
+			os.Remove(name)
+			return err
 		}
-		os.Remove(name)
-		return err
+		// Windows 上目标被占用时 rename 可能失败：先把原文件挪成备份再换，换不上就把备份挪回去。
+		// 以前是先删原文件再重试，重试也失败时连临时文件一起删，原内容和新内容两头落空。
+		backup := name + ".bak"
+		if moveErr := os.Rename(file, backup); moveErr != nil {
+			os.Remove(name)
+			return err
+		}
+		if retry := os.Rename(name, file); retry != nil {
+			if restoreErr := os.Rename(backup, file); restoreErr != nil {
+				// 备份也挪不回去：两份都留在磁盘上，把位置告诉用户。
+				return fmt.Errorf("%w（原内容在 %s，新内容在 %s）", err, backup, name)
+			}
+			os.Remove(name)
+			return err
+		}
+		os.Remove(backup)
 	}
 	return nil
 }

@@ -19,6 +19,9 @@ type workspaceWatcher struct {
 	emit    func(map[string]any)
 	pending map[string]map[string]bool
 	dirs    map[string]map[string]bool
+	// watched 记每个 root 真正加给 fsnotify 的目录，unwatch 时要按它 Remove，
+	// 否则句柄会一直留着。
+	watched map[string]map[string]bool
 	timer   *time.Timer
 	closed  bool
 }
@@ -27,11 +30,12 @@ func newWorkspaceWatcher(emit func(map[string]any)) *workspaceWatcher {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		logWarn("watch", "无法启动文件监听："+err.Error())
-		return &workspaceWatcher{emit: emit, roots: map[string]struct{}{}, pending: map[string]map[string]bool{}, dirs: map[string]map[string]bool{}}
+		return &workspaceWatcher{emit: emit, roots: map[string]struct{}{}, pending: map[string]map[string]bool{}, dirs: map[string]map[string]bool{}, watched: map[string]map[string]bool{}}
 	}
 	instance := &workspaceWatcher{
 		watcher: w, roots: map[string]struct{}{}, emit: emit,
 		pending: map[string]map[string]bool{}, dirs: map[string]map[string]bool{},
+		watched: map[string]map[string]bool{},
 	}
 	go instance.loop()
 	return instance
@@ -52,7 +56,7 @@ func (w *workspaceWatcher) watch(root string) {
 	}
 	w.roots[abs] = struct{}{}
 	w.mu.Unlock()
-	w.addDirs(abs)
+	w.addDirs(abs, abs)
 }
 
 func (w *workspaceWatcher) unwatch(root string) {
@@ -67,11 +71,23 @@ func (w *workspaceWatcher) unwatch(root string) {
 	delete(w.roots, abs)
 	delete(w.pending, abs)
 	delete(w.dirs, abs)
+	watched := w.watched[abs]
+	delete(w.watched, abs)
 	w.mu.Unlock()
+	// 以前只删 map，不 Remove：fsnotify 会一直留着目录句柄，项目关得越多句柄越多。
+	if w.watcher != nil {
+		for dir := range watched {
+			_ = w.watcher.Remove(dir)
+		}
+	}
 }
 
-func (w *workspaceWatcher) addDirs(root string) {
-	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+// addDirs 把 walkFrom 及其子目录加进 fsnotify，并登记到所属的 root 下。
+// root 与 walkFrom 分开传：新建子目录时 walkFrom 不是 root，以前把它当 root 登记，
+// 结果 w.roots 里找不到它，刚加上的监听立刻被当作「已失效」又 Remove 掉。
+func (w *workspaceWatcher) addDirs(root, walkFrom string) {
+	added := []string{}
+	_ = filepath.WalkDir(walkFrom, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry == nil {
 			return nil
 		}
@@ -79,14 +95,33 @@ func (w *workspaceWatcher) addDirs(root string) {
 			return nil
 		}
 		name := entry.Name()
-		if path != root && (name == "node_modules" || name == ".git" || name == ".pi" || name == ".pi-desktop" || strings.HasPrefix(name, ".cache")) {
+		if path != walkFrom && (name == "node_modules" || name == ".git" || name == ".pi" || name == ".pi-desktop" || strings.HasPrefix(name, ".cache")) {
 			return filepath.SkipDir
 		}
 		if w.watcher != nil {
-			_ = w.watcher.Add(path)
+			if addErr := w.watcher.Add(path); addErr == nil {
+				added = append(added, path)
+			}
 		}
 		return nil
 	})
+	w.mu.Lock()
+	if _, alive := w.roots[root]; alive && len(added) > 0 {
+		if w.watched[root] == nil {
+			w.watched[root] = map[string]bool{}
+		}
+		for _, dir := range added {
+			w.watched[root][dir] = true
+		}
+		added = nil
+	}
+	w.mu.Unlock()
+	// Walk 期间这个 root 被 unwatch 了：把刚加进去的目录再撤掉，不留句柄。
+	for _, dir := range added {
+		if w.watcher != nil {
+			_ = w.watcher.Remove(dir)
+		}
+	}
 }
 
 func (w *workspaceWatcher) loop() {
@@ -128,9 +163,10 @@ func (w *workspaceWatcher) handle(event fsnotify.Event) {
 		w.mu.Unlock()
 		return
 	}
+	grow := ""
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			w.addDirs(path)
+			grow = path
 		}
 	}
 	rel, err := filepath.Rel(root, path)
@@ -153,6 +189,11 @@ func (w *workspaceWatcher) handle(event fsnotify.Event) {
 		w.timer = time.AfterFunc(watchDebounce, w.flush)
 	}
 	w.mu.Unlock()
+	// 新目录的内容在锁外补加：WalkDir + fsnotify.Add 在消费 Events 的同一个
+	// goroutine 里跑，大目录会长时间占着 m.mu，事件队列堆满后连 Remove 都拿不到锁。
+	if grow != "" {
+		go w.addDirs(root, grow)
+	}
 }
 
 func (w *workspaceWatcher) flush() {

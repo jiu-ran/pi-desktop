@@ -429,6 +429,7 @@ watch(() => state.activeCwd, loadMcpOverview);
             placeholder="API_KEY=your_key_here"
             spellcheck="false"
           />
+          <small class="settings-field-hint">留空表示保留原值；要清除某项请删除整行。</small>
         </label>
       </template>
 
@@ -451,6 +452,7 @@ watch(() => state.activeCwd, loadMcpOverview);
             placeholder="Authorization: Bearer ${TOKEN}"
             spellcheck="false"
           />
+          <small class="settings-field-hint">留空表示保留原值；要清除某项请删除整行。</small>
         </label>
       </template>
 

@@ -52,9 +52,13 @@ type Host struct {
 	terminals     *terminalManager
 	networkMode   string
 	networkCustom string
-	updates       *appUpdater
-	watcher       *workspaceWatcher
-	crashTimes    []time.Time
+	// systemProxyCache 缓存注册表里的系统代理：childEnv 每次 git / Pi 调用都会走到，
+	// 更新客户端的 Proxy 回调也是每个请求一次，每次都起一个 reg.exe 太贵。
+	systemProxyCache   string
+	systemProxyCacheAt time.Time
+	updates            *appUpdater
+	watcher            *workspaceWatcher
+	crashTimes         []time.Time
 }
 
 func New() *Host {

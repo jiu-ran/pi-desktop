@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var proxyEnvKeys = []string{
@@ -88,11 +89,26 @@ func systemProxyOnWindows() string {
 	return normalizeProxyURL(chosen)
 }
 
+// systemProxyCacheTTL 是系统代理查询结果的缓存时长：
+// childEnv 在每次 git / Pi 调用时都会走到，注册表查询要起 reg.exe，太贵。
+const systemProxyCacheTTL = 30 * time.Second
+
 func (h *Host) systemProxy() string {
 	if value := envProxyOf(envMap()); value != "" {
 		return value
 	}
-	return systemProxyOnWindows()
+	h.mu.Lock()
+	value, at := h.systemProxyCache, h.systemProxyCacheAt
+	h.mu.Unlock()
+	if !at.IsZero() && time.Since(at) < systemProxyCacheTTL {
+		return value
+	}
+	fresh := systemProxyOnWindows()
+	h.mu.Lock()
+	h.systemProxyCache = fresh
+	h.systemProxyCacheAt = time.Now()
+	h.mu.Unlock()
+	return fresh
 }
 
 func envMap() map[string]string {
@@ -137,19 +153,47 @@ func (h *Host) planProxy() (mode, proxy, source string) {
 
 func (h *Host) childEnv() map[string]string {
 	env := envMap()
+	// 先留住用户自己的 NO_PROXY：本地模型（Ollama）和本机 MCP 服务不该走代理。
+	userNoProxy := firstNonEmpty(env["NO_PROXY"], env["no_proxy"])
 	_, proxy, _ := h.planProxy()
 	for _, key := range proxyEnvKeys {
 		delete(env, key)
 	}
 	if proxy == "" {
 		env["NO_PROXY"] = "*"
+		env["no_proxy"] = "*"
 		return env
 	}
 	env["HTTP_PROXY"] = proxy
 	env["HTTPS_PROXY"] = proxy
 	env["http_proxy"] = proxy
 	env["https_proxy"] = proxy
+	noProxy := mergeNoProxy(userNoProxy)
+	env["NO_PROXY"] = noProxy
+	env["no_proxy"] = noProxy
 	return env
+}
+
+// mergeNoProxy 保留用户原有的 NO_PROXY 项，再并上本机地址（大小写两份环境变量共用一份值）。
+func mergeNoProxy(existing string) string {
+	entries := []string{}
+	seen := map[string]bool{}
+	for _, part := range strings.Split(existing, ",") {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[strings.ToLower(item)] {
+			continue
+		}
+		seen[strings.ToLower(item)] = true
+		entries = append(entries, item)
+	}
+	for _, item := range []string{"localhost", "127.0.0.1", "::1"} {
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		entries = append(entries, item)
+	}
+	return strings.Join(entries, ",")
 }
 
 func (h *Host) networkApply(mode, custom string) map[string]any {
@@ -159,6 +203,9 @@ func (h *Host) networkApply(mode, custom string) map[string]any {
 	h.mu.Lock()
 	h.networkMode = mode
 	h.networkCustom = custom
+	// 代理设置变了，缓存的系统代理结果跟着作废。
+	h.systemProxyCache = ""
+	h.systemProxyCacheAt = time.Time{}
 	h.mu.Unlock()
 	return h.networkStatus()
 }

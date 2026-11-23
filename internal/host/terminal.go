@@ -75,6 +75,9 @@ type terminalManager struct {
 	mu    sync.Mutex
 	tasks map[string]*terminalTask
 	host  *Host
+
+	// startMu 把「检查数量上限 → 启动 → 登记」串成一步，并发启动时才不会超出上限
+	startMu sync.Mutex
 }
 
 func newTerminalManager(h *Host) *terminalManager {
@@ -350,6 +353,8 @@ func newTaskID() string {
 }
 
 func (m *terminalManager) startLegacy(cwd, command string, options map[string]any) (map[string]any, error) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	if err := m.assertCanStart(); err != nil {
 		return nil, err
 	}
@@ -410,6 +415,8 @@ func (m *terminalManager) startLegacy(cwd, command string, options map[string]an
 }
 
 func (m *terminalManager) startShell(cwd string) (map[string]any, error) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	if err := m.assertCanStart(); err != nil {
 		return nil, err
 	}
@@ -476,6 +483,8 @@ func normalizePTYSize(cols, rows int) terminalSize {
 }
 
 func (m *terminalManager) startPTY(cwd string, cols, rows int, options map[string]any) (map[string]any, error) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	if err := m.assertCanStart(); err != nil {
 		return nil, err
 	}

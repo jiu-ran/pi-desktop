@@ -258,6 +258,7 @@ func runShell(commandLine string, env map[string]string, timeout time.Duration) 
 	}
 	hideWindow(cmd)
 	prepareProcessGroup(cmd)
+	cmd.WaitDelay = processWaitDelay
 	cmd.Cancel = func() error {
 		killProcess(cmd)
 		if cmd.Process != nil {
