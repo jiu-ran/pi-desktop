@@ -375,8 +375,8 @@ func TestWatcherNoticesNewSubdirectory(t *testing.T) {
 	}
 	// 等新目录被加进监听，再往里写文件
 	waitFor(t, 3*time.Second, func() bool {
-		abs, _ := filepath.Abs(root)
-		return watcher.watchedSnapshot()[abs][sub]
+		// 监听键是真实路径（见 watcher.watch），macOS / Windows 上 Abs 会对不上
+		return watcher.watchedSnapshot()[canonicalPath(root)][canonicalPath(sub)]
 	})
 	writeFile(t, filepath.Join(sub, "b.txt"), "y")
 	seen := map[string]bool{}

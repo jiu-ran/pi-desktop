@@ -45,10 +45,9 @@ func (w *workspaceWatcher) watch(root string) {
 	if w.watcher == nil || root == "" {
 		return
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return
-	}
+	// 键必须用真实路径：macOS 的 /var → /private/var、Windows 的 8.3 短名都会让「同一个
+	// 目录的两种写法」对上两个键，watch 全部监听、unwatch 一个也删不掉。
+	abs := canonicalPath(root)
 	w.mu.Lock()
 	if _, exists := w.roots[abs]; exists {
 		w.mu.Unlock()
@@ -63,10 +62,7 @@ func (w *workspaceWatcher) unwatch(root string) {
 	if root == "" {
 		return
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return
-	}
+	abs := canonicalPath(root)
 	w.mu.Lock()
 	delete(w.roots, abs)
 	delete(w.pending, abs)
