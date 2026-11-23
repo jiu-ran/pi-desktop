@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -655,6 +656,9 @@ type historyCache struct {
 	offset  int64
 	entries []map[string]any
 	history []map[string]any
+	// usedAt 是最近一次命中 / 写入的时间（纳秒）：淘汰时先丢最久没用的那条。
+	// 用原子量而不是 mu 保护，避免和读缓存的路径争同一把锁。
+	usedAt atomic.Int64
 }
 
 var (
@@ -680,6 +684,9 @@ func readSessionHistory(file string) []map[string]any {
 	historyCacheMu.Lock()
 	hit := historyCaches[key]
 	historyCacheMu.Unlock()
+	if hit != nil {
+		hit.usedAt.Store(time.Now().UnixNano())
+	}
 
 	if hit != nil {
 		hit.mu.Lock()
@@ -720,7 +727,9 @@ func readSessionHistory(file string) []map[string]any {
 	entries := parseSessionEntries(string(data))
 	history := messagesFromEntries(entries)
 	historyCacheMu.Lock()
-	historyCaches[key] = &historyCache{mtimeMs: mtime, size: size, offset: size, entries: entries, history: history}
+	cache := &historyCache{mtimeMs: mtime, size: size, offset: size, entries: entries, history: history}
+	cache.usedAt.Store(time.Now().UnixNano())
+	historyCaches[key] = cache
 	evictHistoryCachesLocked(key)
 	historyCacheMu.Unlock()
 	return cloneHistorySlice(history)
@@ -734,21 +743,30 @@ const (
 )
 
 // evictHistoryCachesLocked 淘汰缓存直到两项限制都满足，keep（刚读的这条）始终保留。
+// 按 usedAt 从最久没用的开始丢，避免 map 随机顺序把用户正在来回切的会话删掉又重读。
 // 调用方需持有 historyCacheMu（加锁顺序：historyCacheMu → historyCache.mu）。
 func evictHistoryCachesLocked(keep string) {
 	total := int64(0)
 	for _, item := range historyCaches {
 		total += item.cachedBytes()
 	}
-	for key, item := range historyCaches {
-		if len(historyCaches) <= historyCacheMaxEntries && total <= historyCacheMaxBytes {
+	for len(historyCaches) > historyCacheMaxEntries || total > historyCacheMaxBytes {
+		oldestKey := ""
+		var oldestAt int64
+		for key, item := range historyCaches {
+			if key == keep {
+				continue
+			}
+			at := item.usedAt.Load()
+			if oldestKey == "" || at < oldestAt {
+				oldestKey, oldestAt = key, at
+			}
+		}
+		if oldestKey == "" {
 			return
 		}
-		if key == keep {
-			continue
-		}
-		total -= item.cachedBytes()
-		delete(historyCaches, key)
+		total -= historyCaches[oldestKey].cachedBytes()
+		delete(historyCaches, oldestKey)
 	}
 }
 

@@ -616,6 +616,7 @@ func (h *Host) snapshot(cwd, sessionFile string) (map[string]any, error) {
 	}
 	slot.acquire()
 	defer slot.release()
+	slot.touch()
 	client := slot.client
 	state, err := client.GetState()
 	if err != nil {
