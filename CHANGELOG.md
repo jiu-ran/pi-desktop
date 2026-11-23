@@ -5,6 +5,31 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 安全
+
+- **更新包加 ed25519 签名校验**：下载时先取 `SHA256SUMS.txt` 与 `SHA256SUMS.txt.sig`，用内置公钥验签，再用**验过的清单**比对安装包 SHA-256。没有内置公钥、发布件没签名、验签失败一律不自动安装，只给「到发布页手动下载」；`install()` 也会再拒一次未签名的包。首次启用需要先配好签名密钥并**手动升级一次**（≤0.9.10 的客户端不验签）。
+- **工作区授权收口**：写盘、终端、Git、项目级 MCP 配置只接受已授权（打开过）的项目目录；项目外文件要先在编辑器里打开过才允许写回；外部路径拒绝 UNC / 网络位置。
+- **git 调用加固**：只读探测屏蔽 `fsmonitor` / hooks / `diff.external` / pager / `credential.helper`，`diff`、`show`、`log` 追加 `--no-ext-diff --no-textconv`（依赖 textconv 的仓库，改动面板会显示成二进制）；`commit` / `merge` / `rebase` 保留用户 hooks，网络命令保留 `credential.helper`。
+- **远程图片不再自动加载**：对话与表格单元格里的 http(s) 图片默认只给占位，点一下才加载（避免把本机 IP、Referer、阅读行为送给任意图床）；新增「设置 → 对话 → 自动加载远程图片」（默认关）。CSP 的 `img-src` 去掉 `http:`，**明文 http 图片一律不加载**，占位直接置灰说明原因。
+- MCP 的 `env` / `headers` 按 key 合并掩码值（不再用空串覆盖令牌），读改写放进文件锁并走 `atomicWriteText`；日志脱敏补 AWS 访问密钥与 JWT；会话引用正文里的 `</session>` 转义。
+
+### 修复
+
+- **RPC 死锁**：退出回调不再持锁调 `exitErrOf`（以前 Pi 自己退出会把整个客户端连同 `Stop` 卡死）；启动即退出用 `exited` 通道判断，不跨 goroutine 读 `ProcessState`；超时 timer 持锁创建，只在请求仍挂起时才 reject。
+- **Worker 池**：`inflight` 计数保证请求期间不被淘汰，关池统一收集所有客户端（不再漏掉孤儿 Pi 进程）。
+- **会话历史缓存**：同时按 24 条与 256 MB 限制，淘汰按最近使用时间（不再随机删）；增量读取改 `io.ReadFull`，大块追加时不再漏掉后半截。
+- **写文件**：非 Windows 覆盖时保留原文件权限；Windows 改成「原文件先改名 `.bak` 再替换、失败就恢复」，不再先删原文件导致两头落空。
+- **文件监听**：`unwatch` 真的 `Remove` 句柄；新建子目录的监听登记到所属 root，不再刚加上就被移除。
+- **终端 / worktree / 子进程**：终端启动全程持锁避免并发超限；worktree 合并记下原分支并在结束后切回；`git clone` 失败只删本次新建的目录；子进程设 `WaitDelay`，Windows 先 `taskkill /T /F`；网络类 git 命令超时放宽到 30 分钟。
+- **代理**：保留用户原有的 `NO_PROXY` 并并入 localhost / 127.0.0.1 / ::1；系统代理查询加缓存。
+
+### 开发
+
+- `.gitattributes` 固定 Go 源码为 LF，避免 Windows 上 `autocrlf` 检出成 CRLF 后 `gofmt -l` 列满整包。
+- CI：actions 固定到 commit SHA；Linux 跑 `go test -race ./internal/host`；构建前按 secret 注入更新签名公钥，发布时为 `SHA256SUMS.txt` 生成 `.sig`。
+
 ## [0.9.10] - 2026-11-23
 
 ### 性能

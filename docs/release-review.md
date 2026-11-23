@@ -144,6 +144,9 @@ npx mygo build -platform windows/amd64,darwin/universal,linux/amd64
 - [ ] `.github/workflows/build.yml` 的 `build` job 只有 `contents: read`，`release` job 才提升为 `write`。
 - [ ] CI 使用 `actions/setup-go` 读取 `go.mod`，Linux 安装 `fakeroot dpkg rpm zstd`。
 - [ ] 打 tag（`v*`）后三个平台都产出产物，`SHA256SUMS.txt` 覆盖 exe / zip / dmg / tar.gz / deb / rpm。
+- [ ] **更新签名可用**：仓库已配置签名私钥 secret（`gh api repos/<owner>/<repo>/actions/secrets --jq .total_count` ≥ 1），Release 上带 `SHA256SUMS.txt.sig`，且该版本的 `Pi.Desktop.exe` 里内置了公钥。缺任一环，客户端只能「到发布页手动下载」，自动更新会静默失效。
+  - 首次启用：`node scripts/gen-update-key.mjs` → 把输出里的私钥（base64 种子）存进 secret → 发一版**手动升级**的客户端；此后才能验签。
+  - 换密钥：新旧公钥不互相兼容，老客户端会拒装，需要再手动升级一次。
 - [ ] Release 说明用中文，列出新增功能、修复、已知限制与校验方式；优先维护 `docs/releases/v<版本>.md`，CI 使用 `scripts/release-notes.mjs` 生成说明。
 
 ## 7. 已知限制（随 Release 说明）
