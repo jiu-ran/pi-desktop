@@ -190,14 +190,6 @@ function remoteImageButton(url: string): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "md-remote-image";
-  if (/^http:\/\//i.test(url.trim())) {
-    // 明文 http：CSP 的 img-src 只放行 https，点开只会是破图，直接给说明
-    button.dataset.remoteBlocked = "http";
-    button.disabled = true;
-    button.title = `CSP 只允许 https 图片：${url}`;
-    button.textContent = `明文 http 图片已阻止 (${remoteImageDomain(url)})`;
-    return button;
-  }
   button.dataset.remoteUrl = url;
   button.title = url;
   button.textContent = `点击加载远程图片 (${remoteImageDomain(url)})`;
@@ -237,13 +229,6 @@ function decorateBlockedRemoteImages(): void {
 function loadBlockedRemoteImage(button: HTMLElement): void {
   const url = button.dataset.remoteUrl ?? "";
   if (!url) return;
-  if (/^http:\/\//i.test(url.trim())) {
-    // 兜底：老节点上可能没有 disabled，点了也不要把被 CSP 拦下的破图塞进去
-    button.textContent = `明文 http 图片已阻止 (${remoteImageDomain(url)})`;
-    button.dataset.remoteBlocked = "http";
-    delete button.dataset.remoteUrl;
-    return;
-  }
   forcedRemoteImages.add(url);
   const img = document.createElement("img");
   img.src = url;

@@ -608,15 +608,6 @@
   color: var(--text, inherit);
 }
 
-/* 明文 http 图片：CSP 只放行 https，占位不可点，直接说明原因 */
-.md-remote-image[disabled],
-.md-remote-image[data-remote-blocked="http"] {
-  border-style: dotted;
-  border-color: var(--line-2, rgba(127, 127, 127, 0.4));
-  color: var(--fg-3, inherit);
-  cursor: not-allowed;
-}
-
 .md .md-remote-loaded,
 .md-cell-image {
   max-width: 100%;

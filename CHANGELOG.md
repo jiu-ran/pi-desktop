@@ -10,9 +10,9 @@
 ### 安全
 
 - **更新包加 ed25519 签名校验**：下载时先取 `SHA256SUMS.txt` 与 `SHA256SUMS.txt.sig`，用内置公钥验签，再用**验过的清单**比对安装包 SHA-256。没有内置公钥、发布件没签名、验签失败一律不自动安装，只给「到发布页手动下载」；`install()` 也会再拒一次未签名的包。首次启用需要先配好签名密钥并**手动升级一次**（≤0.9.10 的客户端不验签）。
-- **工作区授权收口**：写盘、终端、Git、项目级 MCP 配置只接受已授权（打开过）的项目目录；项目外文件要先在编辑器里打开过才允许写回；外部路径拒绝 UNC / 网络位置。
-- **git 调用加固**：只读探测屏蔽 `fsmonitor` / hooks / `diff.external` / pager / `credential.helper`，`diff`、`show`、`log` 追加 `--no-ext-diff --no-textconv`（依赖 textconv 的仓库，改动面板会显示成二进制）；`commit` / `merge` / `rebase` 保留用户 hooks，网络命令保留 `credential.helper`。
-- **远程图片不再自动加载**：对话与表格单元格里的 http(s) 图片默认只给占位，点一下才加载（避免把本机 IP、Referer、阅读行为送给任意图床）；新增「设置 → 对话 → 自动加载远程图片」（默认关）。CSP 的 `img-src` 去掉 `http:`，**明文 http 图片一律不加载**，占位直接置灰说明原因。
+- **工作区授权收口**：写盘、终端、Git、项目级 MCP 配置只接受已授权（打开过）的项目目录；外部路径拒绝 UNC / 网络位置（Windows 读 SMB 会把 NTLM 凭据发给对方）。项目外文件仍可直接读写保存，只保留护数据的检查（20 MB 上限、二进制拒存、revision 冲突检测）。
+- **git 调用加固**：只读探测屏蔽 `fsmonitor` / hooks / `diff.external` / pager / `credential.helper`，`diff`、`show`、`log` 追加 `--no-ext-diff`（外部 GUI diff 的输出解析不了）；**textconv 保留**，PDF / Word / 图片仍能读出文本 diff。`commit` / `merge` / `rebase` 保留用户 hooks，网络命令保留 `credential.helper`。
+- **远程图片可以直接显示**：对话与表格单元格里的 http(s) 图片默认自动加载，明文 http 也正常显示（CSP 的 `img-src` 放行 `http:`）。介意远程图片把本机 IP / Referer / 阅读行为带给图床时，可在「设置 → 对话 → 自动加载远程图片」关掉，关掉后只显示占位、点一下才加载。老版本存下来的默认值 `false` 会做一次性迁移翻成打开（之后就尊重用户自己的选择）。
 - MCP 的 `env` / `headers` 按 key 合并掩码值（不再用空串覆盖令牌），读改写放进文件锁并走 `atomicWriteText`；日志脱敏补 AWS 访问密钥与 JWT；会话引用正文里的 `</session>` 转义。
 
 ### 修复

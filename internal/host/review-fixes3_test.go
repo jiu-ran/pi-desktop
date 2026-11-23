@@ -61,8 +61,15 @@ func TestGitHardenedArgsProfiles(t *testing.T) {
 	// diff / show：旗标必须插在子命令后、`--` 前，否则会被当成路径。
 	diff := gitHardenedArgs([]string{"diff", "--unified=3", "--", "a.txt"})
 	diffJoined := strings.Join(diff, " ")
-	if !strings.Contains(diffJoined, "--no-ext-diff") || !strings.Contains(diffJoined, "--no-textconv") {
-		t.Fatalf("diff 应带 --no-ext-diff/--no-textconv：%v", diff)
+	if !strings.Contains(diffJoined, "--no-ext-diff") {
+		t.Fatalf("diff 应带 --no-ext-diff（外部 GUI diff 的输出解析不了）：%v", diff)
+	}
+	// textconv 是 PDF / Word / 图片能读出文本 diff 的唯一途径，属于可视化本身，不能被加固回去。
+	if strings.Contains(diffJoined, "--no-textconv") {
+		t.Fatalf("diff 不该屏蔽 textconv，否则 PDF 等文件只能显示二进制：%v", diff)
+	}
+	if strings.Contains(strings.Join(gitHardenedArgs([]string{"show", "--patch"}), " "), "--no-textconv") {
+		t.Fatal("show 也不该屏蔽 textconv")
 	}
 	if strings.Index(diffJoined, "--no-ext-diff") > strings.Index(diffJoined, " -- a.txt") {
 		t.Fatalf("旗标落在 `--` 之后会变成路径：%v", diff)
@@ -403,7 +410,7 @@ func waitFor(t *testing.T, timeout time.Duration, check func() bool) {
 // ---------- 5. ReadLocalImage ----------
 
 func TestReadLocalImage(t *testing.T) {
-	h := &Host{authorized: map[string]string{}, externalFiles: map[string]string{}}
+	h := &Host{authorized: map[string]string{}}
 	cwd := t.TempDir()
 	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
 	inside := filepath.Join(cwd, "a.png")
@@ -436,16 +443,13 @@ func TestReadLocalImage(t *testing.T) {
 	if _, err := h.readLocalImage(cwd, `\\server\share\a.png`); err == nil {
 		t.Fatal("网络路径应拒绝")
 	}
-	// 外部图片可以读，但不能因此获得写盘权限（不登记 externalFiles）
+	// 项目外的图片也能读（对话里贴的截图通常不在项目内）
 	outside := filepath.Join(t.TempDir(), "b.png")
 	if err := os.WriteFile(outside, png, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.readLocalImage(cwd, outside); err != nil {
 		t.Fatalf("项目外图片应可读取：%v", err)
-	}
-	if _, ok := h.externalFiles[normPathKey(outside)]; ok {
-		t.Fatal("读图片不该登记 externalFiles（会顺带给出写盘权限）")
 	}
 }
 

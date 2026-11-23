@@ -276,7 +276,7 @@ function onThinkingChange(value: string): void {
     <SettingRow
       clickable
       label="自动加载远程图片"
-      hint="对话里的 http(s) 图片默认只显示占位符，点一下才加载；打开后自动加载（会把本机 IP 与阅读行为暴露给图床）"
+      hint="默认直接显示对话里的 http(s) 图片；关掉后只显示占位符、点一下才加载（远程图片会把本机 IP 与阅读行为带给图床）"
     >
       <input v-model="appSettings.autoLoadRemoteImages" type="checkbox" class="settings-switch" />
     </SettingRow>

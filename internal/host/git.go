@@ -99,10 +99,11 @@ func gitHardenedArgs(args []string) []string {
 		return config
 	}
 	out := append(config, args[0])
-	// diff / show / log 的 ext-diff 与 textconv 会把仓库里的配置当命令执行。
-	// 旗标要放在子命令后面（此时还没有 ``--``，直接插在子命令之后就不会变成路径）。
+	// ext-diff 会把 diff 交给外部 GUI 程序（Beyond Compare 这类）：它们的输出不是文本，
+	// 拿回来也解析不了，所以只屏蔽它；textconv 是「把 PDF/Word 转成文本」的机制，
+	// 直接决定可视化效果，不能挡。
 	if profile == gitProbeProfile && noExtDiffCommands(args[0]) {
-		out = append(out, "--no-ext-diff", "--no-textconv")
+		out = append(out, "--no-ext-diff")
 	}
 	return append(out, args[1:]...)
 }

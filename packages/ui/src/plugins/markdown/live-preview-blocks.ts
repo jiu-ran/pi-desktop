@@ -650,13 +650,6 @@ export class TableWidget extends WidgetType {
     const url = placeholder.dataset.remoteUrl ?? "";
     if (!url) return;
     event.preventDefault();
-    if (/^http:\/\//i.test(url.trim())) {
-      // CSP 只放行 https，明文 http 插进去只会是破图（见 index.html 的 img-src）
-      placeholder.textContent = "明文 http 图片已阻止";
-      placeholder.dataset.remoteBlocked = "http";
-      delete placeholder.dataset.remoteUrl;
-      return;
-    }
     // 同一节点上还有「聚焦即编辑」的 click 监听，必须立刻停掉它，
     // 否则一点图片就切成源码，图片还没看见就没了。
     event.stopImmediatePropagation();

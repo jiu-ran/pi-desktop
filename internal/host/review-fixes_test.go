@@ -96,22 +96,21 @@ func TestGitBranchReadsAbsoluteGitdir(t *testing.T) {
 	}
 }
 
-func TestExternalWriteNeedsPriorRead(t *testing.T) {
+func TestExternalWriteKeepsDataGuards(t *testing.T) {
 	cwd := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "notes.txt")
 	writeFile(t, outside, "old")
 	h := &Host{authorized: map[string]string{}, attachments: map[string]string{}, watcher: newWorkspaceWatcher(nil)}
 	defer h.watcher.close()
 
-	if _, err := h.writeWorkspaceFile(cwd, outside, "pwned", ""); err == nil {
-		t.Fatal("没在编辑器里打开过的项目外文件不应允许写入")
+	// 项目外文件不再要求「先在编辑器里打开过」：桌面端的本分是把内容如实读写。
+	if _, err := h.writeWorkspaceFile(cwd, outside, "new", ""); err != nil {
+		t.Fatalf("项目外文本应可直接保存：%v", err)
 	}
-	data, err := h.readWorkspaceFile(cwd, outside)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.writeWorkspaceFile(cwd, outside, "new", asString(data["revision"])); err != nil {
-		t.Fatalf("打开过的项目外文件应可保存：%v", err)
+	// 但 revision 冲突检测必须还在：磁盘上被别人改过就挡住，别覆盖
+	writeFile(t, outside, "changed-by-someone-else")
+	if _, err := h.writeWorkspaceFile(cwd, outside, "mine", "stale-revision"); err == nil {
+		t.Fatal("revision 过期时应拒绝覆盖")
 	}
 	inside := filepath.Join(cwd, "a.txt")
 	writeFile(t, inside, "x")

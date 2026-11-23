@@ -228,9 +228,6 @@ func (h *Host) readWorkspaceFile(cwd, requested string) (map[string]any, error) 
 	}
 	base["content"] = string(data)
 	base["revision"] = sha256Hex(data)
-	if external {
-		h.rememberExternalFile(target)
-	}
 	return base, nil
 }
 
@@ -238,8 +235,8 @@ func (h *Host) readWorkspaceFile(cwd, requested string) (map[string]any, error) 
 const localImageMaxBytes = 20 * 1024 * 1024
 
 // readLocalImage 把一张图片读成 data URL，只给对话里的图片用。
-// 与 readWorkspaceFile 的区别：只接受图片（扩展名 + 文件头魔数）、不登记 externalFiles、
-// 不监听目录——它是纯展示用途，不该因为显示一张图就给写盘开权限。
+// 与 readWorkspaceFile 的区别：只接受图片（扩展名 + 文件头魔数）、不监听目录、
+// 不支持 UNC——纯展示用途，不参与编辑流程。
 func (h *Host) readLocalImage(cwd, requested string) (map[string]any, error) {
 	_, target, external, err := workspaceFilePath(cwd, requested)
 	if err != nil {
@@ -281,32 +278,13 @@ func (h *Host) readLocalImage(cwd, requested string) (map[string]any, error) {
 	}, nil
 }
 
-// rememberExternalFile 记下在编辑器里打开过的项目外文件。只有这些允许写回，
-// 免得写文件接口被用来覆盖磁盘上任意一个文件。
-func (h *Host) rememberExternalFile(target string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.externalFiles == nil {
-		h.externalFiles = map[string]string{}
-	}
-	h.externalFiles[normPathKey(target)] = target
-}
-
-func (h *Host) isRememberedExternalFile(target string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, ok := h.externalFiles[normPathKey(target)]
-	return ok
-}
-
 func (h *Host) writeWorkspaceFile(cwd, requested, content, expectedRevision string) (map[string]any, error) {
 	root, target, external, err := workspaceFilePath(cwd, requested)
 	if err != nil {
 		return nil, err
 	}
-	if external && !within(root, target) && !h.isRememberedExternalFile(target) {
-		return nil, errors.New("项目目录外的文件只能保存在编辑器里打开过的，请先重新打开再保存")
-	}
+	// 项目外的文本文件照常允许保存（桌面端的本分是把内容如实读写，不是设门）。
+	// 仍然拦住的只有下面这些「护数据」的检查：20 MB 上限、二进制拒存、revision 冲突。
 	if len(content) > textPreviewMax {
 		return nil, errors.New("文件超过 20 MB，暂不支持保存")
 	}

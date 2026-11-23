@@ -92,8 +92,8 @@ export interface AppSettings {
   /** 对话消息排版密度 */
   messageDensity: "comfortable" | "compact";
   /**
-   * 对话里的 http(s) 图片是否自动加载。默认关闭：远程图片会把本机 IP、
-   * Referer 和「你是否看过这条消息」泄露给图床，需要用户点一下才加载。
+   * 对话里的 http(s) 图片是否自动加载。默认打开：桌面端要把内容如实呈现出来；
+   * 介意远程图片把本机 IP / Referer 送给图床的用户可以关掉，关掉后只显示占位、点一下才加载。
    */
   autoLoadRemoteImages: boolean;
   /**
@@ -154,7 +154,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalCustomPath: "",
   terminalCustomArgs: [],
   messageDensity: "comfortable",
-  autoLoadRemoteImages: false,
+  autoLoadRemoteImages: true,
   activityDetail: "grouped",
   activityMerge: true,
   uiZoom: 1,
@@ -174,13 +174,38 @@ export const DEFAULT_SETTINGS: AppSettings = {
   markdownView: "preview",
 }
 
+// 0.9.11 之前「自动加载远程图片」默认是关闭的，老设置里存着 false（那是默认值，不是用户选择）。
+// 这里做一次性迁移：把老值翻成打开，让升级后图片直接显示；之后用户自己关掉会存 false，
+// 而迁移标记已经写过，不会被再翻回来。
+const REMOTE_IMAGES_MIGRATION_KEY = "pi-desktop.remote-images-default-on";
+
+function migrateRemoteImagesDefault(settings: AppSettings): AppSettings {
+  if (typeof localStorage === "undefined") return settings;
+  try {
+    // 已经迁移过：之后就是用户自己的选择，不能再翻回去
+    if (localStorage.getItem(REMOTE_IMAGES_MIGRATION_KEY) === "1") return settings;
+  } catch {
+    return settings;
+  }
+  if (settings.autoLoadRemoteImages !== false) {
+    // 本来就是打开的，只补一个标记
+    writeStorage(REMOTE_IMAGES_MIGRATION_KEY, "1");
+    return settings;
+  }
+  // 把翻过来的值同步落盘：只在内存里改的话，下次启动读到的仍然是 false，迁移就白做了。
+  const next = { ...settings, autoLoadRemoteImages: true };
+  writeStorage(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+  writeStorage(REMOTE_IMAGES_MIGRATION_KEY, "1");
+  return next;
+}
+
 function loadSavedSettings(): AppSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
-    return {
+    const loaded: AppSettings = {
       sendShortcut: parsed.sendShortcut === "ctrl-enter" ? "ctrl-enter" : "enter",
       streamingMode: parsed.streamingMode === "steer" ? "steer" : "followUp",
       autoSave: ["off", "afterDelay", "onFocusChange", "onWindowChange"].includes(parsed.autoSave)
@@ -233,6 +258,7 @@ function loadSavedSettings(): AppSettings {
       // 试过一版「分栏」写法（split），升级后统一回到预览
       markdownView: parsed.markdownView === "source" ? "source" : "preview",
     };
+    return migrateRemoteImagesDefault(loaded);
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

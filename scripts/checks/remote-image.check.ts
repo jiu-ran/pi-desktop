@@ -37,34 +37,37 @@ const read = (file: string) => readFileSync(path.join(root, file), "utf8");
   // 工作区里的相对路径不受影响：由宿主按工作区读盘
   assert.match(renderInlineMarkdown("![a](./a.png)"), /<img alt="a" src="\.\/a\.png">/);
 
-  // 明文 http 一律不输出 <img>，即使打开了「自动加载远程图片」也一样（CSP 会拦成破图）
-  for (const options of [undefined, { allowRemoteImages: true } as const]) {
-    const plain = renderInlineMarkdown("![shot](http://img.example.com/a.png)", options);
-    assert.ok(!plain.includes("<img"), `明文 http 不该输出 <img>：${plain}`);
-    assert.match(plain, /data-remote-blocked="http"/, plain);
-    assert.match(plain, /明文 http 图片已阻止 \(img\.example\.com\)/, plain);
-    assert.ok(!plain.includes("data-remote-url"), `明文 http 不该给可点击占位：${plain}`);
-  }
+  // 明文 http 也是正常图片（桌面端要如实显示）：默认给占位，打开自动加载就直接输出 <img>
+  const plainPlaceholder = renderInlineMarkdown("![shot](http://img.example.com/a.png)");
+  assert.match(plainPlaceholder, /data-remote-url="http:\/\/img\.example\.com\/a\.png"/, plainPlaceholder);
+  assert.ok(!plainPlaceholder.includes("<img"), plainPlaceholder);
+  const plainAllowed = renderInlineMarkdown("![shot](http://img.example.com/a.png)", { allowRemoteImages: true });
+  assert.match(plainAllowed, /<img alt="shot" src="http:\/\/img\.example\.com\/a\.png">/, plainAllowed);
+  assert.ok(!plainAllowed.includes("data-remote-blocked"), plainAllowed);
 }
 
-// 2) CSP：img-src 保留 https: / data: / blob:，但不给 http:
+// 2) CSP：img-src 放行 https: / http: / data: / blob:（明文 http 图片也要能显示）
 {
   const html = read("packages/ui/index.html");
   const meta = /content="([^"]*img-src[^"]*)"/.exec(html);
   assert.ok(meta, "index.html 里应有 CSP");
   const imgSrc = /img-src([^;]*);/.exec(meta![1]!)![1]!.trim();
   assert.ok(imgSrc.split(/\s+/).includes("https:"), `img-src 应放行 https：${imgSrc}`);
-  assert.ok(!imgSrc.split(/\s+/).includes("http:"), `img-src 不该放行明文 http：${imgSrc}`);
+  assert.ok(imgSrc.split(/\s+/).includes("http:"), `img-src 应放行明文 http（否则点开是破图）：${imgSrc}`);
   for (const scheme of ["data:", "blob:", "'self'"]) {
     assert.ok(imgSrc.split(/\s+/).includes(scheme), `img-src 应保留 ${scheme}：${imgSrc}`);
   }
 }
 
-// 3) 设置项：默认关闭、可持久化
+// 3) 设置项：默认打开（可视化优先）、可持久化
 {
   const settings = read("packages/ui/src/services/settings.ts");
   assert.match(settings, /autoLoadRemoteImages: boolean/, "AppSettings 里应有 autoLoadRemoteImages");
-  assert.match(settings, /autoLoadRemoteImages: false,/, "远程图片自动加载默认必须关闭");
+  assert.match(settings, /autoLoadRemoteImages: true,/, "远程图片默认直接显示（可视化优先）");
+  // 老设置里存的是旧的默认值 false，需要一次性迁移成打开（用户之后手动关掉的不受影响）
+  assert.match(settings, /function migrateRemoteImagesDefault\(/, "缺少「旧默认值」的一次性迁移");
+  assert.match(settings, /REMOTE_IMAGES_MIGRATION_KEY/, "迁移要靠一个一次性标记，不能每次启动都覆盖用户选择");
+  assert.match(settings, /return migrateRemoteImagesDefault\(loaded\)/, "读设置时要调用迁移");
   assert.match(settings, /typeof parsed\.autoLoadRemoteImages === "boolean"/, "读取设置时要校验类型");
   assert.match(read("packages/ui/src/components/overlays/settings/ConversationSettings.vue"), /自动加载远程图片/);
 }

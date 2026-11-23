@@ -17,11 +17,6 @@ function isRemoteImage(src: string): boolean {
   return /^(?:https?:)?\/\//i.test(src.trim());
 }
 
-/** 明文 http 的远程图片：CSP 只放行 https，插进去也只会是破图，所以永远只给占位说明 */
-export function isBlockedRemoteImage(src: string): boolean {
-  return /^http:\/\//i.test(src.trim());
-}
-
 function remoteImageHost(src: string): string {
   const match = /^(?:https?:)?\/\/(?:[^@/?#]+@)?([^/?#:]+)/i.exec(src.trim());
   return (match?.[1] ?? "").replace(/^www\./i, "") || "远程图片";
@@ -66,10 +61,6 @@ export function renderInlineMarkdown(source: string, options: InlineMarkdownOpti
   const allowRemote = options.allowRemoteImages === true;
   html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt: string, src: string) => {
     if (!SAFE_HREF.test(src)) return match;
-    if (isBlockedRemoteImage(src)) {
-      // 明文 http：CSP 的 img-src 只到 https，点了也是破图，直接说明原因
-      return `<span class="md-remote-image" data-remote-blocked="http" aria-disabled="true">明文 http 图片已阻止 (${remoteImageHost(src)})</span>`;
-    }
     if (isRemoteImage(src) && !allowRemote) {
       // 占位：真正的 <img> 要等用户点一下才插进去（见 live-preview-blocks 的点击处理）
       return `<span class="md-remote-image" role="button" tabindex="0" data-remote-url="${src}">点击加载远程图片 (${remoteImageHost(src)})</span>`;
