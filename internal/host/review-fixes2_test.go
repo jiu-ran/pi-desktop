@@ -320,7 +320,9 @@ func TestWatchWorkspaceRequiresAuthorization(t *testing.T) {
 		t.Fatalf("授权后应监听：%v", roots)
 	}
 	watched := h.watcher.watchedSnapshot()
-	abs, _ := filepath.Abs(root)
+	// watchWorkspace 拿到的是授权时规范化过的路径（realPath），这里也要按同样方式算键：
+	// macOS 临时目录在 /private/var 下、Windows 可能带 8.3 短名，直接 Abs 对不上。
+	abs := canonicalPath(root)
 	if len(watched[abs]) == 0 {
 		t.Fatal("应当记录加给 fsnotify 的目录")
 	}

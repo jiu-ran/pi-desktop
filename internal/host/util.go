@@ -26,9 +26,23 @@ import (
 
 func isWindows() bool { return runtime.GOOS == "windows" }
 
+// canonicalPath 尽量把路径解析成真实路径（macOS 的 /var → /private/var、Windows 的 8.3
+// 短名、指向目录的符号链接），解析不到（路径不存在）就退回 filepath.Abs。
+func canonicalPath(p string) string {
+	if real, err := realPath(p); err == nil {
+		return real
+	}
+	abs, _ := filepath.Abs(p)
+	return abs
+}
+
 func samePath(a, b string) bool {
-	x, _ := filepath.Abs(a)
-	y, _ := filepath.Abs(b)
+	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
+		return false
+	}
+	// 必须两边都规范化：git worktree list 给出的是真实路径，界面上传的是用户选的原路径，
+	// 只做 Abs 在 macOS（临时目录在 /private/var 下）和 Windows（8.3 短名）上会判不相等。
+	x, y := canonicalPath(a), canonicalPath(b)
 	if isWindows() {
 		return strings.EqualFold(filepath.Clean(x), filepath.Clean(y))
 	}
