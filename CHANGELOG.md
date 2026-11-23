@@ -5,7 +5,9 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.9.11] - 2026-11-23
+
+> 这一版开始校验更新包签名，**需要手动升级一次**：≤0.9.10 的客户端不验签，从 0.9.11 起才会在下载后校验 `SHA256SUMS.txt.sig`。
 
 ### 安全
 
