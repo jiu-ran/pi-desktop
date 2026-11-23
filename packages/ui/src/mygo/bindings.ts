@@ -256,6 +256,10 @@ export const Host = {
   readClipboard(): Promise<string> {
     return call("Host.ReadClipboard");
   },
+  /** ReadLocalImage 把对话里的本地图片读成 data URL（不登记写盘权限，详见 readLocalImage）。 */
+  readLocalImage(cwd: string, path: string): Promise<Record<string, unknown>> {
+    return call("Host.ReadLocalImage", cwd, path);
+  },
   readWorkspaceFile(cwd: string, relative: string): Promise<Record<string, unknown>> {
     return call("Host.ReadWorkspaceFile", cwd, relative);
   },

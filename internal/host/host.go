@@ -38,6 +38,9 @@ type Host struct {
 	authorized  map[string]string
 	attachments map[string]string
 
+	// externalFiles 是编辑器里打开过的项目外文件，只有它们允许写回
+	externalFiles map[string]string
+
 	closing        bool
 	dirty          bool
 	startGen       map[string]int

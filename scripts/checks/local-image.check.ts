@@ -32,11 +32,14 @@ for (const src of [
   assert.equal(ref.path, src, `路径不该被改写：${src}`);
 }
 
-// 3) UNC 路径（反斜杠与正斜杠两种写法都当绝对路径）
-for (const src of ["\\\\server\\share\\a.png", "//server/share/a.png"]) {
-  const ref = imageRef(src);
-  assert.equal(ref.kind, "local", `UNC 应是本地文件：${src}`);
-  assert.equal(ref.absolute, true, `UNC 应是绝对路径：${src}`);
+// 3) UNC / 网络位置：一律不加载（宿主层也拒，Windows 读 SMB 会把 NTLM 凭据发给对方）
+for (const src of [
+  "\\\\server\\share\\a.png",
+  "//server/share/a.png",
+  "\\\\?\\UNC\\server\\share\\a.png",
+  "file://server/share/a.png",
+]) {
+  assert.deepEqual(imageRef(src), { kind: "remote" }, `网络位置不应加载：${src}`);
 }
 
 // 4) POSIX 绝对路径
@@ -55,8 +58,6 @@ function local(src: string) {
 assert.equal(local("file:///C:/Users/me/a%20b.png").path, "C:/Users/me/a b.png");
 assert.equal(local("file:///C:/Users/me/a%20b.png").absolute, true);
 assert.equal(local("file:///home/me/a.png").path, "/home/me/a.png");
-assert.equal(local("file://server/share/a.png").path, "//server/share/a.png");
-assert.equal(local("file://server/share/a.png").absolute, true);
 // 转义坏了也不能炸
 assert.equal(local("file:///C:/a%E0%A4%A.png").kind, "local");
 

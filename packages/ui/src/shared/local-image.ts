@@ -31,9 +31,14 @@ function decode(value: string): string {
   }
 }
 
-/** Windows 盘符 / UNC（`\\\\srv` 或 `//srv`）/ POSIX 绝对路径 */
+/** Windows 盘符 / POSIX 绝对路径 */
 function isAbsolutePath(value: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(value) || /^[\\/]{2}/.test(value) || value.startsWith("/");
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("/");
+}
+
+/** UNC / 网络位置（`\\\\srv\\share`、`//srv/share`、`\\\\?\\UNC\\srv`） */
+function isUncPath(value: string): boolean {
+  return /^[\\/]{2}/.test(value);
 }
 
 /** `file:///C:/a%20b.png` → `C:/a b.png`；`file:///home/u/a.png` → `/home/u/a.png` */
@@ -54,8 +59,11 @@ export function imageRef(src: string): ImageRef {
   if (PROTOCOL_RELATIVE.test(value)) return { kind: "remote" };
   if (/^file:\/\//i.test(value)) {
     const path = fromFileUrl(value);
-    return path ? { kind: "local", path, absolute: isAbsolutePath(path) } : { kind: "remote" };
+    // 网络位置：Windows 访问 SMB 时会把 NTLM 凭据发给对方，宿主也会拒，所以不去加载。
+    if (!path || isUncPath(path)) return { kind: "remote" };
+    return { kind: "local", path, absolute: isAbsolutePath(path) };
   }
+  if (isUncPath(value)) return { kind: "remote" };
   return { kind: "local", path: value, absolute: isAbsolutePath(value) };
 }
 

@@ -598,6 +598,8 @@ export interface PiDesktopBridge {
   }>;
   listDirectory: (cwd: string, relative: string) => Promise<WorkspaceEntry[]>;
   readWorkspaceFile: (cwd: string, relative: string) => Promise<WorkspaceFileData>;
+  /** 把对话里的图片读成 data URL：只接受图片（扩展名 + 魔数），不登记写盘权限 */
+  readLocalImage: (cwd: string, path: string) => Promise<{ dataUrl: string; mimeType: string; size: number; path: string }>;
   /** 用系统浏览器打开 http(s) / mailto 链接（markdown 里 Ctrl+点击） */
   openExternalUrl?: (url: string) => Promise<boolean>;
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) => Promise<WorkspaceFileData>;

@@ -38,8 +38,77 @@ func (h *Host) runGit(cwd string, args ...string) (string, error) {
 	return runGitEnv(cwd, env, args...)
 }
 
+// gitSafetyProfile 区分三类 git 调用，加固强度不同：
+//
+//   - 只读探测：仓库配置里的 core.fsmonitor / core.hooksPath / diff.external /
+//     core.pager / credential.helper 全部屏蔽。打开别人的仓库时，这些配置项
+//     本身就是「打开即执行」的入口，而探测类命令又不需要任何凭据。
+//   - 网络操作（clone/fetch/pull/push）：保留用户的 credential.helper（否则私有库
+//     全部拉不动），但仍屏蔽 fsmonitor / hooks / ext-diff——这些只在本地执行代码。
+//   - 用户主动发起的写操作（commit/merge/rebase）：hooks 是用户自己的提交流程
+//     （格式化、提交信息检查），保留；只屏蔽 fsmonitor。
+
+type gitSafetyProfile int
+
+const (
+	gitProbeProfile gitSafetyProfile = iota
+	gitNetworkProfile
+	gitUserWriteProfile
+)
+
+func gitSafetyProfileOf(args []string) gitSafetyProfile {
+	if len(args) == 0 {
+		return gitProbeProfile
+	}
+	switch args[0] {
+	case "clone", "fetch", "pull", "push":
+		return gitNetworkProfile
+	case "commit", "merge", "rebase":
+		return gitUserWriteProfile
+	}
+	return gitProbeProfile
+}
+
+// noExtDiffCommands 是会调用外部 diff / textconv 程序的命令。
+func noExtDiffCommands(command string) bool {
+	switch command {
+	case "diff", "show", "log", "whatchanged":
+		return true
+	}
+	return false
+}
+
+// gitEmptyHooksDir 是一个空目录：把 core.hooksPath 指过来等于禁用全部钩子。
+func gitEmptyHooksDir() string {
+	dir := filepath.Join(userDataDir(), "git", "empty-hooks")
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
+}
+
+// gitHardenedArgs 把加固参数拼到真正的 git 参数前面（-c 必须出现在子命令之前）。
+func gitHardenedArgs(args []string) []string {
+	profile := gitSafetyProfileOf(args)
+	config := []string{"-c", "core.fsmonitor=", "-c", "core.pager=cat"}
+	if profile != gitUserWriteProfile {
+		config = append(config, "-c", "core.hooksPath="+gitEmptyHooksDir())
+	}
+	if profile == gitProbeProfile {
+		config = append(config, "-c", "diff.external=", "-c", "credential.helper=")
+	}
+	if len(args) == 0 {
+		return config
+	}
+	out := append(config, args[0])
+	// diff / show / log 的 ext-diff 与 textconv 会把仓库里的配置当命令执行。
+	// 旗标要放在子命令后面（此时还没有 ``--``，直接插在子命令之后就不会变成路径）。
+	if profile == gitProbeProfile && noExtDiffCommands(args[0]) {
+		out = append(out, "--no-ext-diff", "--no-textconv")
+	}
+	return append(out, args[1:]...)
+}
+
 func runGitEnv(cwd string, env map[string]string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", gitHardenedArgs(args)...)
 	cmd.Dir = cwd
 	cmd.Env = envSlice(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	hideWindow(cmd)

@@ -78,6 +78,9 @@ var (
 	redactKeyRe    = regexp.MustCompile(`(?i)((?:api[-_]?key|token|secret|password|passwd|authorization)["']?\s*[:=]\s*["']?)[^\s"',;}]{6,}`)
 	redactDataRe   = regexp.MustCompile(`(?i)data:([a-z]+\/[a-z0-9.+-]+);base64,[A-Za-z0-9+/=]{64,}`)
 	redactB64Re    = regexp.MustCompile(`\b[A-Za-z0-9+/]{200,}={0,2}\b`)
+	// AWS 访问密钥（AKIA… 这类长期凭证）与 JWT（eyJ… 三段 base64url）。
+	redactAWSRe = regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)
+	redactJWTRe = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 )
 
 func redactLog(input string) string {
@@ -85,6 +88,8 @@ func redactLog(input string) string {
 	text = redactGHRe.ReplaceAllString(text, "gh*_***")
 	text = redactSlackRe.ReplaceAllString(text, "xox*-***")
 	text = redactGoogleRe.ReplaceAllString(text, "AIza***")
+	text = redactAWSRe.ReplaceAllString(text, "AKIA***")
+	text = redactJWTRe.ReplaceAllString(text, "eyJ***")
 	text = redactBearerRe.ReplaceAllString(text, "$1***")
 	text = redactKeyRe.ReplaceAllString(text, "$1***")
 	text = redactDataRe.ReplaceAllString(text, "data:$1;base64,<省略>")

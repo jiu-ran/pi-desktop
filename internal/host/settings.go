@@ -217,7 +217,7 @@ func trustInfo(cwd string) (trusted, writable bool) {
 	return trusted, writable
 }
 
-func setProjectTrust(cwd, action string) map[string]any {
+func setProjectTrust(cwd, action string) (map[string]any, error) {
 	agentDir := agentDirPath()
 	settings := readSettings(cwd)
 	defaultTrust := asString(settings.Global["defaultProjectTrust"])
@@ -237,14 +237,17 @@ func setProjectTrust(cwd, action string) map[string]any {
 		updates = []update{{target, true}}
 	case "distrust":
 		updates = []update{{target, false}}
-	default:
+	case "trust-parent":
 		if parent == target {
 			updates = []update{{target, true}}
 		} else {
 			updates = []update{{parent, true}, {target, nil}}
 		}
+	default:
+		// 以前任何未知动作都会落到这里信任上级目录，界面传错一个值就等于替用户做了决定。
+		return nil, errors.New("项目信任操作无效（只支持 trust / distrust / trust-parent）")
 	}
-	_ = withFileWrite(file, func() error {
+	if err := withFileWrite(file, func() error {
 		store, _ := readTrustStore(file)
 		for _, item := range updates {
 			if item.decision == nil {
@@ -254,8 +257,10 @@ func setProjectTrust(cwd, action string) map[string]any {
 			}
 		}
 		return writeTrustStore(file, store)
-	})
-	return projectTrustStatus(cwd, defaultTrust)
+	}); err != nil {
+		return nil, err
+	}
+	return projectTrustStatus(cwd, defaultTrust), nil
 }
 
 // ---------- 新会话默认模型 / 思考等级 ----------

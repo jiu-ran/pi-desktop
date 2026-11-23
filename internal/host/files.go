@@ -228,13 +228,84 @@ func (h *Host) readWorkspaceFile(cwd, requested string) (map[string]any, error) 
 	}
 	base["content"] = string(data)
 	base["revision"] = sha256Hex(data)
+	if external {
+		h.rememberExternalFile(target)
+	}
 	return base, nil
+}
+
+// localImageMaxBytes 是内嵌图片的上限：data URL 会让内存翻 1.33 倍，再大就不合适了。
+const localImageMaxBytes = 20 * 1024 * 1024
+
+// readLocalImage 把一张图片读成 data URL，只给对话里的图片用。
+// 与 readWorkspaceFile 的区别：只接受图片（扩展名 + 文件头魔数）、不登记 externalFiles、
+// 不监听目录——它是纯展示用途，不该因为显示一张图就给写盘开权限。
+func (h *Host) readLocalImage(cwd, requested string) (map[string]any, error) {
+	_, target, external, err := workspaceFilePath(cwd, requested)
+	if err != nil {
+		return nil, err
+	}
+	if external {
+		if _, err := realPath(target); err != nil {
+			return nil, errors.New("图片不存在或无法访问")
+		}
+	} else if err := assertRealWorkspacePath(cwd, target, false); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(target)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("图片不存在或无法访问")
+	}
+	if imageMIMEByExt[strings.ToLower(filepath.Ext(target))] == "" {
+		return nil, errors.New("只能读取图片文件")
+	}
+	if info.Size() > localImageMaxBytes {
+		return nil, errors.New("图片超过 20 MB，暂不支持内嵌预览")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, errors.New("图片读取失败")
+	}
+	// 光看扩展名不够：SVG 没有魔数，其余格式必须真的像图片，否则 HTML / 脚本会被
+	// 当成 image/png 塞进 data URL。
+	mime := sniffImageMIME(data)
+	if mime == "" {
+		if strings.ToLower(filepath.Ext(target)) != ".svg" {
+			return nil, errors.New("文件内容不是可识别的图片")
+		}
+		mime = "image/svg+xml"
+	}
+	return map[string]any{
+		"path": target, "mimeType": mime, "size": info.Size(),
+		"dataUrl": "data:" + mime + ";base64," + base64Encode(data),
+	}, nil
+}
+
+// rememberExternalFile 记下在编辑器里打开过的项目外文件。只有这些允许写回，
+// 免得写文件接口被用来覆盖磁盘上任意一个文件。
+func (h *Host) rememberExternalFile(target string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.externalFiles == nil {
+		h.externalFiles = map[string]string{}
+	}
+	h.externalFiles[normPathKey(target)] = target
+}
+
+func (h *Host) isRememberedExternalFile(target string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.externalFiles[normPathKey(target)]
+	return ok
 }
 
 func (h *Host) writeWorkspaceFile(cwd, requested, content, expectedRevision string) (map[string]any, error) {
 	root, target, external, err := workspaceFilePath(cwd, requested)
 	if err != nil {
 		return nil, err
+	}
+	if external && !within(root, target) && !h.isRememberedExternalFile(target) {
+		return nil, errors.New("项目目录外的文件只能保存在编辑器里打开过的，请先重新打开再保存")
 	}
 	if len(content) > textPreviewMax {
 		return nil, errors.New("文件超过 20 MB，暂不支持保存")
@@ -288,6 +359,10 @@ func (h *Host) openWorkspacePath(cwd, requested string) (string, error) {
 		if _, err := realPath(target); err != nil {
 			return "", errors.New("文件不存在或无法访问")
 		}
+		// 项目外的脚本/可执行文件不用系统程序打开：那等于双击运行一个界面刚拿到的路径。
+		if isDangerousOpenPath(target) {
+			return "", errors.New("项目外的可执行文件和脚本不能用系统程序直接打开，请改用「在文件管理器中显示」")
+		}
 	} else if err := assertRealWorkspacePath(cwd, target, false); err != nil {
 		return "", err
 	}
@@ -295,8 +370,30 @@ func (h *Host) openWorkspacePath(cwd, requested string) (string, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("文件不存在或无法打开")
 	}
-	h.watcher.watch(cwd)
+	h.watchWorkspace(cwd)
 	return target, nil
+}
+
+// isNetworkPath 判断 UNC / 网络位置（`\\srv\share`、`//srv/share`、`\\?\UNC\srv`）。
+// Windows 访问 SMB 时会先向对方发 NTLM 凭据，而对话里的 markdown 图片、文件链接
+// 可以带任意路径进来，所以外部路径一律不接网络位置。
+func isNetworkPath(path string) bool {
+	if len(path) < 2 {
+		return false
+	}
+	first, second := path[0], path[1]
+	return (first == '\\' || first == '/') && (second == '\\' || second == '/')
+}
+
+// dangerousOpenExts 是交给系统程序打开时会被直接执行/加载的脚本类扩展名。
+var dangerousOpenExts = map[string]bool{
+	".exe": true, ".bat": true, ".cmd": true, ".com": true, ".ps1": true,
+	".vbs": true, ".js": true, ".jse": true, ".wsf": true, ".msi": true,
+	".lnk": true, ".scr": true, ".hta": true, ".cpl": true,
+}
+
+func isDangerousOpenPath(path string) bool {
+	return dangerousOpenExts[strings.ToLower(filepath.Ext(path))]
 }
 
 func workspaceFilePath(cwd, requested string) (root, target string, external bool, err error) {
@@ -309,6 +406,9 @@ func workspaceFilePath(cwd, requested string) (root, target string, external boo
 	}
 	raw := strings.TrimSpace(requested)
 	if filepath.IsAbs(raw) {
+		if isNetworkPath(raw) {
+			return "", "", false, errors.New("不支持网络位置（UNC）上的文件，请先把文件复制到本机")
+		}
 		target, _ = filepath.Abs(raw)
 		return root, target, true, nil
 	}

@@ -7,6 +7,7 @@ import MarkdownCodeBlock from "./MarkdownCodeBlock.vue";
 import ImageLightbox from "../../components/chat/ImageLightbox.vue";
 import { useKernel } from "../../kernel/use-kernel.ts";
 import { imageRef, imageTargets, replaceImageTargets } from "../../shared/local-image.ts";
+import { appSettings } from "../../services/settings.ts";
 import { mermaidOptions, mermaidRender } from "./markdown.ts";
 
 import { extractMermaidCodes, watchMermaidExport } from "./mermaid-export.ts";
@@ -154,20 +155,104 @@ function readLocalImage(imagePath: string): Promise<string | null> {
   const cached = imageCache.get(imagePath);
   if (cached) return cached;
   const pending = workbench
-    .readWorkspaceFile(imagePath)
-    .then((data) => data.preview?.dataUrl ?? null)
+    .readLocalImage(imagePath)
+    .then((data) => data.dataUrl ?? null)
     .catch(() => null);
   imageCache.set(imagePath, pending);
+  // 读失败不进缓存：临时文件稍后就可能出现，缓存住失败结果会一直显示不出来
+  void pending.then((value) => {
+    if (!value) imageCache.delete(imagePath);
+  });
   return pending;
 }
 
-/** 把 markdown 里的本地图片换成 data URL（远程地址 / data URL 原样留着） */
+/* ---------- 远程图片：默认不加载，点一下才换成真的 src ----------
+ * 对话内容是别人写的（或模型写的）markdown：自动加载 http(s) 图片会把本机 IP、
+ * Referer 和「你看过这条消息」直接送给图床。所以默认只渲染一个占位按钮。 */
+const REMOTE_MARKER_RE = /pi-remote-image-(\d+)/g;
+const remoteDomainRe = /^(?:[a-z][a-z0-9+.-]*:)?\/\/(?:[^@/?#]+@)?([^/?#:]+)/i;
+
+/** markdown 里被拦下的远程图片地址（按本次渲染的序号） */
+let blockedRemoteImages: string[] = [];
+/** 用户这一轮里点过「加载」的地址：重新渲染时不要再拆回占位 */
+const forcedRemoteImages = new Set<string>();
+
+function isRemoteHttpImage(src: string): boolean {
+  return /^(?:https?:)?\/\//i.test(String(src ?? "").trim());
+}
+
+function remoteImageDomain(src: string): string {
+  const match = remoteDomainRe.exec(String(src ?? "").trim());
+  return (match?.[1] ?? "").replace(/^www\./i, "") || "远程图片";
+}
+
+function remoteImageButton(url: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "md-remote-image";
+  button.dataset.remoteUrl = url;
+  button.title = url;
+  button.textContent = `点击加载远程图片 (${remoteImageDomain(url)})`;
+  return button;
+}
+
+/** 把占位文本换成按钮（markstream 重渲染会重建节点，这里补一遍） */
+function decorateBlockedRemoteImages(): void {
+  const container = root.value;
+  if (!container || !blockedRemoteImages.length) return;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.nodeValue?.includes("pi-remote-image-")) continue;
+    const parent = node.parentElement;
+    if (parent?.closest("code, pre, .md-code, a, button")) continue;
+    nodes.push(node);
+  }
+  for (const node of nodes) {
+    const value = node.nodeValue ?? "";
+    const fragment = document.createDocumentFragment();
+    let last = 0;
+    for (const match of value.matchAll(new RegExp(REMOTE_MARKER_RE.source, "g"))) {
+      const url = blockedRemoteImages[Number(match[1])];
+      if (!url) continue;
+      if ((match.index ?? 0) > last) fragment.append(document.createTextNode(value.slice(last, match.index)));
+      fragment.append(remoteImageButton(url));
+      last = (match.index ?? 0) + match[0].length;
+    }
+    if (!last) continue;
+    if (last < value.length) fragment.append(document.createTextNode(value.slice(last)));
+    node.parentNode?.replaceChild(fragment, node);
+  }
+}
+
+function loadBlockedRemoteImage(button: HTMLElement): void {
+  const url = button.dataset.remoteUrl ?? "";
+  if (!url) return;
+  forcedRemoteImages.add(url);
+  const img = document.createElement("img");
+  img.src = url;
+  img.alt = button.textContent ?? "";
+  img.className = "md-remote-loaded";
+  button.replaceWith(img);
+  decorateImages();
+  bus.emit("markdown:height-change");
+}
+
+/** 把 markdown 里的本地图片换成 data URL；远程图片默认换成占位标记 */
 async function resolveMarkdownImages(markdown: string): Promise<string> {
   if (!markdown.includes("![")) return markdown;
   const targets = imageTargets(markdown);
   if (!targets.length) return markdown;
   const replacements: Array<{ target: (typeof targets)[number]; text: string }> = [];
+  const blocked: string[] = [];
   for (const target of targets) {
+    if (isRemoteHttpImage(target.src)) {
+      if (appSettings.autoLoadRemoteImages || forcedRemoteImages.has(target.src)) continue;
+      blocked.push(target.src);
+      replacements.push({ target, text: `pi-remote-image-${blocked.length - 1}` });
+      continue;
+    }
     const ref = imageRef(target.src);
     if (ref.kind !== "local") continue;
     const dataUrl = await readLocalImage(ref.path);
@@ -175,6 +260,7 @@ async function resolveMarkdownImages(markdown: string): Promise<string> {
     // 让原路径留着走它的「加载失败」占位，至少能看出有问题。
     if (dataUrl && !dataUrl.startsWith("data:image/svg+xml")) replacements.push({ target, text: dataUrl });
   }
+  blockedRemoteImages = blocked;
   return replacements.length ? replaceImageTargets(markdown, replacements) : markdown;
 }
 
@@ -199,10 +285,16 @@ function openImageZoom(img: HTMLImageElement): void {
   previewIndex.value = index;
 }
 
-/** 点图片 → 放大；键盘 Enter / 空格 等同点击 */
+/** 点图片 → 放大；点远程图片占位 → 加载；键盘 Enter / 空格 等同点击 */
 function onMarkdownClick(event: MouseEvent): void {
   const target = event.target;
   if (!(target instanceof Element)) return;
+  const placeholder = target.closest<HTMLElement>(".md-remote-image");
+  if (placeholder) {
+    event.preventDefault();
+    loadBlockedRemoteImage(placeholder);
+    return;
+  }
   const img = target.closest("img");
   if (!(img instanceof HTMLImageElement) || !root.value?.contains(img)) return;
   if (!(img.closest(".md") instanceof HTMLElement)) return;
@@ -220,6 +312,7 @@ function onMarkdownKeydown(event: KeyboardEvent): void {
 
 /** 图片要能聚焦、能看出可以点（markstream 重渲染会重建节点，这里补一遍） */
 function decorateImages(): void {
+  decorateBlockedRemoteImages();
   for (const img of markdownImages()) {
     if (img.dataset.zoom === "1") continue;
     img.dataset.zoom = "1";
@@ -237,22 +330,29 @@ let decorateObserver: MutationObserver | null = null;
 /** 渲染完成后交给 markstream 的内容（本地图片已就绪才替换） */
 const renderedContent = ref(props.content);
 let contentToken = 0;
+
+async function applyContent(next: string): Promise<void> {
+  const token = ++contentToken;
+  let resolved = next;
+  try {
+    resolved = await resolveMarkdownImages(next);
+  } catch {
+    resolved = next;
+  }
+  if (token === contentToken) {
+    renderedContent.value = resolved;
+    void nextTick(decorateImages);
+  }
+}
+
+watch(() => props.content, applyContent, { immediate: true });
+// 设置里打开「自动加载远程图片」后要立刻重渲染；关掉时把「这一次加载过」的记录清掉
 watch(
-  () => props.content,
-  async (next) => {
-    const token = ++contentToken;
-    let resolved = next;
-    try {
-      resolved = await resolveMarkdownImages(next);
-    } catch {
-      resolved = next;
-    }
-    if (token === contentToken) {
-      renderedContent.value = resolved;
-      void nextTick(decorateImages);
-    }
+  () => appSettings.autoLoadRemoteImages,
+  (enabled) => {
+    if (!enabled) forcedRemoteImages.clear();
+    void applyContent(props.content);
   },
-  { immediate: true },
 );
 
 onMounted(() => {

@@ -2,6 +2,7 @@ import { WidgetType } from "@codemirror/view";
 import { renderInlineMarkdown } from "../../shared/inline-markdown.ts";
 import { codeFenceParts, parseMarkdownTable, replaceCodeFenceBody, serializeMarkdownTable } from "../../shared/markdown-block-edit.ts";
 import { highlightCode, type HighlightToken } from "./markdown-highlight.ts";
+import { appSettings } from "../../services/settings.ts";
 import { mermaidRender } from "./markdown.ts";
 
 /**
@@ -596,7 +597,12 @@ export class TableWidget extends WidgetType {
     // "1" = 当前显示的是 markdown 源码（正在编辑），"0" = 显示渲染结果
     cell.dataset.source = "0";
     // 单元格里的 **加粗**、`代码`、[链接] 要显示成渲染结果，不能把标记原样露出来
-    cell.innerHTML = renderInlineMarkdown(value, { codeClass: "cm-md-inlinecode" });
+    cell.innerHTML = renderInlineMarkdown(value, {
+      codeClass: "cm-md-inlinecode",
+      allowRemoteImages: appSettings.autoLoadRemoteImages,
+    });
+    // 远程图片占位：点一下就地换成 <img>，并且不要进入「编辑源码」模式
+    cell.addEventListener("click", (event) => this.onRemoteImageClick(event));
     if (!editable) return;
     cell.addEventListener("input", () => {
       // 编辑期间 DOM 是纯文本（plaintext-only），把用户敲的 markdown 记到 raw 上
@@ -628,8 +634,30 @@ export class TableWidget extends WidgetType {
     if (cell.dataset.source === "1") cell.dataset.raw = cell.textContent ?? "";
     cell.dataset.source = "0";
     const raw = cell.dataset.raw ?? "";
-    const html = renderInlineMarkdown(raw, { codeClass: "cm-md-inlinecode" });
+    const html = renderInlineMarkdown(raw, {
+      codeClass: "cm-md-inlinecode",
+      allowRemoteImages: appSettings.autoLoadRemoteImages,
+    });
     if (cell.innerHTML !== html) cell.innerHTML = html;
+  }
+
+  /** 表格单元格里的「点击加载远程图片」：默认不加载，点了才换成真的图片。 */
+  private onRemoteImageClick(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const placeholder = target.closest<HTMLElement>(".md-remote-image");
+    if (!placeholder) return;
+    const url = placeholder.dataset.remoteUrl ?? "";
+    if (!url) return;
+    event.preventDefault();
+    // 同一节点上还有「聚焦即编辑」的 click 监听，必须立刻停掉它，
+    // 否则一点图片就切成源码，图片还没看见就没了。
+    event.stopImmediatePropagation();
+    const img = document.createElement("img");
+    img.className = "md-cell-image";
+    img.alt = placeholder.textContent ?? "";
+    img.src = url;
+    placeholder.replaceWith(img);
   }
 
   private onCellKey(event: KeyboardEvent, cell: HTMLElement): void {

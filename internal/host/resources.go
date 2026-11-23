@@ -645,9 +645,22 @@ func (h *Host) packagesInstall(cwd string, payload map[string]any) (map[string]a
 	return packagesOverview(cwd), nil
 }
 
+// packageSource 取要操作的软件包来源：以 - 开头的值会被 pi 当成命令行参数，直接拒掉。
+func packageSource(payload map[string]any) (string, error) {
+	source := strings.TrimSpace(asString(payload["source"]))
+	if strings.HasPrefix(source, "-") {
+		return "", errors.New("软件包来源不能以 - 开头")
+	}
+	return source, nil
+}
+
 func (h *Host) packagesRemove(cwd string, payload map[string]any) (map[string]any, error) {
+	source, err := packageSource(payload)
+	if err != nil {
+		return nil, err
+	}
 	local := asBool(payload["local"])
-	args := []string{"remove", asString(payload["source"])}
+	args := []string{"remove", source}
 	if local {
 		args = append(args, "-l")
 	}
@@ -663,8 +676,12 @@ func (h *Host) packagesRemove(cwd string, payload map[string]any) (map[string]an
 }
 
 func (h *Host) packagesUpdate(cwd string, payload map[string]any) (map[string]any, error) {
+	source, err := packageSource(payload)
+	if err != nil {
+		return nil, err
+	}
 	args := []string{"update"}
-	if source := asString(payload["source"]); source != "" {
+	if source != "" {
 		args = append(args, "--extension", source)
 	} else {
 		args = append(args, "--extensions")

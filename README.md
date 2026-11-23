@@ -2,7 +2,7 @@
 
 基于本机 **Pi Agent CLI**（`@earendil-works/pi-coding-agent`）的跨平台桌面客户端，技术栈 **MyGo + Go 宿主 + Vue 3 / TypeScript**。
 
-桌面端不跑模型、不内置工具，只通过 JSON-RPC 驱动你已经装好的 `pi`；会话记录、Pi 的配置与资源（MCP、软件包、Skills、`settings.json`）由 Go 宿主读写（默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 覆盖）。所有文件操作限制在当前工作区目录内。
+桌面端不跑模型、不内置工具，只通过 JSON-RPC 驱动你已经装好的 `pi`；会话记录、Pi 的配置与资源（MCP、软件包、Skills、`settings.json`）由 Go 宿主读写（默认 `~/.pi/agent`，可用 `PI_CODING_AGENT_DIR` 覆盖）。写盘只发生在已打开（授权）的工作区里；项目外的文件只能通过系统对话框选择、或在编辑器里打开过的文件才能写回，网络路径（UNC / SMB）一律拒绝。
 
 ## 快速开始
 

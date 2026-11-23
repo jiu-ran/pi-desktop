@@ -743,7 +743,12 @@ func TestSessionTitleFromQuotedSession(t *testing.T) {
 
 // 引用头里记的是「引用那一刻」的标题；被引用会话后来改了名，列表要跟上新名字。
 func TestQuotedTitleUsesLiveSessionName(t *testing.T) {
-	dir := t.TempDir()
+	// 引用头里的路径只允许指向 agent 会话目录（见 liveSessionTitle 的限制）
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	dir := filepath.Join(agentSessionsRoot(), "quote-live")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	quoted := filepath.Join(dir, "2026-10-19T11-07-51-575Z_quoted.jsonl")
 	body := `{"type":"session","id":"q1","timestamp":"2026-10-19T11:07:51.000Z"}` + "\n" +
 		`{"type":"message","id":"m1","parentId":null,"timestamp":"2026-10-19T11:07:52.000Z","message":{"role":"user","content":[{"type":"text","text":"请先了解一下本项目"}]}}` + "\n" +
@@ -903,7 +908,12 @@ func TestToolsToggleRewritesLegacyPlainList(t *testing.T) {
 
 // 引用会话的标题优先用用户自己写的内容；只有引用块时才用「原会话名（引用）」。
 func TestQuotedMessageTitlePrefersUserText(t *testing.T) {
-	dir := t.TempDir()
+	// 引用头里的路径只允许指向 agent 会话目录（见 liveSessionTitle 的限制）
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	dir := filepath.Join(agentSessionsRoot(), "quote-test")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	quoted := filepath.Join(dir, "2026-10-19T11-07-51-575Z_quoted.jsonl")
 	body := `{"type":"session","id":"q1","timestamp":"2026-10-19T11:07:51.000Z"}` + "\n" +
 		`{"type":"session_info","id":"n1","parentId":null,"timestamp":"2026-10-23T15:07:03.095Z","name":"Pi Desktop"}` + "\n"

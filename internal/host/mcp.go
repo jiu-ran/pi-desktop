@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// mcpMaskedValue 是界面回显的掩码值：真值不外传，界面上一个点都不能少。
+const mcpMaskedValue = "••••••"
+
 type mcpProbeInfo struct {
 	State     string   `json:"state,omitempty"`
 	Tools     []string `json:"tools,omitempty"`
@@ -60,15 +63,50 @@ func writeMcpFile(file string, data map[string]any) error {
 	if err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.%d.%d.tmp", file, os.Getpid(), time.Now().UnixNano())
-	if err := os.WriteFile(tmp, append(encoded, '\n'), 0o600); err != nil {
-		return err
+	// atomicWriteText 用 0600 建临时文件，新建的 mcp.json 不会带上组/其他用户可读的权限。
+	return atomicWriteText(file, string(encoded)+"\n")
+}
+
+// mcpEditFile 把「读 → 改 → 写」串成一次带锁的操作。
+// 以前各接口自己读、改、写，两处同时保存时后写的会把先写的整份覆盖掉。
+func mcpEditFile(file string, edit func(data map[string]any) error) error {
+	return withFileWrite(file, func() error {
+		data, readErr := readMcpFile(file)
+		if readErr != "" {
+			return errors.New(readErr)
+		}
+		if err := edit(data); err != nil {
+			return err
+		}
+		return writeMcpFile(file, data)
+	})
+}
+
+// mcpMergeSecretMap 按 key 合并可能被界面掩码过的键值表（env / headers）。
+// 界面把已配置的项回填成空输入框，所以「空值或掩码」且上一版有同名 key 时沿用旧值；
+// 只保留新表里出现过的 key，用户删掉的 key 照常消失。
+func mcpMergeSecretMap(next, previous map[string]any) map[string]any {
+	if len(next) == 0 {
+		return nil
 	}
-	if err := os.Rename(tmp, file); err != nil {
-		_ = os.Remove(tmp)
-		return err
+	merged := make(map[string]any, len(next))
+	for key, raw := range next {
+		value := asString(raw)
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || trimmed == mcpMaskedValue {
+			if old := strings.TrimSpace(asString(previous[key])); old != "" && old != mcpMaskedValue {
+				merged[key] = asString(previous[key])
+				continue
+			}
+			if trimmed == mcpMaskedValue {
+				// 界面只给了掩码、旧值也拿不到：留空值，别把掩码字面写进配置。
+				merged[key] = ""
+				continue
+			}
+		}
+		merged[key] = value
 	}
-	return nil
+	return merged
 }
 
 func mcpServersOf(data map[string]any) map[string]any {
@@ -92,7 +130,7 @@ func (h *Host) toMcpServerItem(name string, raw map[string]any, scope, sourcePat
 		if headers := asMap(raw["headers"]); len(headers) > 0 {
 			masked := map[string]string{}
 			for key := range headers {
-				masked[key] = "••••••"
+				masked[key] = mcpMaskedValue
 			}
 			item["headers"] = masked
 		}
@@ -112,7 +150,7 @@ func (h *Host) toMcpServerItem(name string, raw map[string]any, scope, sourcePat
 		if env := asMap(raw["env"]); len(env) > 0 {
 			masked := map[string]string{}
 			for key := range env {
-				masked[key] = "••••••"
+				masked[key] = mcpMaskedValue
 			}
 			item["env"] = masked
 		}
@@ -327,84 +365,69 @@ func (h *Host) mcpSaveServer(cwd string, payload map[string]any) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := readMcpFile(file)
-	if readErr != "" {
-		return nil, errors.New(readErr)
-	}
-	servers := map[string]any{}
-	for key, value := range mcpServersOf(data) {
-		servers[key] = value
-	}
-	previousName := asString(payload["previousName"])
-	previousConfig := asMap(servers[previousName])
-	if previousConfig == nil || len(previousConfig) == 0 {
-		previousConfig = asMap(servers[name])
-	}
-	if previousName != "" && previousName != name {
-		delete(servers, previousName)
-		mcpProbeMu.Lock()
-		delete(mcpProbeCache, scope+":"+previousName)
-		mcpProbeMu.Unlock()
-	}
-	clean := map[string]any{}
-	if url := strings.TrimSpace(asString(cfg["url"])); url != "" {
-		clean["url"] = url
-		if headers := asMap(cfg["headers"]); len(headers) > 0 {
-			clean["headers"] = headers
-		} else if headers := previousConfig["headers"]; headers != nil {
-			clean["headers"] = headers
+	// 读改写串成一次带锁的操作，并发保存时才不会互相覆盖。
+	writeErr := mcpEditFile(file, func(data map[string]any) error {
+		servers := map[string]any{}
+		for key, value := range mcpServersOf(data) {
+			servers[key] = value
 		}
-		if auth := asMap(cfg["auth"]); len(auth) > 0 {
-			clean["auth"] = auth
-		} else if auth := previousConfig["auth"]; auth != nil {
-			clean["auth"] = auth
+		previousName := asString(payload["previousName"])
+		previousConfig := asMap(servers[previousName])
+		if len(previousConfig) == 0 {
+			previousConfig = asMap(servers[name])
 		}
-		if oauth := asMap(cfg["oauth"]); len(oauth) > 0 {
-			clean["oauth"] = oauth
-		} else if oauth := previousConfig["oauth"]; oauth != nil {
-			clean["oauth"] = oauth
+		if previousName != "" && previousName != name {
+			delete(servers, previousName)
+			mcpProbeMu.Lock()
+			delete(mcpProbeCache, scope+":"+previousName)
+			mcpProbeMu.Unlock()
 		}
-	} else {
-		clean["command"] = strings.TrimSpace(asString(cfg["command"]))
-		if args := strSlice(cfg["args"]); len(args) > 0 {
-			clean["args"] = args
-		}
-		if env := asMap(cfg["env"]); len(env) > 0 {
-			masked := false
-			for _, value := range env {
-				if asString(value) == "••••••" {
-					masked = true
-					break
-				}
+		clean := map[string]any{}
+		if url := strings.TrimSpace(asString(cfg["url"])); url != "" {
+			clean["url"] = url
+			if headers := mcpMergeSecretMap(asMap(cfg["headers"]), asMap(previousConfig["headers"])); len(headers) > 0 {
+				clean["headers"] = headers
 			}
-			if masked && previousConfig["env"] != nil {
-				clean["env"] = previousConfig["env"]
-			} else {
+			if auth := asMap(cfg["auth"]); len(auth) > 0 {
+				clean["auth"] = auth
+			} else if auth := previousConfig["auth"]; auth != nil {
+				clean["auth"] = auth
+			}
+			if oauth := asMap(cfg["oauth"]); len(oauth) > 0 {
+				clean["oauth"] = oauth
+			} else if oauth := previousConfig["oauth"]; oauth != nil {
+				clean["oauth"] = oauth
+			}
+		} else {
+			clean["command"] = strings.TrimSpace(asString(cfg["command"]))
+			if args := strSlice(cfg["args"]); len(args) > 0 {
+				clean["args"] = args
+			}
+			if env := mcpMergeSecretMap(asMap(cfg["env"]), asMap(previousConfig["env"])); len(env) > 0 {
 				clean["env"] = env
 			}
-		} else if previousConfig["env"] != nil {
-			clean["env"] = previousConfig["env"]
+			if cwdValue := strings.TrimSpace(asString(cfg["cwd"])); cwdValue != "" {
+				clean["cwd"] = cwdValue
+			}
 		}
-		if cwdValue := strings.TrimSpace(asString(cfg["cwd"])); cwdValue != "" {
-			clean["cwd"] = cwdValue
+		if description := strings.TrimSpace(asString(cfg["description"])); description != "" {
+			clean["description"] = description
 		}
-	}
-	if description := strings.TrimSpace(asString(cfg["description"])); description != "" {
-		clean["description"] = description
-	}
-	if exposure := asString(cfg["exposure"]); exposure != "" && exposure != "codemode" {
-		clean["exposure"] = exposure
-	}
-	if cfg["enabled"] == false {
-		clean["enabled"] = false
-	}
-	if timeout := asFloat(cfg["timeout"]); timeout > 0 && timeout != 60 {
-		clean["timeout"] = timeout
-	}
-	servers[name] = clean
-	data["mcpServers"] = servers
-	if err := writeMcpFile(file, data); err != nil {
-		return nil, err
+		if exposure := asString(cfg["exposure"]); exposure != "" && exposure != "codemode" {
+			clean["exposure"] = exposure
+		}
+		if cfg["enabled"] == false {
+			clean["enabled"] = false
+		}
+		if timeout := asFloat(cfg["timeout"]); timeout > 0 && timeout != 60 {
+			clean["timeout"] = timeout
+		}
+		servers[name] = clean
+		data["mcpServers"] = servers
+		return nil
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 	return h.mcpOverview(cwd)
 }
@@ -415,42 +438,41 @@ func (h *Host) mcpUpdateServer(cwd string, payload map[string]any) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := readMcpFile(file)
-	if readErr != "" {
-		return nil, errors.New(readErr)
-	}
-	servers := map[string]any{}
-	for key, value := range mcpServersOf(data) {
-		servers[key] = value
-	}
-	name := asString(payload["name"])
-	existing := asMap(servers[name])
-	if len(existing) == 0 {
-		return nil, fmt.Errorf("找不到 MCP 服务：%s", name)
-	}
-	next := map[string]any{}
-	for key, value := range existing {
-		next[key] = value
-	}
-	patch := asMap(payload["patch"])
-	if enabled, ok := patch["enabled"].(bool); ok {
-		if enabled {
-			delete(next, "enabled")
-		} else {
-			next["enabled"] = false
+	writeErr := mcpEditFile(file, func(data map[string]any) error {
+		servers := map[string]any{}
+		for key, value := range mcpServersOf(data) {
+			servers[key] = value
 		}
-	}
-	if exposure, ok := patch["exposure"].(string); ok {
-		if exposure == "codemode" {
-			delete(next, "exposure")
-		} else {
-			next["exposure"] = exposure
+		name := asString(payload["name"])
+		existing := asMap(servers[name])
+		if len(existing) == 0 {
+			return fmt.Errorf("找不到 MCP 服务：%s", name)
 		}
-	}
-	servers[name] = next
-	data["mcpServers"] = servers
-	if err := writeMcpFile(file, data); err != nil {
-		return nil, err
+		next := map[string]any{}
+		for key, value := range existing {
+			next[key] = value
+		}
+		patch := asMap(payload["patch"])
+		if enabled, ok := patch["enabled"].(bool); ok {
+			if enabled {
+				delete(next, "enabled")
+			} else {
+				next["enabled"] = false
+			}
+		}
+		if exposure, ok := patch["exposure"].(string); ok {
+			if exposure == "codemode" {
+				delete(next, "exposure")
+			} else {
+				next["exposure"] = exposure
+			}
+		}
+		servers[name] = next
+		data["mcpServers"] = servers
+		return nil
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 	return h.mcpOverview(cwd)
 }
@@ -461,23 +483,22 @@ func (h *Host) mcpRemoveServer(cwd string, payload map[string]any) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := readMcpFile(file)
-	if readErr != "" {
-		return nil, errors.New(readErr)
-	}
-	servers := map[string]any{}
-	for key, value := range mcpServersOf(data) {
-		servers[key] = value
-	}
-	name := asString(payload["name"])
-	delete(servers, name)
-	mcpProbeMu.Lock()
-	delete(mcpProbeCache, scope+":"+name)
-	delete(mcpProbeCache, name)
-	mcpProbeMu.Unlock()
-	data["mcpServers"] = servers
-	if err := writeMcpFile(file, data); err != nil {
-		return nil, err
+	writeErr := mcpEditFile(file, func(data map[string]any) error {
+		servers := map[string]any{}
+		for key, value := range mcpServersOf(data) {
+			servers[key] = value
+		}
+		name := asString(payload["name"])
+		delete(servers, name)
+		mcpProbeMu.Lock()
+		delete(mcpProbeCache, scope+":"+name)
+		delete(mcpProbeCache, name)
+		mcpProbeMu.Unlock()
+		data["mcpServers"] = servers
+		return nil
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 	return h.mcpOverview(cwd)
 }
@@ -488,17 +509,16 @@ func (h *Host) mcpSetAutoCodemode(cwd string, payload map[string]any) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := readMcpFile(file)
-	if readErr != "" {
-		return nil, errors.New(readErr)
-	}
-	if asBool(payload["enabled"]) {
-		delete(data, "autoEnableCodemode")
-	} else {
-		data["autoEnableCodemode"] = false
-	}
-	if err := writeMcpFile(file, data); err != nil {
-		return nil, err
+	writeErr := mcpEditFile(file, func(data map[string]any) error {
+		if asBool(payload["enabled"]) {
+			delete(data, "autoEnableCodemode")
+		} else {
+			data["autoEnableCodemode"] = false
+		}
+		return nil
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 	return h.mcpOverview(cwd)
 }
@@ -550,20 +570,19 @@ func (h *Host) mcpImportJSON(cwd string, payload map[string]any) (map[string]any
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := readMcpFile(file)
-	if readErr != "" {
-		return nil, errors.New(readErr)
-	}
-	servers := map[string]any{}
-	for key, value := range mcpServersOf(data) {
-		servers[key] = value
-	}
-	for name, cfg := range valid {
-		servers[name] = cfg
-	}
-	data["mcpServers"] = servers
-	if err := writeMcpFile(file, data); err != nil {
-		return nil, err
+	writeErr := mcpEditFile(file, func(data map[string]any) error {
+		servers := map[string]any{}
+		for key, value := range mcpServersOf(data) {
+			servers[key] = value
+		}
+		for name, cfg := range valid {
+			servers[name] = cfg
+		}
+		data["mcpServers"] = servers
+		return nil
+	})
+	if writeErr != nil {
+		return nil, writeErr
 	}
 	return h.mcpOverview(cwd)
 }

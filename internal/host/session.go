@@ -114,15 +114,28 @@ func resolveQuotedMessage(text string) (title, quoted string, ok bool) {
 }
 
 // liveSessionTitle 读被引用会话文件里存的会话名（不再递归解析它自己的首条消息）。
+// 路径来自会话内容里的引用头（用户消息可以随便写），只认 agent 会话目录下的 .jsonl：
+// 否则一句 @ 引用就能让宿主去读任意本地文件、把里面的 name 字段显示在界面上。
 func liveSessionTitle(path string) string {
-	if strings.TrimSpace(path) == "" {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || isNetworkPath(trimmed) {
 		return ""
 	}
-	info, err := os.Stat(filepath.Clean(path))
+	if !strings.HasSuffix(strings.ToLower(trimmed), ".jsonl") {
+		return ""
+	}
+	abs, err := filepath.Abs(trimmed)
+	if err != nil {
+		return ""
+	}
+	if !strings.HasPrefix(normPathKey(abs)+string(os.PathSeparator), agentSessionsRoot()) {
+		return ""
+	}
+	info, err := os.Stat(abs)
 	if err != nil || info.IsDir() {
 		return ""
 	}
-	return readSessionName(filepath.Clean(path), info.Size(), nil)
+	return readSessionName(abs, info.Size(), nil)
 }
 
 func attachmentNameFromPath(path string) string {
@@ -1212,11 +1225,15 @@ func sessionContextBlock(file, title string, messages []map[string]any) string {
 		fmt.Sprintf("共 %d 条消息%s，这里保留 %d 条%s。", total, scope, digest.kept, map[bool]string{true: fmt.Sprintf("（省略 %d 条）", digest.omitted), false: ""}[digest.omitted > 0]),
 	}
 	headText := strings.Join(head, "\n")
+	// 正文是另一个会话里的原文，里面可能带着 `</session>`：不转义就会提前闭合引用块，
+	// 界面解析（session-block.ts / queue-prompt.ts / attachments.ts 的非贪婪匹配）和
+	// 卡片渲染都会把后面的内容当成本条消息的一部分。
+	body := strings.ReplaceAll(digest.text, "</session", "&lt;/session")
 	return strings.Join([]string{
 		fmt.Sprintf(`<session name="%s" title="%s" messages="%d">`, escapeXML(file), escapeXML(title), total),
 		headText,
 		"",
-		digest.text,
+		body,
 		"</session>",
 		"",
 	}, "\n")

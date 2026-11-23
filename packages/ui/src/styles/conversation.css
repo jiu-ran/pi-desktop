@@ -587,6 +587,33 @@
 .msg.assistant .mermaid-preview-area,
 .md-thinking .mermaid-preview-area { background: var(--bg); }
 .md-body { min-width: 0; }
+/* 远程图片占位：默认不加载，点一下才换成真图（见 MarkdownBody / inline-markdown） */
+.md-remote-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+  padding: 4px 10px;
+  border: 1px dashed var(--border-strong, rgba(127, 127, 127, 0.5));
+  border-radius: 6px;
+  background: var(--surface-muted, rgba(127, 127, 127, 0.08));
+  color: var(--text-muted, inherit);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.md-remote-image:hover,
+.md-remote-image:focus-visible {
+  border-color: var(--accent, #4c8dff);
+  color: var(--text, inherit);
+}
+
+.md .md-remote-loaded,
+.md-cell-image {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
 .md-mermaid-error {
   margin: 0;
   padding: 6px 8px;

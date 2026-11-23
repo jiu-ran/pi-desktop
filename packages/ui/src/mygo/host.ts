@@ -128,6 +128,7 @@ const bridge = {
 
   listDirectory: (cwd: string, relative: string) => invoke("ListDirectory", cwd, relative),
   readWorkspaceFile: (cwd: string, relative: string) => invoke("ReadWorkspaceFile", cwd, relative),
+  readLocalImage: (cwd: string, path: string) => invoke("ReadLocalImage", cwd, path),
   writeWorkspaceFile: (cwd: string, relative: string, content: string, revision?: string) =>
     invoke("WriteWorkspaceFile", cwd, relative, content, revision ?? ""),
   openWorkspacePath: (cwd: string, relative: string) => invoke("OpenWorkspacePath", cwd, relative),

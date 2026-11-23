@@ -275,6 +275,14 @@ function onThinkingChange(value: string): void {
 
     <SettingRow
       clickable
+      label="自动加载远程图片"
+      hint="对话里的 http(s) 图片默认只显示占位符，点一下才加载；打开后自动加载（会把本机 IP 与阅读行为暴露给图床）"
+    >
+      <input v-model="appSettings.autoLoadRemoteImages" type="checkbox" class="settings-switch" />
+    </SettingRow>
+
+    <SettingRow
+      clickable
       label="网络或模型请求异常自动重试（Auto Retry）"
       hint="遇到临时速率限制或网络波动时由 Pi 进程自动退避重试"
     >

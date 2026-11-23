@@ -92,6 +92,11 @@ export interface AppSettings {
   /** 对话消息排版密度 */
   messageDensity: "comfortable" | "compact";
   /**
+   * 对话里的 http(s) 图片是否自动加载。默认关闭：远程图片会把本机 IP、
+   * Referer 和「你是否看过这条消息」泄露给图床，需要用户点一下才加载。
+   */
+  autoLoadRemoteImages: boolean;
+  /**
    * 执行记录（工具 / 思考）的分组方式：
    * - grouped：按一次用户请求合成一行「执行了 N 步 …」（默认）
    * - compact：只折叠连续 4 步以上的活动（旧行为）
@@ -149,6 +154,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalCustomPath: "",
   terminalCustomArgs: [],
   messageDensity: "comfortable",
+  autoLoadRemoteImages: false,
   activityDetail: "grouped",
   activityMerge: true,
   uiZoom: 1,
@@ -203,6 +209,8 @@ function loadSavedSettings(): AppSettings {
       terminalCustomArgs: Array.isArray(parsed.terminalCustomArgs)
         ? parsed.terminalCustomArgs.filter((arg: unknown) => typeof arg === "string" && !arg.includes("\0")).slice(0, 64).map((arg: string) => arg.slice(0, 4000)) : [],
       messageDensity: parsed.messageDensity === "compact" ? "compact" : "comfortable",
+      autoLoadRemoteImages:
+        typeof parsed.autoLoadRemoteImages === "boolean" ? parsed.autoLoadRemoteImages : DEFAULT_SETTINGS.autoLoadRemoteImages,
       activityDetail:
         parsed.activityDetail === "compact" || parsed.activityDetail === "expanded" ? parsed.activityDetail : "grouped",
       activityMerge: typeof parsed.activityMerge === "boolean" ? parsed.activityMerge : DEFAULT_SETTINGS.activityMerge,

@@ -823,6 +823,13 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     return host.readWorkspaceFile(ws.cwd, relative);
   }
 
+  /** 对话里的图片：走专用接口（只读图片、不给写盘权限），失败直接抛出交给调用方处理。 */
+  async function readLocalImage(path: string): Promise<{ dataUrl: string }> {
+    const ws = active.value;
+    if (!ws) throw new Error("没有打开的工作区");
+    return host.readLocalImage(ws.cwd, path);
+  }
+
   async function writeWorkspaceFile(relative: string, content: string, revision?: string, cwd?: string): Promise<WorkspaceFileData> {
     const target = cwd || active.value?.cwd;
     if (!target) throw new Error("没有打开的工作区");
@@ -2862,6 +2869,7 @@ function routeEvent(ws: WorkspaceState, thread: SessionThreadState, event: any):
     readFile: readWorkspaceFile,
     writeFile: writeWorkspaceFile,
     readWorkspaceFile,
+    readLocalImage,
     writeWorkspaceFile,
     openWorkspacePath,
     createEntry,

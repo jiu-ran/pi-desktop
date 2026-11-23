@@ -12,6 +12,16 @@ const CODE_TOKEN = "\u0000CODE\u0000";
 
 const SAFE_HREF = /^(?:https?:\/\/|mailto:|#|\/|\.\.?\/)/i;
 
+/** http(s) 或协议相对的图片地址（这两种都会真的去外网取图） */
+function isRemoteImage(src: string): boolean {
+  return /^(?:https?:)?\/\//i.test(src.trim());
+}
+
+function remoteImageHost(src: string): string {
+  const match = /^(?:https?:)?\/\/(?:[^@/?#]+@)?([^/?#:]+)/i.exec(src.trim());
+  return (match?.[1] ?? "").replace(/^www\./i, "") || "远程图片";
+}
+
 export function escapeHtml(text: string): string {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -27,6 +37,11 @@ export interface InlineMarkdownOptions {
    * 阅读视图用纯 `<code>`。默认不加 class。
    */
   codeClass?: string;
+  /**
+   * 是否自动加载 http(s) 图片。默认 false：只输出一个「点击加载远程图片」的占位，
+   * 免得表格里贴一张图就把本机 IP / 阅读行为送给图床。
+   */
+  allowRemoteImages?: boolean;
 }
 
 /** 把一段行内 markdown 渲染成 HTML 字符串（不含外层标签）。 */
@@ -43,8 +58,13 @@ export function renderInlineMarkdown(source: string, options: InlineMarkdownOpti
   let html = escapeHtml(withoutCode);
 
   // 链接与图片：先处理图片，再处理链接，避免 ![a](b) 被当成 [a](b)
+  const allowRemote = options.allowRemoteImages === true;
   html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (match, alt: string, src: string) => {
     if (!SAFE_HREF.test(src)) return match;
+    if (isRemoteImage(src) && !allowRemote) {
+      // 占位：真正的 <img> 要等用户点一下才插进去（见 live-preview-blocks 的点击处理）
+      return `<span class="md-remote-image" role="button" tabindex="0" data-remote-url="${src}">点击加载远程图片 (${remoteImageHost(src)})</span>`;
+    }
     return `<img alt="${alt}" src="${src}">`;
   });
   html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, text: string, href: string) => {
