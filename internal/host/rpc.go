@@ -124,13 +124,13 @@ type PiRpcClient struct {
 	listeners  []rpcListener
 	listenerID int64
 	pending    map[string]*rpcPending
-	requestID int64
-	stderr    strings.Builder
-	exitErr   error
-	readErr   error
-	buffer    strings.Builder
-	stopping  bool
-	started   bool
+	requestID  int64
+	stderr     strings.Builder
+	exitErr    error
+	readErr    error
+	buffer     strings.Builder
+	stopping   bool
+	started    bool
 	// exited 在子进程退出时关闭（cmd.Wait 返回）；Stop 用它判断要不要硬杀
 	exited chan struct{}
 	// job 是这个 Pi 进程所在的 Job（Windows 有效）；Stop 时用它连带结束子孙进程
@@ -214,7 +214,7 @@ func (c *PiRpcClient) Start() error {
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
-			scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 		for scanner.Scan() {
 			c.mu.Lock()
 			if c.stderr.Len() < 64*1024 {

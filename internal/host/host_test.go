@@ -707,6 +707,7 @@ func TestSessionNamePicksUpLaterRename(t *testing.T) {
 		t.Fatalf("清空名字后应返回空标题，实际 %q", got)
 	}
 }
+
 // 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
 // 引用会话的消息开头顶着 <session name="…" title="…"> 原文，标题要取被引用会话的名字。
 func TestSessionTitleFromQuotedSession(t *testing.T) {

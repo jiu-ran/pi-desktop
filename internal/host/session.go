@@ -72,7 +72,6 @@ func quotedTitleText(title string) string {
 	return title + quotedTitleSuffix
 }
 
-
 // quotedSessionName 取被引用会话「当前」的名字：改过名也能跟上，读不到就用引用时记下的标题。
 func quotedSessionName(text string) (string, bool) {
 	path, embedded, ok := parseQuotedSessionHeader(text)
@@ -113,6 +112,7 @@ func resolveQuotedMessage(text string) (title, quoted string, ok bool) {
 	}
 	return "", quoted, false
 }
+
 // liveSessionTitle 读被引用会话文件里存的会话名（不再递归解析它自己的首条消息）。
 func liveSessionTitle(path string) string {
 	if strings.TrimSpace(path) == "" {
@@ -286,8 +286,6 @@ func titleFromPartialUserLine(line string) (string, string, bool) {
 	return "", "", false
 }
 
-
-
 func firstUserTitleFromMessages(messages []map[string]any) string {
 	for _, message := range messages {
 		if asString(message["role"]) != "user" {
@@ -445,6 +443,7 @@ func scanSessionNameRange(file string, start, end int64) (string, bool, error) {
 	}
 	return name, found, nil
 }
+
 // ---------- 历史解析 ----------
 
 func parseSessionEntries(text string) []map[string]any {
@@ -819,10 +818,10 @@ func clearSessionHistoryCache(file string) {
 // ---------- 会话摘要 / 列表 ----------
 
 type sessionSummary struct {
-	ID        string `json:"id"`
-	Path      string `json:"path"`
-	Title     string `json:"title"`
-	Empty     bool   `json:"empty"`
+	ID    string `json:"id"`
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	Empty bool   `json:"empty"`
 	// Quoted 非空表示这个会话是引用另一个会话开的，值是那次引用时的会话名（列表上显示「引用」标记）
 	Quoted    string `json:"quoted,omitempty"`
 	Timestamp int64  `json:"timestamp"`

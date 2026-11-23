@@ -71,7 +71,6 @@ func TestSummarizeSessionWithHugeFirstMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
 	summary, ok := summarizeSessionFile(file)
 	if !ok {
 		t.Fatal("摘要应成功")

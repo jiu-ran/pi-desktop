@@ -599,4 +599,3 @@ func isWriteableDir(dir string) bool {
 
 var _ = fs.SkipDir
 var _ = errors.New
-

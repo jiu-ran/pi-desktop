@@ -1,0 +1,2 @@
+# Go 源码统一 LF（Windows 上 core.autocrlf=true 会检出成 CRLF，gofmt -l 就会列满整包）。
+*.go text eol=lf
